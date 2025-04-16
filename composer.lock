@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "5a0e0fcdec8db90e2f60d2ae9873d3b1",
+    "content-hash": "4cd1675d3f35d9ef943d9fc2b1ae6696",
     "packages": [
         {
             "name": "brick/math",
@@ -1327,6 +1327,70 @@
                 "source": "https://github.com/laravel/prompts/tree/v0.3.5"
             },
             "time": "2025-02-11T13:34:40+00:00"
+        },
+        {
+            "name": "laravel/sanctum",
+            "version": "v4.0.8",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/laravel/sanctum.git",
+                "reference": "ec1dd9ddb2ab370f79dfe724a101856e0963f43c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/laravel/sanctum/zipball/ec1dd9ddb2ab370f79dfe724a101856e0963f43c",
+                "reference": "ec1dd9ddb2ab370f79dfe724a101856e0963f43c",
+                "shasum": ""
+            },
+            "require": {
+                "ext-json": "*",
+                "illuminate/console": "^11.0|^12.0",
+                "illuminate/contracts": "^11.0|^12.0",
+                "illuminate/database": "^11.0|^12.0",
+                "illuminate/support": "^11.0|^12.0",
+                "php": "^8.2",
+                "symfony/console": "^7.0"
+            },
+            "require-dev": {
+                "mockery/mockery": "^1.6",
+                "orchestra/testbench": "^9.0|^10.0",
+                "phpstan/phpstan": "^1.10",
+                "phpunit/phpunit": "^11.3"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Laravel\\Sanctum\\SanctumServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Laravel\\Sanctum\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Taylor Otwell",
+                    "email": "taylor@laravel.com"
+                }
+            ],
+            "description": "Laravel Sanctum provides a featherweight authentication system for SPAs and simple APIs.",
+            "keywords": [
+                "auth",
+                "laravel",
+                "sanctum"
+            ],
+            "support": {
+                "issues": "https://github.com/laravel/sanctum/issues",
+                "source": "https://github.com/laravel/sanctum"
+            },
+            "time": "2025-01-26T19:34:36+00:00"
         },
         {
             "name": "laravel/serializable-closure",
@@ -3465,6 +3529,65 @@
                 }
             ],
             "time": "2024-04-27T21:32:50+00:00"
+        },
+        {
+            "name": "spatie/laravel-sluggable",
+            "version": "3.7.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/spatie/laravel-sluggable.git",
+                "reference": "bd320144bc5d473ebc41da927bd1c0bae2cb169c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/spatie/laravel-sluggable/zipball/bd320144bc5d473ebc41da927bd1c0bae2cb169c",
+                "reference": "bd320144bc5d473ebc41da927bd1c0bae2cb169c",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/database": "^8.0|^9.0|^10.0|^11.0|^12.0",
+                "illuminate/support": "^8.0|^9.0|^10.0|^11.0|^12.0",
+                "php": "^8.0"
+            },
+            "require-dev": {
+                "orchestra/testbench": "^6.23|^7.0|^8.0|^9.0|^10.0",
+                "pestphp/pest": "^1.20|^2.0|^3.7",
+                "spatie/laravel-translatable": "^5.0|^6.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Spatie\\Sluggable\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Freek Van der Herten",
+                    "email": "freek@spatie.be",
+                    "homepage": "https://spatie.be",
+                    "role": "Developer"
+                }
+            ],
+            "description": "Generate slugs when saving Eloquent models",
+            "homepage": "https://github.com/spatie/laravel-sluggable",
+            "keywords": [
+                "laravel-sluggable",
+                "spatie"
+            ],
+            "support": {
+                "source": "https://github.com/spatie/laravel-sluggable/tree/3.7.4"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/spatie",
+                    "type": "github"
+                }
+            ],
+            "time": "2025-02-28T13:41:46+00:00"
         },
         {
             "name": "symfony/clock",

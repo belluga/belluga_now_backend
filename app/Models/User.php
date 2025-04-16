@@ -3,14 +3,17 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+
+use App\Models\Traits\HasAccount;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use MongoDB\Laravel\Eloquent\Model as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use MongoDB\Laravel\Eloquent\Casts\ObjectId;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+
+    use HasFactory, Notifiable, HasAccount;
 
     /**
      * The attributes that are mass assignable.
@@ -43,6 +46,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'account_id' => ObjectId::class,
         ];
     }
 }
