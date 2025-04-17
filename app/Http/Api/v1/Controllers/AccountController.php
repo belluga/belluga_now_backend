@@ -4,15 +4,12 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Account;
-use App\Models\Company;
-use App\Models\PaymentSettings;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use MongoDB\BSON\ObjectId;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 
 class AccountController extends Controller
 {
@@ -58,18 +55,20 @@ class AccountController extends Controller
         $request->validate([
             'email' => 'required|string|email',
             'password' => 'required|string',
-            'token_name' => "required|string",
+            'token_name' => "required|string"
         ]);
 
-        $user = User::where('email', $request->email)->with('account')->first();
+        $account = $this->getAccountOrAbort(request()->route("account_slug"));
+
+        $user = User::where('email', $request->email)->with("accounts")->firstOrFail();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
+            abort(403, "The provided credentials are incorrect.");
         }
 
-        $token = $user->account->createToken($request->token_name)->plainTextToken;
+        $this->checkUserAuthorization($user, $account->slug);
+
+        $token = $account->createToken($request->token_name)->plainTextToken;
 
         return response()->json([
             "success" => true,
@@ -86,18 +85,39 @@ class AccountController extends Controller
      */
     public function users(Request $request): LengthAwarePaginator
     {
-        $account = Account::where(
-            "slug",
-            request()->route("account_slug")
-        )->firstOrFail();
 
-        if ($account->id !== $request->user()->id) {
-            abort(403, "Unauthorized");
-        }
+        $account = $this->getAccountOrAbort(request()->route("account_slug"));
+        $this->checkAccountAuthorization($account->id);
 
         return User::where(
-            "account_id",
-            new ObjectId($account->id)
+            "account_ids",
+            $account->id
         )->paginate();
+    }
+
+    protected function getAccountOrAbort($account_slug): ?Account {
+
+        try {
+            return Account::where(
+                "slug",
+                request()->route("account_slug")
+            )->firstOrFail();
+        }catch (ModelNotFoundException $e){
+            abort(404, "Account '$account_slug' not found");
+        }
+    }
+
+    protected function checkUserAuthorization($user, $account_slug): void {
+        $user_accounts_slugs = $user->accounts->pluck("slug")->toArray();
+
+        if(!in_array($account_slug, $user_accounts_slugs)){
+            abort(403, "Unauthorized");
+        }
+    }
+
+    protected function checkAccountAuthorization($account_id): void {
+        if ($account_id !== request()->user()->id) {
+            abort(403, "Unauthorized");
+        }
     }
 }

@@ -1,10 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models;
 
 use Laravel\Sanctum\HasApiTokens;
 use MongoDB\Laravel\Eloquent\Model;
-use MongoDB\Laravel\Relations\HasMany;
+use MongoDB\Laravel\Relations\BelongsToMany;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
@@ -20,9 +22,11 @@ class Account extends Model {
         'address'
     ];
 
-    public function users(): HasMany {
-        return $this->hasMany(User::class);
-    }
+     public function users(): BelongsToMany {
+         return $this->belongsToMany(
+             related: User::class
+         );
+     }
 
     public function getDocumentNumber(): string {
         return $this->document ?? "";

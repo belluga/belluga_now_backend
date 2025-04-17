@@ -9,13 +9,13 @@ Route::prefix('initialize')->middleware('guest')->group(function () {
         ->name('initialize');
 });
 
-Route::prefix('users')->middleware('auth:sanctum')->group(function () {    
+Route::prefix('users')->middleware('auth:sanctum')->group(function () {
     Route::post('/', [AuthController::class , 'register'])
         ->name('users.create');
 });
 
 Route::prefix('accounts')->group(function () {
-    Route::post('/token', [AuthController::class, 'createToken'])
+    Route::post('/{account_slug}/token', [AccountController::class, 'createToken'])
         ->middleware('guest')
         ->name('account.token');
 

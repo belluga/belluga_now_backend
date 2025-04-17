@@ -1,14 +1,14 @@
 <?php
 
-namespace App\Models;
+declare(strict_types=1);
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+namespace App\Models;
 
 use App\Models\Traits\HasAccount;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use MongoDB\Laravel\Eloquent\Model as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use MongoDB\Laravel\Eloquent\Casts\ObjectId;
+use MongoDB\Laravel\Relations\BelongsToMany;
 
 class User extends Authenticatable
 {
@@ -36,6 +36,13 @@ class User extends Authenticatable
         'remember_token',
     ];
 
+    public function accounts(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            related: Account::class
+        );
+    }
+
     /**
      * Get the attributes that should be cast.
      *
@@ -46,7 +53,6 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'account_id' => ObjectId::class,
         ];
     }
 }
