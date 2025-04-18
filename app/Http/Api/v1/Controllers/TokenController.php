@@ -27,6 +27,7 @@ class TokenController extends Controller
      */
     public function createToken(Request $request): JsonResponse
     {
+
         $request->validate([
             'email' => 'required|string|email',
             'password' => 'required|string',
