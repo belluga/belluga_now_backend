@@ -61,6 +61,7 @@ class ApiDefaultInitializeTest extends TestCase {
 
         $this->setGlobal(TestVariableLabels::MAIN_USER_ID->value ,$response->json()['data']['user']["id"]);
         $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_ID->value,$response->json()['data']['account']["id"]);
+        $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value,$response->json()['data']['account']["slug"]);
         $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_TOKEN->value, $response->json()['data']["token"]);
     }
 

@@ -11,9 +11,6 @@ abstract class TestCaseAuthenticated extends TestCase
     }
 
     protected function getHeaders(): array {
-
-        print("Bearer $this->token");
-
         return [
             'Authorization' => "Bearer $this->token",
             'Content-Type' => 'application/json'

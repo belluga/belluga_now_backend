@@ -17,7 +17,9 @@ enum TestVariableLabels: string {
 
     case MAIN_USER_ID = "main.user.id";
 
-    case MAIN_ACCOUNT_ID = "main.user.account";
+    case MAIN_ACCOUNT_ID = "main.account.id";
+
+    case MAIN_ACCOUNT_SLUG = "main.account.slug";
 
     case MAIN_ACCOUNT_TOKEN = "main.token";
 }

@@ -7,14 +7,14 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 trait HasAccountInSlug {
 
-    protected ?Account $account_slug = null;
+    protected ?Account $account = null;
 
     protected function extractAccountFromSlug(): void {
 
         $slug = request()->route("account_slug");
 
         try {
-            $this->account_slug = Account::where(
+            $this->account = Account::where(
                 "slug",
                 $slug
             )->firstOrFail();

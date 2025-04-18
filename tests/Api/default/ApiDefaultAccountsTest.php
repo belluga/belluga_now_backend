@@ -7,12 +7,27 @@ use Tests\TestCaseAuthenticated;
 use Tests\TestVariableLabels;
 
 class ApiDefaultAccountsTest extends TestCaseAuthenticated {
-    protected string $user_password;
-    protected string $user_email;
+    protected string $user_password {
+        get {
+            return $this->getGlobal(TestVariableLabels::USER_PASSWORD->value);
+        }
+    }
+
+    protected string $main_user_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::MAIN_USER_ID->value);
+        }
+    }
 
     protected string $user_name;
 
     protected string $account_name;
+
+    protected string $main_account_slug {
+        get {
+            return $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value);
+        }
+    }
 
     protected string $account_document;
 
@@ -44,14 +59,6 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         }
     }
 
-    public function testAccountCreation(): void {
-
-    }
-
-    public function testAccountList(): void {
-
-    }
-
     public function testAccountUserCreation(): void {
         $response = $this->createAccount();
 
@@ -72,6 +79,21 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
     }
 
     public function testAccountTokenCreation(): void {
+        $response = $this->createToken();
+
+        $response->assertStatus(201);
+
+        $response->assertJsonStructure([
+            "success",
+            "token",
+        ]);
+    }
+
+    public function testAccountCreation(): void {
+
+    }
+
+    public function testAccountList(): void {
 
     }
 
@@ -104,12 +126,28 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         );
     }
 
+    protected function createToken(): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "api/accounts/$this->main_account_slug/token",
+            data: $this->payloadTokenCreation(),
+        );
+    }
+
     protected function payloadUserCreation(): array {
         return [
             "name" => fake()->name(),
             "email" => fake()->email(),
             "password" => fake()->password(),
             "account_id" => $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_ID->value)
+        ];
+    }
+
+    protected function payloadTokenCreation(): array {
+        return [
+            "token_name" => "Token Test",
+            "user_id" => $this->main_user_id,
+            "password" => $this->user_password,
         ];
     }
 
