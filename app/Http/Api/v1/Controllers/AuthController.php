@@ -5,6 +5,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -86,32 +87,37 @@ class AuthController extends Controller
             'account_id' => 'string|required'
         ]);
 
-        $user = new User(
-            [
-                "name" => $request->name,
-                "email" => $request->email,
-                "password" => $request->password
-            ]);
-
-        $account = Account::where(
-            [
-                "_id" => new ObjectId($request["account_id"])
-                ])
-            ->first();
-
-        if($account == null){
-            return response()->json([
-                "success" => false,
-                "data" => $request->all(),
-                "errors" => ["account_id" => "Account not found"]],
-                422
-            );
-        }
-
-        $user->account()->associate($account);
-
         try {
+            DB::beginTransaction();
+
+            $user = User::make(
+                [
+                    "name" => $request->name,
+                    "email" => $request->email,
+                    "password" => $request->password
+                ]);
+
+            try {
+                $account = Account::where(
+                    [
+                        "_id" => new ObjectId($request["account_id"])
+                    ])
+                    ->firstOrFail();
+            }catch (ModelNotFoundException $e) {
+                return response()->json([
+                    "success" => false,
+                    "data" => $request->all(),
+                    "errors" => ["account_id" => "Account not found"]],
+                    422
+                );
+            }
+
             $user->save();
+
+            $user->accounts()->attach($account);
+
+            DB::commit();
+
         }catch (\Exception $e){
             switch ($e->getCode()){
                 case 11000:
@@ -126,8 +132,8 @@ class AuthController extends Controller
                 default:
                     $message = "Erro desconhecido";
                     $error = [
-                        "user"=> [
-                            "Usuário já existente"
+                        "unknown"=> [
+                            "Erro desconhecido"
                         ]
                     ];
                     $status = 400;

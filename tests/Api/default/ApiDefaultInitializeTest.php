@@ -35,7 +35,7 @@ class ApiDefaultInitializeTest extends TestCase {
             $this->account_document = $this->getGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value);
             $this->account_address = $this->getGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value);
         }catch (\Exception $e){
-            $this->setGlobal(TestVariableLabels::USER_NAME->value ,fake()->email());
+            $this->setGlobal(TestVariableLabels::USER_NAME->value ,fake()->name());
             $this->setGlobal(TestVariableLabels::USER_PASSWORD->value ,fake()->password());
             $this->setGlobal(TestVariableLabels::USER_EMAIL->value ,fake()->email());
             $this->setGlobal(TestVariableLabels::ACCOUNT_NAME->value ,fake()->company());
@@ -80,7 +80,7 @@ class ApiDefaultInitializeTest extends TestCase {
         return $this->json(
             method: 'post',
             uri: "api/initialize",
-            data: $this->payloadInitiate()
+            data: $this->payloadInitiate(),
         );
     }
 
