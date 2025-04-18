@@ -3,7 +3,6 @@
 namespace App\Models\Traits;
 
 use App\Models\Account;
-use App\Models\Company;
 use MongoDB\Laravel\Relations\BelongsTo;
 
 trait HasAccount {

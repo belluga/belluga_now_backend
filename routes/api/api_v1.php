@@ -2,6 +2,7 @@
 
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthController;
+use App\Http\Api\v1\Controllers\TokenController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
@@ -15,7 +16,7 @@ Route::prefix('users')->middleware('auth:sanctum')->group(function () {
 });
 
 Route::prefix('accounts')->group(function () {
-    Route::post('/{account_slug}/token', [AccountController::class, 'createToken'])
+    Route::post('/{account_slug}/token', [TokenController::class, 'createToken'])
         ->middleware('guest')
         ->name('account.token');
 
