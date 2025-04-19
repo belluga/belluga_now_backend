@@ -93,19 +93,6 @@ class AccountController extends Controller
         );
     }
 
-    public function userAccounts(Request $request): LengthAwarePaginator
-    {
-
-        $this->account_token = request()->user();
-
-        $user_id = request()->route("user_id");
-
-        return Account::where(
-            "user_ids",
-            $user_id
-        )->paginate();
-    }
-
     protected function checkAccountAuthorization(): void {
         if ($this->account->id !== $this->account_token->id) {
             abort(403, "Unauthorized");

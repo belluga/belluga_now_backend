@@ -113,14 +113,11 @@ class UsersController extends Controller
     public function accounts(Request $request): LengthAwarePaginator
     {
 
-        $this->account_token = request()->user();
+        $user_id = request()->route("user_id");
 
-        $this->extractAccountFromSlug();
-        $this->checkAccountAuthorization();
-
-        return User::where(
-            "account_ids",
-            $this->account_authorized->id
+        return Account::where(
+            "user_ids",
+            $user_id
         )->paginate();
     }
 }
