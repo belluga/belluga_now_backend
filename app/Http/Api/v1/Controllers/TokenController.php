@@ -46,7 +46,7 @@ class TokenController extends Controller
         try {
             $this->user =  User::where("_id", new ObjectId(request()->user_id))->with("accounts")->firstOrFail();
 
-            if (! $this->user || ! Hash::check(request()->password, $this->user->password)) {
+            if (! Hash::check(request()->password, $this->user->password)) {
                 abort(403, "The provided credentials are incorrect.");
             }
 

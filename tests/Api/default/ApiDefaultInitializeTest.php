@@ -2,10 +2,9 @@
 
 namespace Tests\Api\default;
 
-use App\Models\Account;
 use Illuminate\Testing\TestResponse;
+use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
-use Tests\TestVariableLabels;
 
 class ApiDefaultInitializeTest extends TestCase {
     protected string $user_password;
@@ -39,7 +38,7 @@ class ApiDefaultInitializeTest extends TestCase {
             $this->setGlobal(TestVariableLabels::USER_PASSWORD->value ,fake()->password());
             $this->setGlobal(TestVariableLabels::USER_EMAIL->value ,fake()->email());
             $this->setGlobal(TestVariableLabels::ACCOUNT_NAME->value ,fake()->company());
-            $this->setGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value ,fake()->cnpj());
+            $this->setGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value ,fake()->cnpj(false));
             $this->setGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value ,fake()->address());
             $this->getGlobalData();
         }

@@ -3,10 +3,12 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
+use App\Http\Api\v1\Requests\UserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AccountController extends Controller
@@ -33,7 +35,7 @@ class AccountController extends Controller
      * @unauthenticated
      * @responseFile status=201 responses/api/v1/company.post.success.json
      */
-    public function store(Request $request): ?Account{
+    public function store(Request $request): JsonResponse {
 
         $validated_data = $request->validate([
             "name" => "required",
@@ -41,10 +43,20 @@ class AccountController extends Controller
             "address" => "required|string",
         ]);
 
-        $company = Account::make($validated_data);
-        $company->save();
+        $account = Account::make($validated_data);
+        $account->save();
 
-        return $company;
+        $token = $account->createToken("initialization")->plainTextToken;
+
+        return response()->json([
+            "success" => true,
+            'data' => [
+                'account' => $account,
+                'token' => $token
+            ],
+        ],
+            status: 201
+        );
     }
 
     /**
@@ -66,8 +78,36 @@ class AccountController extends Controller
         )->paginate();
     }
 
+    public function userAttach(UserAttachRequest $request): JsonResponse {
+        $this->account_token = request()->user();
+
+        $this->extractAccountFromSlug();
+        $this->checkAccountAuthorization();
+
+        $this->account_token->users()->attach($request->user_id);
+
+        return response()->json([
+            "success" => true,
+        ],
+            status: 201
+        );
+    }
+
+    public function userAccounts(Request $request): LengthAwarePaginator
+    {
+
+        $this->account_token = request()->user();
+
+        $user_id = request()->route("user_id");
+
+        return Account::where(
+            "user_ids",
+            $user_id
+        )->paginate();
+    }
+
     protected function checkAccountAuthorization(): void {
-        if ($this->account_slug->id !== $this->account_token->id) {
+        if ($this->account->id !== $this->account_token->id) {
             abort(403, "Unauthorized");
         }
 

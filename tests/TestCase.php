@@ -19,6 +19,4 @@ abstract class TestCase extends BaseTestCase {
         global $params;
         $params["{$this->prefix}.$key"] = $value;
     }
-
-    abstract protected function getGlobalData(): void;
 }

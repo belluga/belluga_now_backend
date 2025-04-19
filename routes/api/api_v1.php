@@ -3,6 +3,7 @@
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthController;
 use App\Http\Api\v1\Controllers\TokenController;
+use App\Http\Api\v1\Controllers\UsersController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
@@ -11,8 +12,11 @@ Route::prefix('initialize')->middleware('guest')->group(function () {
 });
 
 Route::prefix('users')->middleware('auth:sanctum')->group(function () {
-    Route::post('/', [AuthController::class , 'register'])
+    Route::post('/', [UsersController::class , 'register'])
         ->name('users.create');
+
+    Route::get('/{user_id}/accounts', [AccountController::class , 'userAccounts'])
+        ->name('users.accounts');
 });
 
 Route::prefix('accounts')->group(function () {
@@ -23,6 +27,10 @@ Route::prefix('accounts')->group(function () {
     Route::get('/{account_slug}/users', [AccountController::class , 'users'])
         ->middleware('auth:sanctum')
         ->name('account.users');
+
+    Route::put('/{account_slug}/users', [AccountController::class , 'userAttach'])
+        ->middleware('auth:sanctum')
+        ->name('account.users.attach');
 
     Route::get('/', [AccountController::class , 'index'])
         ->middleware('auth:sanctum')
