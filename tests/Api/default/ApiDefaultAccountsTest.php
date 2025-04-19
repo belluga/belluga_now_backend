@@ -70,10 +70,6 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         }
     }
 
-    protected string $user_name;
-
-    protected string $account_name;
-
     protected string $main_account_slug {
         get {
             return $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value);
@@ -85,10 +81,6 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
             return $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_ID->value);
         }
     }
-
-    protected string $account_document;
-
-    protected string $account_address;
 
     public function testAccountUserCreation(): void {
         $response = $this->createUser();
@@ -226,7 +218,7 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
     }
 
     public function testListAccountsFromUser(): void {
-        $response = $this->listUserAccounts();
+        $response = $this->listMainUserAccounts();
 
         $response->assertStatus(200);
 
@@ -234,6 +226,15 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         $this->assertCount(2, $responseData['data']);
         $accountIds = array_column($responseData['data'], 'id');
         $this->assertContains($this->main_account_id, $accountIds);
+        $this->assertContains($this->secondary_account_id, $accountIds);
+
+        $response = $this->listSecondaryUserAccounts();
+
+        $response->assertStatus(200);
+
+        $responseData = $response->json();
+        $this->assertCount(1, $responseData['data']);
+        $accountIds = array_column($responseData['data'], 'id');
         $this->assertContains($this->secondary_account_id, $accountIds);
     }
 
@@ -248,18 +249,16 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         ]);
     }
 
-    public function testErrorAccountTokenCreationWithoutAuthorization(): void {
-
-    }
-
     public function testErrorAccountTokenCreationWithWrongCredentials(): void {
         $response = $this->createTokenWrongCredentials();
 
         $response->assertStatus(403);
     }
 
-    public function testErrorAccountUserCreationWithoutAuthorization(): void {
+    public function testErrorAccountUserCreationOnAccountUserDontBelongTo(): void {
+        $response = $this->createTokenOnAccountUserDontBelongs();
 
+        $response->assertStatus(403);
     }
 
     public function testErrorAccountUserCreationAccountNotExists(): void {
@@ -300,11 +299,19 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function listUserAccounts(): TestResponse {
+    protected function listMainUserAccounts(): TestResponse {
         return $this->json(
             method: 'get',
             uri: "api/users/$this->main_user_id/accounts",
             headers: $this->getHeaders(),
+        );
+    }
+
+    protected function listSecondaryUserAccounts(): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "api/users/$this->secondary_user_id/accounts",
+            headers: $this->getHeaders(AccountEnvironments::SECONDARY),
         );
     }
 
@@ -372,6 +379,14 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
     protected function createTokenWrongCredentials(): TestResponse {
         return $this->json(
             method: 'post',
+            uri: "api/accounts/$this->secondary_account_slug/token",
+            data: $this->payloadTokenCreationWrongCredentials(),
+        );
+    }
+
+    protected function createTokenOnAccountUserDontBelongs(): TestResponse {
+        return $this->json(
+            method: 'post',
             uri: "api/accounts/$this->main_account_slug/token",
             data: $this->payloadTokenCreationWrongCredentials(),
         );
@@ -435,6 +450,14 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
             "token_name" => "Token Test",
             "user_id" => $this->main_user_id,
             "password" => "123",
+        ];
+    }
+
+    protected function payloadTokenCreationUserDontBelongTo(): array {
+        return [
+            "token_name" => "Token Test",
+            "user_id" => $this->secondary_user_id,
+            "password" => $this->secondary_user_password,
         ];
     }
 
