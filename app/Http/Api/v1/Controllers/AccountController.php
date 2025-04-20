@@ -3,6 +3,7 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
+use App\Http\Api\v1\Requests\AccountCreateRequest;
 use App\Http\Api\v1\Requests\UserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
@@ -35,7 +36,7 @@ class AccountController extends Controller
      * @unauthenticated
      * @responseFile status=201 responses/api/v1/company.post.success.json
      */
-    public function store(Request $request): JsonResponse {
+    public function store(AccountCreateRequest $request): JsonResponse {
 
         $validated_data = $request->validate([
             "name" => "required",

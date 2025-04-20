@@ -8,7 +8,7 @@
         <testsuite name="Api-Default">
             <file>tests/Api/default/ApiDefaultInitializeTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountsTest.php</file>
-<!--            <file>tests/Api/default/ApiDefaultPaymentSettingsIuguTest.php</file>-->
+            <file>tests/Api/default/ApiDefaultValidationTest.php</file>
 <!--            <file>tests/Api/default/ApiDefaultOrdersCreationTest.php</file>-->
 <!--            <file>tests/Api/default/ApiDefaultWebhookTest.php</file>-->
         </testsuite>

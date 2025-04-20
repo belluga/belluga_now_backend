@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\User;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 class AuthController extends Controller
 {
 
-    public function initialize(Request $request): JsonResponse {
+    public function initialize(InitializeRequest $request): JsonResponse {
 
         $request->validate([
             'name' => 'string',
