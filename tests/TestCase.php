@@ -12,7 +12,13 @@ abstract class TestCase extends BaseTestCase {
 
     protected function getGlobal($key): mixed{
         global $params;
-        return $params["{$this->prefix}.$key"];
+
+        if(!isset($params)){
+            return null;
+        }
+
+        $key_to_retrieve = "{$this->prefix}.$key";
+        return array_key_exists($key_to_retrieve, $params) ? $params[$key_to_retrieve] : null;
     }
 
     protected function setGlobal($key, $value): void{

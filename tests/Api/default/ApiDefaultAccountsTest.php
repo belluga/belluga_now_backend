@@ -388,7 +388,7 @@ class ApiDefaultAccountsTest extends TestCaseAuthenticated {
         return $this->json(
             method: 'post',
             uri: "api/accounts/$this->main_account_slug/token",
-            data: $this->payloadTokenCreationWrongCredentials(),
+            data: $this->payloadTokenCreationUserDontBelongTo(),
         );
     }
 

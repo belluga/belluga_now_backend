@@ -7,40 +7,90 @@ use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
 
 class ApiDefaultInitializeTest extends TestCase {
-    protected string $user_password;
-    protected string $user_email;
-
-    protected string $user_name;
-
-    protected string $account_name;
-
-    protected string $account_document;
-
-    protected string $account_address;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        $this->getGlobalData();
+    protected string $user_password {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::USER_PASSWORD->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::USER_PASSWORD->value, fake()->password());
+            }
+            return $this->getGlobal(TestVariableLabels::USER_PASSWORD->value);
+        }
+    }
+    protected string $user_email {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::USER_EMAIL->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::USER_EMAIL->value, fake()->email());
+            }
+            return $this->getGlobal(TestVariableLabels::USER_EMAIL->value);
+        }
     }
 
-    protected function getGlobalData(): void{
-        try {
-            $this->user_name = $this->getGlobal(TestVariableLabels::USER_NAME->value);
-            $this->user_email = $this->getGlobal(TestVariableLabels::USER_EMAIL->value);
-            $this->user_password = $this->getGlobal(TestVariableLabels::USER_PASSWORD->value);
-            $this->account_name = $this->getGlobal(TestVariableLabels::ACCOUNT_NAME->value);
-            $this->account_document = $this->getGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value);
-            $this->account_address = $this->getGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value);
-        }catch (\Exception $e){
-            $this->setGlobal(TestVariableLabels::USER_NAME->value ,fake()->name());
-            $this->setGlobal(TestVariableLabels::USER_PASSWORD->value ,fake()->password());
-            $this->setGlobal(TestVariableLabels::USER_EMAIL->value ,fake()->email());
-            $this->setGlobal(TestVariableLabels::ACCOUNT_NAME->value ,fake()->company());
-            $this->setGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value ,fake()->cnpj(false));
-            $this->setGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value ,fake()->address());
-            $this->getGlobalData();
+    protected string $user_name {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::USER_NAME->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::USER_NAME->value, fake()->name());
+            }
+            return $this->getGlobal(TestVariableLabels::USER_NAME->value);
+        }
+    }
+
+    protected string $account_name {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::ACCOUNT_NAME->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::ACCOUNT_NAME->value, fake()->company());
+            }
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_NAME->value);
+        }
+    }
+
+    protected string $account_document {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value, fake()->cnpj());
+            }
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value);
+        }
+    }
+
+    protected string $account_address {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value, fake()->address());
+            }
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value);
+        }
+    }
+
+    protected string $main_user_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::MAIN_USER_ID->value, $value);
+            $this->main_user_id = $value;
+        }
+    }
+
+    protected string $main_account_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_ID->value, $value);
+            $this->main_account_id = $value;
+        }
+    }
+
+    protected string $main_account_slug {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value, $value);
+            $this->main_account_slug = $value;
+        }
+    }
+
+    protected string $main_account_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_TOKEN->value, $value);
+            $this->main_account_token = $value;
         }
     }
 
@@ -58,10 +108,10 @@ class ApiDefaultInitializeTest extends TestCase {
             ]
         ]);
 
-        $this->setGlobal(TestVariableLabels::MAIN_USER_ID->value ,$response->json()['data']['user']["id"]);
-        $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_ID->value,$response->json()['data']['account']["id"]);
-        $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value,$response->json()['data']['account']["slug"]);
-        $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_TOKEN->value, $response->json()['data']["token"]);
+        $this->main_user_id = $response->json()['data']['user']["id"];
+        $this->main_account_id = $response->json()['data']['account']["id"];
+        $this->main_account_slug = $response->json()['data']['account']["slug"];
+        $this->main_account_token = $response->json()['data']["token"];
     }
 
     public function testInitiateAgain(): void {
@@ -85,6 +135,7 @@ class ApiDefaultInitializeTest extends TestCase {
     }
 
     protected function payloadInitiate(): array {
+
         return [
             "name" => $this->user_name,
             "email" => $this->user_email,
