@@ -4,7 +4,22 @@ use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthController;
 use App\Http\Api\v1\Controllers\TokenController;
 use App\Http\Api\v1\Controllers\UsersController;
+use App\Http\Api\v1\Controllers\CategoryController;
+use App\Http\Api\v1\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('auth')->group(function () {
+    Route::post('/login', [AuthController::class , 'login'])
+        ->name('auth.login');
+
+    Route::post('/check', [AuthController::class , 'loginByToken'])
+        ->middleware('auth:sanctum')
+        ->name('auth.check');
+
+    Route::post('/logout', [AuthController::class , 'logout'])
+        ->middleware('auth:sanctum')
+        ->name('auth.logout');
+});
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
     Route::post('/', [AuthController::class , 'initialize'])
@@ -12,7 +27,7 @@ Route::prefix('initialize')->middleware('guest')->group(function () {
 });
 
 Route::prefix('users')->middleware('auth:sanctum')->group(function () {
-    Route::post('/', [UsersController::class , 'register'])
+    Route::post('/', [AuthController::class , 'register'])
         ->name('users.create');
 
     Route::get('/{user_id}/accounts', [UsersController::class , 'accounts'])
@@ -39,4 +54,9 @@ Route::prefix('accounts')->group(function () {
     Route::post('/', [AccountController::class , 'store'])
         ->middleware('auth:sanctum')
         ->name('account.create');
+});
+
+Route::group(['middleware' => 'auth:sanctum'], function(){
+    Route::apiResource('categories', CategoryController::class);
+    Route::apiResource('transactions', TransactionController::class);
 });

@@ -4,14 +4,17 @@ namespace App\Http\Api\v1\Resources;
 
 use Illuminate\Http\Resources\Json\JsonResource;
 
-class UserResource extends JsonResource {
+/**
+ * Transform the resource into an array.
+ *
+ * @return array<string, mixed>
+ */
+class CategoryResource extends JsonResource {
     public function toArray($request): array {
         return [
             'id' => $this->id,
-            'profile' => [
-                'name' => $this->name,
-                'email' => $this->email,
-            ]
+            'name' => $this->name,
+            'slug' => $this->slug
         ];
     }
 }

@@ -6,14 +6,16 @@ namespace App\Models;
 
 use App\Models\Traits\HasAccount;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use MongoDB\Laravel\Eloquent\Model as Authenticatable;
+use Laravel\Sanctum\HasApiTokens;
+use MongoDB\Laravel\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use MongoDB\Laravel\Relations\BelongsToMany;
+use MongoDB\Laravel\Relations\HasMany;
 
 class User extends Authenticatable
 {
 
-    use HasFactory, Notifiable, HasAccount;
+    use HasFactory, Notifiable, HasAccount, HasApiTokens;
 
     /**
      * The attributes that are mass assignable.
@@ -41,6 +43,14 @@ class User extends Authenticatable
         return $this->belongsToMany(
             related: Account::class
         );
+    }
+
+    public function categories(): HasMany {
+        return $this->hasMany(Category::class);
+    }
+
+    public function transactions(): HasMany {
+        return $this->hasMany(Transaction::class);
     }
 
     /**

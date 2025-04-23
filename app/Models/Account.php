@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Relations\BelongsToMany;
 use Spatie\Sluggable\HasSlug;
@@ -12,7 +12,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class Account extends Model {
 
-    use HasSlug, HasApiTokens;
+    use HasSlug, HasFactory;
 
     protected $keyType = "ObjectId";
 
