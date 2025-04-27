@@ -27,6 +27,7 @@ class InitializeRequest extends FormRequest
             'tenant.name' => 'required|string',
             'tenant.subdomain' => 'required|string|unique:tenants,subdomain',
             'tenant.database' => 'required|string|unique:tenants,database',
+            'tenant.domains' => 'required|array',
             'user.name' => 'string',
             'user.email' => 'required|string|email',
             'user.password' => 'required|string',

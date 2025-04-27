@@ -11,12 +11,12 @@ use MongoDB\Laravel\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use MongoDB\Laravel\Relations\BelongsToMany;
 use MongoDB\Laravel\Relations\HasMany;
-use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
+use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class User extends Authenticatable
 {
 
-    use HasFactory, Notifiable, HasAccount, HasApiTokens, UsesLandlordConnection;
+    use HasFactory, Notifiable, HasAccount, HasApiTokens, UsesTenantConnection;
 
     /**
      * The attributes that are mass assignable.

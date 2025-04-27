@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Relations\BelongsToMany;
+use MongoDB\Laravel\Relations\EmbedsMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
 use Spatie\Sluggable\HasSlug;
@@ -28,6 +29,10 @@ class Tenant extends BaseTenant
         return $this->belongsToMany(User::class);
     }
 
+    public function domains(): EmbedsMany {
+        return $this->embedsMany(Domain::class);
+    }
+
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()
@@ -35,7 +40,7 @@ class Tenant extends BaseTenant
             ->saveSlugsTo('slug');
     }
 
-    public static function booted()
+    public static function booted(): void
     {
         static::creating(function (Tenant $tenant) {
             if (empty($tenant->slug)) {
@@ -50,7 +55,7 @@ class Tenant extends BaseTenant
         });
     }
 
-    protected function createDatabase()
+    protected function createDatabase(): void
     {
         $this->makeCurrent();
 
@@ -66,23 +71,13 @@ class Tenant extends BaseTenant
         $this->forgetCurrent();
     }
 
-    protected function runMigrations()
+    protected function runMigrations(): void
     {
-
-        // Skip standard migrations for MongoDB
-        if (env('DB_CONNECTION_TENANT') === 'mongodb') {
-            return;
-        }
-
-        Artisan::call('tenants:artisan', [
-            'artisanCommand' => 'migrate --database=tenant --force',
-            '--tenant' => $this->id
+        Artisan::call('migrate', [
+            '--database' => config('multitenancy.tenant_database_connection_name'),
+            '--path' => 'database/migrations/tenants',
+            '--force' => true
         ]);
 
-//        Artisan::call('tenants:artisan', [
-//            '--database' => env('DB_CONNECTION_TENANT', 'mongodb'),
-//            '--force' => true,
-//            '--tenant' => $this->id
-//        ]);
     }
 }

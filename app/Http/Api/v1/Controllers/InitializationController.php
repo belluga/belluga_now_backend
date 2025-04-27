@@ -47,6 +47,17 @@ class InitializationController extends Controller
             "database" => $request->tenant["database"],
         ]);
 
+//        $new_tenant->createDatabase();
+
+        foreach($request->tenant["domains"] as $domain){
+            $new_tenant->domains()->create([
+                "host" => $domain
+            ]);
+        }
+
+//        $new_tenant->runMigrations();
+        $new_tenant->makeCurrent();
+
         $new_user = User::create([
             "name" => $request->user['name'],
             "email" => $request->user['email'],
@@ -56,6 +67,8 @@ class InitializationController extends Controller
         $new_user->tenants()->attach($new_tenant);
 
         $token = $new_user->createToken("Initialization Token")->plainTextToken;
+
+        $new_tenant->forgetCurrent();
 
 //        DB::commit();
 

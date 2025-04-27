@@ -127,7 +127,7 @@ return [
         'tenant' => [
             'driver' => 'mongodb',
             'dsn' => env('DB_URI_TENANTS'),
-            'database' => null,
+            'database' => env('DB_DATABASE_TENANT', 'default_tenant_db'),
         ],
 
     ],
