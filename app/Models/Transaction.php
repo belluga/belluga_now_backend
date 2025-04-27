@@ -6,9 +6,12 @@ use Illuminate\Database\Eloquent\Builder;
 use MongoDB\Laravel\Eloquent\Model;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use MongoDB\Laravel\Relations\BelongsTo;
+use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class Transaction extends Model
 {
+
+    use UsesTenantConnection;
     protected $fillable = [
         'category_id',
         'user_id',

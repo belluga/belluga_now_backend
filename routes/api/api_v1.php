@@ -6,6 +6,7 @@ use App\Http\Api\v1\Controllers\TokenController;
 use App\Http\Api\v1\Controllers\UsersController;
 use App\Http\Api\v1\Controllers\CategoryController;
 use App\Http\Api\v1\Controllers\TransactionController;
+use App\Http\Api\v1\Controllers\InitializationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -22,7 +23,7 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
-    Route::post('/', [AuthController::class , 'initialize'])
+    Route::post('/', [InitializationController::class , 'initialize'])
         ->name('initialize');
 });
 

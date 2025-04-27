@@ -24,12 +24,12 @@ class InitializeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'string',
-            'email' => 'required|string|email',
-            'password' => 'required|string',
-            'account.name' => 'string|required',
-            'account.document' => 'string|required',
-            'account.address' => 'string|required'
+            'tenant.name' => 'required|string',
+            'tenant.subdomain' => 'required|string|unique:tenants,subdomain',
+            'tenant.database' => 'required|string|unique:tenants,database',
+            'user.name' => 'string',
+            'user.email' => 'required|string|email',
+            'user.password' => 'required|string',
         ];
     }
 

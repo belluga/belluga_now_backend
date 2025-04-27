@@ -6,17 +6,16 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-
-    protected $connection = 'mongodb';
-
     /**
      * Run the migrations.
      */
     public function up(): void
     {
-        Schema::create('accounts', function (Blueprint $collection) {
-            $collection->id();
-            $collection->timestamps();
+        Schema::create('transactions', function (Blueprint $collection) {
+            $collection->index(['transaction_date', -1]);
+            $collection->index('amount');
+            $collection->string('description');
+            $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
     }
 
@@ -25,6 +24,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('accounts');
+        Schema::dropIfExists('transactions');
     }
 };

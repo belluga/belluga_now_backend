@@ -11,11 +11,12 @@ use MongoDB\Laravel\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use MongoDB\Laravel\Relations\BelongsToMany;
 use MongoDB\Laravel\Relations\HasMany;
+use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
 class User extends Authenticatable
 {
 
-    use HasFactory, Notifiable, HasAccount, HasApiTokens;
+    use HasFactory, Notifiable, HasAccount, HasApiTokens, UsesLandlordConnection;
 
     /**
      * The attributes that are mass assignable.
@@ -37,6 +38,13 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    public function tenants(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            related: Tenant::class
+        );
+    }
 
     public function accounts(): BelongsToMany
     {

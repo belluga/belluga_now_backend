@@ -7,12 +7,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Relations\BelongsToMany;
+use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
 class Account extends Model {
 
-    use HasSlug, HasFactory;
+    use HasSlug, HasFactory, UsesTenantConnection;
 
     protected $keyType = "ObjectId";
 

@@ -116,7 +116,19 @@ return [
             'driver' => 'mongodb',
             'dsn' => env('DB_URI'),
             'database' => env('DB_DATABASE', 'laravel'),
-        ]
+        ],
+
+        'landlord' => [
+            'driver' => 'mongodb',
+            'dsn' => env('DB_URI_LANDLORD'),
+            'database' => env('DB_DATABASE_LANDLORD', 'landlord'),
+        ],
+
+        'tenant' => [
+            'driver' => 'mongodb',
+            'dsn' => env('DB_URI_TENANTS'),
+            'database' => null,
+        ],
 
     ],
 

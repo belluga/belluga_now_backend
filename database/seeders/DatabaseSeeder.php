@@ -3,9 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\Category;
-use App\Models\Module;
+use App\Models\Tenant;
 use App\Models\User;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -22,5 +21,10 @@ class DatabaseSeeder extends Seeder
         ]);
 
         Category::factory()->count(5)->create();
+    }
+
+    public function initialize(): void
+    {
+        Tenant::factory()->initialize();
     }
 }
