@@ -18,8 +18,7 @@ class Tenant extends BaseTenant
 
     protected $fillable = [
         'name',
-        'subdomain',
-        'database'
+        'subdomain'
     ];
 
 //    protected $connection = 'landlord';

@@ -43,8 +43,7 @@ class InitializationController extends Controller
 
         $new_tenant = Tenant::create([
             "name" => $request->tenant["name"],
-            "subdomain" => $request->tenant["subdomain"],
-            "database" => $request->tenant["database"],
+            "subdomain" => $request->tenant["subdomain"]
         ]);
 
 //        $new_tenant->createDatabase();
