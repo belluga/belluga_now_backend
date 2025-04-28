@@ -6,8 +6,8 @@ use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
 use App\Http\Api\v1\Requests\AccountCreateRequest;
 use App\Http\Api\v1\Requests\UserAttachRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Account;
-use App\Models\User;
+use App\Models\Tenants\Account;
+use App\Models\LandlordUser;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -73,7 +73,7 @@ class AccountController extends Controller
         $this->extractAccountFromSlug();
         $this->checkAccountAuthorization();
 
-        return User::where(
+        return LandlordUser::where(
             "account_ids",
             $this->account_authorized->id
         )->paginate();

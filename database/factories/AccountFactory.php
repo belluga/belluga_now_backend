@@ -2,10 +2,8 @@
 
 namespace Database\Factories;
 
-use App\Models\Module;
+use App\Models\Tenants\Module;
 use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 /**
  * @extends Factory<Module>

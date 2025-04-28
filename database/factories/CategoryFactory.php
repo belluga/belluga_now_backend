@@ -2,8 +2,8 @@
 
 namespace Database\Factories;
 
-use App\Models\Category;
-use App\Models\User;
+use App\Models\Tenants\Category;
+use App\Models\LandlordUser;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -25,7 +25,7 @@ class CategoryFactory extends Factory
     {
         return [
             'name' => fake()->word(),
-            'user_id' => User::factory(),
+            'user_id' => LandlordUser::factory(),
         ];
     }
 }

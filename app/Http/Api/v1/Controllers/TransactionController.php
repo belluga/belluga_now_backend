@@ -6,7 +6,7 @@ use App\Http\Api\v1\Requests\StoreTransactionRequest;
 use App\Http\Api\v1\Requests\UpdateTransactionRequest;
 use App\Http\Api\v1\Resources\TransactionResource;
 use App\Http\Controllers\Controller;
-use App\Models\Transaction;
+use App\Models\Tenants\Transaction;
 
 class TransactionController extends Controller
 {

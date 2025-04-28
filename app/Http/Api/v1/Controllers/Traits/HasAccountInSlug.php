@@ -2,7 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers\Traits;
 
-use App\Models\Account;
+use App\Models\Tenants\Account;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 trait HasAccountInSlug {

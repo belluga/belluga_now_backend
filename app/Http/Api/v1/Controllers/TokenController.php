@@ -5,8 +5,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
 use App\Http\Api\v1\Requests\CreateTokenRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Account;
-use App\Models\User;
+use App\Models\LandlordUser;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -17,7 +16,7 @@ class TokenController extends Controller
 
     use HasAccountInSlug;
 
-    protected ?User $user = null;
+    protected ?LandlordUser $user = null;
 
     /**
      * @group v1
@@ -44,7 +43,7 @@ class TokenController extends Controller
 
     protected function extractUserFromPayload(): void {
         try {
-            $this->user =  User::where("_id", new ObjectId(request()->user_id))->with("accounts")->firstOrFail();
+            $this->user =  LandlordUser::where("_id", new ObjectId(request()->user_id))->with("accounts")->firstOrFail();
 
             if (! Hash::check(request()->password, $this->user->password)) {
                 abort(403, "The provided credentials are incorrect.");

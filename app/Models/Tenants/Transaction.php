@@ -1,10 +1,11 @@
 <?php
 
-namespace App\Models;
+namespace App\Models\Tenants;
 
+use App\Models\LandlordUser;
 use Illuminate\Database\Eloquent\Builder;
-use MongoDB\Laravel\Eloquent\Model;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Relations\BelongsTo;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -34,7 +35,7 @@ class Transaction extends Model
     }
 
     public function user(): BelongsTo {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(LandlordUser::class);
     }
 
     public function category(): BelongsTo {

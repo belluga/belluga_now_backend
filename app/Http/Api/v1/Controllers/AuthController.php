@@ -2,20 +2,16 @@
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Api\v1\Requests\LoginEmailRequest;
 use App\Http\Api\v1\Requests\RegisterUserRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
-use App\Models\Account;
-use App\Models\User;
+use App\Models\LandlordUser;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -88,7 +84,7 @@ class AuthController extends Controller
     {
         DB::beginTransaction();
 
-        $user = User::create(
+        $user = LandlordUser::create(
             [
                 "name" => $request->name,
                 "email" => $request->email,

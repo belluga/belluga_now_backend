@@ -2,9 +2,9 @@
 
 namespace Database\Seeders;
 
-use App\Models\Category;
-use App\Models\Tenant;
-use App\Models\User;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Category;
+use App\Models\LandlordUser;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -15,7 +15,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
 
-        User::factory()->create([
+        LandlordUser::factory()->create([
             'name' => 'Super Admin',
             'email' => 'test@example.com',
         ]);

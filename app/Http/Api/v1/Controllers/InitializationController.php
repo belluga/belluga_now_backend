@@ -3,20 +3,11 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\InitializeRequest;
-use App\Http\Api\v1\Requests\LoginEmailRequest;
-use App\Http\Api\v1\Requests\RegisterUserRequest;
-use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
-use App\Models\Account;
-use App\Models\Tenant;
-use App\Models\User;
-use Illuminate\Http\Exceptions\HttpResponseException;
+use App\Models\Landlord\Tenant;
+use App\Models\LandlordUser;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 
 class InitializationController extends Controller
 {
@@ -57,7 +48,7 @@ class InitializationController extends Controller
 //        $new_tenant->runMigrations();
         $new_tenant->makeCurrent();
 
-        $new_user = User::create([
+        $new_user = LandlordUser::create([
             "name" => $request->user['name'],
             "email" => $request->user['email'],
             "password" => $request->user['password']

@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Models;
+namespace App\Models\Landlord;
 
+use App\Models\LandlordUser;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Laravel\Eloquent\DocumentModel;
@@ -25,7 +26,7 @@ class Tenant extends BaseTenant
 
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class);
+        return $this->belongsToMany(LandlordUser::class);
     }
 
     public function domains(): EmbedsMany {

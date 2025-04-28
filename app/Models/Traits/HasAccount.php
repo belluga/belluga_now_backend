@@ -2,7 +2,7 @@
 
 namespace App\Models\Traits;
 
-use App\Models\Account;
+use App\Models\Tenants\Account;
 use MongoDB\Laravel\Relations\BelongsTo;
 
 trait HasAccount {

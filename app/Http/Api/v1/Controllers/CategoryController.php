@@ -6,7 +6,7 @@ use App\Http\Api\v1\Requests\StoreRefactorRequest;
 use App\Http\Api\v1\Requests\UpdateCategoryRequest;
 use App\Http\Api\v1\Resources\CategoryResource;
 use App\Http\Controllers\Controller;
-use App\Models\Category;
+use App\Models\Tenants\Category;
 
 class CategoryController extends Controller
 {

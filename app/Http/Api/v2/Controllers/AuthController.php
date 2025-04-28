@@ -3,7 +3,7 @@
 namespace App\Http\Api\v2\Controllers;
 
 use App\Http\Api\v1\Controllers\AuthController as V1;
-use App\Models\User;
+use App\Models\LandlordUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -13,7 +13,7 @@ class AuthController extends V1
      * @group v2
      * @subgroup Auth
      */
-    public function current(Request $request): User {
+    public function current(Request $request): LandlordUser {
         return Parent::current($request);
     }
 
