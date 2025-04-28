@@ -2,103 +2,54 @@
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
-use App\Http\Api\v1\Requests\AccountCreateRequest;
-use App\Http\Api\v1\Requests\UserAttachRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Tenants\Account;
-use App\Models\LandlordUser;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Illuminate\Http\JsonResponse;
+use App\Services\AccountSessionManager;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 class AccountController extends Controller
 {
-    use HasAccountInSlug;
+    protected $accountSessionManager;
 
-    protected ?Account $account_token;
-
-    protected ?Account $account_authorized;
-
-    /**
-     * @group v1
-     * @subgroup Company
-     * @responseFile status=200 responses/api/v1/company.get.success.json
-     */
-    public function index(): LengthAwarePaginator
+    public function __construct(AccountSessionManager $accountSessionManager)
     {
-        return Account::query()->paginate();
+        $this->accountSessionManager = $accountSessionManager;
     }
 
     /**
-     * @group v1
-     * @subgroup Company
-     * @unauthenticated
-     * @responseFile status=201 responses/api/v1/company.post.success.json
+     * Altera a conta atual do usuário na sessão
      */
-    public function store(AccountCreateRequest $request): JsonResponse {
-
-        $validated_data = $request->validate([
-            "name" => "required",
-            "document" => "required|numeric|digits:14",
-            "address" => "required|string",
-        ]);
-
-        $account = Account::make($validated_data);
-        $account->save();
-
-        $token = $account->createToken("initialization")->plainTextToken;
-
-        return response()->json([
-            "success" => true,
-            'data' => [
-                'account' => $account,
-                'token' => $token
-            ],
-        ],
-            status: 201
-        );
-    }
-
-    /**
-     * @group v1
-     * @subgroup Company
-     * @responseFile status=200 responses/api/v1/company.get.success.json
-     */
-    public function users(Request $request): LengthAwarePaginator
+    public function switchAccount(Request $request, string $accountId): RedirectResponse
     {
+        $user = auth()->user();
 
-        $this->account_token = request()->user();
+        // Verifica se o usuário tem papel nesta conta
+        $hasRole = $user->accountRoles()->where('account_id', $accountId)->exists();
 
-        $this->extractAccountFromSlug();
-        $this->checkAccountAuthorization();
-
-        return LandlordUser::where(
-            "account_ids",
-            $this->account_authorized->id
-        )->paginate();
-    }
-
-    public function userAttach(UserAttachRequest $request): JsonResponse {
-        $this->account_token = request()->user();
-
-        $this->extractAccountFromSlug();
-        $this->checkAccountAuthorization();
-
-        $this->account_token->users()->attach($request->user_id);
-
-        return response()->json([
-            "success" => true,
-        ],
-            status: 201
-        );
-    }
-
-    protected function checkAccountAuthorization(): void {
-        if ($this->account->id !== $this->account_token->id) {
-            abort(403, "Unauthorized");
+        if (!$hasRole) {
+            return redirect()->back()->with('error', 'Você não tem acesso a esta conta');
         }
 
-        $this->account_authorized = $this->account_token;
+        // Define a conta atual na sessão
+        $this->accountSessionManager->setCurrentAccountId($accountId);
+
+        return redirect()->back()->with('success', 'Conta alterada com sucesso');
+    }
+
+    /**
+     * Lista as contas disponíveis para o usuário
+     */
+    public function listAccounts()
+    {
+        $user = auth()->user();
+        $accountIds = $user->accountRoles->pluck('account_id')->toArray();
+
+        $accounts = \App\Models\Tenants\Account::whereIn('_id', $accountIds)->get();
+        $currentAccountId = $this->accountSessionManager->getCurrentAccountId();
+
+        return view('accounts.list', [
+            'accounts' => $accounts,
+            'currentAccountId' => $currentAccountId
+        ]);
     }
 }

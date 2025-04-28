@@ -22,12 +22,18 @@ class Module extends Model
         'created_by_type', // 'tenant' ou 'account'
         'created_by_id',
         'settings',
-        'permissions_schema'
+        'permissions_schema',
+        'fields_schema',
+        'show_in_menu',
+        'menu_position',
+        'menu_icon'
     ];
 
     protected $casts = [
         'settings' => 'array',
-        'permissions_schema' => 'array'
+        'permissions_schema' => 'array',
+        'fields_schema' => 'array',
+        'show_in_menu' => 'boolean'
     ];
 
     public function getSlugOptions(): SlugOptions
@@ -88,5 +94,71 @@ class Module extends Model
                 ]
             ]
         ];
+    }
+
+    public function getDefaultFieldsSchema(): array
+    {
+        return [
+            'fields' => [
+                [
+                    'name' => 'title',
+                    'type' => 'text',
+                    'label' => 'Título',
+                    'required' => true
+                ],
+                [
+                    'name' => 'content',
+                    'type' => 'rich_text',
+                    'label' => 'Conteúdo',
+                    'required' => false
+                ]
+            ]
+        ];
+    }
+
+    public function getSupportedFieldTypes(): array
+    {
+        return [
+            'text' => 'Texto Simples',
+            'textarea' => 'Texto Longo',
+            'rich_text' => 'Editor Rico',
+            'number' => 'Número',
+            'date' => 'Data',
+            'datetime' => 'Data e Hora',
+            'boolean' => 'Sim/Não',
+            'select' => 'Seleção Única',
+            'multiselect' => 'Seleção Múltipla',
+            'file' => 'Arquivo',
+            'image' => 'Imagem',
+            'repeater' => 'Campos Repetíveis'
+        ];
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Garante que os campos necessários estejam presentes
+        static::creating(function ($model) {
+            if (empty($model->fields_schema)) {
+                $model->fields_schema = $model->getDefaultFieldsSchema();
+            }
+
+            if (empty($model->permissions_schema)) {
+                $model->permissions_schema = $model->getDefaultPermissionsSchema();
+            }
+
+            if (!isset($model->show_in_menu)) {
+                $model->show_in_menu = false;
+            }
+
+            if (empty($model->menu_position)) {
+                $model->menu_position = 0;
+            }
+
+            if (empty($model->menu_icon)) {
+                $model->menu_icon = 'document';
+            }
+        });
     }
 }

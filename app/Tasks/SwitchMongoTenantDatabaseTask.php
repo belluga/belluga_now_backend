@@ -22,8 +22,8 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
 
         // Atualiza a configuração com o banco de dados do tenant atual
         config([
-            "database.connections.{$connectionName}" => array_merge(
-                config("database.connections.{$connectionName}"),
+            "database.connections.$connectionName" => array_merge(
+                config("database.connections.$connectionName"),
                 ['database' => $tenant->getDatabaseName()]
             )
         ]);
@@ -41,7 +41,7 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
         }
 
         config([
-            "database.connections.{$connectionName}.database" => null
+            "database.connections.$connectionName.database" => null
         ]);
 
         DB::purge($connectionName);

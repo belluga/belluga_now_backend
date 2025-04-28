@@ -2,12 +2,10 @@
 
 namespace App\Models\Landlord;
 
-use App\Models\LandlordUser;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Relations\BelongsToMany;
-use MongoDB\Laravel\Relations\EmbedsMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
 use Spatie\Sluggable\HasSlug;
@@ -22,15 +20,36 @@ class Tenant extends BaseTenant
         'subdomain'
     ];
 
-//    protected $connection = 'landlord';
-
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(LandlordUser::class);
     }
 
-    public function domains(): EmbedsMany {
-        return $this->embedsMany(Domain::class);
+    protected $casts = [
+        'domains' => 'array',
+        'app_domains' => 'array'
+    ];
+
+    /**
+     * Verifica se um domínio pertence a este tenant
+     *
+     * @param string $domain
+     * @return bool
+     */
+    public function hasDomain(string $domain): bool
+    {
+        return in_array($domain, $this->domains ?? []);
+    }
+
+    /**
+     * Verifica se um domínio de app pertence a este tenant
+     *
+     * @param string $domain
+     * @return bool
+     */
+    public function hasAppDomain(string $domain): bool
+    {
+        return in_array($domain, $this->app_domains ?? []);
     }
 
     public function getSlugOptions(): SlugOptions

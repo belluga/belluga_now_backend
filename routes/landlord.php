@@ -1,7 +1,7 @@
 <?php
 
+use App\Http\Api\v1\Controllers\TenantController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\TenantController;
 
 Route::middleware(['auth:landlord'])->group(function () {
     // Rotas para gerenciamento de tenants

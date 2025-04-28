@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Controllers\Controller;
 use App\Services\TenantSessionManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
