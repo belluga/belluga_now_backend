@@ -2,62 +2,184 @@
 
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthController;
-use App\Http\Api\v1\Controllers\TokenController;
-use App\Http\Api\v1\Controllers\UsersController;
 use App\Http\Api\v1\Controllers\CategoryController;
-use App\Http\Api\v1\Controllers\TransactionController;
 use App\Http\Api\v1\Controllers\InitializationController;
+use App\Http\Api\v1\Controllers\LandlordUserController;
+use App\Http\Api\v1\Controllers\ModuleController;
+use App\Http\Api\v1\Controllers\ModuleItemController;
+use App\Http\Api\v1\Controllers\TenantController;
+use App\Http\Api\v1\Controllers\TenantUserController;
+use App\Http\Api\v1\Controllers\TokenController;
+use App\Http\Api\v1\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
 
+// Rotas públicas
 Route::prefix('auth')->group(function () {
-    Route::post('/login', [AuthController::class , 'login'])
+    Route::post('/login', [AuthController::class, 'login'])
         ->name('auth.login');
 
-    Route::post('/check', [AuthController::class , 'loginByToken'])
+    Route::post('/check', [AuthController::class, 'loginByToken'])
         ->middleware('auth:sanctum')
         ->name('auth.check');
 
-    Route::post('/logout', [AuthController::class , 'logout'])
+    Route::post('/logout', [AuthController::class, 'logout'])
         ->middleware('auth:sanctum')
         ->name('auth.logout');
 });
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
-    Route::post('/', [InitializationController::class , 'initialize'])
+    Route::post('/', [InitializationController::class, 'initialize'])
         ->name('initialize');
 });
 
-Route::prefix('users')->middleware('auth:sanctum')->group(function () {
-    Route::post('/', [AuthController::class , 'register'])
-        ->name('users.create');
+// Rotas para módulos
+Route::group(['prefix' => 'modules'], function () {
+    Route::get('/', [ModuleController::class, 'index']);
+    Route::post('/', [ModuleController::class, 'store']);
+    Route::get('/field-types', [ModuleController::class, 'getFieldTypes']);
+    Route::get('/{id}', [ModuleController::class, 'show']);
+    Route::put('/{id}', [ModuleController::class, 'update']);
+    Route::delete('/{id}', [ModuleController::class, 'destroy']);
 
-    Route::get('/{user_id}/accounts', [UsersController::class , 'accounts'])
-        ->name('users.accounts');
+    // Campos de relacionamento
+    Route::post('/{id}/relation-field', [ModuleController::class, 'addRelationField']);
+    Route::delete('/{id}/field', [ModuleController::class, 'removeField']);
+
+    // Rotas para itens de módulo
+    Route::get('/{moduleId}/items', [ModuleItemController::class, 'index']);
+    Route::post('/{moduleId}/items', [ModuleItemController::class, 'store']);
+    Route::get('/{moduleId}/items/{itemId}', [ModuleItemController::class, 'show']);
+    Route::put('/{moduleId}/items/{itemId}', [ModuleItemController::class, 'update']);
+    Route::delete('/{moduleId}/items/{itemId}', [ModuleItemController::class, 'destroy']);
 });
 
+// Rotas de tenant (landlord)
+Route::prefix('tenants')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [TenantController::class, 'index'])
+        ->name('tenants.index');
+
+    Route::post('/', [TenantController::class, 'store'])
+        ->name('tenants.store');
+
+    Route::get('/{id}', [TenantController::class, 'show'])
+        ->name('tenants.show');
+
+    Route::put('/{id}', [TenantController::class, 'update'])
+        ->name('tenants.update');
+
+    Route::delete('/{id}', [TenantController::class, 'destroy'])
+        ->name('tenants.destroy');
+
+    // Ativar/desativar tenant
+    Route::patch('/{id}/toggle-active', [TenantController::class, 'toggleActive'])
+        ->name('tenants.toggle-active');
+
+    // Usuários do tenant
+    Route::get('/{id}/users', [TenantUserController::class, 'index'])
+        ->name('tenants.users.index');
+
+    Route::post('/{id}/users', [TenantUserController::class, 'store'])
+        ->name('tenants.users.store');
+});
+
+// Rotas para usuários
+Route::prefix('users')->middleware('auth:sanctum')->group(function () {
+    Route::get('/', [UserController::class, 'index'])
+        ->name('users.index');
+
+    Route::post('/', [UserController::class, 'store'])
+        ->name('users.store');
+
+    Route::get('/{id}', [UserController::class, 'show'])
+        ->name('users.show');
+
+    Route::put('/{id}', [UserController::class, 'update'])
+        ->name('users.update');
+
+    Route::delete('/{id}', [UserController::class, 'destroy'])
+        ->name('users.destroy');
+
+    // Perfil do usuário atual
+    Route::get('/profile', [UserController::class, 'profile'])
+        ->name('users.profile');
+
+    Route::put('/profile', [UserController::class, 'updateProfile'])
+        ->name('users.profile.update');
+
+    // Alterar senha
+    Route::put('/{id}/password', [UserController::class, 'updatePassword'])
+        ->name('users.password.update');
+
+    // Ativar/desativar usuário
+    Route::patch('/{id}/toggle-active', [UserController::class, 'toggleActive'])
+        ->name('users.toggle-active');
+});
+
+// Rotas de contas/clientes
 Route::prefix('accounts')->group(function () {
     Route::post('/{account_slug}/token', [TokenController::class, 'createToken'])
         ->middleware('guest')
         ->name('account.token');
 
-    Route::get('/{account_slug}/users', [AccountController::class , 'users'])
-        ->middleware('auth:sanctum')
-        ->name('account.users');
+    // Rotas protegidas por autenticação
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/', [AccountController::class, 'index'])
+            ->name('account.index');
 
-    Route::put('/{account_slug}/users', [AccountController::class , 'userAttach'])
-        ->middleware('auth:sanctum')
-        ->name('account.users.attach');
+        Route::post('/', [AccountController::class, 'store'])
+            ->name('account.store');
 
-    Route::get('/', [AccountController::class , 'index'])
-        ->middleware('auth:sanctum')
-        ->name('account.list');
+        Route::get('/{id}', [AccountController::class, 'show'])
+            ->name('account.show');
 
-    Route::post('/', [AccountController::class , 'store'])
-        ->middleware('auth:sanctum')
-        ->name('account.create');
+        Route::put('/{id}', [AccountController::class, 'update'])
+            ->name('account.update');
+
+        Route::delete('/{id}', [AccountController::class, 'destroy'])
+            ->name('account.destroy');
+
+        Route::get('/{account_slug}/users', [AccountController::class, 'users'])
+            ->name('account.users');
+
+        Route::put('/{account_slug}/users', [AccountController::class, 'userAttach'])
+            ->name('account.users.attach');
+
+        Route::delete('/{account_slug}/users/{user_id}', [AccountController::class, 'userDetach'])
+            ->name('account.users.detach');
+    });
 });
 
-Route::group(['middleware' => 'auth:sanctum'], function(){
+// Rotas de módulos e itens de módulos
+Route::middleware('auth:sanctum')->group(function () {
+    // Módulos
+    Route::apiResource('modules', ModuleController::class);
+
+    // Configurações avançadas de módulos
+    Route::prefix('modules')->group(function () {
+        Route::put('/{id}/schemas', [ModuleController::class, 'updateSchemas'])
+            ->name('modules.schemas.update');
+
+        Route::put('/{id}/settings', [ModuleController::class, 'updateSettings'])
+            ->name('modules.settings.update');
+
+        Route::put('/{id}/menu', [ModuleController::class, 'updateMenuSettings'])
+            ->name('modules.menu.update');
+    });
+
+    // Itens de módulos (conteúdo dinâmico)
+    Route::apiResource('modules.items', ModuleItemController::class)->shallow();
+
+    // Operações em lote para itens de módulos
+    Route::post('modules/{module}/items/batch', [ModuleItemController::class, 'batchStore'])
+        ->name('modules.items.batch.store');
+
+    Route::put('modules/items/batch', [ModuleItemController::class, 'batchUpdate'])
+        ->name('modules.items.batch.update');
+
+    Route::delete('modules/items/batch', [ModuleItemController::class, 'batchDestroy'])
+        ->name('modules.items.batch.destroy');
+
+    // Outros recursos
     Route::apiResource('categories', CategoryController::class);
     Route::apiResource('transactions', TransactionController::class);
 });

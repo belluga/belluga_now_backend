@@ -5,7 +5,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
 use App\Http\Api\v1\Requests\CreateTokenRequest;
 use App\Http\Controllers\Controller;
-use App\Models\LandlordUser;
+use \App\Models\Landlord\LandlordUser;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;

@@ -1,164 +1,57 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App\Models\Tenants;
 
-use MongoDB\Laravel\Eloquent\Model;
-use MongoDB\Laravel\Relations\HasMany;
-use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
-use Spatie\Sluggable\HasSlug;
-use Spatie\Sluggable\SlugOptions;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Jenssegers\Mongodb\Eloquent\Model;
 
 class Module extends Model
 {
-    use UsesTenantConnection, HasSlug;
+    use HasFactory;
 
-    protected $connection = 'tenants';
+    /**
+     * The connection name for the model.
+     *
+     * @var string
+     */
+    protected $connection = 'tenant';
 
+    /**
+     * The collection associated with the model.
+     *
+     * @var string
+     */
+    protected $collection = 'modules';
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array<int, string>
+     */
     protected $fillable = [
         'name',
         'description',
-        'created_by_type', // 'tenant' ou 'account'
-        'created_by_id',
-        'settings',
-        'permissions_schema',
+        'slug',
         'fields_schema',
-        'show_in_menu',
-        'menu_position',
-        'menu_icon'
+        'is_system',
+        'tenant_id'
     ];
 
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
     protected $casts = [
-        'settings' => 'array',
-        'permissions_schema' => 'array',
         'fields_schema' => 'array',
-        'show_in_menu' => 'boolean'
+        'is_system' => 'boolean',
     ];
 
-    public function getSlugOptions(): SlugOptions
-    {
-        return SlugOptions::create()
-            ->generateSlugsFrom('name')
-            ->saveSlugsTo('slug');
-    }
-
-    public function items(): HasMany
+    /**
+     * Get the items for the module.
+     */
+    public function items()
     {
         return $this->hasMany(ModuleItem::class);
-    }
-
-    public function getDefaultPermissionsSchema(): array
-    {
-        return [
-            'items' => [
-                'view' => [
-                    'label' => 'Visualizar',
-                    'scopes' => [
-                        'all' => 'Visualizar todos os itens',
-                        'account' => 'Visualizar itens da conta',
-                        'owned' => 'Visualizar apenas próprios itens'
-                    ]
-                ],
-                'create' => [
-                    'label' => 'Criar',
-                    'scopes' => [
-                        'all' => 'Criar em qualquer conta',
-                        'account' => 'Criar na própria conta'
-                    ]
-                ],
-                'edit' => [
-                    'label' => 'Editar',
-                    'scopes' => [
-                        'all' => 'Editar todos os itens',
-                        'account' => 'Editar itens da conta',
-                        'owned' => 'Editar apenas próprios itens'
-                    ]
-                ],
-                'delete' => [
-                    'label' => 'Deletar',
-                    'scopes' => [
-                        'all' => 'Deletar todos os itens',
-                        'account' => 'Deletar itens da conta',
-                        'owned' => 'Deletar apenas próprios itens'
-                    ]
-                ]
-            ],
-            'module' => [
-                'manage' => [
-                    'label' => 'Gerenciar Módulo',
-                    'scopes' => [
-                        'full' => 'Gerenciamento completo',
-                        'settings' => 'Apenas configurações'
-                    ]
-                ]
-            ]
-        ];
-    }
-
-    public function getDefaultFieldsSchema(): array
-    {
-        return [
-            'fields' => [
-                [
-                    'name' => 'title',
-                    'type' => 'text',
-                    'label' => 'Título',
-                    'required' => true
-                ],
-                [
-                    'name' => 'content',
-                    'type' => 'rich_text',
-                    'label' => 'Conteúdo',
-                    'required' => false
-                ]
-            ]
-        ];
-    }
-
-    public function getSupportedFieldTypes(): array
-    {
-        return [
-            'text' => 'Texto Simples',
-            'textarea' => 'Texto Longo',
-            'rich_text' => 'Editor Rico',
-            'number' => 'Número',
-            'date' => 'Data',
-            'datetime' => 'Data e Hora',
-            'boolean' => 'Sim/Não',
-            'select' => 'Seleção Única',
-            'multiselect' => 'Seleção Múltipla',
-            'file' => 'Arquivo',
-            'image' => 'Imagem',
-            'repeater' => 'Campos Repetíveis'
-        ];
-    }
-
-    protected static function boot()
-    {
-        parent::boot();
-
-        // Garante que os campos necessários estejam presentes
-        static::creating(function ($model) {
-            if (empty($model->fields_schema)) {
-                $model->fields_schema = $model->getDefaultFieldsSchema();
-            }
-
-            if (empty($model->permissions_schema)) {
-                $model->permissions_schema = $model->getDefaultPermissionsSchema();
-            }
-
-            if (!isset($model->show_in_menu)) {
-                $model->show_in_menu = false;
-            }
-
-            if (empty($model->menu_position)) {
-                $model->menu_position = 0;
-            }
-
-            if (empty($model->menu_icon)) {
-                $model->menu_icon = 'document';
-            }
-        });
     }
 }

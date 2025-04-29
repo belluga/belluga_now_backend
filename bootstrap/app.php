@@ -20,6 +20,10 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->middleware('api')
                 ->group(base_path('routes/api/api_v1.php'));
 
+            Route::prefix('api/v1')
+                ->middleware('api')
+                ->group(base_path('routes/api/tenant_api_v1.php'));
+
             Route::prefix('api/v2')
                 ->middleware('api')
                 ->group(base_path('routes/api/api_v2.php'));
@@ -27,6 +31,10 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::prefix('api')
                 ->middleware('api')
                 ->group(base_path('routes/api/api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
+
+            Route::prefix('api')
+                ->middleware('api')
+                ->group(base_path('routes/api/tenant_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
         }
     )
     ->withMiddleware(function (Middleware $middleware) {
