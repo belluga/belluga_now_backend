@@ -13,6 +13,7 @@ class Transaction extends Model
 {
 
     use UsesTenantConnection;
+
     protected $fillable = [
         'category_id',
         'user_id',

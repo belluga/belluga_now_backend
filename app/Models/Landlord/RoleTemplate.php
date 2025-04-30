@@ -13,8 +13,6 @@ class RoleTemplate extends Model
 {
     use UsesLandlordConnection, HasSlug;
 
-    protected $connection = 'tenants';
-
     protected $fillable = [
         'name',
         'description',

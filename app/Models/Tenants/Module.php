@@ -3,18 +3,12 @@
 namespace App\Models\Tenants;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Jenssegers\Mongodb\Eloquent\Model;
+use MongoDB\Laravel\Eloquent\Model;
+use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class Module extends Model
 {
-    use HasFactory;
-
-    /**
-     * The connection name for the model.
-     *
-     * @var string
-     */
-    protected $connection = 'tenant';
+    use HasFactory, UsesTenantConnection;
 
     /**
      * The collection associated with the model.

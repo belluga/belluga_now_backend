@@ -4,8 +4,10 @@ namespace App\Models\Landlord;
 
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Relations\BelongsToMany;
+use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
 use Spatie\Sluggable\HasSlug;
@@ -17,7 +19,7 @@ class Tenant extends BaseTenant
 
     protected $fillable = [
         'name',
-        'subdomain'
+        'subdomain',
     ];
 
     public function users(): BelongsToMany
@@ -25,31 +27,40 @@ class Tenant extends BaseTenant
         return $this->belongsToMany(LandlordUser::class);
     }
 
-    protected $casts = [
-        'domains' => 'array',
-        'app_domains' => 'array'
-    ];
 
     /**
-     * Verifica se um domínio pertence a este tenant
+     * Add multiple domains to the tenant
      *
-     * @param string $domain
-     * @return bool
+     * @param array $domains Array of domain strings to be added
+     * @return ?string Returns an error message if the domain already exists, null on success
+     * @throws BulkWriteException When a duplicate domain is detected
+     * @throws \Exception For other database or general errors
      */
-    public function hasDomain(string $domain): bool
+    public function addDomains(array $domains): ?string
     {
-        return in_array($domain, $this->domains ?? []);
+        foreach ($domains as $domain) {
+            try {
+                $this->domains()->firstOrCreate(
+                    ["path" => $domain], [
+                    "type" => "web",
+                    "path" => $domain,
+                ]);
+            } catch (BulkWriteException $e) {
+                if (str_contains($e->getMessage(), 'E11000')) {
+                    return "Domain already exists.";
+                }
+                throw $e;
+            } catch (\Exception $e) {
+                throw new \Exception("Failed to add domain '{$domain}': " . $e->getMessage());
+            }
+        }
+
+        return null;
     }
 
-    /**
-     * Verifica se um domínio de app pertence a este tenant
-     *
-     * @param string $domain
-     * @return bool
-     */
-    public function hasAppDomain(string $domain): bool
+    public function domains(): HasMany
     {
-        return in_array($domain, $this->app_domains ?? []);
+        return $this->hasMany(Domains::class);
     }
 
     public function getSlugOptions(): SlugOptions

@@ -15,8 +15,6 @@ class Role extends Model
 {
     use UsesTenantConnection, HasSlug;
 
-    protected $connection = 'tenants';
-
     protected $fillable = [
         'name',
         'description',

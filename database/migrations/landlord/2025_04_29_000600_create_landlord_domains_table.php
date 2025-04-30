@@ -11,12 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('tenants', function (Blueprint $collection) {
-            $collection->unique('slug');
-            $collection->unique("subdomain");
-            $collection->index('user_ids');
-            $collection->index(['created_at' => -1]);
-            $collection->index([ "updated_at" => -1]);
+        Schema::create('domains', function (Blueprint $collection) {
+            $collection->unique("path");
             $collection->timestamps();
         });
     }
@@ -26,6 +22,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('tenants');
+        Schema::dropIfExists('domains');
     }
 };

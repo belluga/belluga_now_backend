@@ -12,8 +12,6 @@ class AccountRole extends Model
 {
     use UsesTenantConnection;
 
-    protected $connection = 'tenants';
-
     protected $fillable = [
         'account_id',
         'role_id'

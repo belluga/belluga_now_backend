@@ -11,8 +11,6 @@ class LandlordTenantRole extends Model
 {
     use UsesLandlordConnection;
 
-    protected $connection = 'landlord';
-
     protected $fillable = [
         'tenant_id',
         'role_name',

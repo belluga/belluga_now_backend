@@ -16,8 +16,6 @@ class TenantUser extends Authenticatable
 {
     use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, HasPermissions;
 
-    protected $connection = 'tenants';
-
     protected $fillable = [
         'name',
         'email',
