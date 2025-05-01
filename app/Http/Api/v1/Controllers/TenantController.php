@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class TenantController extends Controller
 {
@@ -70,6 +71,45 @@ class TenantController extends Controller
             'data' => $tenant
         ], 200);
     }
+
+    public function destroy(string $tenant_slug): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
+        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+
+        if (!$tenant) {
+            return response()->json([
+                'message' => "Tenant não encontrado.",
+                'errors' => [
+                    'tenant' => ["O tenant solicitado não existe."]
+                ]
+            ], 404);
+        }
+
+        DB::beginTransaction();
+        try{
+            $tenant->domains()->delete();
+            $tenant->users()->detach();
+            $tenant->delete();
+        }catch (\Exception $e){
+            DB::rollBack();
+
+            return response()->json([
+                'message' => "Erro ao desfazer relacionamentos.",
+                'errors' => [
+                    'tenant' => ["Ocorreu um erro ao desfazer relacionamentos com o tenant. Tente novamente mais tarde."]
+                ]
+            ], 422);
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Tenant deletado com sucesso'
+        ], 200);
+    }
+
 
     /**
      * Altera o tenant atual do usuário na sessão

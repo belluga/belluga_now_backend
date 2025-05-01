@@ -70,8 +70,9 @@ Route::prefix('tenants')->group(function () {
         ->middleware('auth:sanctum', 'abilities:tenants:write')
         ->name('tenants.update');
 //
-//    Route::delete('/{tenant_slug}', [TenantController::class, 'destroy'])
-//        ->name('tenants.destroy');
+    Route::delete('/{tenant_slug}', [TenantController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:tenants:delete')
+        ->name('tenants.destroy');
 //
 //    // Ativar/desativar tenant
 //    Route::patch('/{tenant_slug}/toggle-active', [TenantController::class, 'toggleActive'])
