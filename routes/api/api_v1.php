@@ -62,25 +62,25 @@ Route::prefix('tenants')->group(function () {
         ->middleware('auth:sanctum', 'abilities:tenants:create')
         ->name('tenants.store');
 
-    Route::get('/{id}', [TenantController::class, 'show'])
+    Route::get('/{tenant_slug}', [TenantController::class, 'show'])
         ->middleware('auth:sanctum', 'abilities:tenants:read')
         ->name('tenants.show');
 
-    Route::put('/{id}', [TenantController::class, 'update'])
+    Route::put('/{tenant_slug}', [TenantController::class, 'update'])
         ->name('tenants.update');
 
-    Route::delete('/{id}', [TenantController::class, 'destroy'])
+    Route::delete('/{tenant_slug}', [TenantController::class, 'destroy'])
         ->name('tenants.destroy');
 
     // Ativar/desativar tenant
-    Route::patch('/{id}/toggle-active', [TenantController::class, 'toggleActive'])
+    Route::patch('/{tenant_slug}/toggle-active', [TenantController::class, 'toggleActive'])
         ->name('tenants.toggle-active');
 
     // Usuários do tenant
-    Route::get('/{id}/users', [TenantUserController::class, 'index'])
+    Route::get('/{tenant_id}/users', [TenantUserController::class, 'index'])
         ->name('tenants.users.index');
 
-    Route::post('/{id}/users', [TenantUserController::class, 'store'])
+    Route::post('/{tenant_id}/users', [TenantUserController::class, 'store'])
         ->name('tenants.users.store');
 });
 

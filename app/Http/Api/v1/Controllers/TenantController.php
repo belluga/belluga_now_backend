@@ -39,6 +39,26 @@ class TenantController extends Controller
 
     }
 
+    public function show(string $tenant_slug): JsonResponse
+    {
+
+        $user = auth()->guard('sanctum')->user();
+        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+
+        if($tenant){
+            return response()->json($tenant);
+        }
+
+        return response()->json([
+            'message' => "Tenant não encontrado.",
+            'errors' => [
+                'tenant ' => ["O tenant solicitado não existe."
+                ]
+            ]
+        ],
+        404);
+    }
+
 
     /**
      * Altera o tenant atual do usuário na sessão
