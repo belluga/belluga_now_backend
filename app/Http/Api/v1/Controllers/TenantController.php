@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class TenantController extends Controller
 {
@@ -70,6 +71,78 @@ class TenantController extends Controller
             'data' => $tenant
         ], 200);
     }
+
+    protected function destroyTokenCreate(): string
+    {
+        $user = auth()->guard('sanctum')->user();
+        $token = $user->createToken('tenant-delete-confirmation');
+        return $token->plainTextToken;
+    }
+
+    protected function destroyTokenFind(): bool
+    {
+        $user = auth()->guard('sanctum')->user();
+        $received_token = request()->bearerToken();
+
+        $destruction_token = $user->tokens()
+            ->where('name', 'tenant-delete-confirmation')
+            ->where('token', hash('sha256', $received_token))
+            ->first();
+
+        if (!$destruction_token) {
+            return false;
+        }
+
+        $destruction_token->delete();
+        return true;
+    }
+
+    public function destroy(string $tenant_slug): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
+        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+
+        if (!$tenant) {
+            return response()->json([
+                'message' => "Tenant não encontrado.",
+                'errors' => [
+                    'tenant' => ["O tenant solicitado não existe."]
+                ]
+            ], 404);
+        }
+
+        if (!$this->destroyTokenFind()) {
+            $destruction_token = $this->destroyTokenCreate();
+            return response()->json([
+                'message' => "CUIDADO: Essa ação não poderá ser desfeita. Para confirmar a remoção utilize o 'destruction_token' em sua requisição.",
+                'destruction_token' => $destruction_token,
+            ], 200);
+        }
+
+        DB::beginTransaction();
+        try {
+            $tenant->domains()->delete();
+            $tenant->users()->detach();
+            $tenant->delete();
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => "Erro ao desfazer relacionamentos.",
+                'errors' => [
+                    'tenant' => ["Ocorreu um erro ao desfazer relacionamentos com o tenant. Tente novamente mais tarde."]
+                ]
+            ], 422);
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Tenant deletado com sucesso'
+        ], 200);
+    }
+
 
     /**
      * Altera o tenant atual do usuário na sessão
