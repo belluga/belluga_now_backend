@@ -4,7 +4,6 @@ use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthController;
 use App\Http\Api\v1\Controllers\CategoryController;
 use App\Http\Api\v1\Controllers\InitializationController;
-use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ModuleController;
 use App\Http\Api\v1\Controllers\ModuleItemController;
 use App\Http\Api\v1\Controllers\TenantController;
@@ -12,6 +11,11 @@ use App\Http\Api\v1\Controllers\TenantUserController;
 use App\Http\Api\v1\Controllers\TokenController;
 use App\Http\Api\v1\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('initialize')->middleware('guest')->group(function () {
+    Route::post('/', [InitializationController::class, 'initialize'])
+        ->name('initialize');
+});
 
 // Rotas públicas
 Route::prefix('auth')->group(function () {
@@ -25,11 +29,6 @@ Route::prefix('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])
         ->middleware('auth:sanctum')
         ->name('auth.logout');
-});
-
-Route::prefix('initialize')->middleware('guest')->group(function () {
-    Route::post('/', [InitializationController::class, 'initialize'])
-        ->name('initialize');
 });
 
 // Rotas para módulos
@@ -54,14 +53,17 @@ Route::group(['prefix' => 'modules'], function () {
 });
 
 // Rotas de tenant (landlord)
-Route::prefix('tenants')->middleware('auth:sanctum')->group(function () {
+Route::prefix('tenants')->group(function () {
     Route::get('/', [TenantController::class, 'index'])
+        ->middleware('auth:sanctum', 'abilities:tenants:read')
         ->name('tenants.index');
 
     Route::post('/', [TenantController::class, 'store'])
+        ->middleware('auth:sanctum', 'abilities:tenants:create')
         ->name('tenants.store');
 
     Route::get('/{id}', [TenantController::class, 'show'])
+        ->middleware('auth:sanctum', 'abilities:tenants:read')
         ->name('tenants.show');
 
     Route::put('/{id}', [TenantController::class, 'update'])

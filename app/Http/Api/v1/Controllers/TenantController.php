@@ -2,10 +2,14 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\TenantRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\Tenant;
 use App\Services\TenantSessionManager;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class TenantController extends Controller
 {
@@ -15,6 +19,26 @@ class TenantController extends Controller
     {
         $this->tenantSessionManager = $tenantSessionManager;
     }
+
+    public function index(Request $request): LengthAwarePaginator
+    {
+        $user = auth()->guard('sanctum')->user();
+        return $user->tenants()->with('domains')->paginate($request->get('per_page', 15));
+    }
+
+    public function store(TenantRequest $request): JsonResponse
+    {
+
+        $user = auth()->guard('sanctum')->user();
+        $tenant = $user->tenants()->create($request->validated());
+
+        return response()->json([
+            'success' => true,
+            'data' => $tenant
+        ], 201);
+
+    }
+
 
     /**
      * Altera o tenant atual do usuário na sessão
@@ -34,20 +58,5 @@ class TenantController extends Controller
         $this->tenantSessionManager->setCurrentTenantId($tenantId);
 
         return redirect()->back()->with('success', 'Tenant alterado com sucesso');
-    }
-
-    /**
-     * Lista os tenants disponíveis para o usuário
-     */
-    public function listTenants()
-    {
-        $user = auth()->guard('landlord')->user();
-        $tenants = $user->tenants;
-        $currentTenantId = $this->tenantSessionManager->getCurrentTenantId();
-
-        return view('tenants.list', [
-            'tenants' => $tenants,
-            'currentTenantId' => $currentTenantId
-        ]);
     }
 }

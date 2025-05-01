@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
-use MongoDB\Laravel\Relations\BelongsToMany;
 use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
@@ -22,11 +21,15 @@ class Tenant extends BaseTenant
         'subdomain',
     ];
 
-    public function users(): BelongsToMany
+    public function domains(): HasMany
     {
-        return $this->belongsToMany(LandlordUser::class);
+        return $this->hasMany(Domains::class);
     }
 
+    public function users(): HasMany
+    {
+        return $this->hasMany(LandlordUser::class);
+    }
 
     /**
      * Add multiple domains to the tenant
@@ -58,9 +61,9 @@ class Tenant extends BaseTenant
         return null;
     }
 
-    public function domains(): HasMany
+    public function setSubdomainAttribute($value)
     {
-        return $this->hasMany(Domains::class);
+        $this->attributes['subdomain'] = strtolower($value);
     }
 
     public function getSlugOptions(): SlugOptions

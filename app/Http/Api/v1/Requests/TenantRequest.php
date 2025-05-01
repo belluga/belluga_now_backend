@@ -3,7 +3,7 @@
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use App\Rules\UniqueSubdomainRule;
 
 class TenantRequest extends FormRequest
 {
@@ -24,7 +24,7 @@ class TenantRequest extends FormRequest
     {
         $rules = [
             'name' => 'required|string|max:255',
-            'subdomain' => 'sometimes|string|max:63',
+//            'subdomain' => 'required|string|max:63',
             'domains' => 'sometimes|array',
             'domains.*' => 'string|max:255',
             'app_domains' => 'sometimes|array',
@@ -33,18 +33,24 @@ class TenantRequest extends FormRequest
 
         // Para atualizações, verifica se o subdomínio já existe para outro tenant
         if ($this->isMethod('PUT') || $this->isMethod('PATCH')) {
-            $tenantId = $this->route('id');
+            $tenantId = $this->route('tenant_id');
 
             // Adiciona regra para garantir unicidade do subdomínio
             $rules['subdomain'] = [
                 'sometimes',
                 'string',
                 'max:63',
-                Rule::unique('mongodb.landlord.tenants', 'subdomain')->ignore($tenantId, '_id')
+                new UniqueSubdomainRule($tenantId)
+
             ];
         } else {
             // Para criação, simplesmente valida a unicidade
-            $rules['subdomain'] = 'sometimes|string|max:63|unique:mongodb.landlord.tenants,subdomain';
+            $rules['subdomain'] = [
+                'required',
+                'string',
+                'max:63',
+                new UniqueSubdomainRule()
+            ];
         }
 
         return $rules;
@@ -59,7 +65,6 @@ class TenantRequest extends FormRequest
     {
         return [
             'name.required' => 'O nome do tenant é obrigatório',
-            'subdomain.unique' => 'Este subdomínio já está em uso',
             'domains.*.string' => 'O domínio deve ser uma string válida',
             'app_domains.*.string' => 'O domínio de app deve ser uma string válida',
         ];

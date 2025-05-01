@@ -43,6 +43,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
                 \Spatie\Multitenancy\Http\Middleware\EnsureValidTenantSession::class,
             ]);
+
+        $middleware->alias([
+            'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,
+            'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->renderable(function (NotFoundHttpException $e) {

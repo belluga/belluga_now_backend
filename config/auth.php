@@ -40,6 +40,15 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+        'landlord' => [
+            'driver' => 'session',
+            'provider' => 'landlord_users',
+        ],
+        'tenant' => [
+            'driver' => 'session',
+            'provider' => 'tenant_users',
+        ],
+
     ],
 
     /*
@@ -60,10 +69,15 @@ return [
     */
 
     'providers' => [
-        'users' => [
-            'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', App\Models\LandlordUser::class),
+        'tenant_users' => [
+            'driver' => 'mongodb',
+            'model' => App\Models\Tenants\TenantUser::class,
         ],
+        'landlord_users' => [
+            'driver' => 'mongodb',
+            'model' => App\Models\Landlord\LandlordUser::class,
+        ],
+
 
         // 'users' => [
         //     'driver' => 'database',
