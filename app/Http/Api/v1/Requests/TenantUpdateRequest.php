@@ -5,7 +5,7 @@ namespace App\Http\Api\v1\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use App\Rules\UniqueSubdomainRule;
 
-class TenantRequest extends FormRequest
+class TenantUpdateRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -23,7 +23,7 @@ class TenantRequest extends FormRequest
     public function rules(): array
     {
         $rules = [
-            'name' => 'required|string|max:255',
+            'name' => 'sometimes|string|max:255',
 //            'subdomain' => 'required|string|max:63',
             'domains' => 'sometimes|array',
             'domains.*' => 'string|max:255',

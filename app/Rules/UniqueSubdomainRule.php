@@ -8,11 +8,11 @@ use Illuminate\Support\Facades\DB;
 
 class UniqueSubdomainRule implements ValidationRule
 {
-    protected ?string $tenantId;
+    protected ?string $tenant_slug;
 
-    public function __construct(?string $tenantId = null)
+    public function __construct(?string $tenant_slug = null)
     {
-        $this->tenantId = $tenantId;
+        $this->tenant_slug = $tenant_slug;
     }
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
@@ -21,9 +21,8 @@ class UniqueSubdomainRule implements ValidationRule
             ->table('tenants')
             ->where('subdomain', strtolower($value));
 
-        // Se tiver um tenant_id, ignora este na validação
-        if ($this->tenantId) {
-            $query->where('_id', '!=', $this->tenantId);
+        if ($this->tenant_slug) {
+            $query->where('slug', '!=', $this->tenant_slug);
         }
 
         $exists = $query->exists();

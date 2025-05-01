@@ -59,6 +59,17 @@ class TenantController extends Controller
         404);
     }
 
+    public function update(TenantRequest $request, string $tenant_slug): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
+        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+        $tenant->update($request->validated());
+
+        return response()->json([
+            'success' => true,
+            'data' => $tenant
+        ], 200);
+    }
 
     /**
      * Altera o tenant atual do usuário na sessão
