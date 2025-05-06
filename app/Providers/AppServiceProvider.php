@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Models\Landlord\PersonalAccessToken;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\Laravel\Eloquent\Model;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -27,6 +28,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Model::unguard();
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
     }
 }

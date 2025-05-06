@@ -15,15 +15,6 @@ class Role extends Model
 {
     use UsesTenantConnection, HasSlug;
 
-    protected $fillable = [
-        'name',
-        'description',
-        'created_by_type', // 'tenant' ou 'account'
-        'created_by_id',
-        'template_id',
-        'permissions'
-    ];
-
     protected $casts = [
         'permissions' => 'array',
     ];

@@ -4,6 +4,7 @@ namespace App\Models\Tenants;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use MongoDB\Laravel\Eloquent\Model;
+use MongoDB\Laravel\Relations\MorphMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class Module extends Model
@@ -15,21 +16,7 @@ class Module extends Model
      *
      * @var string
      */
-    protected $collection = 'modules';
-
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
-    protected $fillable = [
-        'name',
-        'description',
-        'slug',
-        'fields_schema',
-        'is_system',
-        'tenant_id'
-    ];
+    protected $table = 'modules';
 
     /**
      * The attributes that should be cast.
@@ -40,6 +27,10 @@ class Module extends Model
         'fields_schema' => 'array',
         'is_system' => 'boolean',
     ];
+
+    public function owner(): MorphMany {
+        return $this->morphMany(ModuleItem::class, 'owner');
+    }
 
     /**
      * Get the items for the module.

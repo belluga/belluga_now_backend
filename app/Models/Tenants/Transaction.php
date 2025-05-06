@@ -14,14 +14,6 @@ class Transaction extends Model
 
     use UsesTenantConnection;
 
-    protected $fillable = [
-        'category_id',
-        'user_id',
-        'transaction_date',
-        'amount',
-        'description',
-    ];
-
     protected function casts() {
         return [
             'transaction_date' => 'date',

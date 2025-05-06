@@ -19,12 +19,6 @@ class LandlordUser extends Authenticatable
 
     protected string $guard = 'landlord';
 
-    protected $fillable = [
-        'name',
-        'email',
-        'password'
-    ];
-
     protected $hidden = [
         'password',
         'remember_token',

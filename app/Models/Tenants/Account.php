@@ -13,12 +13,6 @@ class Account extends Model
 {
     use UsesTenantConnection, HasSlug;
 
-    protected $fillable = [
-        'name',
-        'slug',
-        'settings'
-    ];
-
     protected $casts = [
         'settings' => 'array'
     ];

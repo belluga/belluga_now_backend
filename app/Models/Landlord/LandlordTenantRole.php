@@ -11,12 +11,6 @@ class LandlordTenantRole extends Model
 {
     use UsesLandlordConnection;
 
-    protected $fillable = [
-        'tenant_id',
-        'role_name',
-        'permissions'
-    ];
-
     protected $casts = [
         'permissions' => 'array'
     ];

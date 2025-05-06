@@ -13,13 +13,6 @@ class RoleTemplate extends Model
 {
     use UsesLandlordConnection, HasSlug;
 
-    protected $fillable = [
-        'name',
-        'description',
-        'type', // 'tenant', 'account'
-        'permissions_schema'
-    ];
-
     protected $casts = [
         'permissions_schema' => 'array'
     ];

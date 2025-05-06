@@ -10,11 +10,6 @@ class Domains extends Model
 {
     use UsesLandlordConnection;
 
-    protected $fillable = [
-        'type',
-        'path',
-    ];
-
     public function tenant(): BelongsTo {
         return $this->belongsTo(Tenant::class);
     }

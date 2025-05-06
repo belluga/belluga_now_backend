@@ -17,11 +17,6 @@ class Tenant extends BaseTenant
 {
     use UsesLandlordConnection, HasSlug, DocumentModel;
 
-    protected $fillable = [
-        'name',
-        'subdomain',
-    ];
-
     public function domains(): HasMany
     {
         return $this->hasMany(Domains::class);

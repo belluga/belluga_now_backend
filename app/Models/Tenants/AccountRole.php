@@ -12,11 +12,6 @@ class AccountRole extends Model
 {
     use UsesTenantConnection;
 
-    protected $fillable = [
-        'account_id',
-        'role_id'
-    ];
-
     public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);

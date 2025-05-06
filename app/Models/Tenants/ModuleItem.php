@@ -14,16 +14,6 @@ class ModuleItem extends Model
 {
     use UsesTenantConnection;
 
-    protected $fillable = [
-        'module_id',
-        'account_id',
-        'user_id',
-        'data',
-        'title',
-        'slug',
-        'relations'
-    ];
-
     protected $casts = [
         'data' => 'array',
         'relations' => 'array'
