@@ -11,6 +11,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use MongoDB\Driver\Exception\BulkWriteException;
 
 class TenantController extends Controller
 {
@@ -31,13 +32,28 @@ class TenantController extends Controller
     {
 
         $user = auth()->guard('sanctum')->user();
-        $tenant = $user->tenants()->create($request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data' => $tenant
-        ], 201);
 
+        try {
+            $tenant = $user->tenants()->create($request->validated());
+
+            return response()->json([
+                'data' => $tenant
+            ], 201);
+
+        } catch (BulkWriteException $e) {
+            if (str_contains($e->getMessage(), 'E11000')) {
+                return response()->json([
+                    'message' => 'Tenant already exists.',
+                    'errors' => ['tenant' => ["Tenant already exists."]]
+                ], 422);
+            }
+
+            return response()->json([
+                'message' => "Something went wrong when trying to create the tenant.",
+                'errors' => ['tenant' => ["Something went wrong when trying to create the tenant."]]
+            ], 422);
+        }
     }
 
     public function show(string $tenant_slug): JsonResponse
