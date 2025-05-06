@@ -74,6 +74,14 @@ Route::prefix('tenants')->group(function () {
     Route::delete('/{tenant_slug}', [TenantController::class, 'destroy'])
         ->middleware('auth:sanctum', 'abilities:tenants:delete')
         ->name('tenants.destroy');
+
+    Route::post('/{tenant_slug}/users', [TenantController::class, 'landlordUserManage'])
+        ->middleware('auth:sanctum', 'abilities:tenants:manage')
+        ->name('manage.tenants.users.attach');
+
+    Route::delete('/{tenant_slug}/users', [TenantController::class, 'landlordUserManage'])
+        ->middleware('auth:sanctum', 'abilities:tenants:manage')
+        ->name('manage.tenants.users.detach');
 //
 //    // Ativar/desativar tenant
 //    Route::patch('/{tenant_slug}/toggle-active', [TenantController::class, 'toggleActive'])

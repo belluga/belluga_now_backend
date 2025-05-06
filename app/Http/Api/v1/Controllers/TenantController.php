@@ -2,8 +2,10 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Api\v1\Requests\TenantRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Services\TenantSessionManager;
 use Illuminate\Http\JsonResponse;
@@ -32,7 +34,6 @@ class TenantController extends Controller
     {
 
         $user = auth()->guard('sanctum')->user();
-
 
         try {
             $tenant = $user->tenants()->create($request->validated());
@@ -83,10 +84,60 @@ class TenantController extends Controller
         $tenant->update($request->validated());
 
         return response()->json([
-            'success' => true,
             'data' => $tenant
         ], 200);
     }
+
+    public function landlordUserManage(TenantLandlordUserAttachRequest $request, $tenant_slug): JsonResponse {
+        $user = LandlordUser::find(request()->user_id);
+
+        if(!$user){
+            return response()->json([
+                "message" => "User not found.",
+                "errors" => ["user_id" => "User not found."]
+            ], 422);
+        }
+
+        $tenant = Tenant::findBySlug($tenant_slug);
+
+        if(!$tenant){
+            return response()->json([
+                "message" => "Tenant not found.",
+                "errors" => ["tenant_slug" => "Tenant not found."]
+            ], 422);
+        }
+
+        $method = strtolower($request->method());
+
+        switch( $method){
+            case 'post':
+                $tenant->users()->attach($user);
+                break;
+            case 'delete':
+                $tenant->users()->detach($user);
+                break;
+            default:
+                return response()->json([
+                    "message" => "Not found an action for this method.",
+                    "errors" => ["method" => "Not found an action for this method."]
+                ], 422);
+        }
+
+        return response()->json();
+    }
+
+    public function detachLandlordUser(TenantLandlordUserAttachRequest $request, $tenant_slug): JsonResponse {
+        $user = LandlordUser::findOrFail(request()->user_id)
+            ?? response()->json(["errors" => ["user_id" => "User not found."]], 422);
+
+        $tenant = Tenant::findOrFail($tenant_slug)
+            ?? response()->json(["errors" => ["tenant_slug" => "Tenant not found."]], 422);
+
+        $tenant->users()->detach($user);
+
+        return response()->json();
+    }
+
 
     protected function destroyTokenCreate(): string
     {
