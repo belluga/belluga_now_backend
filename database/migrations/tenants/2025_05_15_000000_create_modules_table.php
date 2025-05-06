@@ -18,6 +18,7 @@ return new class extends Migration
             $collection->index('created_by_type');
             $collection->index('show_in_menu');
             $collection->index('menu_position');
+            $collection->index(['creator_id', 'creator_type']);
             $collection->timestamps(); // timestamps
         });
     }

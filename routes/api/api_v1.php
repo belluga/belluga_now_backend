@@ -7,6 +7,7 @@ use App\Http\Api\v1\Controllers\InitializationController;
 use App\Http\Api\v1\Controllers\ModuleController;
 use App\Http\Api\v1\Controllers\ModuleItemController;
 use App\Http\Api\v1\Controllers\TenantController;
+use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\TenantUserController;
 use App\Http\Api\v1\Controllers\TokenController;
 use App\Http\Api\v1\Controllers\TransactionController;
@@ -87,21 +88,26 @@ Route::prefix('tenants')->group(function () {
 });
 
 // Rotas para usuários
-//Route::prefix('users')->middleware('auth:sanctum')->group(function () {
-//    Route::get('/', [UserController::class, 'index'])
-//        ->name('users.index');
+Route::prefix('users')->group(function () {
+    Route::get('/', [LandlordUserController::class, 'index'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:read')
+        ->name('users.index');
 //
-//    Route::post('/', [UserController::class, 'store'])
-//        ->name('users.store');
+    Route::post('/', [LandlordUserController::class, 'store'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+        ->name('users.store');
 //
-//    Route::get('/{id}', [UserController::class, 'show'])
-//        ->name('users.show');
+    Route::get('/{user_id}', [LandlordUserController::class, 'show'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:read')
+        ->name('users.show');
 //
-//    Route::put('/{id}', [UserController::class, 'update'])
-//        ->name('users.update');
+    Route::patch('/{user_id}', [LandlordUserController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+        ->name('users.update');
 //
-//    Route::delete('/{id}', [UserController::class, 'destroy'])
-//        ->name('users.destroy');
+    Route::delete('/{id}', [LandlordUserController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+        ->name('users.destroy');
 //
 //    // Perfil do usuário atual
 //    Route::get('/profile', [UserController::class, 'profile'])
@@ -117,7 +123,7 @@ Route::prefix('tenants')->group(function () {
 //    // Ativar/desativar usuário
 //    Route::patch('/{id}/toggle-active', [UserController::class, 'toggleActive'])
 //        ->name('users.toggle-active');
-//});
+});
 
 // Rotas de contas/clientes
 //Route::prefix('accounts')->group(function () {

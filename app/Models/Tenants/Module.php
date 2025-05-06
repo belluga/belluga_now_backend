@@ -33,10 +33,30 @@ class Module extends Model
     }
 
     /**
+     * Get the creator of the module.
+     * This can be either a TenantUser or a LandlordUser.
+     */
+         public function creator()
+         {
+        return $this->morphTo();
+         }
+
+         /**
      * Get the items for the module.
      */
-    public function items()
-    {
+         public function items()
+         {
         return $this->hasMany(ModuleItem::class);
+         }
+
+
+         public function isCreatedBy($user): bool
+         {
+        if (!$this->creator_id || !$this->creator_type) {
+            return false;
+        }
+
+        return $this->creator_id == $user->id &&
+               $this->creator_type == get_class($user);
     }
 }

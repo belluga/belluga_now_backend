@@ -10,6 +10,7 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Relations\EmbedsMany;
+use MongoDB\Laravel\Relations\MorphMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class TenantUser extends Authenticatable
@@ -25,6 +26,11 @@ class TenantUser extends Authenticatable
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
     ];
+
+    public function createdModules(): MorphMany
+    {
+        return $this->morphMany(Module::class, 'creator');
+    }
 
     public function accountRoles(): EmbedsMany
     {

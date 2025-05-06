@@ -4,16 +4,22 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
+use App\Http\Api\v1\Requests\LandlordUserUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Tenants\Module;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class LandlordUserController extends Controller
 {
+    protected ?LandlordUser $user;
+
     /**
      * Lista todos os usuários do landlord
      */
@@ -26,37 +32,22 @@ class LandlordUserController extends Controller
     /**
      * Exibe um usuário específico do landlord
      */
-    public function show(string $id): JsonResponse
+    public function show(string $user_id): JsonResponse
     {
-        $user = LandlordUser::findOrFail($id);
+        $user = LandlordUser::findOrFail($user_id)
+            ?? abort(404);
+
+
         return response()->json(['data' => $user]);
     }
 
     /**
      * Cria um novo usuário do landlord
      */
-    public function store(Request $request): JsonResponse
+    public function store(LandlordUserCreateRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:landlord_users,email',
-            'password' => 'required|string|min:8',
-            'role' => 'nullable|string|in:admin,manager,viewer',
-        ]);
 
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
-        }
-
-        $user = new LandlordUser([
-            'name' => $request->input('name'),
-            'email' => $request->input('email'),
-            'password' => Hash::make($request->input('password')),
-            'role' => $request->input('role', 'viewer'),
-            'active' => true,
-        ]);
-
-        $user->save();
+        $user = LandlordUser::create($request->validated());
 
         return response()->json([
             'message' => 'Usuário do landlord criado com sucesso',
@@ -67,53 +58,51 @@ class LandlordUserController extends Controller
     /**
      * Atualiza um usuário existente do landlord
      */
-    public function update(Request $request, string $id): JsonResponse
+    public function update(LandlordUserUpdateRequest $request, string $user_id): JsonResponse
     {
-        $user = LandlordUser::findOrFail($id);
+        $this->user = LandlordUser::findOrFail($user_id)
+            ?? abort(404);
 
-        $validator = Validator::make($request->all(), [
-            'name' => 'string|max:255',
-            'email' => 'string|email|max:255|unique:landlord_users,email,' . $id,
-            'role' => 'nullable|string|in:admin,manager,viewer',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
-        }
-
-        if ($request->has('name')) {
-            $user->name = $request->input('name');
-        }
-
-        if ($request->has('email')) {
-            $user->email = $request->input('email');
-        }
-
-        if ($request->has('role')) {
-            $user->role = $request->input('role');
-        }
-
-        $user->save();
+        $params_to_update = $this->filterGuardedParameters($request->validated());
+        $this->user->update($params_to_update);
 
         return response()->json([
             'message' => 'Usuário do landlord atualizado com sucesso',
-            'data' => $user
+            'data' => $this->user
         ]);
     }
 
     /**
      * Remove um usuário do landlord
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(string $user_id): JsonResponse
     {
-        $user = LandlordUser::findOrFail($id);
+        $user = LandlordUser::findOrFail($user_id)
+            ?? abort(404);
 
-        // Impede que o usuário atual seja excluído
-        if ($user->id === Auth::id()) {
-            return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
+        if ((string)$user->_id === Auth::id()) {
+            return response()->json(
+                [
+                    "errors" => [
+                        "user" => ['Não é possível excluir o próprio usuário']
+                    ]
+                ],
+                403
+            );
         }
 
-        $user->delete();
+        // Remove all relationships with modules
+        DB::beginTransaction();
+        try{
+            $user->modules()->detach();
+            $user->tenants()->detach();
+            $user->delete();
+        }catch(\Exception $e){
+            DB::rollBack();
+            throw $e;
+        }
+
+        DB::commit();
 
         return response()->json(['message' => 'Usuário do landlord removido com sucesso']);
     }
@@ -198,5 +187,13 @@ class LandlordUserController extends Controller
         $status = $user->active ? 'ativado' : 'desativado';
 
         return response()->json(['message' => "Usuário do landlord {$status} com sucesso"]);
+    }
+
+    protected function filterGuardedParameters(array $received_params): array {
+        $guarded = $this->user->getGuarded();
+
+        return collect($received_params)
+            ->reject(fn ($value, $key) => in_array($key, $guarded) )
+            ->toArray();
     }
 }
