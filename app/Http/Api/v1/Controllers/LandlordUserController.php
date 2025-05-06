@@ -6,8 +6,10 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
 use App\Http\Api\v1\Requests\LandlordUserUpdateRequest;
+use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Module;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -70,6 +72,44 @@ class LandlordUserController extends Controller
             'message' => 'Usuário do landlord atualizado com sucesso',
             'data' => $this->user
         ]);
+    }
+
+    public function tenantUserManage(TenantLandlordUserAttachRequest $request, $user_id): JsonResponse {
+        $user = LandlordUser::find($user_id);
+
+        if(!$user){
+            return response()->json([
+                "message" => "User not found.",
+                "errors" => ["user_id" => "User not found."]
+            ], 422);
+        }
+
+        $tenant = Tenant::findBySlug(request()->tenant_slug);
+
+        if(!$tenant){
+            return response()->json([
+                "message" => "Tenant not found.",
+                "errors" => ["tenant_slug" => "Tenant not found."]
+            ], 422);
+        }
+
+        $method = strtolower($request->method());
+
+        switch( $method){
+            case 'post':
+                $tenant->users()->attach($user);
+                break;
+            case 'delete':
+                $tenant->users()->detach($user);
+                break;
+            default:
+                return response()->json([
+                    "message" => "Not found an action for this method.",
+                    "errors" => ["method" => "Not found an action for this method."]
+                ], 422);
+        }
+
+        return response()->json();
     }
 
     /**

@@ -23,7 +23,7 @@ class TenantLandlordUserAttachRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'user_id' => 'required|string|max:255',
+            'tenant_slug' => 'required|string|max:255',
             //role
         ];
     }
