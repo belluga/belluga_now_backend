@@ -103,9 +103,17 @@ Route::prefix('users')->group(function () {
         ->middleware('auth:sanctum', 'abilities:landlord-users:write')
         ->name('users.update');
 //
-    Route::delete('/{id}', [LandlordUserController::class, 'destroy'])
+    Route::delete('/{user_id}/force_delete', [LandlordUserController::class, 'forceDestroy'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:write')
         ->name('users.destroy');
+
+    Route::post('/{user_id}/restore', [LandlordUserController::class, 'restore'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+        ->name('users.restore');
+
+    Route::delete('/{user_id}', [LandlordUserController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+        ->name('users.force_destroy');
 
     Route::post('/{user_id}/tenants', [LandlordUserController::class, 'tenantUserManage'])
         ->middleware('auth:sanctum', 'abilities:tenants:manage')

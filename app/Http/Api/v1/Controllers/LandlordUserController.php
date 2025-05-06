@@ -13,6 +13,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Module;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -25,10 +26,12 @@ class LandlordUserController extends Controller
     /**
      * Lista todos os usuários do landlord
      */
-    public function index(): JsonResponse
+    public function index(Request $request): LengthAwarePaginator
     {
-        $users = LandlordUser::paginate(20);
-        return response()->json($users);
+        return LandlordUser::with('tenants')
+            ->when($request->has('archive'), fn ($query, $name) => $query->onlyTrashed())
+            ->paginate(20);
+//        return response()->json($users);
     }
 
     /**
@@ -112,13 +115,26 @@ class LandlordUserController extends Controller
         return response()->json();
     }
 
+    public function restore($user_id): JsonResponse {
+        $user = LandlordUser::onlyTrashed()->findOrFail($user_id);
+        $user->restore();
+
+        return response()->json();
+    }
+
+    public function forceDestroy($user_id): JsonResponse {
+        $user = LandlordUser::onlyTrashed()->findOrFail($user_id);
+        $user->forceDelete();
+
+        return response()->json();
+    }
+
     /**
      * Remove um usuário do landlord
      */
     public function destroy(string $user_id): JsonResponse
     {
-        $user = LandlordUser::findOrFail($user_id)
-            ?? abort(404);
+        $user = LandlordUser::findOrFail($user_id);
 
         if ((string)$user->_id === Auth::id()) {
             return response()->json(
@@ -134,7 +150,7 @@ class LandlordUserController extends Controller
         // Remove all relationships with modules
         DB::beginTransaction();
         try{
-            $user->modules()->detach();
+//            $user->modules()->detach();
             $user->tenants()->detach();
             $user->delete();
         }catch(\Exception $e){
