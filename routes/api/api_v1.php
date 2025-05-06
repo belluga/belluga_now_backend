@@ -74,6 +74,14 @@ Route::prefix('tenants')->group(function () {
     Route::delete('/{tenant_slug}', [TenantController::class, 'destroy'])
         ->middleware('auth:sanctum', 'abilities:tenants:delete')
         ->name('tenants.destroy');
+
+    Route::post('/{tenant_slug}/restore', [TenantController::class, 'restore'])
+        ->middleware('auth:sanctum', 'abilities:tenants:manage')
+        ->name('tenants.restore');
+
+    Route::delete('/{tenant_slug}/force_delete', [TenantController::class, 'forceDestroy'])
+        ->middleware('auth:sanctum', 'abilities:tenants:delete')
+        ->name('tenants.destroy');
 //
 //    // Ativar/desativar tenant
 //    Route::patch('/{tenant_slug}/toggle-active', [TenantController::class, 'toggleActive'])

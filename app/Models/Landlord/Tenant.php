@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
+use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsToMany;
 use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
@@ -15,7 +16,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class Tenant extends BaseTenant
 {
-    use UsesLandlordConnection, HasSlug, DocumentModel;
+    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes;
 
     public function domains(): HasMany
     {

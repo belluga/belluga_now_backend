@@ -88,29 +88,13 @@ class TenantController extends Controller
         ], 200);
     }
 
-    protected function destroyTokenCreate(): string
+    public function restore(string $tenant_slug): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-        $token = $user->createToken('tenant-delete-confirmation');
-        return $token->plainTextToken;
-    }
+        $tenant = $user->tenants()->onlyTrashed()->where('slug', $tenant_slug)->first();
+        $tenant->restore();
 
-    protected function destroyTokenFind(): bool
-    {
-        $user = auth()->guard('sanctum')->user();
-        $received_token = request()->bearerToken();
-
-        $destruction_token = $user->tokens()
-            ->where('name', 'tenant-delete-confirmation')
-            ->where('token', hash('sha256', $received_token))
-            ->first();
-
-        if (!$destruction_token) {
-            return false;
-        }
-
-        $destruction_token->delete();
-        return true;
+        return response()->json([]);
     }
 
     public function destroy(string $tenant_slug): JsonResponse
@@ -118,28 +102,22 @@ class TenantController extends Controller
         $user = auth()->guard('sanctum')->user();
         $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
 
-        if (!$tenant) {
-            return response()->json([
-                'message' => "Tenant não encontrado.",
-                'errors' => [
-                    'tenant' => ["O tenant solicitado não existe."]
-                ]
-            ], 404);
-        }
+        $tenant->delete();
 
-        if (!$this->destroyTokenFind()) {
-            $destruction_token = $this->destroyTokenCreate();
-            return response()->json([
-                'message' => "CUIDADO: Essa ação não poderá ser desfeita. Para confirmar a remoção utilize o 'destruction_token' em sua requisição.",
-                'destruction_token' => $destruction_token,
-            ], 200);
-        }
+        return response()->json([]);
+    }
+
+    public function forceDestroy(string $tenant_slug): JsonResponse
+    {
+        $tenant = Tenant::onlyTrashed()
+            ->where('slug', $tenant_slug)
+            ->firstOrFail();
 
         DB::beginTransaction();
         try {
             $tenant->domains()->delete();
             $tenant->users()->detach();
-            $tenant->delete();
+            $tenant->forceDelete();;
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -153,10 +131,7 @@ class TenantController extends Controller
 
         DB::commit();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Tenant deletado com sucesso'
-        ], 200);
+        return response()->json();
     }
 
 
