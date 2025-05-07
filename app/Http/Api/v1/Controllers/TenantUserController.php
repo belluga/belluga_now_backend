@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Stancl\Tenancy\Contracts\TenantManager;
 
 class TenantUserController extends Controller
 {
@@ -54,6 +55,8 @@ class TenantUserController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $tenant = Tenant::current();
+
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:tenant.tenant_users,email',

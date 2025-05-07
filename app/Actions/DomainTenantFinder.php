@@ -20,6 +20,19 @@ class DomainTenantFinder extends TenantFinder
         // 2. Verificar por domínio da requisição web
         $host = $request->getHost();
 
+        // Check if the host is a subdomain
+        $parts = explode('.', $host);
+
+
+        if (count($parts) >= 2) {
+            // It's a subdomain
+            $subdomain = $parts[0];
+            $tenant = $this->findTenantBySubdomain($subdomain);
+            if ($tenant) {
+                return $tenant;
+            }
+        }
+
         // Primeiro tenta como app domain (caso esteja acessando o app via navegador)
         $tenant = $this->findTenantByAppDomain($host);
 
@@ -51,5 +64,10 @@ class DomainTenantFinder extends TenantFinder
     protected function findTenantByWebDomain(string $domain): ?IsTenant
     {
         return app(IsTenant::class)::where('domains', 'all', [$domain])->first();
+    }
+
+    protected function findTenantBySubdomain(string $subdomain): ?IsTenant
+    {
+        return app(IsTenant::class)::where('subdomain', 'all', [$subdomain])->first();
     }
 }

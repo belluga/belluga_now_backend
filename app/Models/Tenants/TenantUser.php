@@ -17,6 +17,8 @@ class TenantUser extends Authenticatable
 {
     use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, HasPermissions;
 
+    protected $table = 'users';
+
     protected $hidden = [
         'password',
         'remember_token',

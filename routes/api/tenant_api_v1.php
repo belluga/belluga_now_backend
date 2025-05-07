@@ -34,7 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Usuários do tenant
-    Route::prefix('tenant-users')->group(function () {
+    Route::prefix('users')->group(function () {
         Route::get('/', [TenantUserController::class, 'index'])
             ->name('tenant.users.index');
 

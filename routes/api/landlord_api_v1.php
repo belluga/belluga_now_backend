@@ -33,7 +33,6 @@ Route::prefix('auth')->group(function () {
         ->name('admin.auth.logout');
 });
 
-// Rotas para módulos
 //Route::group(['prefix' => 'modules'], function () {
 //    Route::get('/', [ModuleController::class, 'index']);
 //    Route::post('/', [ModuleController::class, 'store']);
@@ -54,7 +53,6 @@ Route::prefix('auth')->group(function () {
 //    Route::delete('/{moduleId}/items/{itemId}', [ModuleItemController::class, 'destroy']);
 //});
 
-// Rotas de tenant (landlord)
 Route::prefix('tenants')->group(function () {
     Route::get('/', [TenantController::class, 'index'])
         ->middleware('auth:sanctum', 'abilities:tenants:read')
@@ -85,7 +83,6 @@ Route::prefix('tenants')->group(function () {
         ->name('tenants.destroy');
 });
 
-// Rotas para usuários
 Route::prefix('users')->group(function () {
     Route::get('/', [LandlordUserController::class, 'index'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:read')
