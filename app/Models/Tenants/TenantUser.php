@@ -9,13 +9,14 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use MongoDB\Laravel\Eloquent\DocumentModel;
+use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\EmbedsMany;
 use MongoDB\Laravel\Relations\MorphMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class TenantUser extends Authenticatable
 {
-    use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, HasPermissions;
+    use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, HasPermissions, SoftDeletes;
 
     protected $table = 'users';
 

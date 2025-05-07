@@ -29,7 +29,7 @@ class LandlordUserController extends Controller
     public function index(Request $request): LengthAwarePaginator
     {
         return LandlordUser::with('tenants')
-            ->when($request->has('archive'), fn ($query, $name) => $query->onlyTrashed())
+            ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(20);
 //        return response()->json($users);
     }
@@ -87,23 +87,25 @@ class LandlordUserController extends Controller
             ], 422);
         }
 
-        $tenant = Tenant::findBySlug(request()->tenant_slug);
+        $tenant_slugs = request()->tenant_slugs;
+        $tenants = Tenant::whereIn('slug', $tenant_slugs)->get();
 
-        if(!$tenant){
+        if(count($tenants) < 1){
             return response()->json([
-                "message" => "Tenant not found.",
-                "errors" => ["tenant_slug" => "Tenant not found."]
+                "message" => "None tenant not found.",
+                "errors" => ["tenant_slugs" => "None tenant found."]
             ], 422);
         }
 
         $method = strtolower($request->method());
 
+        DB::beginTransaction();
         switch( $method){
             case 'post':
-                $tenant->users()->attach($user);
+                $tenants->each(fn($tenant) => $tenant->users()->attach($user));
                 break;
             case 'delete':
-                $tenant->users()->detach($user);
+                $tenants->each(fn($tenant) => $tenant->users()->detach($user));
                 break;
             default:
                 return response()->json([
@@ -111,6 +113,7 @@ class LandlordUserController extends Controller
                     "errors" => ["method" => "Not found an action for this method."]
                 ], 422);
         }
+        DB::commit();
 
         return response()->json();
     }

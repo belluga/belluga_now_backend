@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Controllers\Traits\HasAccountInSlug;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\TenantUser;
@@ -23,9 +24,12 @@ class TenantUserController extends Controller
     /**
      * Lista todos os usuários de um tenant
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $users = TenantUser::paginate(20);
+        $users = TenantUser::
+            when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+            ->paginate();
+
         return response()->json($users);
     }
 
@@ -166,18 +170,38 @@ class TenantUserController extends Controller
     /**
      * Remove um usuário
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(string $user_id): JsonResponse
     {
-        $user = TenantUser::findOrFail($id);
+        $user = TenantUser::findOrFail($user_id);
 
         // Impede que o usuário atual seja excluído
         if ($user->_id === Auth::id()) {
             return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
         }
 
-        $user->delete();
+        //remove relationships
+        $user->delete();;
 
         return response()->json(['message' => 'Usuário removido com sucesso']);
+    }
+
+    public function restore($user_id): JsonResponse {
+        $user = TenantUser::onlyTrashed()->findOrFail($user_id);
+        $user->restore();
+
+        return response()->json();
+    }
+
+    public function forceDestroy($user_id): JsonResponse {
+        $user = TenantUser::onlyTrashed()->findOrFail($user_id);
+
+        if ($user->_id === Auth::id()) {
+            return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
+        }
+
+        $user->forceDelete();
+
+        return response()->json();
     }
 
     /**

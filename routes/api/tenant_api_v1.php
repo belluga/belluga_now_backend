@@ -34,7 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Usuários do tenant
     Route::prefix('users')
-        ->middleware('tenant')
+        ->middleware('auth:sanctum')
         ->group(function () {
         Route::get('/', [TenantUserController::class, 'index'])
             ->name('tenant.users.index');
@@ -42,14 +42,22 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [TenantUserController::class, 'store'])
             ->name('tenant.users.store');
 
-        Route::get('/{id}', [TenantUserController::class, 'show'])
+        Route::get('/{user_id}', [TenantUserController::class, 'show'])
             ->name('tenant.users.show');
 
-        Route::put('/{id}', [TenantUserController::class, 'update'])
+        Route::patch('/{user_id}', [TenantUserController::class, 'update'])
             ->name('tenant.users.update');
 
-        Route::delete('/{id}', [TenantUserController::class, 'destroy'])
+        Route::delete('/{user_id}', [TenantUserController::class, 'destroy'])
             ->name('tenant.users.destroy');
+
+        Route::delete('/{user_id}/force_delete', [TenantUserController::class, 'forceDestroy'])
+            ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+            ->name('tentant.users.force_destroy');
+
+        Route::post('/{user_id}/restore', [TenantUserController::class, 'restore'])
+            ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+            ->name('tentant.users.restore');
 
         // Perfil do usuário atual
         Route::get('/profile', [TenantUserController::class, 'profile'])
