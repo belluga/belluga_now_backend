@@ -10,64 +10,49 @@ class DomainTenantFinder extends TenantFinder
 {
     public function findForRequest(Request $request): ?IsTenant
     {
-        // 1. Verificar se a requisição veio do App Flutter
-        if ($request->hasHeader('X-App-Domain')) {
-            // Vindo do Flutter App, usando o domínio fornecido no cabeçalho
-            $appDomain = $request->header('X-App-Domain');
-            return $this->findTenantByAppDomain($appDomain);
+        if($this->isRequestFromSubdomain()){
+            return $this->findTenantBySubdomain();
         }
 
-        // 2. Verificar por domínio da requisição web
-        $host = $request->getHost();
-
-        // Check if the host is a subdomain
-        $parts = explode('.', $host);
-
-
-        if (count($parts) >= 2) {
-            // It's a subdomain
-            $subdomain = $parts[0];
-            $tenant = $this->findTenantBySubdomain($subdomain);
-            if ($tenant) {
-                return $tenant;
-            }
+        if($this->isRequestFromApp()){
+            return $this->findTenantByAppDomain();
         }
 
-        // Primeiro tenta como app domain (caso esteja acessando o app via navegador)
-        $tenant = $this->findTenantByAppDomain($host);
-
-        // Se não encontrar, tenta como domínio web normal
-        if (!$tenant) {
-            $tenant = $this->findTenantByWebDomain($host);
-        }
-
-        return $tenant;
+        return $this->findTenantByWebDomain();
     }
 
-    /**
-     * Encontra um tenant pelo domínio de aplicativo
-     *
-     * @param string $domain
-     * @return IsTenant|null
-     */
-    protected function findTenantByAppDomain(string $domain): ?IsTenant
+    protected function findTenantByAppDomain(): ?IsTenant
     {
-        return app(IsTenant::class)::where('app_domains', 'all', [$domain])->first();
+        $appDomain = request()->header('X-App-Domain');
+        return app(IsTenant::class)::where('app_domains', 'all', [$appDomain])->first();
     }
 
-    /**
-     * Encontra um tenant pelo domínio web
-     *
-     * @param string $domain
-     * @return IsTenant|null
-     */
-    protected function findTenantByWebDomain(string $domain): ?IsTenant
+    protected function findTenantByWebDomain(): ?IsTenant
     {
+        $domain = request()->getHost();
         return app(IsTenant::class)::where('domains', 'all', [$domain])->first();
     }
 
-    protected function findTenantBySubdomain(string $subdomain): ?IsTenant
+    protected function findTenantBySubdomain(): ?IsTenant
     {
+        $parts_request = explode('.', request()->getHost());
+        $subdomain = $parts_request[0];
         return app(IsTenant::class)::where('subdomain', 'all', [$subdomain])->first();
+    }
+
+    protected function isRequestFromApp(): bool {
+        return request()->hasHeader('X-App-Domain');
+    }
+
+    protected function isRequestFromSubdomain(): bool {
+        $host = request()->getHost();
+        $parts_request = explode('.', $host);
+
+        if (count($parts_request) >= 2) {
+            $parts_config = explode('://', config('app.url'));
+            return $parts_request[1] === $parts_config[1];
+        }
+
+        return false;
     }
 }
