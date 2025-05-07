@@ -2,12 +2,12 @@
 
 namespace App\Http\Api\v2\Controllers;
 
-use App\Http\Api\v1\Controllers\AuthController as V1;
+use App\Http\Api\v1\Controllers\AuthControllerContract as V1;
 use App\Models\LandlordUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class AuthController extends V1
+class AuthControllerContract extends V1
 {
     /**
      * @group v2

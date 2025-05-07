@@ -1,24 +1,27 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Http\Api\v1\Controllers\AuthController;
+use App\Http\Api\v1\Controllers\AuthControllerContract;
 use App\Http\Api\v1\Controllers\CategoryController;
 use App\Http\Api\v1\Controllers\ModuleController;
 use App\Http\Api\v1\Controllers\ModuleItemController;
 use App\Http\Api\v1\Controllers\TenantUserController;
 use App\Http\Api\v1\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Api\v1\Controllers\AuthControllerTenant;
 
 // Rotas públicas para tenant
-Route::prefix('auth')->group(function () {
-    Route::post('/login', [AuthController::class, 'tenantLogin'])
+Route::prefix('auth')
+    ->middleware('tenant')
+    ->group(function () {
+    Route::post('/login', [AuthControllerTenant::class, 'tenantLogin'])
         ->name('tenant.auth.login');
 
-    Route::post('/logout', [AuthController::class, 'logout'])
+    Route::post('/logout', [AuthControllerContract::class, 'logout'])
         ->middleware('auth:sanctum')
         ->name('tenant.auth.logout');
 
-    Route::post('/refresh', [AuthController::class, 'refresh'])
+    Route::post('/refresh', [AuthControllerContract::class, 'refresh'])
         ->middleware('auth:sanctum')
         ->name('tenant.auth.refresh');
 });

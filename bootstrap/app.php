@@ -16,9 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/healh',
         then: function () {
-            Route::prefix('api/v1')
+            Route::prefix('admin/api/v1')
                 ->middleware('api')
-                ->group(base_path('routes/api/api_v1.php'));
+                ->group(base_path('routes/api/landlord_api_v1.php'));
 
             Route::prefix('api/v1')
                 ->middleware('api')
@@ -28,9 +28,9 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->middleware('api')
                 ->group(base_path('routes/api/api_v2.php'));
 
-            Route::prefix('api')
+            Route::prefix('admin/api')
                 ->middleware('api')
-                ->group(base_path('routes/api/api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
+                ->group(base_path('routes/api/landlord_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
 
             Route::prefix('api')
                 ->middleware('api')

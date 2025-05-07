@@ -70,11 +70,11 @@ return [
 
     'providers' => [
         'tenant_users' => [
-            'driver' => 'mongodb',
+            'driver' => 'eloquent',
             'model' => App\Models\Tenants\TenantUser::class,
         ],
         'landlord_users' => [
-            'driver' => 'mongodb',
+            'driver' => 'eloquent',
             'model' => App\Models\Landlord\LandlordUser::class,
         ],
 

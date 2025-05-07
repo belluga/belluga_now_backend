@@ -6,21 +6,25 @@ use App\Http\Api\v1\Requests\LoginEmailRequest;
 use App\Http\Api\v1\Requests\RegisterUserRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
-use App\Models\LandlordUser;
+use App\Models\Landlord\LandlordUser;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
-class AuthController extends Controller
+abstract class AuthControllerContract extends Controller
 {
+
+    abstract protected string $guard {
+        get;
+        set;
+    }
 
     public function login(LoginEmailRequest $request): JsonResponse
     {
-
-        if(Auth::attempt($request->only('email', 'password'))){
-            $user = Auth ::user();
+        if(Auth::guard($this->guard)->attempt($request->only('email', 'password'))){
+            $user = Auth::guard($this->guard)->user();
             $token = $user->createToken($request->device_name)->plainTextToken;
 
             return response()->json([

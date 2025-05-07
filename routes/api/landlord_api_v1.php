@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Http\Api\v1\Controllers\AuthController;
+use App\Http\Api\v1\Controllers\AuthControllerContract;
 use App\Http\Api\v1\Controllers\CategoryController;
 use App\Http\Api\v1\Controllers\InitializationController;
 use App\Http\Api\v1\Controllers\ModuleController;
@@ -12,6 +12,7 @@ use App\Http\Api\v1\Controllers\TenantUserController;
 use App\Http\Api\v1\Controllers\TokenController;
 use App\Http\Api\v1\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Api\v1\Controllers\AuthControllerLandlord;
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
     Route::post('/', [InitializationController::class, 'initialize'])
@@ -19,9 +20,9 @@ Route::prefix('initialize')->middleware('guest')->group(function () {
 });
 
 // Rotas públicas
-//Route::prefix('auth')->group(function () {
-//    Route::post('/login', [AuthController::class, 'login'])
-//        ->name('auth.login');
+Route::prefix('auth')->group(function () {
+    Route::post('/login', [AuthControllerLandlord::class, 'login'])
+        ->name('auth.login');
 //
 //    Route::post('/check', [AuthController::class, 'loginByToken'])
 //        ->middleware('auth:sanctum')
@@ -30,7 +31,7 @@ Route::prefix('initialize')->middleware('guest')->group(function () {
 //    Route::post('/logout', [AuthController::class, 'logout'])
 //        ->middleware('auth:sanctum')
 //        ->name('auth.logout');
-//});
+});
 
 // Rotas para módulos
 //Route::group(['prefix' => 'modules'], function () {
@@ -82,15 +83,6 @@ Route::prefix('tenants')->group(function () {
     Route::delete('/{tenant_slug}/force_delete', [TenantController::class, 'forceDestroy'])
         ->middleware('auth:sanctum', 'abilities:tenants:delete')
         ->name('tenants.destroy');
-//
-//    // Ativar/desativar tenant
-//    Route::patch('/{tenant_slug}/toggle-active', [TenantController::class, 'toggleActive'])
-//        ->name('tenants.toggle-active');
-//    Route::get('/{tenant_id}/users', [TenantUserController::class, 'index'])
-//        ->name('tenants.users.index');
-//
-//    Route::post('/{tenant_id}/users', [TenantUserController::class, 'store'])
-//        ->name('tenants.users.store');
 });
 
 // Rotas para usuários
@@ -98,19 +90,19 @@ Route::prefix('users')->group(function () {
     Route::get('/', [LandlordUserController::class, 'index'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:read')
         ->name('users.index');
-//
+
     Route::post('/', [LandlordUserController::class, 'store'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:write')
         ->name('users.store');
-//
+
     Route::get('/{user_id}', [LandlordUserController::class, 'show'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:read')
         ->name('users.show');
-//
+
     Route::patch('/{user_id}', [LandlordUserController::class, 'update'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:write')
         ->name('users.update');
-//
+
     Route::delete('/{user_id}/force_delete', [LandlordUserController::class, 'forceDestroy'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:write')
         ->name('users.destroy');
