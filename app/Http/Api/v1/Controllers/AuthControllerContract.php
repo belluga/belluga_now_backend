@@ -7,42 +7,46 @@ use App\Http\Api\v1\Requests\RegisterUserRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 abstract class AuthControllerContract extends Controller
 {
 
-    abstract protected string $guard {
+    abstract protected $userModel {
         get;
         set;
     }
 
     public function login(LoginEmailRequest $request): JsonResponse
     {
-        if(Auth::guard($this->guard)->attempt($request->only('email', 'password'))){
-            $user = Auth::guard($this->guard)->user();
-            $token = $user->createToken($request->device_name)->plainTextToken;
+        $user = $this->userModel::where('email', $request->email)->first();
 
-            return response()->json([
-                "success" => true,
-                'data' => [
-                    'user' => UserResource::make($user),
-                    'token' => $token
-                ],
-            ],
-            );
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'errors' => [
+                    "credentials" => "As credenciais fornecidas estão incorretas."
+                ]
+            ], 403));
         }
 
-        throw new HttpResponseException(response()->json([
-            'success' => false,
-            'errors' => [
-                "credentials" => "The provided credentials are incorrect."
-            ]
-        ], 403));
+        $token = $user->createToken($request->device_name)
+            ->plainTextToken;
+
+        return response()->json([
+            "success" => true,
+            'data' => [
+                'user' => UserResource::make($user),
+                'token' => $token
+            ],
+        ]);
+
     }
 
     public function loginByToken(Request $request): JsonResponse
@@ -62,7 +66,7 @@ abstract class AuthControllerContract extends Controller
         );
     }
 
-    public function logout(Request $request)
+    public function logout(Request $request): JsonResponse
     {
         $request->validate([
             'device' => 'required|string'
@@ -74,7 +78,7 @@ abstract class AuthControllerContract extends Controller
             $user->tokens()->where("name", $request->device)->delete();
         }
 
-        return response()->noContent();
+        return response()->json();
     }
 
     /**

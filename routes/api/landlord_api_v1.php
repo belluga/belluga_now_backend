@@ -25,11 +25,11 @@ Route::prefix('auth')->group(function () {
         ->name('admin.auth.login');
 //
     Route::post('/check', [AuthControllerLandlord::class, 'loginByToken'])
-        ->middleware('auth:sanctum')
+        ->middleware(['auth:sanctum'])
         ->name('admin.auth.check');
 //
     Route::post('/logout', [AuthControllerLandlord::class, 'logout'])
-        ->middleware('auth:sanctum')
+        ->middleware(['auth:sanctum'])
         ->name('admin.auth.logout');
 });
 

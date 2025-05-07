@@ -38,17 +38,8 @@ return [
     'guards' => [
         'web' => [
             'driver' => 'session',
-            'provider' => 'users',
-        ],
-        'landlord' => [
-            'driver' => 'session',
-            'provider' => 'landlord_users',
-        ],
-        'tenant' => [
-            'driver' => 'session',
             'provider' => 'tenant_users',
         ],
-
     ],
 
     /*
@@ -105,9 +96,15 @@ return [
     */
 
     'passwords' => [
-        'users' => [
-            'provider' => 'users',
-            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+        'tenant_users' => [
+            'provider' => 'tenant_users',
+            'table' => 'password_reset_tokens',
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+        'landlord_users' => [
+            'provider' => 'landlord_users',
+            'table' => 'password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
         ],

@@ -24,8 +24,6 @@ class LandlordUser extends Authenticatable
         'role'
     ];
 
-    protected string $guard = 'landlord';
-
     protected $hidden = [
         'password',
         'remember_token',

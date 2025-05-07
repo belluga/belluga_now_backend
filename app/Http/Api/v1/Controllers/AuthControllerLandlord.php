@@ -7,6 +7,7 @@ use App\Http\Api\v1\Requests\RegisterUserRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,5 +17,5 @@ use Illuminate\Support\Facades\DB;
 class AuthControllerLandlord extends AuthControllerContract
 {
 
-    protected string $guard = 'landlord';
+    protected $userModel = LandlordUser::class;
 }

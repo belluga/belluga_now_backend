@@ -10,20 +10,19 @@ use App\Http\Api\v1\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerTenant;
 
-// Rotas públicas para tenant
 Route::prefix('auth')
-    ->middleware('tenant')
     ->group(function () {
-    Route::post('/login', [AuthControllerTenant::class, 'tenantLogin'])
+    Route::post('/login', [AuthControllerTenant::class, 'login'])
         ->name('tenant.auth.login');
 
-    Route::post('/logout', [AuthControllerTenant::class, 'logout'])
-        ->middleware('auth:sanctum')
-        ->name('tenant.auth.logout');
+    Route::middleware(['auth:sanctum'])
+        ->group(function () {
+            Route::post('/logout', [AuthControllerTenant::class, 'logout'])
+                ->name('tenant.auth.logout');
 
-    Route::post('/refresh', [AuthControllerTenant::class, 'refresh'])
-        ->middleware('auth:sanctum')
-        ->name('tenant.auth.refresh');
+            Route::post('/refresh', [AuthControllerTenant::class, 'refresh'])
+                ->name('tenant.auth.refresh');
+        });
 });
 
 // Rotas protegidas para o tenant
@@ -34,7 +33,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Usuários do tenant
-    Route::prefix('users')->group(function () {
+    Route::prefix('users')
+        ->middleware('tenant')
+        ->group(function () {
         Route::get('/', [TenantUserController::class, 'index'])
             ->name('tenant.users.index');
 

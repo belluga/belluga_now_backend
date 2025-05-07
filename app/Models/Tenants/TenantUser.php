@@ -19,6 +19,10 @@ class TenantUser extends Authenticatable
 
     protected $table = 'users';
 
+    protected $guarded = [
+        'role'
+    ];
+
     protected $hidden = [
         'password',
         'remember_token',

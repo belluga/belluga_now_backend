@@ -17,32 +17,32 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/healh',
         then: function () {
             Route::prefix('admin/api/v1')
-                ->middleware('api')
+//                ->middleware('api')
                 ->group(base_path('routes/api/landlord_api_v1.php'));
 
             Route::prefix('api/v1')
-                ->middleware('api')
+//                ->middleware('api')
                 ->group(base_path('routes/api/tenant_api_v1.php'));
 
             Route::prefix('api/v2')
-                ->middleware('api')
+//                ->middleware('api')
                 ->group(base_path('routes/api/api_v2.php'));
 
             Route::prefix('admin/api')
-                ->middleware('api')
+//                ->middleware('api')
                 ->group(base_path('routes/api/landlord_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
 
             Route::prefix('api')
-                ->middleware('api')
+//                ->middleware('api')
                 ->group(base_path('routes/api/tenant_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
         }
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware
-            ->group('tenant', [
-                \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
-                \Spatie\Multitenancy\Http\Middleware\EnsureValidTenantSession::class,
-            ]);
+//        $middleware
+//            ->group('tenant', [
+//                \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
+//                \Spatie\Multitenancy\Http\Middleware\EnsureValidTenantSession::class,
+//            ]);
 
         $middleware->alias([
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,
