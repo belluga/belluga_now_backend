@@ -16,21 +16,21 @@ use App\Http\Api\v1\Controllers\AuthControllerLandlord;
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
     Route::post('/', [InitializationController::class, 'initialize'])
-        ->name('initialize');
+        ->name('admin.initialize');
 });
 
 // Rotas públicas
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthControllerLandlord::class, 'login'])
-        ->name('auth.login');
+        ->name('admin.auth.login');
 //
-//    Route::post('/check', [AuthController::class, 'loginByToken'])
-//        ->middleware('auth:sanctum')
-//        ->name('auth.check');
+    Route::post('/check', [AuthControllerLandlord::class, 'loginByToken'])
+        ->middleware('auth:sanctum')
+        ->name('admin.auth.check');
 //
-//    Route::post('/logout', [AuthController::class, 'logout'])
-//        ->middleware('auth:sanctum')
-//        ->name('auth.logout');
+    Route::post('/logout', [AuthControllerLandlord::class, 'logout'])
+        ->middleware('auth:sanctum')
+        ->name('admin.auth.logout');
 });
 
 // Rotas para módulos

@@ -17,11 +17,11 @@ Route::prefix('auth')
     Route::post('/login', [AuthControllerTenant::class, 'tenantLogin'])
         ->name('tenant.auth.login');
 
-    Route::post('/logout', [AuthControllerContract::class, 'logout'])
+    Route::post('/logout', [AuthControllerTenant::class, 'logout'])
         ->middleware('auth:sanctum')
         ->name('tenant.auth.logout');
 
-    Route::post('/refresh', [AuthControllerContract::class, 'refresh'])
+    Route::post('/refresh', [AuthControllerTenant::class, 'refresh'])
         ->middleware('auth:sanctum')
         ->name('tenant.auth.refresh');
 });
