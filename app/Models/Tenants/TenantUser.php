@@ -14,7 +14,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class TenantUser extends Authenticatable
 {
-    use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, HasPermissions, SoftDeletes;
+    use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, SoftDeletes;
 
     protected $table = 'users';
 

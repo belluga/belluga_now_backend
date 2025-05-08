@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\TenantUserCreateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,32 +40,9 @@ class TenantUserController extends Controller
     /**
      * Cria um novo usuário para o tenant atual
      */
-    public function store(Request $request): JsonResponse
+    public function store(TenantUserCreateRequest $request): JsonResponse
     {
-        $tenant = Tenant::current();
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:tenant.tenant_users,email',
-            'password' => 'required|string|min:8',
-            'role_id' => 'nullable|string|exists:tenant.roles,_id',
-            'account_id' => 'nullable|string|exists:tenant.accounts,_id',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
-        }
-
-        $user = new TenantUser([
-            'name' => $request->input('name'),
-            'email' => $request->input('email'),
-            'password' => Hash::make($request->input('password')),
-            'role_id' => $request->input('role_id'),
-            'account_id' => $request->input('account_id'),
-            'active' => true,
-        ]);
-
-        $user->save();
+        $user = TenantUser::create($request->validated());
 
         return response()->json([
             'message' => 'Usuário criado com sucesso',
@@ -83,8 +60,6 @@ class TenantUserController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'string|max:255',
             'email' => 'string|email|max:255|unique:tenant.tenant_users,email,' . $id . ',_id',
-            'role_id' => 'nullable|string|exists:tenant.roles,_id',
-            'account_id' => 'nullable|string|exists:tenant.accounts,_id',
         ]);
 
         if ($validator->fails()) {

@@ -25,7 +25,7 @@ abstract class AuthControllerContract extends Controller
 
     public function login(LoginEmailRequest $request): JsonResponse
     {
-        $user = $this->userModel::where('email', $request->email)->first();
+        $user = $this->userModel::where('emails', "all", [$request->email])->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             throw new HttpResponseException(response()->json([
