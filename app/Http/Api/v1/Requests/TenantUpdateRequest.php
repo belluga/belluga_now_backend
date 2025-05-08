@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -23,12 +25,7 @@ class TenantUpdateRequest extends FormRequest
     public function rules(): array
     {
         $rules = [
-            'name' => 'sometimes|string|max:255',
-//            'subdomain' => 'required|string|max:63',
-            'domains' => 'sometimes|array',
-            'domains.*' => 'string|max:255',
-            'app_domains' => 'sometimes|array',
-            'app_domains.*' => 'string|max:255',
+            'name' => 'required|string|max:255',
         ];
 
         // Para atualizações, verifica se o subdomínio já existe para outro tenant
@@ -39,6 +36,7 @@ class TenantUpdateRequest extends FormRequest
             $rules['subdomain'] = [
                 'sometimes',
                 'string',
+                'regex:/^[a-z][a-z0-9-]*[a-z0-9]$/',
                 'max:63',
                 new UniqueSubdomainRule($tenant_slug)
 
@@ -48,6 +46,7 @@ class TenantUpdateRequest extends FormRequest
             $rules['subdomain'] = [
                 'required',
                 'string',
+                'regex:/^[a-z][a-z0-9-]*[a-z0-9]$/',
                 'max:63',
                 new UniqueSubdomainRule()
             ];

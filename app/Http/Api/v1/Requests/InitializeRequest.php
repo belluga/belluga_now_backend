@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -28,7 +30,8 @@ class InitializeRequest extends FormRequest
             'tenant.subdomain' => 'required|string|unique:tenants,subdomain',
             'tenant.domains' => 'required|array',
             'user.name' => 'string',
-            'user.email' => 'required|string|email',
+            'user.emails' => 'required|array',
+            'user.emails.*' => 'email|unique:landlord_users,email',
             'user.password' => 'required|string',
         ];
     }

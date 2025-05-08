@@ -10,7 +10,6 @@ use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\Module;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -51,7 +50,6 @@ class LandlordUserController extends Controller
      */
     public function store(LandlordUserCreateRequest $request): JsonResponse
     {
-
         $user = LandlordUser::create($request->validated());
 
         return response()->json([
@@ -127,7 +125,17 @@ class LandlordUserController extends Controller
 
     public function forceDestroy($user_id): JsonResponse {
         $user = LandlordUser::onlyTrashed()->findOrFail($user_id);
-        $user->forceDelete();
+
+        DB::beginTransaction();
+        try{
+            $user->tenants()->detach();
+            $user->forceDelete();
+        }catch (\Exception $e){
+            DB::rollBack();
+            return response()->json(["errors" => ["relationships" => ["Error deleting relationships."]]]);
+        }
+        DB::commit();
+
 
         return response()->json();
     }
@@ -150,61 +158,9 @@ class LandlordUserController extends Controller
             );
         }
 
-        // Remove all relationships with modules
-        DB::beginTransaction();
-        try{
-//            $user->modules()->detach();
-            $user->tenants()->detach();
-            $user->delete();
-        }catch(\Exception $e){
-            DB::rollBack();
-            throw $e;
-        }
-
-        DB::commit();
+       $user->delete();
 
         return response()->json(['message' => 'Usuário do landlord removido com sucesso']);
-    }
-
-    /**
-     * Exibe o perfil do usuário atual do landlord
-     */
-    public function profile(): JsonResponse
-    {
-        $user = Auth::user();
-        return response()->json(['data' => $user]);
-    }
-
-    /**
-     * Atualiza o perfil do usuário atual do landlord
-     */
-    public function updateProfile(Request $request): JsonResponse
-    {
-        $user = Auth::user();
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'string|max:255',
-            'email' => 'string|email|max:255|unique:landlord_users,email,' . $user->id,
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
-        }
-
-        if ($request->has('name')) {
-            $user->name = $request->input('name');
-        }
-
-        if ($request->has('email')) {
-            $user->email = $request->input('email');
-        }
-
-        $user->save();
-
-        return response()->json([
-            'message' => 'Perfil atualizado com sucesso',
-            'data' => $user
-        ]);
     }
 
     /**
@@ -226,26 +182,6 @@ class LandlordUserController extends Controller
         $user->save();
 
         return response()->json(['message' => 'Senha atualizada com sucesso']);
-    }
-
-    /**
-     * Ativa ou desativa um usuário do landlord
-     */
-    public function toggleActive(string $id): JsonResponse
-    {
-        $user = LandlordUser::findOrFail($id);
-
-        // Impede que o usuário atual seja desativado
-        if ($user->id === Auth::id()) {
-            return response()->json(['message' => 'Não é possível desativar o próprio usuário'], 422);
-        }
-
-        $user->active = !$user->active;
-        $user->save();
-
-        $status = $user->active ? 'ativado' : 'desativado';
-
-        return response()->json(['message' => "Usuário do landlord {$status} com sucesso"]);
     }
 
     protected function filterGuardedParameters(array $received_params): array {

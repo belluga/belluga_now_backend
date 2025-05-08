@@ -4,16 +4,12 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
-use App\Models\Tenants\Module;
-use App\Services\TenantSessionManager;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsToMany;
-use MongoDB\Laravel\Relations\EmbedsMany;
-use MongoDB\Laravel\Relations\MorphMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
 class LandlordUser extends Authenticatable
@@ -34,29 +30,21 @@ class LandlordUser extends Authenticatable
         'password' => 'hashed',
     ];
 
-    public function createdModules(): MorphMany
-    {
-        return $this->morphMany(Module::class, 'creator');
-    }
-
     public function tenants(): BelongsToMany
     {
         return $this->belongsToMany(Tenant::class);
     }
 
-    public function tenantRoles(): EmbedsMany
-    {
-        return $this->embedsMany(LandlordTenantRole::class);
+    public function addEmail(string $email): void {
+        $this->update(
+            ['$push' => ['emails' => $email]]
+        );
     }
 
-    public function getCurrentTenantRole()
-    {
-        $currentTenantId = app(TenantSessionManager::class)->getCurrentTenantId();
-
-        if (!$currentTenantId) {
-            return null;
-        }
-
-        return $this->tenantRoles->where('tenant_id', $currentTenantId)->first();
+    public function removeEmail(string $email): void {
+        $this->update(
+            [],
+            ['$pull' => ['emails' => $email]]
+        );
     }
 }

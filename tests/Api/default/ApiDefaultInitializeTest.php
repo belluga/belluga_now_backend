@@ -36,61 +36,10 @@ class ApiDefaultInitializeTest extends TestCase {
         }
     }
 
-    protected string $account_name {
-        get {
-            $current_value = $this->getGlobal(TestVariableLabels::ACCOUNT_NAME->value);
-            if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::ACCOUNT_NAME->value, fake()->company());
-            }
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_NAME->value);
-        }
-    }
-
-    protected string $account_document {
-        get {
-            $current_value = $this->getGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value);
-            if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value, fake()->cnpj());
-            }
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_DOCUMENT->value);
-        }
-    }
-
-    protected string $account_address {
-        get {
-            $current_value = $this->getGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value);
-            if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value, fake()->address());
-            }
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ADDRESS->value);
-        }
-    }
-
     protected string $main_user_id {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::MAIN_USER_ID->value, $value);
             $this->main_user_id = $value;
-        }
-    }
-
-    protected string $main_account_id {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_ID->value, $value);
-            $this->main_account_id = $value;
-        }
-    }
-
-    protected string $main_account_slug {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value, $value);
-            $this->main_account_slug = $value;
-        }
-    }
-
-    protected string $main_account_token {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::MAIN_ACCOUNT_TOKEN->value, $value);
-            $this->main_account_token = $value;
         }
     }
 
@@ -109,9 +58,6 @@ class ApiDefaultInitializeTest extends TestCase {
         ]);
 
         $this->main_user_id = $response->json()['data']['user']["id"];
-        $this->main_account_id = $response->json()['data']['account']["id"];
-        $this->main_account_slug = $response->json()['data']['account']["slug"];
-        $this->main_account_token = $response->json()['data']["token"];
     }
 
     public function testInitiateAgain(): void {
@@ -140,11 +86,6 @@ class ApiDefaultInitializeTest extends TestCase {
             "name" => $this->user_name,
             "email" => $this->user_email,
             "password" => $this->user_password,
-            "account" => [
-                "name" => $this->account_name,
-                "document" => $this->account_document,
-                "address" => $this->account_address,
-            ]
         ];
     }
 

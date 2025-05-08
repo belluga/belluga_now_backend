@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Rules;
 
 use Closure;
@@ -10,9 +12,9 @@ class UniqueSubdomainRule implements ValidationRule
 {
     protected ?string $tenant_slug;
 
-    public function __construct(?string $tenant_slug = null)
+    public function __construct(?string $exclude_slug = null)
     {
-        $this->tenant_slug = $tenant_slug;
+        $this->tenant_slug = $exclude_slug;
     }
 
     public function validate(string $attribute, mixed $value, Closure $fail): void

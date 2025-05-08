@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models\Landlord;
 
 use Illuminate\Support\Facades\Artisan;
@@ -40,7 +42,7 @@ class Tenant extends BaseTenant
     {
         foreach ($domains as $domain) {
             try {
-                $this->domains()->firstOrCreate(
+                $this->domains()->create(
                     ["path" => $domain], [
                     "type" => "web",
                     "path" => $domain,
@@ -56,11 +58,6 @@ class Tenant extends BaseTenant
         }
 
         return null;
-    }
-
-    public function setSubdomainAttribute($value)
-    {
-        $this->attributes['subdomain'] = strtolower($value);
     }
 
     public function getSlugOptions(): SlugOptions

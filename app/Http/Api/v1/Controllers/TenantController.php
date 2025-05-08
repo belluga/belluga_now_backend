@@ -1,15 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
-use App\Http\Api\v1\Requests\TenantRequest;
+use App\Http\Api\v1\Requests\TenantStoreRequest;
+use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use App\Services\TenantSessionManager;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -17,12 +16,8 @@ use MongoDB\Driver\Exception\BulkWriteException;
 
 class TenantController extends Controller
 {
-    protected $tenantSessionManager;
 
-    public function __construct(TenantSessionManager $tenantSessionManager)
-    {
-        $this->tenantSessionManager = $tenantSessionManager;
-    }
+    protected ?Tenant $tenant;
 
     public function index(Request $request): LengthAwarePaginator
     {
@@ -30,7 +25,7 @@ class TenantController extends Controller
         return $user->tenants()->with('domains')->paginate($request->get('per_page', 15));
     }
 
-    public function store(TenantRequest $request): JsonResponse
+    public function store(TenantStoreRequest $request): JsonResponse
     {
 
         $user = auth()->guard('sanctum')->user();
@@ -77,14 +72,15 @@ class TenantController extends Controller
         404);
     }
 
-    public function update(TenantRequest $request, string $tenant_slug): JsonResponse
+    public function update(TenantUpdateRequest $request, string $tenant_slug): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-        $tenant->update($request->validated());
+        $this->tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+        $params_to_update = $this->filterGuardedParameters($request->validated());
+        $this->tenant->update($params_to_update);
 
         return response()->json([
-            'data' => $tenant
+            'data' => $this->tenant
         ], 200);
     }
 
@@ -134,24 +130,11 @@ class TenantController extends Controller
         return response()->json();
     }
 
+    protected function filterGuardedParameters(array $received_params): array {
+        $guarded = $this->tenant->getGuarded();
 
-    /**
-     * Altera o tenant atual do usuário na sessão
-     */
-    public function switchTenant(Request $request, string $tenantId): RedirectResponse
-    {
-        $user = auth()->guard('landlord')->user();
-
-        // Verifica se o usuário tem acesso a este tenant
-        $hasTenant = $user->tenants()->where('id', $tenantId)->exists();
-
-        if (!$hasTenant) {
-            return redirect()->back()->with('error', 'Você não tem acesso a este tenant');
-        }
-
-        // Define o tenant atual na sessão
-        $this->tenantSessionManager->setCurrentTenantId($tenantId);
-
-        return redirect()->back()->with('success', 'Tenant alterado com sucesso');
+        return collect($received_params)
+            ->reject(fn ($value, $key) => in_array($key, $guarded) )
+            ->toArray();
     }
 }

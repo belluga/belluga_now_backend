@@ -1,11 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
+use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Contracts\Validation\Validator;
-use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Validation\Rules\Password;
 
 class LandlordUserCreateRequest extends FormRequest
 {
@@ -26,9 +26,11 @@ class LandlordUserCreateRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:landlord_users,email',
-            'password' => 'required|string|min:8',
-            'role' => 'nullable|string|in:admin,manager,viewer',
+            'emails' => [
+                'required',
+                new UniqueArrayItemRule('landlord', 'landlord_users', 'emails', )
+            ],
+            'password' => 'required|string|min:8'
         ];
     }
 }

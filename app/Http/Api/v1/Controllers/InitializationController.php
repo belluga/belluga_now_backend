@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\InitializeRequest;
@@ -18,9 +20,8 @@ class InitializationController extends Controller
         ini_set('max_execution_time', 600);
         set_time_limit(600);
 
-
-        $users_count = DB::table('users')->count();
-        $tenants_count = DB::table('tenants')->count();
+        $users_count = DB::connection('landlord')->table('users')->count();
+        $tenants_count = DB::connection('landlord')->table('tenants')->count();
 
         if($users_count > 0 || $tenants_count > 0){
             return response()->json(
@@ -33,26 +34,38 @@ class InitializationController extends Controller
                 403);
         }
 
-        $new_tenant = Tenant::create([
-            "name" => $request->tenant["name"],
-            "subdomain" => $request->tenant["subdomain"]
-        ]);
 
-        $new_tenant->addDomains($request->tenant["domains"]);
+        DB::connection('landlord')->beginTransaction();
+        try{
+            $new_tenant = Tenant::create([
+                "name" => $request->tenant["name"],
+                "subdomain" => $request->tenant["subdomain"]
+            ]);
 
-        $new_tenant->makeCurrent();
+            $new_tenant->addDomains($request->tenant["domains"]);
 
-        $new_user = LandlordUser::create([
-            "name" => $request->user['name'],
-            "email" => $request->user['email'],
-            "password" => $request->user['password']
-        ]);
+//            $new_tenant->makeCurrent();
 
-        $new_user->tenants()->attach($new_tenant);
+            $new_user = LandlordUser::create([
+                "name" => $request->user['name'],
+                "password" => $request->user['password']
+            ]);
 
-        $token = $new_user->createToken("Initialization Token")->plainTextToken;
+            $new_user->tenants()->attach($new_tenant);
 
-        $new_tenant->forgetCurrent();
+            foreach($request->user['emails'] as $email){
+                $new_user->addEmail($email);
+            }
+
+            $token = $new_user->createToken("Initialization Token")->plainTextToken;
+
+//            $new_tenant->forgetCurrent();
+
+        }catch (\Exception $e){
+            DB::connection('landlord')->rollBack();
+            throw $e;
+        }
+        DB::connection('landlord')->commit();
 
         return response()->json([
             "success" => true,

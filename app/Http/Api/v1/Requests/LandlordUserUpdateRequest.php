@@ -1,11 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
+use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Contracts\Validation\Validator;
-use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Validation\Rules\Password;
 
 class LandlordUserUpdateRequest extends FormRequest
 {
@@ -26,8 +26,6 @@ class LandlordUserUpdateRequest extends FormRequest
     {
         return [
             'name' => 'sometimes|string|max:255',
-            'email' => 'sometimes|string|email|max:255|unique:landlord_users,email',
-            'role' => 'sometimes|string|in:admin,manager,viewer',
         ];
     }
 }
