@@ -120,7 +120,7 @@ class LandlordUserController extends Controller
         $user = LandlordUser::onlyTrashed()->findOrFail($user_id);
         $user->restore();
 
-        return response()->json();
+        return response()->json(["data" => $user]);
     }
 
     public function forceDestroy($user_id): JsonResponse {

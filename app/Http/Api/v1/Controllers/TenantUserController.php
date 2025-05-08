@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\TenantUserCreateRequest;
+use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\TenantUser;
 use Illuminate\Http\JsonResponse;
@@ -112,7 +113,11 @@ class TenantUserController extends Controller
         $user = TenantUser::onlyTrashed()->findOrFail($user_id);
         $user->restore();
 
-        return response()->json();
+        return response()->json(
+            [
+                "data" => UserResource::make($user)
+            ]
+        );
     }
 
     public function forceDestroy($user_id): JsonResponse {
