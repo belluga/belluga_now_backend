@@ -3,6 +3,7 @@
 use App\Http\Api\v1\Controllers\TenantUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerTenant;
+use App\Http\Api\v1\Controllers\DomainController;
 
 Route::prefix('auth')
     ->group(function () {
@@ -19,6 +20,21 @@ Route::prefix('auth')
         });
 });
 
+Route::prefix('domains')
+    ->group(function (){
+        Route::post('/', [DomainController::class, 'store'])
+            ->name('tenant.domains.add');
+
+        Route::delete('/{domain_id}', [DomainController::class, 'destroy'])
+            ->name('tenant.domains.destroy');
+
+        Route::post('/{domain_id}/restore', [DomainController::class, 'restore'])
+            ->name('tenant.domains.restore');
+
+        Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy'])
+            ->name('tenant.domains.force_destroy');
+});
+
 // Rotas protegidas para o tenant
 Route::middleware('auth:sanctum')->group(function () {
     // Rota para verificar autenticação
@@ -26,7 +42,6 @@ Route::middleware('auth:sanctum')->group(function () {
         return response()->json(['authenticated' => true]);
     });
 
-    // Usuários do tenant
     Route::prefix('users')
         ->middleware('auth:sanctum')
         ->group(function () {
