@@ -9,10 +9,10 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
-use MongoDB\Laravel\Relations\MorphMany;
+use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
-class TenantUser extends Authenticatable
+class AccountUser extends Authenticatable
 {
     use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, SoftDeletes;
 
@@ -32,8 +32,7 @@ class TenantUser extends Authenticatable
         'password' => 'hashed',
     ];
 
-    public function createdModules(): MorphMany
-    {
-        return $this->morphMany(Module::class, 'creator');
+    public function accountRoles(): HasMany {
+        return $this->hasMany(AccountUserRole::class);
     }
 }

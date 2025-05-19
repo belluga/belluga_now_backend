@@ -7,7 +7,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Requests\TenantUserCreateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
-use App\Models\Tenants\TenantUser;
+use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -22,7 +22,7 @@ class TenantUserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $users = TenantUser::
+        $users = AccountUser::
             when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate();
 
@@ -34,7 +34,7 @@ class TenantUserController extends Controller
      */
     public function show(string $id): JsonResponse
     {
-        $user = TenantUser::findOrFail($id);
+        $user = AccountUser::findOrFail($id);
         return response()->json(['data' => $user]);
     }
 
@@ -43,7 +43,7 @@ class TenantUserController extends Controller
      */
     public function store(TenantUserCreateRequest $request): JsonResponse
     {
-        $user = TenantUser::create($request->validated());
+        $user = AccountUser::create($request->validated());
 
         return response()->json([
             'message' => 'Usuário criado com sucesso',
@@ -56,7 +56,7 @@ class TenantUserController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $user = TenantUser::findOrFail($id);
+        $user = AccountUser::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
             'name' => 'string|max:255',
@@ -96,7 +96,7 @@ class TenantUserController extends Controller
      */
     public function destroy(string $user_id): JsonResponse
     {
-        $user = TenantUser::findOrFail($user_id);
+        $user = AccountUser::findOrFail($user_id);
 
         // Impede que o usuário atual seja excluído
         if ($user->_id === Auth::id()) {
@@ -110,7 +110,7 @@ class TenantUserController extends Controller
     }
 
     public function restore($user_id): JsonResponse {
-        $user = TenantUser::onlyTrashed()->findOrFail($user_id);
+        $user = AccountUser::onlyTrashed()->findOrFail($user_id);
         $user->restore();
 
         return response()->json(
@@ -121,7 +121,7 @@ class TenantUserController extends Controller
     }
 
     public function forceDestroy($user_id): JsonResponse {
-        $user = TenantUser::onlyTrashed()->findOrFail($user_id);
+        $user = AccountUser::onlyTrashed()->findOrFail($user_id);
 
         if ($user->_id === Auth::id()) {
             return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
@@ -137,7 +137,7 @@ class TenantUserController extends Controller
      */
     public function updatePassword(Request $request, string $id): JsonResponse
     {
-        $user = TenantUser::findOrFail($id);
+        $user = AccountUser::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
             'password' => 'required|string|min:8|confirmed',

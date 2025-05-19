@@ -62,7 +62,7 @@ return [
     'providers' => [
         'tenant_users' => [
             'driver' => 'eloquent',
-            'model' => App\Models\Tenants\TenantUser::class,
+            'model' => App\Models\Tenants\AccountUser::class,
         ],
         'landlord_users' => [
             'driver' => 'eloquent',
