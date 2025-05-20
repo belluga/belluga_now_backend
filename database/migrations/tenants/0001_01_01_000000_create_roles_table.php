@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('roles', function (Blueprint $collection) {
             $collection->unique('slug');
-            $collection->index(['account_id' => -1]);
+            $collection->unique(['owner_id' => -1]);
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
     }

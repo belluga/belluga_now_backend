@@ -16,69 +16,51 @@ use MongoDB\Driver\Exception\BulkWriteException;
 
 class RolesController extends Controller
 {
-
-
     public function store(RolesStoreRequest $request): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
         $account_slug = $request->route('account_slug');
 
+        $account = $user->accountsOwner()
+            ->where('slug', $account_slug)
+            ->firstOrFail();
+
+        $userRole = AccountUserRole::where('account_id', $account->id)
+            ->where('user_id', $user->id)
+            ->with('role')
+            ->firstOr(function () {
+                abort(403, 'Unauthorized.');
+            });
+
+        if (!$userRole->role->hasPermissionTo('role.create')) {
+            abort(403, 'You do not have permission to create roles.');
+        }
+
         try {
-            $account = $user->accountsOwner()
-                ->where('slug', $account_slug)
-                ->first();
+            DB::beginTransaction();
 
+            $role = $account->rolesOwner()->create(
+                [
+                    ...$request->validated(),
+                    'owner_id' => $user->id,
+                    'owner_type' => get_class($user)
+                ]
+            );
 
-            if (!$account) {
-                return response()->json([
-                    'message' => 'Account not found.',
-                    'errors' => ['account' => ['Account not found.']]
-                ], 404);
-            }
-
-            $userRole = AccountUserRole::where('account_id', $account->id)
-                ->where('user_id', $user->id)
-                ->with('role')
-                ->first();
-
-            if (!$userRole || !$userRole->role->hasPermissionTo('role.create')) {
-                return response()->json([
-                    'message' => 'Unauthorized.',
-                    'errors' => ['role' => ['You do not have permission to create roles.']]
-                ], 403);
-            }
-
-            try{
-                DB::beginTransaction();
-                $role = new Role($request->validated());
-                $role->account()->associate($account);
-                $role->owner()->associate($user);
-                $role->save();
-                DB::commit();
-            }catch(\Exception $e){
-                DB::rollBack();
-                return response()->json([
-                    'message' => "Something went wrong when trying to create the tenant.",
-                    'errors' => ['account' => ["Something went wrong when trying to create the account."]]
-                ], 422);
-            }
+            DB::commit();
 
             return response()->json([
                 'data' => $role
             ], 201);
 
         } catch (BulkWriteException $e) {
+            DB::rollBack();
+
             if (str_contains($e->getMessage(), 'E11000')) {
-                return response()->json([
-                    'message' => 'Account already exists.',
-                    'errors' => ['account' => ["Account already exists."]]
-                ], 422);
+                abort(422, 'Role already exists.');
             }
 
-            return response()->json([
-                'message' => "Something went wrong when trying to create the tenant.",
-                'errors' => ['account' => ["Something went wrong when trying to create the account."]]
-            ], 422);
+            abort(422, 'Something went wrong when trying to create the role.');
         }
     }
 

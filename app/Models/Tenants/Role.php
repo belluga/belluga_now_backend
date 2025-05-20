@@ -23,6 +23,7 @@ class Role extends Model
     {
         return SlugOptions::create()
             ->generateSlugsFrom('name')
+            ->allowDuplicateSlugs()
             ->saveSlugsTo('slug');
     }
 }
