@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerTenant;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
+use App\Models\Tenants\Account;
 
 Route::prefix('auth')
     ->group(function () {
@@ -88,7 +89,10 @@ Route::middleware('auth:sanctum')
 
         Route::prefix('accounts')
             ->group(function () {
-                Route::post('/', [AccountController::class, 'store'])
-                    ->name('tenant.accounts.create');
-            });
+                Route::middleware(['ability:'.Account::canManagePermissions()])
+                    ->group(function () {
+                        Route::post('/', [AccountController::class, 'store'])
+                            ->name('tenant.accounts.create');
+                    });
+        });
 });

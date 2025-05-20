@@ -2,7 +2,9 @@
 
 namespace App\Models\Tenants;
 
+use App\Traits\DemandPermissions;
 use App\Traits\HasOwner;
+use App\Traits\OwnRoles;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\HasMany;
@@ -12,13 +14,9 @@ use Spatie\Sluggable\SlugOptions;
 
 class Account extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug, HasOwner;
+    use UsesTenantConnection, SoftDeletes, HasSlug, HasOwner, DemandPermissions, OwnRoles;
 
-    public function roles(): HasMany {
-        return $this->hasMany(Role::class);
-    }
-
-    public function usersRoles(): HasMany {
+    public function userRoles(): HasMany {
         return $this->hasMany(AccountUserRole::class);
     }
 

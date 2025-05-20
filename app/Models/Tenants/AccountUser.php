@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
-use App\Traits\HasAbilities;
+use App\Traits\DemandPermissions;
 use App\Traits\OwnAccounts;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -16,7 +16,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class AccountUser extends Authenticatable
 {
-    use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, SoftDeletes, HasAbilities, OwnAccounts;
+    use HasApiTokens, Notifiable, UsesTenantConnection, DocumentModel, SoftDeletes, OwnAccounts;
 
     protected $table = 'users';
 

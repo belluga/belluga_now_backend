@@ -2,6 +2,8 @@
 
 namespace App\Models\Tenants;
 
+use App\Traits\DemandPermissions;
+use App\Traits\HasOwner;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
@@ -11,7 +13,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class Role extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug;
+    use UsesTenantConnection, SoftDeletes, HasSlug, HasOwner, DemandPermissions;
 
     public function account(): BelongsTo {
         return $this->belongsTo(Account::class);

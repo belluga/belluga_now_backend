@@ -16,9 +16,6 @@ class InitializationController extends Controller
 {
 
     public function initialize(InitializeRequest $request): JsonResponse {
-        ini_set('memory_limit', '512M');
-        ini_set('max_execution_time', 600);
-        set_time_limit(600);
 
         $users_count = DB::connection('landlord')->table('users')->count();
         $tenants_count = DB::connection('landlord')->table('tenants')->count();
