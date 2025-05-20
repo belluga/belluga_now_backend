@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
+use App\Traits\HasAbilities;
+use App\Traits\OwnAccounts;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -14,7 +16,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
 class LandlordUser extends Authenticatable
 {
-    use HasApiTokens, Notifiable, UsesLandlordConnection, DocumentModel, SoftDeletes;
+    use HasApiTokens, Notifiable, UsesLandlordConnection, DocumentModel, SoftDeletes, HasAbilities, OwnAccounts;
 
     protected $guarded = [
         'role'

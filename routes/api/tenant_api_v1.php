@@ -4,6 +4,7 @@ use App\Http\Api\v1\Controllers\TenantUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerTenant;
 use App\Http\Api\v1\Controllers\DomainController;
+use App\Http\Api\v1\Controllers\AccountController;
 
 Route::prefix('auth')
     ->group(function () {
@@ -36,51 +37,58 @@ Route::prefix('domains')
 });
 
 // Rotas protegidas para o tenant
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware('auth:sanctum')
+    ->group(function () {
     // Rota para verificar autenticação
-    Route::get('/check', function () {
-        return response()->json(['authenticated' => true]);
-    });
+        Route::get('/check', function () {
+            return response()->json(['authenticated' => true]);
+        });
 
-    Route::prefix('users')
-        ->middleware('auth:sanctum')
-        ->group(function () {
-        Route::get('/', [TenantUserController::class, 'index'])
-            ->name('tenant.users.index');
+        Route::prefix('users')
+            ->group(function () {
 
-        Route::post('/', [TenantUserController::class, 'store'])
-            ->name('tenant.users.store');
+                Route::get('/', [TenantUserController::class, 'index'])
+                ->name('tenant.users.index');
 
-        Route::get('/{user_id}', [TenantUserController::class, 'show'])
-            ->name('tenant.users.show');
+                Route::post('/', [TenantUserController::class, 'store'])
+                    ->name('tenant.users.store');
 
-        Route::patch('/{user_id}', [TenantUserController::class, 'update'])
-            ->name('tenant.users.update');
+                Route::get('/{user_id}', [TenantUserController::class, 'show'])
+                    ->name('tenant.users.show');
 
-        Route::delete('/{user_id}', [TenantUserController::class, 'destroy'])
-            ->name('tenant.users.destroy');
+                Route::patch('/{user_id}', [TenantUserController::class, 'update'])
+                    ->name('tenant.users.update');
 
-        Route::delete('/{user_id}/force_delete', [TenantUserController::class, 'forceDestroy'])
-            ->middleware('auth:sanctum', 'abilities:landlord-users:write')
-            ->name('tentant.users.force_destroy');
+                Route::delete('/{user_id}', [TenantUserController::class, 'destroy'])
+                    ->name('tenant.users.destroy');
 
-        Route::post('/{user_id}/restore', [TenantUserController::class, 'restore'])
-            ->middleware('auth:sanctum', 'abilities:landlord-users:write')
-            ->name('tentant.users.restore');
+                Route::delete('/{user_id}/force_delete', [TenantUserController::class, 'forceDestroy'])
+                    ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+                    ->name('tentant.users.force_destroy');
 
-        // Perfil do usuário atual
-        Route::get('/profile', [TenantUserController::class, 'profile'])
-            ->name('tenant.users.profile');
+                Route::post('/{user_id}/restore', [TenantUserController::class, 'restore'])
+                    ->middleware('auth:sanctum', 'abilities:landlord-users:write')
+                    ->name('tentant.users.restore');
 
-        Route::put('/profile', [TenantUserController::class, 'updateProfile'])
-            ->name('tenant.users.profile.update');
+                // Perfil do usuário atual
+                Route::get('/profile', [TenantUserController::class, 'profile'])
+                    ->name('tenant.users.profile');
 
-        // Alterar senha
-        Route::put('/{id}/password', [TenantUserController::class, 'updatePassword'])
-            ->name('tenant.users.password.update');
+                Route::put('/profile', [TenantUserController::class, 'updateProfile'])
+                    ->name('tenant.users.profile.update');
 
-        // Ativar/desativar usuário
-        Route::patch('/{id}/toggle-active', [TenantUserController::class, 'toggleActive'])
-            ->name('tenant.users.toggle-active');
-    });
+                // Alterar senha
+                Route::put('/{id}/password', [TenantUserController::class, 'updatePassword'])
+                    ->name('tenant.users.password.update');
+
+                // Ativar/desativar usuário
+                Route::patch('/{id}/toggle-active', [TenantUserController::class, 'toggleActive'])
+                    ->name('tenant.users.toggle-active');
+            });
+
+        Route::prefix('accounts')
+            ->group(function () {
+                Route::post('/', [AccountController::class, 'store'])
+                    ->name('tenant.accounts.create');
+            });
 });
