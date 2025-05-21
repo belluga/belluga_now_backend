@@ -37,7 +37,7 @@ class RolesStoreRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'name.required' => 'O nome do tenant é obrigatório',
+            'name.required' => 'O nome do role é obrigatório',
             'permissions.required' => 'É obrigatório enviar uma lista de permissões',
         ];
     }

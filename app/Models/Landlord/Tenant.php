@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
+use App\Models\Tenants\AccountUserRole;
+use App\Traits\HasOwner;
+use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -18,16 +21,11 @@ use Spatie\Sluggable\SlugOptions;
 
 class Tenant extends BaseTenant
 {
-    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes;
+    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
 
     public function domains(): HasMany
     {
         return $this->hasMany(Domains::class);
-    }
-
-    public function users(): BelongsToMany
-    {
-        return $this->belongsToMany(LandlordUser::class);
     }
 
     /**
@@ -58,6 +56,10 @@ class Tenant extends BaseTenant
         }
 
         return null;
+    }
+
+    public function userRoles(): HasMany {
+        return $this->hasMany(TenantUserRole::class);
     }
 
     public function getSlugOptions(): SlugOptions

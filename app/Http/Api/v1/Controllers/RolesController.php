@@ -4,12 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\RolesStoreRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUserRole;
-use App\Models\Tenants\Role;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;

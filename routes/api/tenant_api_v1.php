@@ -64,12 +64,12 @@ Route::middleware('auth:sanctum')
                     ->name('tenant.users.destroy');
 
                 Route::delete('/{user_id}/force_delete', [TenantUserController::class, 'forceDestroy'])
-                    ->middleware('auth:sanctum', 'abilities:landlord-users:write')
-                    ->name('tentant.users.force_destroy');
+                    ->middleware('abilities:landlord-users:write')
+                    ->name('tenant.users.force_destroy');
 
                 Route::post('/{user_id}/restore', [TenantUserController::class, 'restore'])
-                    ->middleware('auth:sanctum', 'abilities:landlord-users:write')
-                    ->name('tentant.users.restore');
+                    ->middleware('abilities:landlord-users:write')
+                    ->name('tenant.users.restore');
 
                 // Perfil do usuário atual
                 Route::get('/profile', [TenantUserController::class, 'profile'])
