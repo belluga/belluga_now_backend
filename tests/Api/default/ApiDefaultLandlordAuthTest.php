@@ -2,6 +2,8 @@
 
 namespace Tests\Api\default;
 
+use App\Models\Landlord\PersonalAccessToken;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
@@ -29,8 +31,18 @@ class ApiDefaultLandlordAuthTest extends TestCaseAuthenticated {
         }
     }
 
-    protected string $secondary_landlord_token {
-        set(string $value) {
+    protected ?string $secondary_landlord_user_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_ID->value);
+        }
+    }
+
+    protected ?string $secondary_landlord_token {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_TOKEN->value);
+        }
+
+        set(?string $value) {
             $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_TOKEN->value, $value);
             $this->secondary_landlord_token = $value;
         }
@@ -64,9 +76,9 @@ class ApiDefaultLandlordAuthTest extends TestCaseAuthenticated {
 
     }
 
-    public function testUserLoginSuccess(): void {
+    public function testUserLoginLogoutSuccess(): void {
 
-        $response = $this->userLoginSuccess();
+        $response = $this->userLoginSuccess("device1");
 
         $response->assertStatus(200);
 
@@ -78,6 +90,45 @@ class ApiDefaultLandlordAuthTest extends TestCaseAuthenticated {
         ]);
 
         $this->secondary_landlord_token = $response->json()['data']['token'];
+
+        $response = $this->userLogout("device1");
+
+        $response->assertStatus(200);
+
+        $this->secondary_landlord_token = null;
+    }
+
+    public function testUserLoginLogoutManyDevicesSuccess(): void {
+
+        $response = $this->userLoginSuccess("device1");
+
+        $this->secondary_landlord_token = $response->json()['data']['token'];
+
+        $response = $this->userLoginSuccess("device2");
+
+        $count = PersonalAccessToken::where('tokenable_id', $this->secondary_landlord_user_id)->count();
+
+        assert($count === 2);
+
+        $response = $this->userLogout(all_devices: true);
+
+        $response->assertStatus(200);
+
+        $response = $this->userLoginSuccess("default");
+
+        $this->secondary_landlord_token = $response->json()['data']['token'];
+    }
+
+    protected function userLogout(?string $device = null, ?bool $all_devices = null): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "admin/api/auth/logout",
+            data: $this->payloadUserLogout($device, $all_devices),
+            headers: [
+                'Authorization' => "Bearer $this->secondary_landlord_token",
+                'Content-Type' => 'application/json'
+            ]
+        );
     }
 
     protected function userLoginWrongPassword(): TestResponse {
@@ -96,19 +147,33 @@ class ApiDefaultLandlordAuthTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userLoginSuccess(): TestResponse {
+    protected function userLoginSuccess(string $device): TestResponse {
         return $this->json(
             method: 'post',
             uri: "admin/api/auth/login",
-            data: $this->payloadUserLoginSuccess()
+            data: $this->payloadUserLoginSuccess($device)
         );
     }
 
-    protected function payloadUserLoginSuccess(): array {
+    protected function payloadUserLogout(?string $device, ?bool $all_devices): array {
+
+        $return = [];
+        if ($device !== null) {
+            $return["device"] = $device;
+        }
+
+        if($all_devices !== null) {
+            $return["all_devices"] = $all_devices;
+        }
+
+        return $return;
+    }
+
+    protected function payloadUserLoginSuccess(String $device): array {
         return [
             "email" => $this->secondary_user_email,
             "password" => $this->secondary_user_password,
-            "device_name" => "test"
+            "device_name" => $device
         ];
     }
 

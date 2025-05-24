@@ -66,13 +66,18 @@ abstract class AuthControllerContract extends Controller
     public function logout(Request $request): JsonResponse
     {
         $request->validate([
-            'device' => 'required|string'
+            'all_devices' => 'boolean',
+            'device' => 'required_if:all_devices,false|string'
         ]);
 
         $user = $request->user();
 
         if ($user) {
-            $user->tokens()->where("name", $request->device)->delete();
+            if ($request->boolean('all_devices')) {
+                $user->tokens()->delete();
+            } else {
+                $user->tokens()->where("name", $request->device)->delete();
+            }
         }
 
         return response()->json();

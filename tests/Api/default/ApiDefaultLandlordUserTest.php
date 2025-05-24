@@ -13,7 +13,7 @@ class ApiDefaultLandlordUserTest extends TestCaseAuthenticated {
         get {
             $current_value = $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value);
             if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value, fake()->password());
+                $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value, fake()->password(8));
             }
             return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value);
         }
@@ -28,6 +28,7 @@ class ApiDefaultLandlordUserTest extends TestCaseAuthenticated {
             return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_EMAIL->value);
         }
     }
+
 
     protected string $secondary_landlord_user_id {
         set(string $value) {
