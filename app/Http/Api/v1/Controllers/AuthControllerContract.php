@@ -29,7 +29,6 @@ abstract class AuthControllerContract extends Controller
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             throw new HttpResponseException(response()->json([
-                'success' => false,
                 'errors' => [
                     "credentials" => "As credenciais fornecidas estão incorretas."
                 ]
@@ -40,7 +39,6 @@ abstract class AuthControllerContract extends Controller
             ->plainTextToken;
 
         return response()->json([
-            "success" => true,
             'data' => [
                 'user' => UserResource::make($user),
                 'token' => $token
@@ -58,7 +56,6 @@ abstract class AuthControllerContract extends Controller
         }
 
         return response()->json([
-            "success" => true,
             'data' => [
                 'user' => UserResource::make($user)
             ],
@@ -104,7 +101,6 @@ abstract class AuthControllerContract extends Controller
         DB::commit();
 
         return response()->json([
-            "success" => true,
             "data" => [
                 "token" => $token
             ],

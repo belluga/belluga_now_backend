@@ -2,6 +2,7 @@
 
 namespace App\Models\Tenants;
 
+use App\Models\Landlord\UserRole;
 use App\Traits\DemandPermissions;
 use App\Traits\HasOwner;
 use App\Traits\OwnRoles;
@@ -17,7 +18,7 @@ class Account extends Model
     use UsesTenantConnection, SoftDeletes, HasSlug, HasOwner, DemandPermissions, OwnRoles;
 
     public function userRoles(): HasMany {
-        return $this->hasMany(AccountUserRole::class);
+        return $this->hasMany(UserRole::class);
     }
 
     public function getSlugOptions(): SlugOptions

@@ -9,7 +9,7 @@ abstract class TestCaseAuthenticated extends TestCase
 {
     protected string $main_account_token {
         get {
-            return $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_TOKEN->value);
+            return $this->getGlobal(TestVariableLabels::LANDLORD_TOKEN->value);
         }
     }
 

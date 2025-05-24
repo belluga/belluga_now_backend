@@ -17,7 +17,7 @@ class InitializationController extends Controller
 
     public function initialize(InitializeRequest $request): JsonResponse {
 
-        $users_count = DB::connection('landlord')->table('users')->count();
+        $users_count = DB::connection('landlord')->table('landlord_users')->count();
         $tenants_count = DB::connection('landlord')->table('tenants')->count();
 
         if($users_count > 0 || $tenants_count > 0){
@@ -65,7 +65,6 @@ class InitializationController extends Controller
         DB::connection('landlord')->commit();
 
         return response()->json([
-            "success" => true,
             "data" => [
                 "user" => $new_user->toArray(),
                 "tenant" => TenantResource::make($new_tenant),

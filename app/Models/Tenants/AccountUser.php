@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
-use App\Traits\DemandPermissions;
+use App\Models\Landlord\UserRole;
 use App\Traits\OwnAccounts;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -35,6 +35,19 @@ class AccountUser extends Authenticatable
     ];
 
     public function accountRoles(): HasMany {
-        return $this->hasMany(AccountUserRole::class);
+        return $this->hasMany(UserRole::class);
+    }
+
+    public function addEmail(string $email): void {
+        $this->update(
+            ['$push' => ['emails' => $email]]
+        );
+    }
+
+    public function removeEmail(string $email): void {
+        $this->update(
+            [],
+            ['$pull' => ['emails' => $email]]
+        );
     }
 }

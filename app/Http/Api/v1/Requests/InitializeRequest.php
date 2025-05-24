@@ -27,7 +27,7 @@ class InitializeRequest extends FormRequest
     {
         return [
             'tenant.name' => 'required|string',
-            'tenant.subdomain' => 'required|string|unique:tenants,subdomain',
+            'tenant.subdomain' => 'required|string',
             'tenant.domains' => 'required|array',
             'user.name' => 'string',
             'user.emails' => 'required|array',
@@ -39,7 +39,6 @@ class InitializeRequest extends FormRequest
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'success' => false,
             'errors' => $validator->errors()
         ], 422));
     }

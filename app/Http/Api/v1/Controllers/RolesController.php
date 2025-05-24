@@ -6,7 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\RolesStoreRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Tenants\AccountUserRole;
+use App\Models\Landlord\UserRole;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -22,7 +22,7 @@ class RolesController extends Controller
             ->where('slug', $account_slug)
             ->firstOrFail();
 
-        $userRole = AccountUserRole::where('account_id', $account->id)
+        $userRole = UserRole::where('account_id', $account->id)
             ->where('user_id', $user->id)
             ->with('role')
             ->firstOr(function () {

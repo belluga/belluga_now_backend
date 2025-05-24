@@ -9,25 +9,18 @@ use Tests\TestCaseAuthenticated;
 
 class ApiDefaultValidationTest extends TestCaseAuthenticated {
 
-    protected string $main_account_slug {
-        get {
-            return $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_SLUG->value);
-        }
-    }
-
     public function testInitialization(): void {
         $response = $this->initiate();
 
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
-            "success",
             "errors" => [
-                "email",
-                "password",
-                "account.name",
-                "account.document",
-                "account.address",
+                "tenant.name",
+                "tenant.subdomain",
+                "tenant.domains",
+                "user.emails",
+                "user.password",
             ]
         ]);
     }
@@ -38,41 +31,10 @@ class ApiDefaultValidationTest extends TestCaseAuthenticated {
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
-            "success",
-            "errors" => [
-                "email",
-                "password",
-                "account_id",
-            ]
-        ]);
-    }
-
-    public function testAccountCreation(): void {
-        $response = $this->accountCreate();
-
-        $response->assertStatus(422);
-
-        $response->assertJsonStructure([
-            "success",
             "errors" => [
                 "name",
-                "document",
-                "address",
-            ]
-        ]);
-    }
-
-    public function testAccountTokenCreation(): void {
-        $response = $this->accountTokenCreate();
-
-        $response->assertStatus(422);
-
-        $response->assertJsonStructure([
-            "success",
-            "errors" => [
-                "user_id",
+                "emails",
                 "password",
-                "token_name",
             ]
         ]);
     }
@@ -80,30 +42,14 @@ class ApiDefaultValidationTest extends TestCaseAuthenticated {
     protected function initiate(): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "api/initialize"
+            uri: "admin/api/initialize"
         );
     }
 
     protected function userCreate(): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "api/users",
-            headers: $this->getHeaders()
-        );
-    }
-
-    protected function accountCreate(): TestResponse {
-        return $this->json(
-            method: 'post',
-            uri: "api/accounts",
-            headers: $this->getHeaders()
-        );
-    }
-
-    protected function accountTokenCreate(): TestResponse {
-        return $this->json(
-            method: 'post',
-            uri: "api/accounts/$this->main_account_slug/token",
+            uri: "admin/api/users",
             headers: $this->getHeaders()
         );
     }

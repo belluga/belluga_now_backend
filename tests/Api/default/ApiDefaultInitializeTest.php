@@ -2,6 +2,7 @@
 
 namespace Tests\Api\default;
 
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
@@ -16,13 +17,24 @@ class ApiDefaultInitializeTest extends TestCase {
             return $this->getGlobal(TestVariableLabels::USER_PASSWORD->value);
         }
     }
-    protected string $user_email {
+
+    protected string $user_email_1 {
         get {
-            $current_value = $this->getGlobal(TestVariableLabels::USER_EMAIL->value);
+            $current_value = $this->getGlobal(TestVariableLabels::USER_EMAIL_1->value);
             if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::USER_EMAIL->value, fake()->email());
+                $this->setGlobal(TestVariableLabels::USER_EMAIL_1->value, fake()->email());
             }
-            return $this->getGlobal(TestVariableLabels::USER_EMAIL->value);
+            return $this->getGlobal(TestVariableLabels::USER_EMAIL_1->value);
+        }
+    }
+
+    protected string $user_email_2 {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::USER_EMAIL_2->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::USER_EMAIL_2->value, fake()->email());
+            }
+            return $this->getGlobal(TestVariableLabels::USER_EMAIL_2->value);
         }
     }
 
@@ -36,10 +48,27 @@ class ApiDefaultInitializeTest extends TestCase {
         }
     }
 
+    protected string $tenant_name {
+        get {
+            $current_value = $this->getGlobal(TestVariableLabels::TENANT_1_NAME->value);
+            if ($current_value === null) {
+                $this->setGlobal(TestVariableLabels::TENANT_1_NAME->value, fake()->company());
+            }
+            return $this->getGlobal(TestVariableLabels::TENANT_1_NAME->value);
+        }
+    }
+
     protected string $main_user_id {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::MAIN_USER_ID->value, $value);
+            $this->setGlobal(TestVariableLabels::LANDLORD_USER_ID->value, $value);
             $this->main_user_id = $value;
+        }
+    }
+
+    protected string $landlord_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::LANDLORD_TOKEN->value, $value);
+            $this->landlord_token = $value;
         }
     }
 
@@ -49,15 +78,15 @@ class ApiDefaultInitializeTest extends TestCase {
         $response->assertStatus(201);
 
         $response->assertJsonStructure([
-            "success",
             "data" => [
                 "token",
                 "user",
-                "account"
-            ]
+                "tenant"
+            ],
         ]);
 
         $this->main_user_id = $response->json()['data']['user']["id"];
+        $this->landlord_token = $response->json()['data']['token'];
     }
 
     public function testInitiateAgain(): void {
@@ -66,7 +95,6 @@ class ApiDefaultInitializeTest extends TestCase {
         $response->assertStatus(403);
 
         $response->assertJsonStructure([
-            "success",
             "message",
             "errors"
         ]);
@@ -75,18 +103,28 @@ class ApiDefaultInitializeTest extends TestCase {
     protected function initiate(): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "api/initialize",
+            uri: "admin/api/initialize",
             data: $this->payloadInitiate(),
         );
     }
 
     protected function payloadInitiate(): array {
-
         return [
-            "name" => $this->user_name,
-            "email" => $this->user_email,
-            "password" => $this->user_password,
+            "user" => [
+                "name" => $this->user_name,
+                "emails" => [
+                    $this->user_email_1,
+                    $this->user_email_2,
+                ],
+                "password" => $this->user_password
+            ],
+            "tenant" => [
+                "name" => $this->tenant_name,
+                "subdomain" => Str::slug($this->tenant_name),
+                "domains" => [
+                    "localhost"
+                ]
+            ]
         ];
     }
-
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
-use App\Models\Tenants\AccountUserRole;
 use App\Traits\HasOwner;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
@@ -12,7 +11,6 @@ use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
-use MongoDB\Laravel\Relations\BelongsToMany;
 use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
