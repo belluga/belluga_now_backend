@@ -26,4 +26,8 @@ enum TestVariableLabels: string {
     case TENANT_1_NAME = "tenant.1.name";
 
     case TENANT_1_SLUG = "tenant.1.slug";
+
+    case TENANT_2_SLUG = "tenant.2.slug";
+
+    case TENANT_2_SUBDOMAIN = "tenant.2.subdomain";
 }

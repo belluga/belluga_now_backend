@@ -39,16 +39,10 @@ class TenantController extends Controller
 
         } catch (BulkWriteException $e) {
             if (str_contains($e->getMessage(), 'E11000')) {
-                return response()->json([
-                    'message' => 'Tenant already exists.',
-                    'errors' => ['tenant' => ["Tenant already exists."]]
-                ], 422);
+                abort(422, "Tenant already exists.");
             }
 
-            return response()->json([
-                'message' => "Something went wrong when trying to create the tenant.",
-                'errors' => ['tenant' => ["Something went wrong when trying to create the tenant."]]
-            ], 422);
+            abort(422, "Something went wrong when trying to create the tenant.");;
         }
     }
 

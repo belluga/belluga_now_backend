@@ -16,9 +16,15 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         }
     }
 
-    public function testTenantsCreate(): void {}
-
-    public function testTenantsCreateExistentDomain(): void {}
+    protected string $tenant_2_slug {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_SLUG->value, $value);
+            $this->tenant_2_slug = $value;;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SLUG->value);
+        }
+    }
 
     public function testTenantsList(): void {
         $tenantsList = $this->tenantsList();
@@ -30,6 +36,50 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         $this->assertEquals(1, $responseData['last_page']);
         $this->assertEquals(1, $responseData['current_page']);
         $this->assertEquals(15, $responseData['per_page']);
+    }
+
+    public function testTenantsCreate(): void {
+        $company_name = fake()->company();
+        $this->tenant_2_slug = Str::slug($company_name);
+
+        $response = $this->tenantsCreate([
+            "name" => $company_name,
+            "subdomain" => $this->tenant_2_slug,
+            "domains" => [
+                $this->tenant_2_slug,
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonStructure([
+            "data" => [
+                "name",
+                "subdomain",
+                "slug",
+                "database",
+                "created_at",
+            ]
+        ]);
+
+        $this->tenant_2_slug = $response->json()['data']['slug'];
+
+        $tenantsList = $this->tenantsList();
+        $tenantsList->assertOk();
+        $this->assertEquals(2, $tenantsList->json()['total']);
+    }
+
+    public function testTenantsCreateExistentSubdomain(): void {
+        $company_name = fake()->company();
+        $response = $this->tenantsCreate([
+            "name" => $company_name,
+            "subdomain" => $this->tenant_2_slug,
+            "domains" => [
+                $this->tenant_2_slug,
+            ]
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertEquals("The subdomain has already been taken", $response->json()['message']);;
     }
 
     public function testTenantsShow(): void {
@@ -46,7 +96,9 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         ]);
     }
 
-    public function testTenantsSoftDelete(): void {}
+    public function testTenantsSoftDelete(): void {
+
+    }
 
     public function testTenantsListArchived(): void {}
 
@@ -74,6 +126,15 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         return $this->json(
             method: 'get',
             uri: "admin/api/tenants/$this->tenant_1_slug",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsCreate(array $data): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "admin/api/tenants",
+            data: $data,
             headers: $this->getHeaders(),
         );
     }

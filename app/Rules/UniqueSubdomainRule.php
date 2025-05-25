@@ -30,7 +30,7 @@ class UniqueSubdomainRule implements ValidationRule
         $exists = $query->exists();
 
         if ($exists) {
-            $fail('Este subdomínio já está em uso.');
+            $fail('The subdomain has already been taken');
         }
     }
 }
