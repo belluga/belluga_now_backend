@@ -53,6 +53,16 @@ Route::prefix('tenants')->group(function () {
     Route::delete('/{tenant_slug}/force_delete', [TenantController::class, 'forceDestroy'])
         ->middleware('auth:sanctum', 'abilities:tenants:delete')
         ->name('tenants.destroy');
+
+    Route::group(['prefix' => '/{tenant_slug}/users'], function () {
+        Route::post('/', [LandlordUserController::class, 'tenantUserManage'])
+            ->middleware('auth:sanctum', 'abilities:tenants:manage')
+            ->name('manage.tenants.users.attach');
+
+        Route::delete('/', [LandlordUserController::class, 'tenantUserManage'])
+            ->middleware('auth:sanctum', 'abilities:tenants:manage')
+            ->name('manage.tenants.users.detach');
+    });
 });
 
 Route::prefix('users')->group(function () {
@@ -83,14 +93,6 @@ Route::prefix('users')->group(function () {
     Route::delete('/{user_id}', [LandlordUserController::class, 'destroy'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:write')
         ->name('users.force_destroy');
-
-    Route::post('/{user_id}/tenants', [LandlordUserController::class, 'tenantUserManage'])
-        ->middleware('auth:sanctum', 'abilities:tenants:manage')
-        ->name('manage.tenants.users.attach');
-
-    Route::delete('/{user_id}/tenants', [LandlordUserController::class, 'tenantUserManage'])
-        ->middleware('auth:sanctum', 'abilities:tenants:manage')
-        ->name('manage.tenants.users.detach');
 //
 //    // Alterar senha
 //    Route::put('/{id}/password', [UserController::class, 'updatePassword'])

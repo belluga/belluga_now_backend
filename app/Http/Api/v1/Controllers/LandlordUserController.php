@@ -75,42 +75,35 @@ class LandlordUserController extends Controller
         ]);
     }
 
-    public function tenantUserManage(TenantLandlordUserAttachRequest $request, $user_id): JsonResponse {
-        $user = LandlordUser::find($user_id);
+    public function tenantUserManage(TenantLandlordUserAttachRequest $request, $tenant_slug): JsonResponse {
 
-        if(!$user){
-            return response()->json([
-                "message" => "User not found.",
-                "errors" => ["user_id" => "User not found."]
-            ], 422);
-        }
+        $tenant = Tenant::findBySlug($tenant_slug) ?? abort(422, "Tenant not found");
 
-        $tenant_slugs = request()->tenant_slugs;
-        $tenants = Tenant::whereIn('slug', $tenant_slugs)->get();
+        $users = LandlordUser::whereIn('_id', request()->user_ids)->get();
 
-        if(count($tenants) < 1){
-            return response()->json([
-                "message" => "None tenant not found.",
-                "errors" => ["tenant_slugs" => "None tenant found."]
-            ], 422);
+        if(count($users) < 1){
+            abort(422, "No users found");
         }
 
         $method = strtolower($request->method());
 
         DB::beginTransaction();
-        switch( $method){
-            case 'post':
-                $tenants->each(fn($tenant) => $tenant->users()->attach($user));
-                break;
-            case 'delete':
-                $tenants->each(fn($tenant) => $tenant->users()->detach($user));
-                break;
-            default:
-                return response()->json([
-                    "message" => "Not found an action for this method.",
-                    "errors" => ["method" => "Not found an action for this method."]
-                ], 422);
+        try {
+            switch( $method){
+                case 'post':
+                    $users->each(fn($user) => $tenant->users()->attach($user));
+                    break;
+                case 'delete':
+                    $users->each(fn($user) => $tenant->users()->attach($user));
+                    break;
+                default:
+                    abort(422, "Not found an action for this method.");
+            }
+        }catch (\Exception $e){
+            DB::rollBack();
+            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
         }
+
         DB::commit();
 
         return response()->json();

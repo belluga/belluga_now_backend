@@ -52,9 +52,15 @@ class ApiDefaultInitializeTest extends TestCase {
         get {
             $current_value = $this->getGlobal(TestVariableLabels::TENANT_1_NAME->value);
             if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::TENANT_1_NAME->value, fake()->company());
+                $this->setGlobal(TestVariableLabels::TENANT_1_NAME->value, "Belluga Solutions Test");
             }
             return $this->getGlobal(TestVariableLabels::TENANT_1_NAME->value);
+        }
+    }
+
+    protected string $tenant_1_slug {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_1_SLUG->value, $value);
         }
     }
 
@@ -87,6 +93,7 @@ class ApiDefaultInitializeTest extends TestCase {
 
         $this->main_user_id = $response->json()['data']['user']["id"];
         $this->landlord_token = $response->json()['data']['token'];
+        $this->tenant_1_slug = $response->json()['data']['tenant']["slug"];
     }
 
     public function testInitiateAgain(): void {
@@ -126,5 +133,7 @@ class ApiDefaultInitializeTest extends TestCase {
                 ]
             ]
         ];
+
+
     }
 }

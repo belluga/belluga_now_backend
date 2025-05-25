@@ -10,6 +10,7 @@
             <file>tests/Api/default/ApiDefaultValidationTest.php</file>
             <file>tests/Api/default/ApiDefaultLandlordUserTest.php</file>
             <file>tests/Api/default/ApiDefaultLandlordAuthTest.php</file>
+            <file>tests/Api/default/ApiDefaultLandlordTenantTest.php</file>
 <!--            <file>tests/Api/default/ApiDefaultOrdersCreationTest.php</file>-->
 <!--            <file>tests/Api/default/ApiDefaultWebhookTest.php</file>-->
         </testsuite>
