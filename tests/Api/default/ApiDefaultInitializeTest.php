@@ -61,6 +61,7 @@ class ApiDefaultInitializeTest extends TestCase {
     protected string $tenant_1_slug {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_1_SLUG->value, $value);
+            $this->tenant_1_slug = $value;
         }
     }
 

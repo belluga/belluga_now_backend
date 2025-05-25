@@ -59,7 +59,9 @@ class TenantController extends Controller
         $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
 
         if($tenant){
-            return response()->json($tenant);
+            return response()->json([
+                "data" => $tenant
+            ]);
         }
 
         return response()->json([
