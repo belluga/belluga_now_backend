@@ -77,7 +77,7 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
     }
 
     public function testTenantsShow(): void {
-        $tenantsShow = $this->tenantsShow();
+        $tenantsShow = $this->tenantsShow($this->tenant_1_slug);
         $tenantsShow->assertOk();;
         $tenantsShow->assertJsonStructure([
             "data" => [
@@ -120,7 +120,23 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         $this->assertEquals(2, $listResponse->json('total') ?? 0);
     }
 
-    public function testTenantsUpdate(): void {}
+    public function testTenantsUpdate(): void {
+        $tenantUpdate = $this->tenantsUpdate(
+            $this->tenant_1_slug,
+            [
+                "name" => "Updated Tenant",
+            ]
+        );
+
+        $tenantUpdate->assertStatus(200);
+
+        $new_slug = Str::slug("Updated Tenant");
+
+        $tenantsShow = $this->tenantsShow($new_slug);
+        $tenantsShow->assertOk();
+
+        $this->assertEquals("Updated Tenant", $tenantsShow->json()['data']['name']);
+    }
 
     public function testTenantsDeleteFlow(): void {
 
@@ -161,6 +177,12 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
 
     public function testTenantsUsersList(): void {}
 
+    public function testTenantsDomainAdd(): void {}
+
+    public function testTenantsDomainRemove(): void {}
+
+    public function testTenantsDomainList(): void {}
+
     protected function tenantsList(): TestResponse {
         return $this->json(
             method: 'get',
@@ -169,10 +191,10 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function tenantsShow(): TestResponse {
+    protected function tenantsShow(string $slug): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "admin/api/tenants/$this->tenant_1_slug",
+            uri: "admin/api/tenants/$slug",
             headers: $this->getHeaders(),
         );
     }
@@ -181,6 +203,15 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         return $this->json(
             method: 'post',
             uri: "admin/api/tenants",
+            data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsUpdate(string $slug ,array $data): TestResponse {
+        return $this->json(
+            method: 'patch',
+            uri: "admin/api/tenants/$slug",
             data: $data,
             headers: $this->getHeaders(),
         );

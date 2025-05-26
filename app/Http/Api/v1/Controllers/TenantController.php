@@ -62,9 +62,10 @@ class TenantController extends Controller
 
     public function update(TenantUpdateRequest $request, string $tenant_slug): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-        $this->tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+        $this->tenant = Tenant::where('slug', $tenant_slug)->first();
+
         $params_to_update = $this->filterGuardedParameters($request->validated());
+
         $this->tenant->update($params_to_update);
 
         return response()->json([
