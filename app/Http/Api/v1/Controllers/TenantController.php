@@ -8,7 +8,9 @@ use App\Http\Api\v1\Requests\TenantStoreRequest;
 use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -21,29 +23,26 @@ class TenantController extends Controller
 
     public function index(Request $request): LengthAwarePaginator
     {
+
         $user = auth()->guard('sanctum')->user();
-        return $user->tenants()->with('domains')->paginate($request->get('per_page', 15));
+        return $user->tenants()
+            ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+            ->with('domains')->paginate($request->get('per_page', 15));
     }
 
     public function store(TenantStoreRequest $request): JsonResponse
     {
-
         $user = auth()->guard('sanctum')->user();
 
         try {
             $tenant = $user->tenants()->create($request->validated());
-
-            return response()->json([
-                'data' => $tenant
-            ], 201);
-
         } catch (BulkWriteException $e) {
-            if (str_contains($e->getMessage(), 'E11000')) {
-                abort(422, "Tenant already exists.");
-            }
-
-            abort(422, "Something went wrong when trying to create the tenant.");;
+            abort(422, "Something went wrong when trying to create the tenant.");
         }
+
+        return response()->json([
+            'data' => $tenant,
+        ], 201);
     }
 
     public function show(string $tenant_slug): JsonResponse
@@ -58,14 +57,7 @@ class TenantController extends Controller
             ]);
         }
 
-        return response()->json([
-            'message' => "Tenant não encontrado.",
-            'errors' => [
-                'tenant ' => ["O tenant solicitado não existe."
-                ]
-            ]
-        ],
-        404);
+        abort(404, "Tenant não encontrado.");
     }
 
     public function update(TenantUpdateRequest $request, string $tenant_slug): JsonResponse
@@ -92,6 +84,7 @@ class TenantController extends Controller
     public function destroy(string $tenant_slug): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
+
         $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
 
         $tenant->delete();
@@ -105,23 +98,16 @@ class TenantController extends Controller
             ->where('slug', $tenant_slug)
             ->firstOrFail();
 
-        DB::beginTransaction();
+        DB::connection("landlord")->beginTransaction();
         try {
             $tenant->domains()->delete();
-            $tenant->users()->detach();
             $tenant->forceDelete();;
         } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'message' => "Erro ao desfazer relacionamentos.",
-                'errors' => [
-                    'tenant' => ["Ocorreu um erro ao desfazer relacionamentos com o tenant. Tente novamente mais tarde."]
-                ]
-            ], 422);
+            DB::connection("landlord")->rollBack();
+            abort(422, "Erro ao desfazer relacionamentos");
         }
 
-        DB::commit();
+        DB::connection("landlord")->commit();
 
         return response()->json();
     }

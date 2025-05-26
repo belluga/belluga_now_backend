@@ -56,10 +56,6 @@ class Tenant extends BaseTenant
         return null;
     }
 
-    public function userRoles(): HasMany {
-        return $this->hasMany(TenantUserRole::class);
-    }
-
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()

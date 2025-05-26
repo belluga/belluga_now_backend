@@ -17,7 +17,7 @@ trait MigrateFreshSeedOnce
     {
         parent::setUp();
         if (!static::$setUpHasRunOnce) {
-            Artisan::call('migrate:fresh');
+            Artisan::call('migrate:fresh --database=landlord --path=database/migrations/landlord');
 //            Artisan::call(
 //                'db:seed', ['--class' => 'DatabaseSeeder']
 //            );

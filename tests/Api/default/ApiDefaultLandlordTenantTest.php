@@ -39,15 +39,12 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
     }
 
     public function testTenantsCreate(): void {
-        $company_name = fake()->company();
+        $company_name = "Temporary Test";
         $this->tenant_2_slug = Str::slug($company_name);
 
         $response = $this->tenantsCreate([
             "name" => $company_name,
             "subdomain" => $this->tenant_2_slug,
-            "domains" => [
-                $this->tenant_2_slug,
-            ],
         ]);
 
         $response->assertStatus(201);
@@ -73,9 +70,6 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         $response = $this->tenantsCreate([
             "name" => $company_name,
             "subdomain" => $this->tenant_2_slug,
-            "domains" => [
-                $this->tenant_2_slug,
-            ]
         ]);
 
         $response->assertStatus(422);
@@ -96,17 +90,70 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         ]);
     }
 
-    public function testTenantsSoftDelete(): void {
+    public function testTenantsSoftDelete(): void
+    {
+        $deleteResponse = $this->tenantsDelete($this->tenant_2_slug);
+        $deleteResponse->assertStatus(200);
 
+        $listResponse = $this->tenantsList();
+        $listResponse->assertOk();
+        $this->assertEquals(1, $listResponse->json('total') ?? 0);
     }
 
-    public function testTenantsListArchived(): void {}
+    public function testTenantsListArchived(): void
+    {
+        $archivedResponse = $this->tenantsListArchived();
+        $archivedResponse->assertOk();
+        $data = $archivedResponse->json();
 
-    public function testTenantsRestore(): void {}
+        $this->assertGreaterThanOrEqual(1, $data['total'] ?? 0);
+        $this->assertNotEmpty($data['data'] ?? []);
+        $this->assertEquals($this->tenant_2_slug, $data['data'][0]['slug']);
+    }
+
+    public function testTenantsRestore(): void
+    {
+        $restoreResponse = $this->tenantsRestore($this->tenant_2_slug);
+        $restoreResponse->assertStatus(200);
+
+        $listResponse = $this->tenantsList();
+        $this->assertEquals(2, $listResponse->json('total') ?? 0);
+    }
 
     public function testTenantsUpdate(): void {}
 
-    public function testTenantsDeleteFlow(): void {}
+    public function testTenantsDeleteFlow(): void {
+
+        $company = "To Be Deleted Company";
+        $tenant_slug = Str::slug($company);
+
+        $response = $this->tenantsCreate([
+            "name" => $company,
+            "subdomain" => $tenant_slug,
+        ]);
+        $response->assertStatus(201);
+
+        $response = $this->tenantsList();
+        $this->assertEquals(3, count($response['data']));
+
+        $response = $this->tenantsDelete($tenant_slug);
+        $response->assertStatus(200);
+
+        $response = $this->tenantsList();
+        $this->assertEquals(2, count($response['data']));
+
+        $response = $this->tenantsListArchived();
+        $this->assertEquals(1, count($response['data']));
+
+        $response = $this->tenantsForceDelete($tenant_slug);
+        $response->assertStatus(200);
+
+        $response = $this->tenantsList();
+        $this->assertEquals(2, count($response['data']));
+
+        $response = $this->tenantsListArchived();
+        $this->assertEquals(0, count($response['data']));
+    }
 
     public function testTenantsUsersAttach(): void {}
 
@@ -135,6 +182,38 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
             method: 'post',
             uri: "admin/api/tenants",
             data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsDelete(string $tenant_slug): TestResponse {
+        return $this->json(
+            method: 'delete',
+            uri: "admin/api/tenants/$tenant_slug",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsForceDelete(string $tenant_slug): TestResponse {
+        return $this->json(
+            method: 'delete',
+            uri: "admin/api/tenants/$tenant_slug/force_delete",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsRestore(string $tenant_slug): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "admin/api/tenants/$tenant_slug/restore",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsListArchived(): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "admin/api/tenants?archived=true",
             headers: $this->getHeaders(),
         );
     }

@@ -65,9 +65,7 @@ class TenantStoreRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'name.required' => 'O nome do tenant é obrigatório',
-            'domains.*.string' => 'O domínio deve ser uma string válida',
-            'app_domains.*.string' => 'O domínio de app deve ser uma string válida',
+            'name.required' => 'O nome do tenant é obrigatório'
         ];
     }
 }
