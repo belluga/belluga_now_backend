@@ -101,6 +101,7 @@ class LandlordUserController extends Controller
             }
         }catch (\Exception $e){
             DB::rollBack();
+            print_r($e->getMessage());
             abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
         }
 

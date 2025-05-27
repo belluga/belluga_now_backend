@@ -7,7 +7,7 @@ use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultValidationTest extends TestCaseAuthenticated {
+class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
 
     protected string $tenant_1_slug {
         get {

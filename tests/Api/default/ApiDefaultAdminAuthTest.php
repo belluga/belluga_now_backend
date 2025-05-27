@@ -10,7 +10,7 @@ use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultLandlordAuthTest extends TestCaseAuthenticated {
+class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
     protected string $secondary_user_password {
         get {
             $current_value = $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value);

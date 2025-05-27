@@ -8,7 +8,7 @@ use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
+class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
 
     protected string $tenant_1_slug {
         get {
@@ -23,6 +23,12 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_SLUG->value);
+        }
+    }
+
+    protected ?string $secondary_landlord_user_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_ID->value);
         }
     }
 
@@ -122,7 +128,7 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
 
     public function testTenantsUpdate(): void {
         $tenantUpdate = $this->tenantsUpdate(
-            $this->tenant_1_slug,
+            $this->tenant_2_slug,
             [
                 "name" => "Updated Tenant",
             ]
@@ -170,18 +176,6 @@ class ApiDefaultLandlordTenantTest extends TestCaseAuthenticated {
         $response = $this->tenantsListArchived();
         $this->assertEquals(0, count($response['data']));
     }
-
-    public function testTenantsUsersAttach(): void {}
-
-    public function testTenantsUsersDetach(): void {}
-
-    public function testTenantsUsersList(): void {}
-
-    public function testTenantsDomainAdd(): void {}
-
-    public function testTenantsDomainRemove(): void {}
-
-    public function testTenantsDomainList(): void {}
 
     protected function tenantsList(): TestResponse {
         return $this->json(
