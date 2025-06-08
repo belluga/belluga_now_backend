@@ -11,9 +11,9 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('account_user_roles', function (Blueprint $collection) {
-            $collection->unique(['account_id' => -1, 'user_id' => -1]);
-            $collection->index(['role_id' => -1]);
+        Schema::create('roles', function (Blueprint $collection) {
+            $collection->index('permissions');
+            $collection->unique('slug');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
     }
@@ -23,6 +23,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('account_user_roles');
+        Schema::dropIfExists('roles');
     }
 };

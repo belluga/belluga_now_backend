@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -21,11 +22,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(base_path('routes/api/landlord_api_v1.php'));
 
             Route::prefix('api/v1')
-//                ->middleware('api')
+                ->middleware('tenant')
                 ->group(base_path('routes/api/tenant_api_v1.php'));
 
             Route::prefix('api/v1/account/{account_slug}')
-//                ->middleware('api')
+                ->middleware('tenant')
                 ->group(base_path('routes/api/account_api_v1.php'));
 
             Route::prefix('api/v2')
@@ -46,11 +47,13 @@ return Application::configure(basePath: dirname(__DIR__))
         }
     )
     ->withMiddleware(function (Middleware $middleware) {
-//        $middleware
-//            ->group('tenant', [
-//                \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
-//                \Spatie\Multitenancy\Http\Middleware\EnsureValidTenantSession::class,
-//            ]);
+        $middleware
+            ->group('tenant', [
+                StartSession::class,
+                \App\Http\Middleware\InitializeTenancy::class,
+                \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
+                \Spatie\Multitenancy\Http\Middleware\EnsureValidTenantSession::class,
+            ]);
 
         $middleware->alias([
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,

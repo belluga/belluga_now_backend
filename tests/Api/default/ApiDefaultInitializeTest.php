@@ -79,6 +79,13 @@ class ApiDefaultInitializeTest extends TestCase {
         }
     }
 
+    protected string $main_role_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::MAIN_LANDLORD_ROLE_ID->value, $value);
+            $this->main_role_id = $value;
+        }
+    }
+
     public function testInitiate(): void {
         $response = $this->initiate();
 
@@ -95,6 +102,7 @@ class ApiDefaultInitializeTest extends TestCase {
         $this->main_user_id = $response->json()['data']['user']["id"];
         $this->landlord_token = $response->json()['data']['token'];
         $this->tenant_1_slug = $response->json()['data']['tenant']["slug"];
+        $this->main_role_id = $response->json()['data']["role"]["id"];
     }
 
     public function testInitiateAgain(): void {
@@ -132,6 +140,13 @@ class ApiDefaultInitializeTest extends TestCase {
                 "domains" => [
                     "localhost"
                 ]
+            ],
+            "role" => [
+                "name" =>  "Super User",
+                "permissions" => [
+                    "*.*"
+                ],
+                "is_default" => false
             ]
         ];
 

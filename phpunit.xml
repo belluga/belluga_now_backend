@@ -7,12 +7,13 @@
     <testsuites>
         <testsuite name="Api-Default">
             <file>tests/Api/default/ApiDefaultInitializeTest.php</file>
-            <file>tests/Api/default/ApiDefaultValidationTest.php</file>
-            <file>tests/Api/default/ApiDefaultLandlordUserTest.php</file>
-            <file>tests/Api/default/ApiDefaultLandlordAuthTest.php</file>
-            <file>tests/Api/default/ApiDefaultLandlordTenantTest.php</file>
-<!--            <file>tests/Api/default/ApiDefaultOrdersCreationTest.php</file>-->
-<!--            <file>tests/Api/default/ApiDefaultWebhookTest.php</file>-->
+            <file>tests/Api/default/ApiDefaultAdminValidationTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminUserTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminAuthTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminTenantTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminRolesTest.php</file>
+            <file>tests/Api/default/ApiDefaultAccountTest.php</file>
+            <file>tests/Api/default/ApiDefaultAccountRolesTest.php</file>
         </testsuite>
 <!--        <testsuite name="Api-V1">-->
 <!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->

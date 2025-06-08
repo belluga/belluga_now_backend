@@ -31,8 +31,13 @@ class InitializeRequest extends FormRequest
             'tenant.domains' => 'required|array',
             'user.name' => 'string',
             'user.emails' => 'required|array',
-            'user.emails.*' => 'email|unique:landlord_users,email',
+            'user.emails.*' => 'email',
             'user.password' => 'required|string',
+            'role.name' => ['required', 'string', 'max:255'],
+            'role.description' => ['nullable', 'string', 'max:1000'],
+            'role.permissions' => ['required', 'array'],
+            'role.permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
+            'role.is_default' => ['boolean'],
         ];
     }
 

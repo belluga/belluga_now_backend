@@ -7,7 +7,6 @@ namespace App\Rules;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Support\Facades\DB;
-use Spatie\Multitenancy\Contracts\IsTenant;
 
 class UniqueArrayItemRule implements ValidationRule
 {
@@ -33,7 +32,7 @@ class UniqueArrayItemRule implements ValidationRule
         $exists = $query->exists();
 
         if ($exists) {
-            $fail('Email já utilizado.');
+            $fail("$attribute já utilizado.");
         }
     }
 }

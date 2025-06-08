@@ -6,6 +6,9 @@ use App\Http\Api\v1\Controllers\AuthControllerTenant;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Models\Tenants\Account;
+use App\Http\Api\v1\Controllers\RolesController;
+
+
 
 Route::prefix('auth')
     ->group(function () {
@@ -88,11 +91,38 @@ Route::middleware('auth:sanctum')
             });
 
         Route::prefix('accounts')
+            ->middleware(["tenant"])
             ->group(function () {
                 Route::middleware(['ability:'.Account::canManagePermissions()])
                     ->group(function () {
                         Route::post('/', [AccountController::class, 'store'])
                             ->name('tenant.accounts.create');
                     });
+
+                Route::get('/', [AccountController::class, 'index'])
+                    ->name('tenant.accounts.list');
+
+                Route::get('/{account_slug}', [AccountController::class, 'show'])
+                    ->name('tenant.accounts.show');
+
+                Route::patch('/{account_slug}', [AccountController::class, 'update'])
+                    ->name('tenant.accounts.update');
+
+                Route::delete('/{account_slug}', [AccountController::class, 'destroy'])
+                    ->name('tenant.accounts.destroy');
+
+                Route::post('/{account_slug}/restore', [AccountController::class, 'restore'])
+                    ->name('tenant.accounts.restore');
+
+                Route::post('/{account_slug}/force_delete', [AccountController::class, 'forceDestroy'])
+                    ->name('tenant.accounts.force_destroy');;
+
+                Route::get('/{account_slug}/roles', [RolesController::class, 'index']);
+                Route::post('/{account_slug}/roles', [RolesController::class, 'store']);
+                Route::get('/{account_slug}/roles/{role_id}', [RolesController::class, 'show']);
+                Route::patch('/{account_slug}/roles/{role_id}', [RolesController::class, 'update']);
+                Route::delete('/{account_slug}/roles/{role_id}', [RolesController::class, 'destroy']);
+                Route::post('/{account_slug}/roles/{role_id}/restore', [RolesController::class, 'restore']);
+                Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesController::class, 'forceDestroy']);
         });
 });

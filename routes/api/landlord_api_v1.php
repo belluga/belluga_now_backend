@@ -5,6 +5,7 @@ use App\Http\Api\v1\Controllers\TenantController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
+use App\Http\Api\v1\Controllers\LandlordRolesController;
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
     Route::post('/', [InitializationController::class, 'initialize'])
@@ -97,4 +98,23 @@ Route::prefix('users')->group(function () {
 //    // Alterar senha
 //    Route::put('/{id}/password', [UserController::class, 'updatePassword'])
 //        ->name('users.password.update');
+});
+
+Route::middleware(['auth:sanctum'])->group(function () {
+    // System Roles
+    Route::get('roles', [LandlordRolesController::class, 'index']);
+    Route::post('roles', [LandlordRolesController::class, 'storeSystemRole']);
+    Route::get('roles/{role_id}', [LandlordRolesController::class, 'show']);
+    Route::patch('roles/{role_id}', [LandlordRolesController::class, 'update']);
+    Route::delete('roles/{role_id}', [LandlordRolesController::class, 'destroy']);
+    Route::delete('roles/{role_id}/force_delete', [LandlordRolesController::class, 'forceDestroy']);
+    Route::post('roles/{role_id}/restore', [LandlordRolesController::class, 'restore']);
+
+    // Tenant Roles
+    Route::get('tenants/{tenant_slug}/roles', [LandlordRolesController::class, 'tenantRoles']);
+    Route::post('tenants/{tenant_slug}/roles', [LandlordRolesController::class, 'storeTenantRole']);
+
+    // Role Assignment
+    Route::post('roles/{role_id}/users/{user_id}', [LandlordRolesController::class, 'assignRoleToUser']);
+    Route::delete('roles/{role_id}/users/{user_id}', [LandlordRolesController::class, 'removeRoleFromUser']);
 });

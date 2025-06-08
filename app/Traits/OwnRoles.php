@@ -1,13 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Traits;
 
-use App\Models\Landlord\Role;
-use MongoDB\Laravel\Relations\MorphMany;
+use App\Models\Tenants\Role;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 trait OwnRoles
 {
-    public function rolesOwner(): MorphMany {
-        return $this->morphMany(Role::class,"owner");
+    /**
+     * Get all roles owned by this entity
+     */
+    public function roles(): MorphMany
+    {
+        return $this->morphMany(Role::class, 'owner');
     }
 }

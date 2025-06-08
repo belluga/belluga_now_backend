@@ -30,4 +30,18 @@ enum TestVariableLabels: string {
     case TENANT_2_SLUG = "tenant.2.slug";
 
     case TENANT_2_SUBDOMAIN = "tenant.2.subdomain";
+
+    case ROLE_ID = "role.id";
+
+    case MAIN_LANDLORD_ROLE_ID = "main.landlord.role.id";
+
+    case TENANT_2_MAIN_ACCOUNT_SLUG = "tenant.2.main.account.slug";
+
+    case TENANT_2_MAIN_ACCOUNT_ID = "tenant.2.main.account.id";
+
+    case TENANT_2_MAIN_ACCOUNT_ROLE_ID = "tenant.2.main.account.role.id";
+
+    case TENANT_2_DELETE_ACCOUNT_SLUG = "tenant.2.delete.account.slug";
+
+    case SECONDARY_ROLE_ID = "tenant.2.main_account.secondary.role.id";
 }

@@ -5,7 +5,6 @@ namespace Tests\Api\default;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
-use Tests\TestCase;
 use Tests\TestCaseAuthenticated;
 
 class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
@@ -23,6 +22,13 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_SLUG->value);
+        }
+    }
+
+    protected string $tenant_2_subdomain {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_SUBDOMAIN->value, $value);
+            $this->tenant_2_subdomain = $value;;
         }
     }
 
@@ -142,6 +148,8 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         $tenantsShow->assertOk();
 
         $this->assertEquals("Updated Tenant", $tenantsShow->json()['data']['name']);
+
+        $this->tenant_2_subdomain = $tenantsShow->json()['data']['subdomain'];
     }
 
     public function testTenantsDeleteFlow(): void {

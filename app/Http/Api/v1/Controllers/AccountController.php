@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\AccountStoreRequest;
+use App\Http\Api\v1\Requests\AccountUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
 
@@ -22,32 +25,43 @@ class AccountController extends Controller
 //        return $user->tenants()->with('domains')->paginate($request->get('per_page', 15));
 //    }
 
+    public function index(Request $request): LengthAwarePaginator
+    {
+        $user = auth()->guard('sanctum')->user();
+
+        if (!$user->hasPermissionTo('accounts.view')) {
+            abort(403, 'You do not have permission to view accounts.');
+        }
+
+        return Account::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+            ->paginate(15);
+    }
+
     public function store(AccountStoreRequest $request): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
 
         try {
+
             DB::beginTransaction();
 
-            $account = $user->accountsOwner()->create($request->validated());
+            $account = Account::create($request->validated());
 
-            $role = $account->rolesOwner()->create([
+            $role = $account->roles()->create([
                 'name' => 'Admin',
-                'description' => 'Administrador do sistema',
+                'description' => 'Administrador',
                 'permissions' => [
                     '*.*'
                 ]
             ]);
 
-            $account->userRoles()->create([
-                "role_id" => $role->id,
-                "user_id" => $user->id
-            ]);
-
             DB::commit();
 
             return response()->json([
-                'data' => $account
+                'data' => [
+                    'account' => $account,
+                    'role' => $role,
+                ]
             ], 201);
 
         } catch (BulkWriteException $e) {
@@ -66,83 +80,95 @@ class AccountController extends Controller
         }
     }
 
-//    public function show(string $tenant_slug): JsonResponse
-//    {
-//
-//        $user = auth()->guard('sanctum')->user();
-//        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-//
-//        if($tenant){
-//            return response()->json($tenant);
-//        }
-//
-//        return response()->json([
-//            'message' => "Tenant não encontrado.",
-//            'errors' => [
-//                'tenant ' => ["O tenant solicitado não existe."
-//                ]
-//            ]
-//        ],
-//        404);
-//    }
+    public function show(string $account_slug): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
 
-//    public function update(TenantUpdateRequest $request, string $tenant_slug): JsonResponse
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        $this->tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-//        $params_to_update = $this->filterGuardedParameters($request->validated());
-//        $this->tenant->update($params_to_update);
-//
-//        return response()->json([
-//            'data' => $this->tenant
-//        ], 200);
-//    }
+        if (!$user->hasPermissionTo('account.view')) {
+            abort(403, 'You do not have permission to view accounts.');
+        }
 
-//    public function restore(string $tenant_slug): JsonResponse
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        $tenant = $user->tenants()->onlyTrashed()->where('slug', $tenant_slug)->first();
-//        $tenant->restore();
-//
-//        return response()->json([]);
-//    }
+        $account = Account::where("slug", $account_slug)->firstOrFail();;
 
-//    public function destroy(string $tenant_slug): JsonResponse
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-//
-//        $tenant->delete();
-//
-//        return response()->json([]);
-//    }
+        return response()->json([
+            'data' => $account
+        ]);
+    }
 
-//    public function forceDestroy(string $tenant_slug): JsonResponse
-//    {
-//        $tenant = Tenant::onlyTrashed()
-//            ->where('slug', $tenant_slug)
-//            ->firstOrFail();
-//
-//        DB::beginTransaction();
-//        try {
-//            $tenant->domains()->delete();
-//            $tenant->users()->detach();
-//            $tenant->forceDelete();;
-//        } catch (\Exception $e) {
-//            DB::rollBack();
-//
-//            return response()->json([
-//                'message' => "Erro ao desfazer relacionamentos.",
-//                'errors' => [
-//                    'tenant' => ["Ocorreu um erro ao desfazer relacionamentos com o tenant. Tente novamente mais tarde."]
-//                ]
-//            ], 422);
-//        }
-//
-//        DB::commit();
-//
-//        return response()->json();
-//    }
+    public function update(AccountUpdateRequest $request, string $account_slug): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
+
+        if (!$user->hasPermissionTo('account.update')) {
+            abort(403, 'You do not have permission to update account.');
+        }
+
+        $account = Account::where("slug", $account_slug)->firstOrFail();
+        $account->update($request->validated());
+
+        return response()->json([
+            'data' => $account
+        ]);
+    }
+
+    public function destroy(Request $request): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
+
+        if (!$user->hasPermissionTo('account.delete')) {
+            abort(403, 'You do not have permission to delete accounts.');
+        }
+
+        $account = Account::where('slug', $request->route('account_slug'))->firstOrFail();
+
+        try {
+            DB::beginTransaction();
+            $account->roles()->delete();
+            $account->delete();
+            DB::commit();
+        }catch (\Exception $e){
+            DB::rollBack();
+            return response()->json([
+                "message" => "Erro ao excluir conta. Tente novamente mais tarde.",
+            ], 422);
+        }
+
+        return response()->json([], 200);
+    }
+
+    public function restore(string $account_slug): JsonResponse
+    {
+        $account = Account::onlyTrashed()->where('slug', $account_slug)->first();
+        $account->restore();
+
+        return response()->json([]);
+    }
+
+    public function forceDestroy(string $account_slug): JsonResponse
+    {
+        $account = Account::onlyTrashed()
+            ->where('slug', $account_slug)
+            ->firstOrFail();
+
+        DB::beginTransaction();
+        try {
+            $account->roles()->forceDelete();;
+            $account->forceDelete();;
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => "Erro ao desfazer relacionamentos.",
+                'errors' => [
+                    'tenant' => ["Ocorreu um erro ao desfazer relacionamentos com o tenant. Tente novamente mais tarde."]
+                ]
+            ], 422);
+        }
+
+        DB::commit();
+
+        return response()->json();
+    }
 
 //    protected function filterGuardedParameters(array $received_params): array {
 //        $guarded = $this->tenant->getGuarded();

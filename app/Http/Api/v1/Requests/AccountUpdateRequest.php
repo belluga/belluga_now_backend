@@ -6,7 +6,7 @@ namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class AccountStoreRequest extends FormRequest
+class AccountUpdateRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -24,10 +24,10 @@ class AccountStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:255',
-            'document' => 'required|array',
-            'document.type' => 'required|string|in:cpf,cnpj',
-            'document.number' => 'required|string|max:255',
+            'name' => 'sometimes|string|max:255',
+            'document' => 'sometimes|array',
+            'document.type' => 'required_with:document.number|string|in:cpf,cnpj',
+            'document.number' => 'required_with:document.type|string|max:255',
         ];
     }
 
@@ -39,9 +39,6 @@ class AccountStoreRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'name.required' => 'O nome do tenant é obrigatório',
-            'document.required' => 'O documento é obrigatório',
-            'document.array' => 'O documento deve ser um objeto',
             'document.type.required' => 'O tipo do documento é obrigatório',
             'document.type.in' => 'O tipo do documento deve ser cpf ou cnpj',
             'document.number.required' => 'O número do documento é obrigatório',

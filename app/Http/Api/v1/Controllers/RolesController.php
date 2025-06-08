@@ -4,43 +4,53 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\RolesDeleteRequest;
 use App\Http\Api\v1\Requests\RolesStoreRequest;
+use App\Http\Api\v1\Requests\RolesUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\UserRole;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\Role;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
 
 class RolesController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $user = auth()->guard('sanctum')->user();
+
+        if (!$user->hasPermissionTo('role.view')) {
+            abort(403, 'You do not have permission to view roles.');
+        }
+
+        $roles = Role::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+            ->paginate(15);
+
+        return response()->json($roles);
+    }
+
     public function store(RolesStoreRequest $request): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
         $account_slug = $request->route('account_slug');
 
-        $account = $user->accountsOwner()
-            ->where('slug', $account_slug)
-            ->firstOrFail();
-
-        $userRole = UserRole::where('account_id', $account->id)
-            ->where('user_id', $user->id)
-            ->with('role')
-            ->firstOr(function () {
-                abort(403, 'Unauthorized.');
-            });
-
-        if (!$userRole->role->hasPermissionTo('role.create')) {
-            abort(403, 'You do not have permission to create roles.');
+        if (!$user->hasPermissionTo('account.role.create')) {
+            abort(403, 'You do not have permission to create account roles.');
         }
+
+        $account = Account::where('slug', $account_slug)
+            ->firstOrFail();
 
         try {
             DB::beginTransaction();
 
-            $role = $account->rolesOwner()->create(
+            $role = $account->roles()->create(
                 [
                     ...$request->validated(),
-                    'owner_id' => $user->id,
-                    'owner_type' => get_class($user)
+                    'account_id' => $account->id,
                 ]
             );
 
@@ -61,89 +71,81 @@ class RolesController extends Controller
         }
     }
 
-//    public function show(string $tenant_slug): JsonResponse
-//    {
-//
-//        $user = auth()->guard('sanctum')->user();
-//        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-//
-//        if($tenant){
-//            return response()->json($tenant);
-//        }
-//
-//        return response()->json([
-//            'message' => "Tenant não encontrado.",
-//            'errors' => [
-//                'tenant ' => ["O tenant solicitado não existe."
-//                ]
-//            ]
-//        ],
-//        404);
-//    }
+    public function show(string $account_slug, string $role_id): JsonResponse
+    {
 
-//    public function update(TenantUpdateRequest $request, string $tenant_slug): JsonResponse
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        $this->tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-//        $params_to_update = $this->filterGuardedParameters($request->validated());
-//        $this->tenant->update($params_to_update);
-//
-//        return response()->json([
-//            'data' => $this->tenant
-//        ], 200);
-//    }
+        $account = Account::where('slug', $account_slug)->firstOrFail();
 
-//    public function restore(string $tenant_slug): JsonResponse
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        $tenant = $user->tenants()->onlyTrashed()->where('slug', $tenant_slug)->first();
-//        $tenant->restore();
-//
-//        return response()->json([]);
-//    }
+        $role = $account->roles()->where('_id', new ObjectId($role_id))->firstOrFail();
 
-//    public function destroy(string $tenant_slug): JsonResponse
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
-//
-//        $tenant->delete();
-//
-//        return response()->json([]);
-//    }
+        return response()->json([
+            'data' => $role
+        ]);
+    }
 
-//    public function forceDestroy(string $tenant_slug): JsonResponse
-//    {
-//        $tenant = Tenant::onlyTrashed()
-//            ->where('slug', $tenant_slug)
-//            ->firstOrFail();
-//
-//        DB::beginTransaction();
-//        try {
-//            $tenant->domains()->delete();
-//            $tenant->users()->detach();
-//            $tenant->forceDelete();;
-//        } catch (\Exception $e) {
-//            DB::rollBack();
-//
-//            return response()->json([
-//                'message' => "Erro ao desfazer relacionamentos.",
-//                'errors' => [
-//                    'tenant' => ["Ocorreu um erro ao desfazer relacionamentos com o tenant. Tente novamente mais tarde."]
-//                ]
-//            ], 422);
-//        }
-//
-//        DB::commit();
-//
-//        return response()->json();
-//    }
+    public function update(RolesUpdateRequest $request): JsonResponse
+    {
+        $account = Account::where('slug', $request->route("account_slug") )->firstOrFail();
+        $role = $account->roles()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
 
-//    protected function filterGuardedParameters(array $received_params): array {
-//        $guarded = $this->tenant->getGuarded();
-//
-//        return collect($received_params)
-//            ->reject(fn ($value, $key) => in_array($key, $guarded) )
-//            ->toArray();
-//    }
+        $role->update($request->validated());
+
+        return response()->json([
+            'data' => $role
+        ], 200);
+    }
+
+    public function destroy(RolesDeleteRequest $request): JsonResponse
+    {
+        $account = Account::where('slug', $request->route("account_slug") )->firstOrFail();
+        $role = $account->roles()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
+
+        try{
+            DB::beginTransaction();
+
+            $role->users()->update(['role_id' => $request->validated()['role_id']]);
+            $role->delete();
+
+            DB::commit();
+        }catch (\Exception $e){
+            DB::rollBack();
+            return response()->json([
+                    "message" => "Erro ao excluir role. Tente novamente mais tarde.",
+                ],
+                422
+            );
+        }
+
+        return response()->json([]);
+    }
+
+    public function restore(string $account_slug, string $role_id): JsonResponse
+    {
+        $account = Account::where('slug', $account_slug)->firstOrFail();
+
+        $role = $account->roles()
+            ->onlyTrashed()
+            ->where('_id', new ObjectId($role_id))
+            ->firstOrFail();
+
+        $role->restore();
+
+        return response()->json([
+            "data" => $role
+        ]);
+    }
+
+    public function forceDestroy(string $account_slug, string $role_id): JsonResponse
+    {
+        $account = Account::where('slug', $account_slug)->firstOrFail();
+
+        $role = $account->roles()
+            ->onlyTrashed()
+            ->where('_id', new ObjectId($role_id))
+            ->firstOrFail();
+
+        $role->forceDelete();
+
+        return response()->json();
+    }
 }
