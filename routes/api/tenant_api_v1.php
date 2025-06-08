@@ -6,7 +6,7 @@ use App\Http\Api\v1\Controllers\AuthControllerTenant;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Models\Tenants\Account;
-use App\Http\Api\v1\Controllers\RolesController;
+use App\Http\Api\v1\Controllers\RolesAccountController;
 
 
 
@@ -117,24 +117,24 @@ Route::middleware('auth:sanctum')
                 Route::post('/{account_slug}/force_delete', [AccountController::class, 'forceDestroy'])
                     ->name('tenant.accounts.force_destroy');;
 
-                Route::get('/{account_slug}/roles', [RolesController::class, 'index'])
+                Route::get('/{account_slug}/roles', [RolesAccountController::class, 'index'])
                     ->name('tenant.accounts.roles.list');
 
-                Route::post('/{account_slug}/roles', [RolesController::class, 'store'])
+                Route::post('/{account_slug}/roles', [RolesAccountController::class, 'store'])
                     ->name('tenant.accounts.roles.create');
 
-                Route::get('/{account_slug}/roles/{role_id}', [RolesController::class, 'show'])
+                Route::get('/{account_slug}/roles/{role_id}', [RolesAccountController::class, 'show'])
                     ->name('tenant.accounts.roles.show');
 
-                Route::patch('/{account_slug}/roles/{role_id}', [RolesController::class, 'update'])
+                Route::patch('/{account_slug}/roles/{role_id}', [RolesAccountController::class, 'update'])
                     ->name('tenant.accounts.roles.update');
 
-                Route::delete('/{account_slug}/roles/{role_id}', [RolesController::class, 'destroy'])
+                Route::delete('/{account_slug}/roles/{role_id}', [RolesAccountController::class, 'destroy'])
                     ->name('tenant.accounts.roles.destroy');
 
-                Route::post('/{account_slug}/roles/{role_id}/restore', [RolesController::class, 'restore'])
+                Route::post('/{account_slug}/roles/{role_id}/restore', [RolesAccountController::class, 'restore'])
                     ->name('tenant.accounts.roles.restore');
-                Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesController::class, 'forceDestroy'])
+                Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesAccountController::class, 'forceDestroy'])
                     ->name('tenant.accounts.roles.force_destroy');
         });
 });

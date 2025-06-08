@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
 
-class RolesController extends Controller
+class RolesAccountController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
