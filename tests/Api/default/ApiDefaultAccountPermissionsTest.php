@@ -6,9 +6,44 @@ use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
+class ApiDefaultAccountPermissionsTest extends TestCaseAuthenticated
 {
-    public function testTenantRolesList(): void
+
+    protected string $tenant_subdomain {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SUBDOMAIN->value);
+        }
+    }
+
+    protected string $main_account_slug {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value);
+        }
+    }
+
+    protected string $secondary_role_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::SECONDARY_ROLE_ID->value, $value);
+            $this->secondary_role_id = $value;;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ROLE_ID->value);
+        }
+    }
+
+    protected string $main_role_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ROLE_ID->value);
+        }
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->account_slug = 'test-account';
+    }
+
+    public function testAccountRolesList(): void
     {
 //        $rolesList = $this->accountRolesList($this->main_account_slug);
 //        $rolesList->assertOk();
@@ -19,7 +54,7 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 //        $this->assertArrayHasKey('data', $responseData);
     }
 
-    public function testTenantRolesCreate(): void
+    public function testAccountRolesCreate(): void
     {
 
 //        $response = $this->accountRolesCreate(
@@ -45,7 +80,7 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 //        $this->secondary_role_id = $response->json()['data']['id'];
     }
 
-    public function testTenantRolesShow(): void
+    public function testAccountRolesShow(): void
     {
 //        $rolesShow = $this->accountRolesShow($this->main_account_slug, $this->secondary_role_id);
 //        $rolesShow->assertOk();
@@ -60,7 +95,7 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 //        ]);
     }
 
-    public function testTenantRolesUpdate(): void
+    public function testAccountRolesUpdate(): void
     {
 //        $roleUpdate = $this->accountRolesUpdate(
 //            $this->main_account_slug,
@@ -83,7 +118,7 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 //        );
     }
 
-    public function testTenantRolesDelete(): void
+    public function testAccountRolesDelete(): void
     {
 
 //        $rolesList = $this->accountRolesList($this->main_account_slug);
@@ -120,7 +155,7 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 //        $showDeleted->assertStatus(404);
     }
 
-    public function testTenantRolesRestore(): void
+    public function testAccountRolesRestore(): void
     {
 //        $restoreResponse = $this->accountRolesRestore($this->main_account_slug, $this->secondary_role_id);
 //        $restoreResponse->assertStatus(200);
@@ -137,7 +172,7 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 //        $this->equalTo(2, $responseData['total']);
     }
 
-    public function testTenantRolesDeleteFlow(): void
+    public function testAccountRolesDeleteFlow(): void
     {
 //        $responseListWithCreated = $this->accountRolesList($this->main_account_slug);
 //        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
@@ -180,77 +215,77 @@ class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
 
     }
 
-    protected function tenantRolesList(): TestResponse
+    protected function accountRolesList(string $account_slug): TestResponse
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles",
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesListArchived(): TestResponse
+    protected function accountRolesListArchived(string $account_slug): TestResponse
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles?archived=true",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles?archived=true",
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesShow(string $roleId): TestResponse
+    protected function accountRolesShow(string $account_slug, string $roleId): TestResponse
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles/$roleId",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesCreate(array $data): TestResponse
+    protected function accountRolesCreate(string $account_slug, array $data): TestResponse
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles",
             data: $data,
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesUpdate(string $roleId, array $data): TestResponse
+    protected function accountRolesUpdate(string $account_slug, string $roleId, array $data): TestResponse
     {
         return $this->json(
             method: 'patch',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles/$roleId",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
             data: $data,
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesDelete(string $roleId, array $data): TestResponse
+    protected function accountRolesDelete(string $account_slug, string $roleId, array $data): TestResponse
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles/$roleId",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
             data: $data,
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesForceDelete(string $roleId): TestResponse
+    protected function accountRolesForceDelete(string $account_slug, string $roleId): TestResponse
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles/$roleId/force_delete",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId/force_delete",
             headers: $this->getHeaders(),
         );
     }
 
-    protected function tenantRolesRestore(string $roleId): TestResponse
+    protected function accountRolesRestore(string $account_slug, string $roleId): TestResponse
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/roles/$roleId/restore",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId/restore",
             headers: $this->getHeaders(),
         );
     }

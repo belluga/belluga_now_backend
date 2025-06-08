@@ -12,8 +12,14 @@
             <file>tests/Api/default/ApiDefaultAdminAuthTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminTenantTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminRolesTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminPermissionsTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountTest.php</file>
+            <file>tests/Api/default/ApiDefaultAccountRolesValidationTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountRolesTest.php</file>
+            <file>tests/Api/default/ApiDefaultAccountPermissionsTest.php</file>
+            <file>tests/Api/default/ApiDefaultTenantRolesValidationTest.php</file>
+            <file>tests/Api/default/ApiDefaultTenantRolesTest.php</file>
+            <file>tests/Api/default/ApiDefaultTenantPermissionsTest.php</file>
         </testsuite>
 <!--        <testsuite name="Api-V1">-->
 <!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->

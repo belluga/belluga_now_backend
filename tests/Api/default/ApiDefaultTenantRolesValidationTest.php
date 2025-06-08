@@ -6,7 +6,7 @@ use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultTenantRolesTest extends TestCaseAuthenticated
+class ApiDefaultTenantRolesValidationTest extends TestCaseAuthenticated
 {
     public function testTenantRolesList(): void
     {
