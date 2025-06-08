@@ -117,12 +117,24 @@ Route::middleware('auth:sanctum')
                 Route::post('/{account_slug}/force_delete', [AccountController::class, 'forceDestroy'])
                     ->name('tenant.accounts.force_destroy');;
 
-                Route::get('/{account_slug}/roles', [RolesController::class, 'index']);
-                Route::post('/{account_slug}/roles', [RolesController::class, 'store']);
-                Route::get('/{account_slug}/roles/{role_id}', [RolesController::class, 'show']);
-                Route::patch('/{account_slug}/roles/{role_id}', [RolesController::class, 'update']);
-                Route::delete('/{account_slug}/roles/{role_id}', [RolesController::class, 'destroy']);
-                Route::post('/{account_slug}/roles/{role_id}/restore', [RolesController::class, 'restore']);
-                Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesController::class, 'forceDestroy']);
+                Route::get('/{account_slug}/roles', [RolesController::class, 'index'])
+                    ->name('tenant.accounts.roles.list');
+
+                Route::post('/{account_slug}/roles', [RolesController::class, 'store'])
+                    ->name('tenant.accounts.roles.create');
+
+                Route::get('/{account_slug}/roles/{role_id}', [RolesController::class, 'show'])
+                    ->name('tenant.accounts.roles.show');
+
+                Route::patch('/{account_slug}/roles/{role_id}', [RolesController::class, 'update'])
+                    ->name('tenant.accounts.roles.update');
+
+                Route::delete('/{account_slug}/roles/{role_id}', [RolesController::class, 'destroy'])
+                    ->name('tenant.accounts.roles.destroy');
+
+                Route::post('/{account_slug}/roles/{role_id}/restore', [RolesController::class, 'restore'])
+                    ->name('tenant.accounts.roles.restore');
+                Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesController::class, 'forceDestroy'])
+                    ->name('tenant.accounts.roles.force_destroy');
         });
 });
