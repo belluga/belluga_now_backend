@@ -88,6 +88,15 @@ class RolesAccountController extends Controller
         $account = Account::where('slug', $request->route("account_slug") )->firstOrFail();
         $role = $account->roles()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
 
+        if(empty($request->validated())){
+            return response()->json([
+                'message' => "Send at least one field to update.",
+                'errors' => [
+                    'empty' => ['Send at least one field to update.']
+                ]
+            ], 422);
+        }
+
         $role->update($request->validated());
 
         return response()->json([
