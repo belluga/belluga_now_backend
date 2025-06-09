@@ -134,6 +134,7 @@ Route::middleware('auth:sanctum')
 
                 Route::post('/{account_slug}/roles/{role_id}/restore', [RolesAccountController::class, 'restore'])
                     ->name('tenant.accounts.roles.restore');
+
                 Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesAccountController::class, 'forceDestroy'])
                     ->name('tenant.accounts.roles.force_destroy');
         });
