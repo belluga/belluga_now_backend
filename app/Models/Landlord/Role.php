@@ -14,6 +14,12 @@ class Role extends Model
 {
     use UsesLandlordConnection, SoftDeletes, HasSlug, DemandPermissions;
 
+    protected $fillable = [
+        'name',
+        'slug',
+        'permissions',
+    ];
+
     public function users(): HasMany {
         return $this->hasMany(LandlordUser::class);
     }

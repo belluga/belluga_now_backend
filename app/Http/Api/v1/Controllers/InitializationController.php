@@ -21,9 +21,6 @@ class InitializationController extends Controller
         $users_count = LandlordUser::all()->count();
         $tenants_count = Tenant::all()->count();
 
-//        $users_count = DB::connection('landlord')->table('landlord_users')->count();
-//        $tenants_count = DB::connection('landlord')->table('tenants')->count();
-
         if($users_count > 0 || $tenants_count > 0){
             return response()->json(
                 [
@@ -53,6 +50,7 @@ class InitializationController extends Controller
 
             $new_user = LandlordUser::create([
                 "name" => $request->user['name'],
+                "emails" => $request->user['emails'],
                 "password" => $request->user['password']
             ]);
 

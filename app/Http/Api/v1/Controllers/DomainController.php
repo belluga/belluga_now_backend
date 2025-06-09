@@ -58,7 +58,7 @@ class DomainController extends Controller
     {
         $tenant = Tenant::current();
         $domain = $tenant->domains()->onlyTrashed()->where("_id", $domain_id)->first();
-        $domain->forceDelete();;
+        $domain->forceDelete();
 
         return response()->json();
     }

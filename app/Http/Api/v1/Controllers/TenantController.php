@@ -102,7 +102,7 @@ class TenantController extends Controller
         DB::connection("landlord")->beginTransaction();
         try {
             $tenant->domains()->delete();
-            $tenant->forceDelete();;
+            $tenant->forceDelete();
         } catch (\Exception $e) {
             DB::connection("landlord")->rollBack();
             abort(422, "Erro ao desfazer relacionamentos");

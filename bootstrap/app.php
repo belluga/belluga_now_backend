@@ -25,7 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->middleware('tenant')
                 ->group(base_path('routes/api/tenant_api_v1.php'));
 
-            Route::prefix('api/v1/account/{account_slug}')
+            Route::prefix('api/v1/accounts/{account_slug}')
                 ->middleware('tenant')
                 ->group(base_path('routes/api/account_api_v1.php'));
 
@@ -38,11 +38,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(base_path('routes/api/landlord_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
 
             Route::prefix('api')
-//                ->middleware('api')
+                ->middleware('tenant')
                 ->group(base_path('routes/api/tenant_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
 
-            Route::prefix('api/account/{account_slug}')
-//                ->middleware('api')
+            Route::prefix('api/accounts/{account_slug}')
+                ->middleware('tenant')
                 ->group(base_path('routes/api/account_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
         }
     )

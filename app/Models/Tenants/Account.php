@@ -18,7 +18,10 @@ class Account extends Model
 {
     use UsesTenantConnection, SoftDeletes, HasSlug, DemandPermissions, OwnRoles;
 
-    protected $guarded = [];
+    protected $fillable = [
+        'name',
+        'document',
+    ];
 
     protected $casts = [
         'settings' => 'array',
@@ -29,7 +32,7 @@ class Account extends Model
      */
     public function users(): HasMany
     {
-        return $this->hasMany(AccountUser::class);;
+        return $this->hasMany(AccountUser::class);
     }
 
     public function roles(): HasMany {

@@ -5,8 +5,6 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerTenant;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Models\Tenants\Account;
-use App\Http\Api\v1\Controllers\RolesAccountController;
 
 
 
@@ -91,51 +89,31 @@ Route::middleware('auth:sanctum')
             });
 
         Route::prefix('accounts')
-            ->middleware(["tenant"])
             ->group(function () {
-                Route::middleware(['ability:'.Account::canManagePermissions()])
-                    ->group(function () {
-                        Route::post('/', [AccountController::class, 'store'])
-                            ->name('tenant.accounts.create');
-                    });
-
                 Route::get('/', [AccountController::class, 'index'])
                     ->name('tenant.accounts.list');
 
-                Route::get('/{account_slug}', [AccountController::class, 'show'])
-                    ->name('tenant.accounts.show');
+                Route::post('/', [AccountController::class, 'store'])
+                    ->name('tenant.accounts.create');
 
-                Route::patch('/{account_slug}', [AccountController::class, 'update'])
-                    ->name('tenant.accounts.update');
+                Route::prefix('{account_slug}')
+                    ->group(function () {
+                        Route::get('/', [AccountController::class, 'show'])
+                            ->name('tenant.accounts.show');
 
-                Route::delete('/{account_slug}', [AccountController::class, 'destroy'])
-                    ->name('tenant.accounts.destroy');
+                        Route::patch('/', [AccountController::class, 'update'])
+                            ->name('tenant.accounts.update');
 
-                Route::post('/{account_slug}/restore', [AccountController::class, 'restore'])
-                    ->name('tenant.accounts.restore');
+                        Route::delete('/', [AccountController::class, 'destroy'])
+                            ->name('tenant.accounts.destroy');
 
-                Route::post('/{account_slug}/force_delete', [AccountController::class, 'forceDestroy'])
-                    ->name('tenant.accounts.force_destroy');;
+                        Route::post('/restore', [AccountController::class, 'restore'])
+                            ->name('tenant.accounts.restore');
 
-                Route::get('/{account_slug}/roles', [RolesAccountController::class, 'index'])
-                    ->name('tenant.accounts.roles.list');
+                        Route::post('/force_delete', [AccountController::class, 'forceDestroy'])
+                            ->name('tenant.accounts.force_destroy');
+                    });
+            });
 
-                Route::post('/{account_slug}/roles', [RolesAccountController::class, 'store'])
-                    ->name('tenant.accounts.roles.create');
 
-                Route::get('/{account_slug}/roles/{role_id}', [RolesAccountController::class, 'show'])
-                    ->name('tenant.accounts.roles.show');
-
-                Route::patch('/{account_slug}/roles/{role_id}', [RolesAccountController::class, 'update'])
-                    ->name('tenant.accounts.roles.update');
-
-                Route::delete('/{account_slug}/roles/{role_id}', [RolesAccountController::class, 'destroy'])
-                    ->name('tenant.accounts.roles.destroy');
-
-                Route::post('/{account_slug}/roles/{role_id}/restore', [RolesAccountController::class, 'restore'])
-                    ->name('tenant.accounts.roles.restore');
-
-                Route::delete('/{account_slug}/roles/{role_id}/force_delete', [RolesAccountController::class, 'forceDestroy'])
-                    ->name('tenant.accounts.roles.force_destroy');
-        });
 });

@@ -18,7 +18,11 @@ class LandlordUser extends Authenticatable
 {
     use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesLandlordConnection;
 
-    protected $guarded = [];
+    protected $fillable = [
+        'name',
+        'emails',
+        'password'
+    ];
 
     protected $hidden = [
         'password',

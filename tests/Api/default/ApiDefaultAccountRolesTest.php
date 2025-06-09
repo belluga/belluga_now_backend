@@ -24,16 +24,40 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
     protected string $secondary_role_id {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::SECONDARY_ROLE_ID->value, $value);
-            $this->secondary_role_id = $value;;
+            $this->secondary_role_id = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::SECONDARY_ROLE_ID->value);
         }
     }
 
-    protected string $main_role_id {
+    protected string $main_account_role_admin_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value, $value);
+            $this->main_account_role_admin_id = $value;
+        }
         get {
-            return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ROLE_ID->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
+    protected string $main_account_role_usermanage_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_USERMANAGE_ID->value, $value);
+            $this->main_account_role_usermanage_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_USERMANAGE_ID->value);
+        }
+    }
+
+    protected string $main_account_role_rolemanage_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_ROLEMANAGE_ID->value, $value);
+            $this->main_account_role_rolemanage_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ROLEMANAGE_ID->value);
         }
     }
 
@@ -132,7 +156,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             $this->main_account_slug,
             $this->secondary_role_id,
             [
-                "role_id" => $this->main_role_id
+                "role_id" => $this->main_account_role_admin_id
             ]
         );
         $deleteResponse->assertStatus(200);
@@ -175,28 +199,28 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
     public function testAccountRolesDeleteFlow(): void
     {
         $responseListWithCreated = $this->accountRolesList($this->main_account_slug);
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(2, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountRolesListArchived($this->main_account_slug);
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(0, $responseListArchived->json()['total']);
 
         $restoreResponse = $this->accountRolesDelete(
             $this->main_account_slug,
             $this->secondary_role_id,
             [
-                "role_id" => $this->main_role_id
+                "role_id" => $this->main_account_role_admin_id
             ]
         );
         $restoreResponse->assertStatus(200);
 
         $responseListWithCreated = $this->accountRolesList($this->main_account_slug);
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(1, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountRolesListArchived($this->main_account_slug);
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(1, $responseListArchived->json()['total']);
 
         $restoreResponse = $this->accountRolesForceDelete(
@@ -206,13 +230,45 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
         $restoreResponse->assertStatus(200);
 
         $responseListWithCreated = $this->accountRolesList($this->main_account_slug);
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(1, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountRolesListArchived($this->main_account_slug);
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(0, $responseListArchived->json()['total']);
 
+    }
+
+    public function testAccountRolesCreateFinalRoles(): void {
+
+        $response = $this->accountRolesCreate(
+            $this->main_account_slug,
+            [
+                "name" => "User Manager",
+                "description" => "Role for users management",
+                "permissions" => ["user.*"],
+            ]
+        );
+
+        $response->assertStatus(201);
+
+        $response = $this->accountRolesCreate(
+            $this->main_account_slug,
+            [
+                "name" => "Role Manager",
+                "description" => "Role for roles management",
+                "permissions" => ["role.*", "user.view"],
+            ]
+        );
+
+        $response->assertStatus(201);
+
+        $rolesList = $this->accountRolesList($this->main_account_slug);
+        $rolesList->assertOk();
+
+        $responseData = $rolesList->json();
+        $this->assertArrayHasKey('total', $responseData);
+        $this->equalTo(3, $responseData['total']);
     }
 
     protected function accountRolesList(string $account_slug): TestResponse

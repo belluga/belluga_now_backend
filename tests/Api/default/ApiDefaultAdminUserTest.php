@@ -86,7 +86,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         $response_data = $response->json();
         $this->assertEquals(2, count($response_data['data']));
         $this->assertArrayHasKey('current_page', $response_data);
-        $this->assertArrayHasKey('per_page', $response_data);;
+        $this->assertArrayHasKey('per_page', $response_data);
     }
 
     public function testSoftDelete(): void

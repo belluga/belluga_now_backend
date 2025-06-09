@@ -44,4 +44,35 @@ enum TestVariableLabels: string {
     case TENANT_2_DELETE_ACCOUNT_SLUG = "tenant.2.delete.account.slug";
 
     case SECONDARY_ROLE_ID = "tenant.2.main_account.secondary.role.id";
+
+    case ACCOUNT_USER_ADMIN_ID = "account.user.admin.id";
+
+    case ACCOUNT_USER_USERMANAGE_ID = "account.user.usermanage.id";
+
+    case ACCOUNT_USER_ROLEMANAGE_ID = "account.user.rolemanage.id";
+
+    case ACCOUNT_ROLE_USERMANAGE_ID = "account.role.usermanage.id";
+
+    case ACCOUNT_ROLE_ROLEMANAGE_ID = "account.role.rolemanage.id";
+
+    case ACCOUNT_ROLE_ADMIN_ID = "account.role.admin.id";
+
+    case ACCOUNT_USER_ADMIN_PASSWORD = "account.user.admin.password";
+
+    case ACCOUNT_USER_ADMIN_EMAIL = "account.user.admin.email";
+
+    case ACCOUNT_USER_ADMIN_NAME = "account.user.admin.name";
+
+    case ACCOUNT_USER_USERMANAGE_PASSWORD = "account.user.usermanage.password";
+
+    case ACCOUNT_USER_USERMANAGE_EMAIL = "account.user.usermanage.email";
+
+    case ACCOUNT_USER_USERMANAGE_NAME = "account.user.usermanage.name";
+
+    case ACCOUNT_USER_ROLEMANAGE_PASSWORD = "account.user.rolemanage.password";
+
+    case ACCOUNT_USER_ROLEMANAGE_EMAIL = "account.user.rolemanage.email";
+
+    case ACCOUNT_USER_ROLEMANAGE_NAME = "account.user.rolemanage.name";
+
 }

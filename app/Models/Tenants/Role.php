@@ -9,6 +9,7 @@ use App\Traits\HasOwner;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
+use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
@@ -17,15 +18,19 @@ class Role extends Model
 {
     use DemandPermissions, SoftDeletes, UsesTenantConnection, HasOwner, HasSlug;
 
-    protected $guarded = [];
+    protected $fillable = [
+        'name',
+        'description',
+        'permissions',
+    ];
 
     protected $casts = [
         'permissions' => 'array',
     ];
 
-    public function users(): BelongsToMany
+    public function users(): HasMany
     {
-        return $this->belongsToMany(AccountUser::class);
+        return $this->hasMany(AccountUser::class);
     }
 
     public function getSlugOptions(): SlugOptions

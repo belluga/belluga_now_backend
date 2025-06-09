@@ -23,7 +23,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Model::unguard();
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
     }
 }

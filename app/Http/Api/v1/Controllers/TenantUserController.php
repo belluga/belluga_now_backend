@@ -8,9 +8,11 @@ use App\Http\Api\v1\Requests\TenantUserCreateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\Role;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
@@ -43,7 +45,24 @@ class TenantUserController extends Controller
      */
     public function store(TenantUserCreateRequest $request): JsonResponse
     {
-        $user = AccountUser::create($request->validated());
+//        DB::beginTransaction();
+        try {
+            $user = AccountUser::create($request->validated());
+            $role = Role::where('slug', $request->role)->firstOrFail();
+
+            $role->users()->save($user);
+//            $user->role()->save($role);
+//            DB::commit();
+        }catch (\Exception $e){
+//            DB::rollBack();
+            print($e->getMessage());
+            return response()->json([
+                'message' => 'An error occurred while trying to create the user. Please try again later.',
+                'errors' => [
+                    'database' => ['An error occurred while trying to create the user. Please try again later.']
+                ]
+            ], 422);
+        }
 
         return response()->json([
             'message' => 'Usuário criado com sucesso',
@@ -104,7 +123,7 @@ class TenantUserController extends Controller
         }
 
         //remove relationships
-        $user->delete();;
+        $user->delete();
 
         return response()->json(['message' => 'Usuário removido com sucesso']);
     }

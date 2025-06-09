@@ -23,7 +23,7 @@ class ApiDefaultAccountRolesValidationTest extends TestCaseAuthenticated
 
     protected string $main_role_id {
         get {
-            return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ROLE_ID->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
         }
     }
 

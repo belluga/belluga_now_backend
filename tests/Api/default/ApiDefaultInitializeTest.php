@@ -91,10 +91,14 @@ class ApiDefaultInitializeTest extends TestCase {
 
         $response->assertStatus(201);
 
+
         $response->assertJsonStructure([
             "data" => [
                 "token",
-                "user",
+                "user" => [
+                    "name",
+                    "emails",
+                ],
                 "tenant"
             ],
         ]);

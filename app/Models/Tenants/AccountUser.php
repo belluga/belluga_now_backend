@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Tenants;
 
 use App\Traits\OwnAccounts;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -20,8 +21,10 @@ class AccountUser extends Authenticatable
 
     protected $table = 'users';
 
-    protected $guarded = [
-        'role'
+    protected $fillable = [
+        'name',
+        'emails',
+        'password',
     ];
 
     protected $hidden = [
@@ -38,8 +41,8 @@ class AccountUser extends Authenticatable
         return $this->belongsToMany(AccountUser::class);
     }
 
-    public function role(): HasOne {
-        return $this->hasOne(Role::class);
+    public function role(): BelongsTo {
+        return $this->belongsTo(Role::class);
     }
 
     public function addEmail(string $email): void {

@@ -18,7 +18,7 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
     protected string $tenant_2_slug {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_SLUG->value, $value);
-            $this->tenant_2_slug = $value;;
+            $this->tenant_2_slug = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_SLUG->value);
@@ -28,7 +28,7 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
     protected string $tenant_2_subdomain {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_SUBDOMAIN->value, $value);
-            $this->tenant_2_subdomain = $value;;
+            $this->tenant_2_subdomain = $value;
         }
     }
 
@@ -85,12 +85,12 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         ]);
 
         $response->assertStatus(422);
-        $this->assertEquals("The subdomain has already been taken", $response->json()['message']);;
+        $this->assertEquals("The subdomain has already been taken", $response->json()['message']);
     }
 
     public function testTenantsShow(): void {
         $tenantsShow = $this->tenantsShow($this->tenant_1_slug);
-        $tenantsShow->assertOk();;
+        $tenantsShow->assertOk();
         $tenantsShow->assertJsonStructure([
             "data" => [
                 "name",

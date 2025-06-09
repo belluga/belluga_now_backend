@@ -17,27 +17,27 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     protected string $main_account_id {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ID->value, $value);
-            $this->main_account_id = $value;;
+            $this->main_account_id = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ID->value);
         }
     }
 
-    protected string $main_role_id {
+    protected string $main_account_role_admin_id {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ROLE_ID->value, $value);
-            $this->main_role_id = $value;;
+            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value, $value);
+            $this->main_account_role_admin_id = $value;
         }
         get {
-            return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ROLE_ID->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
         }
     }
 
     protected string $main_account_slug {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value, $value);
-            $this->main_account_slug = $value;;
+            $this->main_account_slug = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value);
@@ -47,7 +47,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     protected string $delete_account_slug {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_DELETE_ACCOUNT_SLUG->value, $value);
-            $this->delete_account_slug = $value;;
+            $this->delete_account_slug = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_DELETE_ACCOUNT_SLUG->value);
@@ -96,7 +96,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
 
         $this->main_account_id = $response->json()['data']['account']['id'];
         $this->main_account_slug = $response->json()['data']['account']['slug'];
-        $this->main_role_id = $response->json()['data']['role']['id'];
+        $this->main_account_role_admin_id = $response->json()['data']['role']['id'];
     }
 
     public function testAccountShow(): void
@@ -153,18 +153,18 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
         $this->delete_account_slug = $responseCreate->json()['data']['account']['slug'];
 
         $responseList = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseList->json());;
+        $this->assertArrayHasKey('total', $responseList->json());
         $this->equalTo(2, $responseList->json()['total']);
 
         $deleteResponse = $this->accountDelete($this->delete_account_slug);
         $deleteResponse->assertStatus(200);
 
         $responseListWithCreated = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(1, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountsListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(1, $responseListArchived->json()['total']);
     }
 
@@ -174,11 +174,11 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
         $showResponse->assertStatus(404);
 
         $responseListWithCreated = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(1, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountsListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(1, $responseListArchived->json()['total']);
 
         $restoreResponse = $this->accountRestore($this->delete_account_slug);
@@ -188,44 +188,44 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
         $showResponse->assertOk();
 
         $responseListWithCreated = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(2, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountsListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(0, $responseListArchived->json()['total']);
     }
 
     public function testAccountDeleteFlow(): void
     {
         $responseListWithCreated = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(2, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountsListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(0, $responseListArchived->json()['total']);
 
         $restoreResponse = $this->accountDelete($this->delete_account_slug);
         $restoreResponse->assertStatus(200);
 
         $responseListWithCreated = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(1, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountsListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(1, $responseListArchived->json()['total']);
 
         $restoreResponse = $this->accountForceDelete($this->delete_account_slug);
         $restoreResponse->assertStatus(200);
 
         $responseListWithCreated = $this->accountsList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());;
+        $this->assertArrayHasKey('total', $responseListWithCreated->json());
         $this->equalTo(1, $responseListWithCreated->json()['total']);
 
         $responseListArchived = $this->accountsListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());;
+        $this->assertArrayHasKey('total', $responseListArchived->json());
         $this->equalTo(0, $responseListArchived->json()['total']);
 
         //TODO: Test if it deleted the Roles or if I still have orphan roles in database

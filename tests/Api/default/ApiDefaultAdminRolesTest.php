@@ -53,7 +53,7 @@ class ApiDefaultAdminRolesTest extends TestCaseAuthenticated
         $rolesList->assertOk();
 
         $responseData = $rolesList->json();
-        $this->assertEquals(2, $responseData['total']);;
+        $this->assertEquals(2, $responseData['total']);
         $this->assertArrayHasKey('total', $responseData);
         $this->assertArrayHasKey('data', $responseData);
         $this->assertArrayHasKey('last_page', $responseData);
@@ -126,7 +126,7 @@ class ApiDefaultAdminRolesTest extends TestCaseAuthenticated
         $rolesListArchived->assertOk();
 
         $responseData = $rolesListArchived->json();
-        $this->assertEquals(1, $responseData['total']);;
+        $this->assertEquals(1, $responseData['total']);
         $this->assertArrayHasKey('total', $responseData);
         $this->assertArrayHasKey('data', $responseData);
         $this->assertArrayHasKey('last_page', $responseData);
@@ -138,11 +138,11 @@ class ApiDefaultAdminRolesTest extends TestCaseAuthenticated
 
         $rolesListArchived = $this->rolesListArchived();
         $responseData = $rolesListArchived->json();
-        $this->assertEquals(0, $responseData['total']);;
+        $this->assertEquals(0, $responseData['total']);
 
         $rolesList = $this->rolesList();
         $responseData = $rolesList->json();
-        $this->assertEquals(1, $responseData['total']);;
+        $this->assertEquals(1, $responseData['total']);
     }
 
     protected function rolesList(): TestResponse

@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\AccountUpdateRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,8 +40,6 @@ class AccountController extends Controller
 
     public function store(AccountStoreRequest $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
         try {
 
             DB::beginTransaction();
@@ -88,7 +87,7 @@ class AccountController extends Controller
             abort(403, 'You do not have permission to view accounts.');
         }
 
-        $account = Account::where("slug", $account_slug)->firstOrFail();;
+        $account = Account::where("slug", $account_slug)->firstOrFail();
 
         return response()->json([
             'data' => $account
@@ -152,8 +151,8 @@ class AccountController extends Controller
 
         DB::beginTransaction();
         try {
-            $account->roles()->forceDelete();;
-            $account->forceDelete();;
+            $account->roles()->forceDelete();
+            $account->forceDelete();
         } catch (\Exception $e) {
             DB::rollBack();
 

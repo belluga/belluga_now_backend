@@ -11,6 +11,10 @@ class Domains extends Model
 {
     use UsesLandlordConnection, SoftDeletes;
 
+    protected $fillable = [
+        'path'
+    ];
+
     public function tenant(): BelongsTo {
         return $this->belongsTo(Tenant::class);
     }
