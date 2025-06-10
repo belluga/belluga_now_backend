@@ -11,40 +11,93 @@ use Tests\TestCase;
 use Tests\TestCaseAuthenticated;
 
 class ApiDefaultAcountAuthTest extends TestCaseAuthenticated {
-    protected string $secondary_user_password {
+    protected string $account_user_rolemanage_email {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_EMAIL->value, $value);
+            $this->account_user_rolemanage_email = $value;
+        }
         get {
-            $current_value = $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value);
-            if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value, fake()->password());
-            }
-            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_PASSWORD->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_EMAIL->value);
         }
     }
 
-    protected string $secondary_user_email {
+    protected string $account_user_rolemanage_password {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_PASSWORD->value, $value);
+            $this->account_user_rolemanage_password = $value;
+        }
         get {
-            $current_value = $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_EMAIL->value);
-            if ($current_value === null) {
-                $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_EMAIL->value, fake()->email());
-            }
-            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_EMAIL->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_PASSWORD->value);
         }
     }
 
-    protected ?string $secondary_landlord_user_id {
+    protected string $account_user_rolemanage_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_TOKEN->value, $value);
+            $this->account_user_rolemanage_token = $value;
+        }
         get {
-            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_ID->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_TOKEN->value);
         }
     }
 
-    protected ?string $secondary_landlord_token {
-        get {
-            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_TOKEN->value);
+    protected string $account_user_usermanage_email {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_EMAIL->value, $value);
+            $this->account_user_usermanage_email = $value;
         }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_EMAIL->value);
+        }
+    }
 
-        set(?string $value) {
-            $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_TOKEN->value, $value);
-            $this->secondary_landlord_token = $value;
+    protected string $account_user_usermanage_password {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_PASSWORD->value, $value);
+            $this->account_user_usermanage_password = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_PASSWORD->value);
+        }
+    }
+
+    protected string $account_user_usermanage_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_TOKEN->value, $value);
+            $this->account_user_usermanage_token = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_TOKEN->value);
+        }
+    }
+
+    protected string $account_user_admin_email {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_EMAIL->value, $value);
+            $this->account_user_admin_email = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_EMAIL->value);
+        }
+    }
+
+    protected string $account_user_admin_password {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_PASSWORD->value, $value);
+            $this->account_user_admin_password = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_PASSWORD->value);
+        }
+    }
+
+    protected string $account_user_admin_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_TOKEN->value, $value);
+            $this->account_user_admin_token = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_TOKEN->value);
         }
     }
 

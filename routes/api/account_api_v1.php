@@ -31,12 +31,16 @@ Route::prefix('users')
             ->name('tenant.users.destroy');
 
         Route::delete('/{user_id}/force_delete', [TenantUserController::class, 'forceDestroy'])
-            ->middleware('abilities:landlord-users:write')
             ->name('tenant.users.force_destroy');
 
         Route::post('/{user_id}/restore', [TenantUserController::class, 'restore'])
-            ->middleware('abilities:landlord-users:write')
             ->name('tenant.users.restore');
+
+        Route::patch('/{user_id}/emails', [TenantUserController::class, 'addEmails'])
+            ->name('tenant.users.add_emails');
+
+        Route::delete('/{user_id}/emails', [TenantUserController::class, 'removeEmails'])
+            ->name('tenant.users.remove_emails');
 
         // Perfil do usuário atual
         Route::get('/profile', [TenantUserController::class, 'profile'])

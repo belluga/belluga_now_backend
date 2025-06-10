@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\AccountUserEmailsAddRequest;
+use App\Http\Api\v1\Requests\AccountUserEmailsRemoveRequest;
 use App\Http\Api\v1\Requests\TenantUserCreateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
@@ -15,6 +17,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use MongoDB\BSON\ObjectId;
 
 class TenantUserController extends Controller
 {
@@ -34,9 +37,9 @@ class TenantUserController extends Controller
     /**
      * Exibe um usuário específico
      */
-    public function show(string $id): JsonResponse
+    public function show(Request $request): JsonResponse
     {
-        $user = AccountUser::findOrFail($id);
+        $user = AccountUser::where('_id', new ObjectId($request->route("user_id")))->firstOrFail();
         return response()->json(['data' => $user]);
     }
 
@@ -73,13 +76,15 @@ class TenantUserController extends Controller
     /**
      * Atualiza um usuário existente
      */
-    public function update(Request $request, string $id): JsonResponse
+    public function update(Request $request): JsonResponse
     {
-        $user = AccountUser::findOrFail($id);
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();;
 
         $validator = Validator::make($request->all(), [
             'name' => 'string|max:255',
-            'email' => 'string|email|max:255|unique:tenant.tenant_users,email,' . $id . ',_id',
+            'email' => 'string|email|max:255|unique:tenant.tenant_users,email,' . $user_id . ',_id',
         ]);
 
         if ($validator->fails()) {
@@ -113,9 +118,11 @@ class TenantUserController extends Controller
     /**
      * Remove um usuário
      */
-    public function destroy(string $user_id): JsonResponse
+    public function destroy(Request $request): JsonResponse
     {
-        $user = AccountUser::findOrFail($user_id);
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();;
 
         // Impede que o usuário atual seja excluído
         if ($user->_id === Auth::id()) {
@@ -128,8 +135,14 @@ class TenantUserController extends Controller
         return response()->json(['message' => 'Usuário removido com sucesso']);
     }
 
-    public function restore($user_id): JsonResponse {
-        $user = AccountUser::onlyTrashed()->findOrFail($user_id);
+    public function restore(Request $request): JsonResponse {
+
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::onlyTrashed()
+            ->where("_id", new ObjectId($user_id))
+            ->firstOrFail();
+
         $user->restore();
 
         return response()->json(
@@ -139,8 +152,13 @@ class TenantUserController extends Controller
         );
     }
 
-    public function forceDestroy($user_id): JsonResponse {
-        $user = AccountUser::onlyTrashed()->findOrFail($user_id);
+    public function forceDestroy(Request $request): JsonResponse {
+
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::onlyTrashed()
+            ->where("_id", new ObjectId($user_id))
+            ->firstOrFail();
 
         if ($user->_id === Auth::id()) {
             return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
@@ -154,9 +172,13 @@ class TenantUserController extends Controller
     /**
      * Atualiza a senha de um usuário
      */
-    public function updatePassword(Request $request, string $id): JsonResponse
+    public function updatePassword(Request $request): JsonResponse
     {
-        $user = AccountUser::findOrFail($id);
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::onlyTrashed()
+            ->where("_id", new ObjectId($user_id))
+            ->firstOrFail();
 
         $validator = Validator::make($request->all(), [
             'password' => 'required|string|min:8|confirmed',
@@ -170,5 +192,60 @@ class TenantUserController extends Controller
         $user->save();
 
         return response()->json(['message' => 'Senha atualizada com sucesso']);
+    }
+
+    public function addEmails(AccountUserEmailsAddRequest $request): JsonResponse
+    {
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();
+
+        $new_emails = $request->input('emails');
+
+        try{
+            $user->push('emails', $new_emails);
+        }catch (\Exception $e){
+            if (str_contains($e->getMessage(), 'E11000')) {
+                return response()->json([
+                    'message' => 'An email already exists.',
+                    'errors' => ['emails' => ["One of the emails given already exists.."]]
+                ], 422);
+            }
+
+            return response()->json([
+                    "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
+                ],
+               422
+            );
+        }
+
+        return response()->json([
+            'message' => 'Usuário atualizado com sucesso',
+            'data' => $user
+        ]);
+    }
+
+    public function removeEmails(AccountUserEmailsRemoveRequest $request): JsonResponse
+    {
+        $user_id = $request->route("user_id");
+
+        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();
+
+        $remove_emails = $request->input('emails');
+
+        try{
+            $user->pull('emails', $remove_emails);
+        }catch (\Exception $e){
+            return response()->json([
+                "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
+            ],
+                422
+            );
+        }
+
+        return response()->json([
+            'message' => 'Usuário atualizado com sucesso',
+            'data' => $user
+        ]);
     }
 }

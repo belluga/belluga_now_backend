@@ -59,9 +59,13 @@ enum TestVariableLabels: string {
 
     case ACCOUNT_USER_ADMIN_PASSWORD = "account.user.admin.password";
 
-    case ACCOUNT_USER_ADMIN_EMAIL = "account.user.admin.email";
+    case ACCOUNT_USER_ADMIN_EMAIL_1 = "account.user.admin.email.1";
+
+    case ACCOUNT_USER_ADMIN_EMAIL_2 = "account.user.admin.email.2";
 
     case ACCOUNT_USER_ADMIN_NAME = "account.user.admin.name";
+
+    case ACCOUNT_USER_ADMIN_TOKEN = "account.user.admin.token";
 
     case ACCOUNT_USER_USERMANAGE_PASSWORD = "account.user.usermanage.password";
 
@@ -69,10 +73,26 @@ enum TestVariableLabels: string {
 
     case ACCOUNT_USER_USERMANAGE_NAME = "account.user.usermanage.name";
 
+    case ACCOUNT_USER_USERMANAGE_TOKEN = "account.user.usermanage.token";
+
     case ACCOUNT_USER_ROLEMANAGE_PASSWORD = "account.user.rolemanage.password";
 
     case ACCOUNT_USER_ROLEMANAGE_EMAIL = "account.user.rolemanage.email";
 
     case ACCOUNT_USER_ROLEMANAGE_NAME = "account.user.rolemanage.name";
+
+    case ACCOUNT_USER_ROLEMANAGE_TOKEN = "account.user.rolemanage.token";
+
+    case ACCOUNT_USER_TODELETE_NAME = "account.user.todelete.name";
+
+    case ACCOUNT_USER_TODELETE_EMAIL = "account.user.todelete.email";
+
+    case ACCOUNT_USER_TODELETE_PASSWORD = "account.user.todelete.password";
+
+    case ACCOUNT_USER_TODELETE_ID = "account.user.todelete.id";
+
+    case ACCOUNT_USER_TODELETE_EMAIL_2 = "account.user.todelete.email.2";
+
+    case ACCOUNT_USER_TODELETE_EMAIL_3 = "account.user.todelete.email.3";
 
 }
