@@ -241,6 +241,46 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $account_user_visitor_name {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value, $value);
+            $this->account_user_visitor_name = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value);
+        }
+    }
+
+    protected string $account_user_visitor_email {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value, $value);
+            $this->account_user_visitor_email = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value);
+        }
+    }
+
+    protected string $account_user_visitor_password {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value, $value);
+            $this->account_user_visitor_password = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value);
+        }
+    }
+
+    protected string $account_user_visitor_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value, $value);
+            $this->account_user_visitor_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value);
+        }
+    }
+
     public function testAccountUserCreation(): void {
         $this->account_user_admin_name = fake()->name();
         $this->account_user_admin_email_1 = fake()->email();
@@ -318,6 +358,25 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
 
         $response->assertStatus(201);
         $this->account_user_to_delete_id = $response->json()['data']["id"];
+
+
+        $this->account_user_visitor_name = fake()->name();
+        $this->account_user_visitor_email = fake()->email();
+        $this->account_user_visitor_password = fake()->password(8);
+
+        $response = $this->accountUserCreate([
+            "name" => $this->account_user_visitor_name,
+            "emails" => [
+                $this->account_user_visitor_email,
+            ],
+            "password" => $this->account_user_visitor_password,
+            "password_confirmation" => $this->account_user_visitor_password,
+            "role" => "visitor"
+
+        ]);
+
+        $response->assertStatus(201);
+        $this->account_user_visitor_id = $response->json()['data']["id"];
     }
 
     public function testAccountUsersList(): void {

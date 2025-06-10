@@ -261,6 +261,15 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
 
+        $response = $this->accountRolesCreate(
+            $this->main_account_slug,
+            [
+                "name" => "Visitor",
+                "description" => "Role for roles management",
+                "permissions" => ["content.view"],
+            ]
+        );
+
         $response->assertStatus(201);
 
         $rolesList = $this->accountRolesList($this->main_account_slug);

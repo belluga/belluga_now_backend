@@ -97,4 +97,12 @@ enum TestVariableLabels: string {
 
     case ACCOUNT_USER_TODELETE_EMAIL_3 = "account.user.todelete.email.3";
 
+    case ACCOUNT_USER_VISITOR_NAME = "account.user.visitor.name";
+
+    case ACCOUNT_USER_VISITOR_EMAIL = "account.user.visitor.email";
+
+    case ACCOUNT_USER_VISITOR_PASSWORD = "account.user.visitor.password";
+
+    case ACCOUNT_USER_VISITOR_ID = "account.user.visitor.id";
+
 }

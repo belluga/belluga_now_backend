@@ -184,6 +184,20 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
 
     }
 
+    public function testRolesList(): void
+    {
+//        $rolesList = $this->rolesList();
+//        $rolesList->assertOk();
+//
+//        $responseData = $rolesList->json();
+//        $this->assertEquals(2, $responseData['total']);
+//        $this->assertArrayHasKey('total', $responseData);
+//        $this->assertArrayHasKey('data', $responseData);
+//        $this->assertArrayHasKey('last_page', $responseData);
+//        $this->assertArrayHasKey('current_page', $responseData);
+//        $this->assertArrayHasKey('per_page', $responseData);
+    }
+
     public function testRolesCreate(): void
     {
 //        $roleName = "Test Admin Role";
@@ -205,20 +219,6 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
 //
 //        $this->role_id = $response->json()['data']['id'];
 
-    }
-
-    public function testRolesList(): void
-    {
-//        $rolesList = $this->rolesList();
-//        $rolesList->assertOk();
-//
-//        $responseData = $rolesList->json();
-//        $this->assertEquals(2, $responseData['total']);
-//        $this->assertArrayHasKey('total', $responseData);
-//        $this->assertArrayHasKey('data', $responseData);
-//        $this->assertArrayHasKey('last_page', $responseData);
-//        $this->assertArrayHasKey('current_page', $responseData);
-//        $this->assertArrayHasKey('per_page', $responseData);
     }
 
     public function testRolesShow(): void
