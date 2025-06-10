@@ -8,6 +8,5 @@ use App\Models\Landlord\LandlordUser;
 
 class AuthControllerLandlord extends AuthControllerContract
 {
-
     protected $userModel = LandlordUser::class;
 }

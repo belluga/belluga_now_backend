@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Api\v1\Controllers\AuthControllerTenant;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\RolesAccountController;
 use App\Enums\PermissionsActions;
@@ -10,6 +11,15 @@ Route::prefix("roles")
     ->group(function () {
         Route::post('/', [RolesAccountController::class, 'store'])
             ->name('account.roles.add');
+    });
+
+Route::prefix('auth')
+    ->group(function () {
+        Route::post('/login', [AuthControllerTenant::class, 'login'])
+            ->name('tenant.auth.login');
+
+        Route::post('/logout', [AuthControllerTenant::class, 'logout'])
+            ->name('tenant.auth.login');
     });
 
 Route::prefix('users')
@@ -41,13 +51,6 @@ Route::prefix('users')
 
         Route::delete('/{user_id}/emails', [TenantUserController::class, 'removeEmails'])
             ->name('tenant.users.remove_emails');
-
-        // Perfil do usuário atual
-        Route::get('/profile', [TenantUserController::class, 'profile'])
-            ->name('tenant.users.profile');
-
-        Route::put('/profile', [TenantUserController::class, 'updateProfile'])
-            ->name('tenant.users.profile.update');
 
         // Alterar senha
         Route::put('/{id}/password', [TenantUserController::class, 'updatePassword'])

@@ -65,7 +65,9 @@ enum TestVariableLabels: string {
 
     case ACCOUNT_USER_ADMIN_NAME = "account.user.admin.name";
 
-    case ACCOUNT_USER_ADMIN_TOKEN = "account.user.admin.token";
+    case ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN = "account.user.admin.device_1.token";
+
+    case ACCOUNT_USER_ADMIN_DEVICE_2_TOKEN = "account.user.admin.device_2.token";
 
     case ACCOUNT_USER_USERMANAGE_PASSWORD = "account.user.usermanage.password";
 
