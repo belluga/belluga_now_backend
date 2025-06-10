@@ -148,7 +148,7 @@ class ApiDefaultInitializeTest extends TestCase {
             "role" => [
                 "name" =>  "Super User",
                 "permissions" => [
-                    "*.*"
+                    "*"
                 ],
                 "is_default" => false
             ]

@@ -57,7 +57,7 @@ class LandlordUser extends Authenticatable
         }
         [$resource, $action] = $parts;
 
-        return in_array("*.*", $permissions) ||
+        return in_array("*", $permissions) ||
             in_array("*.$action", $permissions) ||
             in_array("$resource.*", $permissions) ||
             in_array("$resource.$action", $permissions);

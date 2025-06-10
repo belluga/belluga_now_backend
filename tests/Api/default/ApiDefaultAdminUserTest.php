@@ -255,8 +255,8 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
             ],
             "password" => $this->secondary_user_password,
             "password_confirmation" => $this->secondary_user_password,
-            "device_name" => "test"
-
+            "device_name" => "test",
+            "role" => "super-user"
         ];
     }
 
@@ -269,7 +269,8 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
             ],
             "password" => $password,
             "password_confirmation" => $password,
-            "device_name" => "test"
+            "device_name" => "test",
+            "role" => "super-user"
 
         ];
     }

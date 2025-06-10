@@ -30,7 +30,8 @@ class LandlordUserCreateRequest extends FormRequest
                 'required',
                 new UniqueArrayItemRule('landlord', 'landlord_users', 'emails', )
             ],
-            'password' => 'required|string|min:8'
+            'password' => 'required|string|min:8',
+            'role' => 'required|string|exists:landlord.roles,slug'
         ];
     }
 }

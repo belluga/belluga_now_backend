@@ -50,7 +50,7 @@ class AccountController extends Controller
                 'name' => 'Admin',
                 'description' => 'Administrador',
                 'permissions' => [
-                    '*.*'
+                    '*'
                 ]
             ]);
 

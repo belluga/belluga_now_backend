@@ -86,7 +86,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "Account Editor Role",
                 "description" => "Role for account editing",
-                "permissions" => ["user.view", "user.create"],
+                "permissions" => ["users.view", "users.create"],
             ]
         );
 
@@ -126,7 +126,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             $this->secondary_role_id,
             [
                 "name" => "Updated Account Role",
-                "permissions" => ["user.view", "user.create", "user.update"],
+                "permissions" => ["users.view", "users.create", "users.update"],
             ]
         );
 
@@ -137,7 +137,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
 
         $this->assertEquals("Updated Account Role", $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["user.view", "user.create", "user.update"],
+            ["users.view", "users.create", "users.update"],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -246,7 +246,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "User Manager",
                 "description" => "Role for users management",
-                "permissions" => ["user.*"],
+                "permissions" => ["users.*"],
             ]
         );
 
@@ -257,7 +257,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "Role Manager",
                 "description" => "Role for roles management",
-                "permissions" => ["role.*", "user.view"],
+                "permissions" => ["roles.*", "users.view"],
             ]
         );
 

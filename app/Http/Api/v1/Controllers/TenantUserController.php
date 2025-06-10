@@ -48,16 +48,15 @@ class TenantUserController extends Controller
      */
     public function store(TenantUserCreateRequest $request): JsonResponse
     {
-//        DB::beginTransaction();
+        DB::beginTransaction();
         try {
             $user = AccountUser::create($request->validated());
             $role = Role::where('slug', $request->role)->firstOrFail();
 
             $role->users()->save($user);
-//            $user->role()->save($role);
-//            DB::commit();
+            DB::commit();
         }catch (\Exception $e){
-//            DB::rollBack();
+            DB::rollBack();
             print($e->getMessage());
             return response()->json([
                 'message' => 'An error occurred while trying to create the user. Please try again later.',
