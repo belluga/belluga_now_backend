@@ -6,7 +6,7 @@ use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultAccountRolesValidationTest extends TestCaseAuthenticated
+class ApiDefaultAccountApiValidationTest extends TestCaseAuthenticated
 {
 
     protected string $tenant_subdomain {
@@ -84,6 +84,22 @@ class ApiDefaultAccountRolesValidationTest extends TestCaseAuthenticated
         ]);
     }
 
+    public function testUserCreation(): void {
+
+        $response = $this->userCreate([]);
+        $response->assertStatus(422);
+
+        $response->assertJsonStructure([
+            "message",
+            "errors" => [
+                "name",
+                "emails",
+                "password",
+                "role"
+            ],
+        ]);
+    }
+
     protected function accountRolesCreate(string $account_slug): TestResponse
     {
         return $this->json(
@@ -107,6 +123,15 @@ class ApiDefaultAccountRolesValidationTest extends TestCaseAuthenticated
         return $this->json(
             method: 'delete',
             uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function userCreate(array $data): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$this->main_account_slug/users",
             data: $data,
             headers: $this->getHeaders(),
         );
