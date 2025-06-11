@@ -23,10 +23,6 @@ class LandlordRolesController extends Controller
     {
         $user = auth()->guard('sanctum')->user();
 
-        if (!$user->hasPermissionTo('role.view')) {
-            abort(403, 'You do not have permission to view roles.');
-        }
-
         $roles = Role::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
 
@@ -40,10 +36,6 @@ class LandlordRolesController extends Controller
     {
         $user = auth()->guard('sanctum')->user();
 
-        if (!$user->hasPermissionTo('role.view')) {
-            abort(403, 'You do not have permission to view roles.');
-        }
-
         $tenant = Tenant::where('slug', $tenant_slug)->firstOrFail();
         $roles = Role::tenantRoles($tenant->id)->paginate(15);
 
@@ -56,10 +48,6 @@ class LandlordRolesController extends Controller
     public function storeSystemRole(LandlordRoleStoreRequest $request): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.create')) {
-            abort(403, 'You do not have permission to create roles.');
-        }
 
         try {
             DB::beginTransaction();
@@ -91,10 +79,6 @@ class LandlordRolesController extends Controller
     public function storeTenantRole(LandlordRoleStoreRequest $request, string $tenant_slug): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.create')) {
-            abort(403, 'You do not have permission to create roles.');
-        }
 
         $tenant = Tenant::where('slug', $tenant_slug)->firstOrFail();
 
@@ -130,11 +114,6 @@ class LandlordRolesController extends Controller
      */
     public function show(string $role_id): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.view')) {
-            abort(403, 'You do not have permission to view roles.');
-        }
 
         $role = Role::findOrFail($role_id);
 
@@ -148,11 +127,6 @@ class LandlordRolesController extends Controller
      */
     public function update(LandlordRoleUpdateRequest $request, string $role_id): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.update')) {
-            abort(403, 'You do not have permission to update roles.');
-        }
 
         $role = Role::findOrFail($role_id);
         $role->update($request->validated());
@@ -167,11 +141,6 @@ class LandlordRolesController extends Controller
      */
     public function destroy(LandlordRoleDestroyRequest $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.delete')) {
-            abort(403, 'You do not have permission to delete roles.');
-        }
 
         $role = Role::findOrFail($request->route("role_id"));
 
@@ -207,11 +176,6 @@ class LandlordRolesController extends Controller
      */
     public function restore(string $role_id): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.update')) {
-            abort(403, 'You do not have permission to restore roles.');
-        }
 
         $role = Role::onlyTrashed()
             ->where('_id', $role_id)
@@ -227,11 +191,6 @@ class LandlordRolesController extends Controller
      */
     public function assignRoleToUser(string $role_id, string $user_id): JsonResponse
     {
-        $currentUser = auth()->guard('sanctum')->user();
-
-        if (!$currentUser->hasPermissionTo('user.update')) {
-            abort(403, 'You do not have permission to assign roles.');
-        }
 
         $role = Role::findOrFail($role_id);
         $user = LandlordUser::findOrFail($user_id);
@@ -247,11 +206,6 @@ class LandlordRolesController extends Controller
      */
     public function removeRoleFromUser(string $role_id, string $user_id): JsonResponse
     {
-        $currentUser = auth()->guard('sanctum')->user();
-
-        if (!$currentUser->hasPermissionTo('user.update')) {
-            abort(403, 'You do not have permission to remove roles.');
-        }
 
         $role = Role::findOrFail($role_id);
         $user = LandlordUser::findOrFail($user_id);

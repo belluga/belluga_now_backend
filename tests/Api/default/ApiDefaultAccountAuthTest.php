@@ -134,6 +134,46 @@ class ApiDefaultAccountAuthTest extends TestCaseAuthenticated {
         }
     }
 
+    protected string $account_user_visitor_name {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value, $value);
+            $this->account_user_visitor_name = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value);
+        }
+    }
+
+    protected string $account_user_visitor_email {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value, $value);
+            $this->account_user_visitor_email = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value);
+        }
+    }
+
+    protected string $account_user_visitor_password {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value, $value);
+            $this->account_user_visitor_password = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value);
+        }
+    }
+
+    protected string $account_user_visitor_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value, $value);
+            $this->account_user_visitor_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value);
+        }
+    }
+
     public function testUserLoginWrongPassword(): void {
 
         $response = $this->userLogin(

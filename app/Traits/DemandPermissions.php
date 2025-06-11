@@ -67,18 +67,4 @@ trait DemandPermissions
             $model.".".PermissionsActions::VIEW->value,
         ];
     }
-
-    public function hasPermissionTo(string $permission): bool {
-        $parts = explode('.', $permission,2);
-
-        if (count($parts) !== 2) {
-            return false;
-        }
-        [$resource, $action] = $parts;
-
-        return in_array("*.*", $this->permissions) ||
-            in_array("*.$action", $this->permissions) ||
-            in_array("$resource.*", $this->permissions) ||
-            in_array("$resource.$action", $this->permissions);
-    }
 }

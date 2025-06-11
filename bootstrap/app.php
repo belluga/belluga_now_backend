@@ -26,7 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(base_path('routes/api/tenant_api_v1.php'));
 
             Route::prefix('api/v1/accounts/{account_slug}')
-                ->middleware('tenant')
+                ->middleware(['tenant'])
                 ->group(base_path('routes/api/account_api_v1.php'));
 
             Route::prefix('api/v2')

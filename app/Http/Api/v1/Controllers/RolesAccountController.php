@@ -20,12 +20,6 @@ class RolesAccountController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('role.view')) {
-            abort(403, 'You do not have permission to view roles.');
-        }
-
         $roles = Role::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
 
@@ -34,12 +28,7 @@ class RolesAccountController extends Controller
 
     public function store(RolesStoreRequest $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
         $account_slug = $request->route('account_slug');
-
-        if (!$user->hasPermissionTo('account.role.create')) {
-            abort(403, 'You do not have permission to create account roles.');
-        }
 
         $account = Account::where('slug', $account_slug)
             ->firstOrFail();

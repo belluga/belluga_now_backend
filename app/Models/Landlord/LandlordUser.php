@@ -44,23 +44,20 @@ class LandlordUser extends Authenticatable
         return $this->belongsTo(LandlordRole::class);
     }
 
-    /**
-     * Check if user has permission
-     */
-    public function hasPermissionTo(string $permission): bool
+    public function tokenCan(string $ability): bool
     {
+
         $permissions = $this->getAllPermissions();
 
-        $parts = explode('.', $permission, 2);
+        $parts = explode(':', $ability, 2);
         if (count($parts) !== 2) {
             return false;
         }
         [$resource, $action] = $parts;
 
         return in_array("*", $permissions) ||
-            in_array("*.$action", $permissions) ||
-            in_array("$resource.*", $permissions) ||
-            in_array("$resource.$action", $permissions);
+            in_array("$resource:*", $permissions) ||
+            in_array("$resource:$action", $permissions);
     }
 
     /**

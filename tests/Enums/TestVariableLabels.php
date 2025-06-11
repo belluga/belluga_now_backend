@@ -105,4 +105,6 @@ enum TestVariableLabels: string {
 
     case ACCOUNT_USER_VISITOR_ID = "account.user.visitor.id";
 
+    case ACCOUNT_USER_VISITOR_TOKEN = "account.user.visitor.token";
+
 }

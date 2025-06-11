@@ -12,7 +12,6 @@ use Laravel\Sanctum\HasApiTokens;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsToMany;
-use MongoDB\Laravel\Relations\HasOne;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class AccountUser extends Authenticatable
@@ -56,5 +55,31 @@ class AccountUser extends Authenticatable
             [],
             ['$pull' => ['emails' => $email]]
         );
+    }
+
+    public function tokenCan(string $ability): bool
+    {
+
+        $permissions = $this->getAllPermissions();
+
+        $parts = explode(':', $ability, 2);
+        if (count($parts) !== 2) {
+            return false;
+        }
+        [$resource, $action] = $parts;
+
+        return in_array("*", $permissions) ||
+            in_array("$resource:*", $permissions) ||
+            in_array("$resource:$action", $permissions);
+    }
+
+    public function getAllPermissions(): array
+    {
+        return $this->role()
+            ->get()
+            ->pluck('permissions')
+            ->flatten()
+            ->unique()
+            ->toArray();
     }
 }

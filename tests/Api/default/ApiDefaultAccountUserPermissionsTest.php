@@ -21,6 +21,12 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $main_account_slug {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value);
+        }
+    }
+
     protected string $account_user_rolemanage_email {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_EMAIL->value, $value);
@@ -131,6 +137,56 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $account_user_visitor_name {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value, $value);
+            $this->account_user_visitor_name = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value);
+        }
+    }
+
+    protected string $account_user_visitor_email {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value, $value);
+            $this->account_user_visitor_email = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value);
+        }
+    }
+
+    protected string $account_user_visitor_password {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value, $value);
+            $this->account_user_visitor_password = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value);
+        }
+    }
+
+    protected string $account_user_visitor_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value, $value);
+            $this->account_user_visitor_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value);
+        }
+    }
+
+    protected string $account_user_visitor_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_TOKEN->value, $value);
+            $this->account_user_visitor_token = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_TOKEN->value);
+        }
+    }
+
     public function testLoginSuccess(): void {
         $responseUserAdmin = $this->userLogin([
                 "email" => $this->account_user_admin_email_1,
@@ -165,6 +221,7 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
 
         $this->account_user_usermanage_token = $responseUserUserManage->json()['data']['token'];
 
+
         $responseUserRoleManage = $this->userLogin([
                 "email" => $this->account_user_rolemanage_email,
                 "password" => $this->account_user_rolemanage_password,
@@ -182,20 +239,51 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
 
         $this->account_user_rolemanage_token = $responseUserRoleManage->json()['data']['token'];
 
+
+        $responseUserVisitor = $this->userLogin([
+                "email" => $this->account_user_visitor_email,
+                "password" => $this->account_user_visitor_password,
+                "device_name" => "test",
+            ]
+        );
+        $responseUserVisitor->assertStatus(200);
+
+        $responseUserVisitor->assertJsonStructure([
+            "data" => [
+                "user",
+                "token",
+            ]
+        ]);
+
+        $this->account_user_visitor_token = $responseUserVisitor->json()['data']['token'];
+
     }
 
     public function testRolesList(): void
     {
-//        $rolesList = $this->rolesList();
-//        $rolesList->assertOk();
-//
-//        $responseData = $rolesList->json();
-//        $this->assertEquals(2, $responseData['total']);
-//        $this->assertArrayHasKey('total', $responseData);
-//        $this->assertArrayHasKey('data', $responseData);
-//        $this->assertArrayHasKey('last_page', $responseData);
-//        $this->assertArrayHasKey('current_page', $responseData);
-//        $this->assertArrayHasKey('per_page', $responseData);
+        $rolesListAdmin = $this->accountRolesList(
+            $this->main_account_slug,
+            $this->account_user_admin_token_device_1
+        );
+        $rolesListAdmin->assertOk();
+
+        $rolesListRoleManage = $this->accountRolesList(
+            $this->main_account_slug,
+            $this->account_user_rolemanage_token
+        );
+        $rolesListRoleManage->assertOk();
+
+        $rolesListUserManage = $this->accountRolesList(
+            $this->main_account_slug,
+            $this->account_user_usermanage_token
+        );
+        $rolesListUserManage->assertOk();
+
+        $rolesListVisitor = $this->accountRolesList(
+            $this->main_account_slug,
+            $this->account_user_visitor_token
+        );
+        $rolesListVisitor->assertOk();
     }
 
     public function testRolesCreate(): void
@@ -343,6 +431,18 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
             method: 'post',
             uri: $this->base_api_url."auth/logout",
             data: $data,
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesList(string $account_slug, string $token): TestResponse
+    {
+        return $this->json(
+            method: 'get',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'

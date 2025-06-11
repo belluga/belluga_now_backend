@@ -13,9 +13,13 @@ abstract class TestCaseAuthenticated extends TestCase
         }
     }
 
-    protected string $secondary_account_token {
+    protected string $account_user_admin_token_device_1 {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN->value, $value);
+            $this->account_user_admin_token_device_1 = $value;
+        }
         get {
-            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_TOKEN->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN->value);
         }
     }
 
@@ -23,7 +27,7 @@ abstract class TestCaseAuthenticated extends TestCase
 
         $token = match ($accountEnv) {
             AccountEnvironments::MAIN => $this->main_account_token,
-            AccountEnvironments::SECONDARY => $this->secondary_account_token,
+            AccountEnvironments::SECONDARY => $this->account_user_admin_token_device_1,
         };
 
         return [

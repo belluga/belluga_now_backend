@@ -28,11 +28,6 @@ class AccountController extends Controller
 
     public function index(Request $request): LengthAwarePaginator
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('accounts.view')) {
-            abort(403, 'You do not have permission to view accounts.');
-        }
 
         return Account::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
@@ -81,11 +76,6 @@ class AccountController extends Controller
 
     public function show(string $account_slug): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('account.view')) {
-            abort(403, 'You do not have permission to view accounts.');
-        }
 
         $account = Account::where("slug", $account_slug)->firstOrFail();
 
@@ -96,11 +86,6 @@ class AccountController extends Controller
 
     public function update(AccountUpdateRequest $request, string $account_slug): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('account.update')) {
-            abort(403, 'You do not have permission to update account.');
-        }
 
         $account = Account::where("slug", $account_slug)->firstOrFail();
         $account->update($request->validated());
@@ -112,11 +97,6 @@ class AccountController extends Controller
 
     public function destroy(Request $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        if (!$user->hasPermissionTo('account.delete')) {
-            abort(403, 'You do not have permission to delete accounts.');
-        }
 
         $account = Account::where('slug', $request->route('account_slug'))->firstOrFail();
 

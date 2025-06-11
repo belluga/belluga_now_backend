@@ -26,7 +26,7 @@ class RolesUpdateRequest extends FormRequest
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
             'permissions' => ['sometimes', 'array', new UniqueArrayItemRule("tenant", "roles", "permissions")],
-            'permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
+            'permissions.*' => ['required', 'string', 'regex:/^[a-z]+(?:-[a-z]+)*:(?:\*|[a-z]+)$/'],
             'is_default' => ['boolean'],
         ];
     }

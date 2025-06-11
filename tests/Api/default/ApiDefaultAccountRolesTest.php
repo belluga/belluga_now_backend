@@ -86,7 +86,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "Account Editor Role",
                 "description" => "Role for account editing",
-                "permissions" => ["users.view", "users.create"],
+                "permissions" => ["account-users:view", "account-users:create"],
             ]
         );
 
@@ -126,7 +126,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             $this->secondary_role_id,
             [
                 "name" => "Updated Account Role",
-                "permissions" => ["users.view", "users.create", "users.update"],
+                "permissions" => ["account-users:view", "account-users:create", "account-users:update"],
             ]
         );
 
@@ -137,7 +137,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
 
         $this->assertEquals("Updated Account Role", $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["users.view", "users.create", "users.update"],
+            ["account-users:view", "account-users:create", "account-users:update"],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -246,10 +246,9 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "User Manager",
                 "description" => "Role for users management",
-                "permissions" => ["users.*"],
+                "permissions" => ["account-users:*"],
             ]
         );
-
         $response->assertStatus(201);
 
         $response = $this->accountRolesCreate(
@@ -257,19 +256,19 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "Role Manager",
                 "description" => "Role for roles management",
-                "permissions" => ["roles.*", "users.view"],
+                "permissions" => ["account-roles:*", "account-users:view"],
             ]
         );
+        $response->assertStatus(201);
 
         $response = $this->accountRolesCreate(
             $this->main_account_slug,
             [
                 "name" => "Visitor",
                 "description" => "Role for roles management",
-                "permissions" => ["content.view"],
+                "permissions" => ["account-content:view"],
             ]
         );
-
         $response->assertStatus(201);
 
         $rolesList = $this->accountRolesList($this->main_account_slug);
@@ -277,7 +276,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
 
         $responseData = $rolesList->json();
         $this->assertArrayHasKey('total', $responseData);
-        $this->equalTo(3, $responseData['total']);
+        $this->equalTo(4, $responseData['total']);
     }
 
     protected function accountRolesList(string $account_slug): TestResponse
