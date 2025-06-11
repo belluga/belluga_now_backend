@@ -40,6 +40,12 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         }
     }
 
+    protected string $main_role_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::MAIN_LANDLORD_ROLE_ID->value);
+        }
+    }
+
     public function testUserCreate(): void {
         $response = $this->userCreate($this->payloadUserCreate());
 
@@ -256,7 +262,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
             "password" => $this->secondary_user_password,
             "password_confirmation" => $this->secondary_user_password,
             "device_name" => "test",
-            "role" => "super-user"
+            "role_id" => $this->main_role_id
         ];
     }
 
@@ -270,8 +276,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
             "password" => $password,
             "password_confirmation" => $password,
             "device_name" => "test",
-            "role" => "super-user"
-
+            "role_id" => $this->main_role_id
         ];
     }
 }

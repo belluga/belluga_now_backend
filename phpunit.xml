@@ -2,17 +2,17 @@
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="vendor/autoload.php"
-         stopOnFailure="true"
+
          colors="true"
 >
     <testsuites>
         <testsuite name="Api-Default">
             <file>tests/Api/default/ApiDefaultInitializeTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminValidationTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminRolesTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminUserTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminAuthTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminTenantTest.php</file>
-            <file>tests/Api/default/ApiDefaultAdminRolesTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminPermissionsTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountApiValidationTest.php</file>

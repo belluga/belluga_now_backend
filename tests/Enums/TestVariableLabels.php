@@ -57,6 +57,8 @@ enum TestVariableLabels: string {
 
     case ACCOUNT_ROLE_ADMIN_ID = "account.role.admin.id";
 
+    case ACCOUNT_ROLE_VISITOR_ID = "account.role.visitor.id";
+
     case ACCOUNT_USER_ADMIN_PASSWORD = "account.user.admin.password";
 
     case ACCOUNT_USER_ADMIN_EMAIL_1 = "account.user.admin.email.1";
@@ -106,5 +108,9 @@ enum TestVariableLabels: string {
     case ACCOUNT_USER_VISITOR_ID = "account.user.visitor.id";
 
     case ACCOUNT_USER_VISITOR_TOKEN = "account.user.visitor.token";
+
+    case ROLE_ID_CREATED_BY_ACCOUNT_ADMIN_USER = "role.id.created_by_account_admin_user";
+
+    case ROLE_ID_CREATED_BY_ACCOUNT_ROLEMANAGE_USER = "role.id.created_by_account_rolemanage_user";
 
 }

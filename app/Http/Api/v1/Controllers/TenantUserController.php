@@ -51,7 +51,7 @@ class TenantUserController extends Controller
         DB::beginTransaction();
         try {
             $user = AccountUser::create($request->validated());
-            $role = Role::where('slug', $request->role)->firstOrFail();
+            $role = Role::where('_id', new ObjectId($request->role_id))->firstOrFail();
 
             $role->users()->save($user);
             DB::commit();

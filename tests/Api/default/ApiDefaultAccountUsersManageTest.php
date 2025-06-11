@@ -93,11 +93,11 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
 
     protected string $account_user_admin_token {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_TOKEN->value, $value);
+            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN->value, $value);
             $this->account_user_admin_token = $value;
         }
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_TOKEN->value);
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN->value);
         }
     }
 
@@ -281,6 +281,30 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $main_account_role_admin_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
+    protected string $main_account_role_usermanage_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_USERMANAGE_ID->value);
+        }
+    }
+
+    protected string $main_account_role_rolemanage_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ROLEMANAGE_ID->value);
+        }
+    }
+
+    protected string $main_account_role_visitor_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_VISITOR_ID->value);
+        }
+    }
+
     public function testAccountUserCreation(): void {
         $this->account_user_admin_name = fake()->name();
         $this->account_user_admin_email_1 = fake()->email();
@@ -295,7 +319,7 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
             ],
             "password" => $this->account_user_admin_password,
             "password_confirmation" => $this->account_user_admin_password,
-            "role" => "admin"
+            "role_id" => $this->main_account_role_admin_id,
 
         ]);
 
@@ -314,7 +338,7 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
             ],
             "password" => $this->account_user_usermanage_password,
             "password_confirmation" => $this->account_user_usermanage_password,
-            "role" => "user-manager"
+            "role_id" => $this->main_account_role_usermanage_id,
 
         ]);
 
@@ -333,7 +357,7 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
             ],
             "password" => $this->account_user_rolemanage_password,
             "password_confirmation" => $this->account_user_rolemanage_password,
-            "role" => "role-manager"
+            "role_id" => $this->main_account_role_rolemanage_id,
 
         ]);
 
@@ -352,7 +376,7 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
             ],
             "password" => $this->account_user_to_delete_password,
             "password_confirmation" => $this->account_user_to_delete_password,
-            "role" => "role-manager"
+            "role_id" => $this->main_account_role_visitor_id,
 
         ]);
 
@@ -371,8 +395,7 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
             ],
             "password" => $this->account_user_visitor_password,
             "password_confirmation" => $this->account_user_visitor_password,
-            "role" => "visitor"
-
+            "role_id" => $this->main_account_role_visitor_id,
         ]);
 
         $response->assertStatus(201);

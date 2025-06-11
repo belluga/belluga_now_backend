@@ -187,7 +187,51 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
         }
     }
 
-    public function testLoginSuccess(): void {
+    protected string $role_id_created_by_account_admin_user {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ROLE_ID_CREATED_BY_ACCOUNT_ADMIN_USER->value, $value);
+            $this->role_id_created_by_account_admin_user = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ROLE_ID_CREATED_BY_ACCOUNT_ADMIN_USER->value);
+        }
+    }
+
+    protected string $role_id_created_by_account_rolemanage_user {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ROLE_ID_CREATED_BY_ACCOUNT_ROLEMANAGE_USER->value, $value);
+            $this->role_id_created_by_account_rolemanage_user = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ROLE_ID_CREATED_BY_ACCOUNT_ROLEMANAGE_USER->value);
+        }
+    }
+
+    protected string $main_account_role_admin_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
+    protected string $main_account_role_usermanage_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_USERMANAGE_ID->value);
+        }
+    }
+
+    protected string $main_account_role_rolemanage_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ROLEMANAGE_ID->value);
+        }
+    }
+
+    protected string $main_account_role_visitor_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_VISITOR_ID->value);
+        }
+    }
+
+    public function testLoginAdminSuccess(): void {
         $responseUserAdmin = $this->userLogin([
                 "email" => $this->account_user_admin_email_1,
                 "password" => $this->account_user_admin_password,
@@ -203,7 +247,9 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
             ],
         ]);
         $this->account_user_admin_token_device_1 = $responseUserAdmin->json()['data']['token'];
+    }
 
+    public function testLoginUserManagerSuccess(): void {
         $responseUserUserManage = $this->userLogin([
                 "email" => $this->account_user_usermanage_email,
                 "password" => $this->account_user_usermanage_password,
@@ -220,8 +266,9 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
         ]);
 
         $this->account_user_usermanage_token = $responseUserUserManage->json()['data']['token'];
+    }
 
-
+    public function testLoginRoleManagerSuccess(): void {
         $responseUserRoleManage = $this->userLogin([
                 "email" => $this->account_user_rolemanage_email,
                 "password" => $this->account_user_rolemanage_password,
@@ -238,8 +285,9 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
         ]);
 
         $this->account_user_rolemanage_token = $responseUserRoleManage->json()['data']['token'];
+    }
 
-
+    public function testLoginVisitorSuccess(): void {
         $responseUserVisitor = $this->userLogin([
                 "email" => $this->account_user_visitor_email,
                 "password" => $this->account_user_visitor_password,
@@ -256,141 +304,530 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
         ]);
 
         $this->account_user_visitor_token = $responseUserVisitor->json()['data']['token'];
-
     }
 
-    public function testRolesList(): void
-    {
+    public function testRolesListWithAdminUser(): void {
         $rolesListAdmin = $this->accountRolesList(
             $this->main_account_slug,
             $this->account_user_admin_token_device_1
         );
         $rolesListAdmin->assertOk();
+    }
 
+    public function testRolesListWithUserManageUser(): void {
+        $rolesListUserManage = $this->accountRolesList(
+            $this->main_account_slug,
+            $this->account_user_usermanage_token
+        );
+        $rolesListUserManage->assertStatus(403);
+    }
+
+    public function testRolesListWithRoleManageUser(): void {
         $rolesListRoleManage = $this->accountRolesList(
             $this->main_account_slug,
             $this->account_user_rolemanage_token
         );
         $rolesListRoleManage->assertOk();
+    }
 
-        $rolesListUserManage = $this->accountRolesList(
-            $this->main_account_slug,
-            $this->account_user_usermanage_token
-        );
-        $rolesListUserManage->assertOk();
-
+    public function testRolesListWithVisitorUser(): void {
         $rolesListVisitor = $this->accountRolesList(
             $this->main_account_slug,
             $this->account_user_visitor_token
         );
-        $rolesListVisitor->assertOk();
+        $rolesListVisitor->assertStatus(403);
     }
 
-    public function testRolesCreate(): void
+    public function testRolesCreateWithAdminUser(): void
     {
-//        $roleName = "Test Admin Role";
-//
-//        $response = $this->rolesCreate([
-//            "name" => $roleName,
-//            "description" => "Role for testing purposes",
-//            "permissions" => ["user.view", "user.create", "role.view"],
-//        ]);
-//
-//        $response->assertStatus(201);
-//        $response->assertJsonStructure([
-//            "data" => [
-//                "name",
-//                "permissions",
-//                "created_at",
-//            ]
-//        ]);
-//
-//        $this->role_id = $response->json()['data']['id'];
+        $roleCreate = $this->accountRolesCreate(
+            $this->main_account_slug,
+            $this->account_user_admin_token_device_1,
+            [
+                "name" => "Role By Admin",
+                "description" => "Role for testing purposes created by Account Admin User",
+                "permissions" => ["user:view", "user:create", "role:view"],
+            ]
+        );
+        $roleCreate->assertStatus(201);
+        $this->role_id_created_by_account_admin_user = $roleCreate->json()['data']['id'];
 
     }
 
-    public function testRolesShow(): void
+    public function testRolesCreateWithRoleManageUser(): void
     {
-//        $rolesShow = $this->rolesShow($this->role_id);
-//        $rolesShow->assertOk();
-//        $rolesShow->assertJsonStructure([
-//            "data" => [
-//                "name",
-//                "permissions",
-//                "created_at",
-//            ],
-//        ]);
+        $roleCreate = $this->accountRolesCreate(
+            $this->main_account_slug,
+            $this->account_user_rolemanage_token,
+            [
+                "name" => "Role By Role Manager",
+                "description" => "Role for testing purposes created by Role Manager User",
+                "permissions" => ["user:view", "user:create", "role:view"],
+            ]
+        );
+        $roleCreate->assertStatus(201);
+        $this->role_id_created_by_account_rolemanage_user = $roleCreate->json()['data']['id'];
+
     }
 
-    public function testRolesUpdate(): void
+    public function testRolesCreateWithUserManageUser(): void
     {
-//        $roleUpdate = $this->rolesUpdate(
-//            $this->role_id,
-//            [
-//                "name" => "Updated Role Name",
-//                "permissions" => ["user.view", "user.create", "role.view", "role.create"],
-//            ]
-//        );
-//
-//        $roleUpdate->assertStatus(200);
-//
-//        $rolesShow = $this->rolesShow($this->role_id);
-//        $rolesShow->assertOk();
-//
-//        $this->assertEquals("Updated Role Name", $rolesShow->json()['data']['name']);
-//        $this->assertEquals(
-//            ["user.view", "user.create", "role.view", "role.create"],
-//            $rolesShow->json()['data']['permissions']
-//        );
+        $roleCreate = $this->accountRolesCreate(
+            $this->main_account_slug,
+            $this->account_user_usermanage_token,
+            [
+                "name" => "Role By User Manager",
+                "description" => "Role for testing purposes created by User Manager User",
+                "permissions" => ["user:view", "user:create", "role:view"],
+            ]
+        );
+        $roleCreate->assertStatus(403);
+
     }
 
-    public function testRolesDelete(): void
+    public function testRolesCreateWithVisitorUser(): void
     {
-//        $deleteResponse = $this->rolesDelete($this->role_id);
-//        $deleteResponse->assertStatus(200);
-//
-//        $showResponse = $this->rolesShow($this->role_id);
-//        $showResponse->assertStatus(404);
+        $roleCreate = $this->accountRolesCreate(
+            $this->main_account_slug,
+            $this->account_user_visitor_token,
+            [
+                "name" => "Role By Visitor",
+                "description" => "Role for testing purposes created by Visitor User",
+                "permissions" => ["user:view", "user:create", "role:view"],
+            ]
+        );
+        $roleCreate->assertStatus(403);
+
     }
 
-    public function testRolesRestore(): void
+    public function testRolesShowWithAdminUser(): void
     {
-//        $restoreResponse = $this->rolesRestore($this->role_id);
-//        $restoreResponse->assertStatus(200);
-//
-//        $showResponse = $this->rolesShow($this->role_id);
-//        $showResponse->assertOk();
+        $rolesShow = $this->accountRolesShow(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->account_user_admin_token_device_1
+        );
+        $rolesShow->assertOk();
+        $rolesShow->assertJsonStructure([
+            "data" => [
+                "name",
+                "permissions",
+                "created_at",
+            ],
+        ]);
     }
 
-    public function testRolesDeleteFlow(): void
+    public function testRolesShowWithRoleManagerUser(): void
     {
-//        $deleteResponse = $this->rolesDelete($this->role_id);
-//        $deleteResponse->assertStatus(200);
-//
-//        $showResponse = $this->rolesShow($this->role_id);
-//        $showResponse->assertStatus(404);
-//
-//        $rolesListArchived = $this->rolesListArchived();
-//        $rolesListArchived->assertOk();
-//
-//        $responseData = $rolesListArchived->json();
-//        $this->assertEquals(1, $responseData['total']);
-//        $this->assertArrayHasKey('total', $responseData);
-//        $this->assertArrayHasKey('data', $responseData);
-//        $this->assertArrayHasKey('last_page', $responseData);
-//        $this->assertArrayHasKey('current_page', $responseData);
-//        $this->assertArrayHasKey('per_page', $responseData);
-//
-//        $rolesListArchived = $this->forceDelete($this->role_id);
-//        $rolesListArchived->assertOk();
-//
-//        $rolesListArchived = $this->rolesListArchived();
-//        $responseData = $rolesListArchived->json();
-//        $this->assertEquals(0, $responseData['total']);
-//
-//        $rolesList = $this->rolesList();
-//        $responseData = $rolesList->json();
-//        $this->assertEquals(1, $responseData['total']);
+        $rolesShow = $this->accountRolesShow(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->account_user_rolemanage_token
+        );
+        $rolesShow->assertOk();
+        $rolesShow->assertJsonStructure([
+            "data" => [
+                "name",
+                "permissions",
+                "created_at",
+            ],
+        ]);
+    }
+
+    public function testRolesShowWithUserManagerUser(): void
+    {
+        $rolesShow = $this->accountRolesShow(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->account_user_usermanage_token
+        );
+        $rolesShow->assertStatus(403);
+    }
+
+    public function testRolesShowWithVisitorUser(): void
+    {
+        $rolesShow = $this->accountRolesShow(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->account_user_visitor_token
+        );
+        $rolesShow->assertStatus(403);
+    }
+
+    public function testRolesUpdateWithAdminUser(): void
+    {
+        $token = $this->account_user_admin_token_device_1;
+        $role_id = $this->role_id_created_by_account_admin_user;
+
+        $roleUpdate = $this->accountRolesUpdate(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "name" => "Role By Admin Updated",
+                "permissions" => ["user:view", "user:create", "role:view", "role:create"],
+            ]
+        );
+
+        $roleUpdate->assertStatus(200);
+
+        $rolesShow = $this->accountRolesShow(
+            $this->main_account_slug,
+            $role_id,
+            $token
+        );
+        $rolesShow->assertOk();
+
+        $this->assertEquals("Role By Admin Updated", $rolesShow->json()['data']['name']);
+        $this->assertEquals(
+            ["user:view", "user:create", "role:view", "role:create"],
+            $rolesShow->json()['data']['permissions']
+        );
+    }
+
+    public function testRolesUpdateWithRoleManagerUser(): void
+    {
+        $token = $this->account_user_rolemanage_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+        $roleUpdate = $this->accountRolesUpdate(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "name" => "Role By Role Manager Updated",
+                "permissions" => ["user:view", "user:create", "role:view", "role:create"],
+            ]
+        );
+
+        $roleUpdate->assertStatus(200);
+
+        $rolesShow = $this->accountRolesShow(
+            $this->main_account_slug,
+            $role_id,
+            $token
+        );
+        $rolesShow->assertOk();
+
+        $this->assertEquals("Role By Role Manager Updated", $rolesShow->json()['data']['name']);
+        $this->assertEquals(
+            ["user:view", "user:create", "role:view", "role:create"],
+            $rolesShow->json()['data']['permissions']
+        );
+    }
+
+    public function testRolesUpdateWithUserManagerUser(): void
+    {
+        $token = $this->account_user_usermanage_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+        $roleUpdate = $this->accountRolesUpdate(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "name" => "Role By User Manager Updated",
+                "permissions" => ["user:view", "user:create", "role:view", "role:create"],
+            ]
+        );
+
+        $roleUpdate->assertStatus(403);
+
+    }
+
+    public function testRolesUpdateWithVisitorUser(): void
+    {
+        $token = $this->account_user_visitor_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+        $roleUpdate = $this->accountRolesUpdate(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "name" => "Role By User Manager Updated",
+                "permissions" => ["user:view", "user:create", "role:view", "role:create"],
+            ]
+        );
+
+        $roleUpdate->assertStatus(403);
+
+    }
+
+    public function testRolesDeleteWithUserManagerUser(): void
+    {
+        $token = $this->account_user_usermanage_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(403);
+    }
+
+    public function testRolesDeleteWithVisitorUser(): void
+    {
+        $token = $this->account_user_visitor_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(403);
+    }
+
+    public function testRolesDeleteWithSameRoleAsBackground(): void
+    {
+        $token = $this->account_user_admin_token_device_1;
+        $role_id = $this->role_id_created_by_account_admin_user;
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $role_id
+            ]
+        );
+        $deleteResponse->assertStatus(422);
+
+        $deleteResponse->assertJsonStructure([
+            "message",
+            "errors" => [
+                "role_id"
+            ]
+        ]);
+
+    }
+
+    public function testRolesDeleteWithAdminUser(): void
+    {
+        $token = $this->account_user_admin_token_device_1;
+        $role_id = $this->role_id_created_by_account_admin_user;
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(200);
+
+        $showResponse = $this->accountRolesShow(
+            $this->main_account_slug,
+            $role_id,
+            $token
+        );
+        $showResponse->assertStatus(404);
+
+    }
+
+    public function testRolesDeleteWithRoleManagerUser(): void
+    {
+        $token = $this->account_user_rolemanage_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(200);
+
+        $showResponse = $this->accountRolesShow(
+            $this->main_account_slug,
+            $role_id,
+            $token
+        );
+        $showResponse->assertStatus(404);
+
+    }
+
+    public function testRolesRestoreWithVisitorUser(): void
+    {
+        $restoreResponse = $this->accountRolesRestore(
+            $this->main_account_slug,
+            $this->main_account_role_admin_id,
+            $this->account_user_visitor_token
+        );
+        $restoreResponse->assertStatus(403);
+    }
+
+    public function testRolesRestoreWithUserManagerUser(): void
+    {
+        $restoreResponse = $this->accountRolesRestore(
+            $this->main_account_slug,
+            $this->main_account_role_admin_id,
+            $this->account_user_usermanage_token
+        );
+        $restoreResponse->assertStatus(403);
+    }
+
+    public function testRolesRestoreWithRoleManagerUser(): void
+    {
+        $restoreResponse = $this->accountRolesRestore(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_rolemanage_user,
+            $this->account_user_rolemanage_token
+        );
+        $restoreResponse->assertStatus(200);
+
+        $showResponse = $this->accountRolesShow(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_rolemanage_user,
+            $this->account_user_rolemanage_token
+        );
+        $showResponse->assertOk();
+    }
+
+    public function testRolesRestoreWithAdminUser(): void
+    {
+        $restoreResponse = $this->accountRolesRestore(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->account_user_admin_token_device_1
+        );
+        $restoreResponse->assertStatus(200);
+
+        $showResponse = $this->accountRolesShow(
+            $this->main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->account_user_admin_token_device_1
+        );
+        $showResponse->assertOk();
+    }
+
+    public function testRolesDeleteFlowWithRoleManagerUser(): void
+    {
+        $token = $this->account_user_rolemanage_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(200);
+
+        $rolesListResponse = $this->accountRolesList(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(5, $rolesListResponse['total']);
+
+        $rolesListResponse = $this->accountRolesListArchived(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(1, $rolesListResponse['total']);
+
+        $rolesListArchived = $this->accountRolesForceDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token
+        );
+        $rolesListArchived->assertOk();
+
+        $rolesListResponse = $this->accountRolesList(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(5, $rolesListResponse['total']);
+
+        $rolesListResponse = $this->accountRolesListArchived(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(0, $rolesListResponse['total']);
+
+    }
+
+    public function testRolesDeleteFlowWithAdminUser(): void
+    {
+        $token = $this->account_user_admin_token_device_1;
+        $role_id = $this->role_id_created_by_account_admin_user;
+
+
+        $deleteResponse = $this->accountRolesDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(200);
+
+        $rolesListResponse = $this->accountRolesList(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(4, $rolesListResponse['total']);
+
+        $rolesListResponse = $this->accountRolesListArchived(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(1, $rolesListResponse['total']);
+
+        $rolesListArchived = $this->accountRolesForceDelete(
+            $this->main_account_slug,
+            $role_id,
+            $token
+        );
+        $rolesListArchived->assertOk();
+
+        $rolesListResponse = $this->accountRolesList(
+            $this->main_account_slug,
+            $token
+        );
+
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(4, $rolesListResponse['total']);
+
+        $rolesListResponse = $this->accountRolesListArchived(
+            $this->main_account_slug,
+            $token
+        );
+        $rolesListResponse->assertOk();
+        $this->assertArrayHasKey('total', $rolesListResponse);
+        $this->assertEquals(0, $rolesListResponse['total']);
+
     }
 
     public function testLogoutUsers(): void {
@@ -449,4 +886,92 @@ class ApiDefaultAccountUserPermissionsTest extends TestCaseAuthenticated
             ]
         );
     }
+
+    protected function accountRolesListArchived(string $account_slug, string $token): TestResponse
+    {
+        return $this->json(
+            method: 'get',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles?archived=true",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesCreate(string $account_slug, string $token, array $data): TestResponse
+    {
+        return $this->json(
+            method: 'post',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles",
+            data: $data,
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesShow(string $account_slug, string $roleId, string $token): TestResponse
+    {
+        return $this->json(
+            method: 'get',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesUpdate(string $account_slug, string $roleId, string $token, array $data): TestResponse
+    {
+        return $this->json(
+            method: 'patch',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            data: $data,
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesDelete(string $account_slug, string $roleId, string $token, array $data): TestResponse
+    {
+        return $this->json(
+            method: 'delete',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            data: $data,
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesForceDelete(string $account_slug, string $roleId, string $token): TestResponse
+    {
+        return $this->json(
+            method: 'delete',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId/force_delete",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
+    protected function accountRolesRestore(string $account_slug, string $roleId, string $token): TestResponse
+    {
+        return $this->json(
+            method: 'post',
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId/restore",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
 }

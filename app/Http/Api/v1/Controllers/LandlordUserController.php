@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use MongoDB\BSON\ObjectId;
 
 class LandlordUserController extends Controller
 {
@@ -56,7 +57,7 @@ class LandlordUserController extends Controller
         DB::beginTransaction();
         try {
             $user = LandlordUser::create($request->validated());
-            $role = Role::where('slug', $request->role)->firstOrFail();
+            $role = Role::where('_id', new ObjectId($request->role_id))->firstOrFail();
             DB::commit();
         }catch (\Exception $e){
             DB::rollBack();

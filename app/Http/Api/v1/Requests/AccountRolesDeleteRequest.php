@@ -5,7 +5,7 @@ namespace App\Http\Api\v1\Requests;
 use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-class RolesDeleteRequest extends FormRequest
+class AccountRolesDeleteRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -23,7 +23,7 @@ class RolesDeleteRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'role_id' => ['required', 'string', 'max:255'],
+            'role_id' => 'required|string|exists:tenant.roles,_id'
         ];
     }
 }

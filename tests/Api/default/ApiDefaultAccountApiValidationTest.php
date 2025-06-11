@@ -95,7 +95,7 @@ class ApiDefaultAccountApiValidationTest extends TestCaseAuthenticated
                 "name",
                 "emails",
                 "password",
-                "role"
+                "role_id"
             ],
         ]);
     }

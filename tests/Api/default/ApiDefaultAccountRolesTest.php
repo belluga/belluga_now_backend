@@ -61,6 +61,16 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $main_account_role_visitor_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_VISITOR_ID->value, $value);
+            $this->main_account_role_visitor_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_VISITOR_ID->value);
+        }
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -250,6 +260,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
         $response->assertStatus(201);
+        $this->main_account_role_usermanage_id = $response->json()['data']['id'];
 
         $response = $this->accountRolesCreate(
             $this->main_account_slug,
@@ -260,6 +271,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
         $response->assertStatus(201);
+        $this->main_account_role_rolemanage_id = $response->json()['data']['id'];
 
         $response = $this->accountRolesCreate(
             $this->main_account_slug,
@@ -270,6 +282,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
         $response->assertStatus(201);
+        $this->main_account_role_visitor_id = $response->json()['data']['id'];
 
         $rolesList = $this->accountRolesList($this->main_account_slug);
         $rolesList->assertOk();

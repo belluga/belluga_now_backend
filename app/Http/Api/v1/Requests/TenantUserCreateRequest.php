@@ -32,7 +32,7 @@ class TenantUserCreateRequest extends FormRequest
                 new UniqueArrayItemRule('tenant', 'users', 'emails', )
             ],
             'password' => 'required|string|min:8',
-            'role' => 'required|string|exists:tenant.roles,slug'
+            'role_id' => 'required|string|exists:tenant.roles,_id'
         ];
     }
 }

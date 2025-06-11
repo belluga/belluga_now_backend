@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Requests\RolesDeleteRequest;
+use App\Http\Api\v1\Requests\AccountRolesDeleteRequest;
 use App\Http\Api\v1\Requests\RolesStoreRequest;
 use App\Http\Api\v1\Requests\RolesUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -93,8 +93,19 @@ class RolesAccountController extends Controller
         ], 200);
     }
 
-    public function destroy(RolesDeleteRequest $request): JsonResponse
+    public function destroy(AccountRolesDeleteRequest $request): JsonResponse
     {
+        if($request->route("role_id") == $request->validated()['role_id']){
+            return response()->json([
+                "message" => "Role ID backgrount should be different from the role ID to be deleted.",
+                "errors" => [
+                    "role_id" => "Role ID backgrount should be different from the role ID to be deleted.",
+                ]
+            ],
+                422
+            );
+        }
+
         $account = Account::where('slug', $request->route("account_slug") )->firstOrFail();
         $role = $account->roles()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
 
