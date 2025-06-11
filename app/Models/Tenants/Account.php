@@ -6,7 +6,6 @@ namespace App\Models\Tenants;
 
 use App\Traits\DemandPermissions;
 use App\Traits\OwnRoles;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\HasMany;
