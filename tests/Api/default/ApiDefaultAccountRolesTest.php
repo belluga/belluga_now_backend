@@ -32,10 +32,6 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
     }
 
     protected string $main_account_role_admin_id {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value, $value);
-            $this->main_account_role_admin_id = $value;
-        }
         get {
             return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
         }

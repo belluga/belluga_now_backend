@@ -19,7 +19,8 @@
             <file>tests/Api/default/ApiDefaultAccountRolesTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountUsersManageTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountAuthTest.php</file>
-            <file>tests/Api/default/ApiDefaultAccountUserPermissionsTest.php</file>
+            <file>tests/Api/default/ApiDefaultAccountPermissionsRolesTest.php</file>
+            <file>tests/Api/default/ApiDefaultAccountPermissionsUsersTest.php</file>
         </testsuite>
 <!--        <testsuite name="Api-V1">-->
 <!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->

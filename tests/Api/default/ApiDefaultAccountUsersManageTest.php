@@ -91,16 +91,6 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         }
     }
 
-    protected string $account_user_admin_token {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN->value, $value);
-            $this->account_user_admin_token = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_1_TOKEN->value);
-        }
-    }
-
     protected string $account_user_usermanage_name {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_NAME->value, $value);
@@ -131,16 +121,6 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         }
     }
 
-    protected string $account_user_usermanage_token {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_TOKEN->value, $value);
-            $this->account_user_usermanage_token = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_TOKEN->value);
-        }
-    }
-
     protected string $account_user_rolemanage_name {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_NAME->value, $value);
@@ -168,16 +148,6 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         }
         get {
             return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_PASSWORD->value);
-        }
-    }
-
-    protected string $account_user_rolemanage_token {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_TOKEN->value, $value);
-            $this->account_user_rolemanage_token = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_TOKEN->value);
         }
     }
 

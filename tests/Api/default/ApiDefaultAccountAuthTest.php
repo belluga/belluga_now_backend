@@ -24,91 +24,19 @@ class ApiDefaultAccountAuthTest extends TestCaseAuthenticated {
         }
     }
 
-    protected string $account_user_rolemanage_email {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_EMAIL->value, $value);
-            $this->account_user_rolemanage_email = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_EMAIL->value);
-        }
-    }
-
-    protected string $account_user_rolemanage_password {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_PASSWORD->value, $value);
-            $this->account_user_rolemanage_password = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_PASSWORD->value);
-        }
-    }
-
-    protected string $account_user_rolemanage_token {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_TOKEN->value, $value);
-            $this->account_user_rolemanage_token = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ROLEMANAGE_TOKEN->value);
-        }
-    }
-
-    protected string $account_user_usermanage_email {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_EMAIL->value, $value);
-            $this->account_user_usermanage_email = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_EMAIL->value);
-        }
-    }
-
-    protected string $account_user_usermanage_password {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_PASSWORD->value, $value);
-            $this->account_user_usermanage_password = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_PASSWORD->value);
-        }
-    }
-
-    protected string $account_user_usermanage_token {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_TOKEN->value, $value);
-            $this->account_user_usermanage_token = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_USERMANAGE_TOKEN->value);
-        }
-    }
-
     protected string $account_user_admin_email_1 {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_EMAIL_1->value, $value);
-            $this->account_user_admin_email_1 = $value;
-        }
         get {
             return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_EMAIL_1->value);
         }
     }
 
     protected string $account_user_admin_email_2 {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_EMAIL_2->value, $value);
-            $this->account_user_admin_email_2 = $value;
-        }
         get {
             return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_EMAIL_2->value);
         }
     }
 
     protected string $account_user_admin_password {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_PASSWORD->value, $value);
-            $this->account_user_admin_password = $value;
-        }
         get {
             return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_PASSWORD->value);
         }
@@ -131,46 +59,6 @@ class ApiDefaultAccountAuthTest extends TestCaseAuthenticated {
         }
         get {
             return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_ADMIN_DEVICE_2_TOKEN->value);
-        }
-    }
-
-    protected string $account_user_visitor_name {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value, $value);
-            $this->account_user_visitor_name = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_NAME->value);
-        }
-    }
-
-    protected string $account_user_visitor_email {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value, $value);
-            $this->account_user_visitor_email = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_EMAIL->value);
-        }
-    }
-
-    protected string $account_user_visitor_password {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value, $value);
-            $this->account_user_visitor_password = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_PASSWORD->value);
-        }
-    }
-
-    protected string $account_user_visitor_id {
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value, $value);
-            $this->account_user_visitor_id = $value;
-        }
-        get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_USER_VISITOR_ID->value);
         }
     }
 
