@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use MongoDB\BSON\ObjectId;
 
-class TenantUserController extends Controller
+class AccountUserController extends Controller
 {
 
     /**

@@ -6,7 +6,7 @@ use Illuminate\Testing\TestResponse;
 use Tests\Enums\TestVariableLabels;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultAccountPermissionsRolesTest extends TestCaseAuthenticated
+class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 {
 
     protected string $base_api_url {

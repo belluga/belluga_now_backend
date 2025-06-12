@@ -6,7 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Models\Tenants\AccountUser;
 
-class AuthControllerTenant extends AuthControllerContract
+class AuthControllerAccount extends AuthControllerContract
 {
     protected $userModel = AccountUser::class;
 }
