@@ -81,7 +81,9 @@ class AccountRolesController extends Controller
             return response()->json([
                 'message' => "Send at least one field to update.",
                 'errors' => [
-                    'empty' => ['Send at least one field to update.']
+                    'empty' => [
+                        'Send at least one field to update.'
+                    ]
                 ]
             ], 422);
         }
@@ -99,7 +101,9 @@ class AccountRolesController extends Controller
             return response()->json([
                 "message" => "Role ID backgrount should be different from the role ID to be deleted.",
                 "errors" => [
-                    "role_id" => "Role ID backgrount should be different from the role ID to be deleted.",
+                    "role_id" => [
+                        "Role ID backgrount should be different from the role ID to be deleted."
+                    ],
                 ]
             ],
                 422
@@ -120,6 +124,11 @@ class AccountRolesController extends Controller
             DB::rollBack();
             return response()->json([
                     "message" => "Erro ao excluir role. Tente novamente mais tarde.",
+                    "errors" => [
+                        "database" => [
+                            "Erro ao excluir role. Tente novamente mais tarde."
+                        ]
+                    ]
                 ],
                 422
             );

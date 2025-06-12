@@ -252,7 +252,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             [
                 "name" => "User Manager",
                 "description" => "Role for users management",
-                "permissions" => ["account-users:*"],
+                "permissions" => ["account-users:*", 'account-roles:view'],
             ]
         );
         $response->assertStatus(201);

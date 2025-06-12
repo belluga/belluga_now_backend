@@ -9,6 +9,8 @@ use Tests\TestCaseAuthenticated;
 class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 {
 
+    protected string $resource_slug = "roles";
+
     protected string $base_api_url {
         get {
             return "http://{$this->tenant_subdomain}.localhost/api/";
@@ -235,40 +237,40 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
     }
 
     public function testRolesListWithAdminUser(): void {
-        $rolesListAdmin = $this->accountRolesList(
+        $listAdmin = $this->list(
             $this->main_account_slug,
             $this->account_user_admin_token_device_1
         );
-        $rolesListAdmin->assertOk();
+        $listAdmin->assertOk();
     }
 
     public function testRolesListWithUserManageUser(): void {
-        $rolesListUserManage = $this->accountRolesList(
+        $listUserManage = $this->list(
             $this->main_account_slug,
             $this->account_user_usermanage_token
         );
-        $rolesListUserManage->assertStatus(403);
+        $listUserManage->assertOk();
     }
 
     public function testRolesListWithRoleManageUser(): void {
-        $rolesListRoleManage = $this->accountRolesList(
+        $listRoleManage = $this->list(
             $this->main_account_slug,
             $this->account_user_rolemanage_token
         );
-        $rolesListRoleManage->assertOk();
+        $listRoleManage->assertOk();
     }
 
     public function testRolesListWithVisitorUser(): void {
-        $rolesListVisitor = $this->accountRolesList(
+        $listVisitor = $this->list(
             $this->main_account_slug,
             $this->account_user_visitor_token
         );
-        $rolesListVisitor->assertStatus(403);
+        $listVisitor->assertStatus(403);
     }
 
     public function testRolesCreateWithAdminUser(): void
     {
-        $roleCreate = $this->accountRolesCreate(
+        $create = $this->create(
             $this->main_account_slug,
             $this->account_user_admin_token_device_1,
             [
@@ -277,14 +279,14 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
                 "permissions" => ["user:view", "user:create", "role:view"],
             ]
         );
-        $roleCreate->assertStatus(201);
-        $this->role_id_created_by_account_admin_user = $roleCreate->json()['data']['id'];
+        $create->assertStatus(201);
+        $this->role_id_created_by_account_admin_user = $create->json()['data']['id'];
 
     }
 
     public function testRolesCreateWithRoleManageUser(): void
     {
-        $roleCreate = $this->accountRolesCreate(
+        $reate = $this->create(
             $this->main_account_slug,
             $this->account_user_rolemanage_token,
             [
@@ -293,14 +295,14 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
                 "permissions" => ["user:view", "user:create", "role:view"],
             ]
         );
-        $roleCreate->assertStatus(201);
-        $this->role_id_created_by_account_rolemanage_user = $roleCreate->json()['data']['id'];
+        $reate->assertStatus(201);
+        $this->role_id_created_by_account_rolemanage_user = $reate->json()['data']['id'];
 
     }
 
     public function testRolesCreateWithUserManageUser(): void
     {
-        $roleCreate = $this->accountRolesCreate(
+        $create = $this->create(
             $this->main_account_slug,
             $this->account_user_usermanage_token,
             [
@@ -309,13 +311,13 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
                 "permissions" => ["user:view", "user:create", "role:view"],
             ]
         );
-        $roleCreate->assertStatus(403);
+        $create->assertStatus(403);
 
     }
 
     public function testRolesCreateWithVisitorUser(): void
     {
-        $roleCreate = $this->accountRolesCreate(
+        $create = $this->create(
             $this->main_account_slug,
             $this->account_user_visitor_token,
             [
@@ -324,19 +326,19 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
                 "permissions" => ["user:view", "user:create", "role:view"],
             ]
         );
-        $roleCreate->assertStatus(403);
+        $create->assertStatus(403);
 
     }
 
     public function testRolesShowWithAdminUser(): void
     {
-        $rolesShow = $this->accountRolesShow(
+        $show = $this->show(
             $this->main_account_slug,
             $this->role_id_created_by_account_admin_user,
             $this->account_user_admin_token_device_1
         );
-        $rolesShow->assertOk();
-        $rolesShow->assertJsonStructure([
+        $show->assertOk();
+        $show->assertJsonStructure([
             "data" => [
                 "name",
                 "permissions",
@@ -347,13 +349,13 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     public function testRolesShowWithRoleManagerUser(): void
     {
-        $rolesShow = $this->accountRolesShow(
+        $show = $this->show(
             $this->main_account_slug,
             $this->role_id_created_by_account_admin_user,
             $this->account_user_rolemanage_token
         );
-        $rolesShow->assertOk();
-        $rolesShow->assertJsonStructure([
+        $show->assertOk();
+        $show->assertJsonStructure([
             "data" => [
                 "name",
                 "permissions",
@@ -364,22 +366,22 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     public function testRolesShowWithUserManagerUser(): void
     {
-        $rolesShow = $this->accountRolesShow(
+        $show = $this->show(
             $this->main_account_slug,
             $this->role_id_created_by_account_admin_user,
             $this->account_user_usermanage_token
         );
-        $rolesShow->assertStatus(403);
+        $show->assertStatus(200);
     }
 
     public function testRolesShowWithVisitorUser(): void
     {
-        $rolesShow = $this->accountRolesShow(
+        $show = $this->show(
             $this->main_account_slug,
             $this->role_id_created_by_account_admin_user,
             $this->account_user_visitor_token
         );
-        $rolesShow->assertStatus(403);
+        $show->assertStatus(403);
     }
 
     public function testRolesUpdateWithAdminUser(): void
@@ -387,7 +389,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $token = $this->account_user_admin_token_device_1;
         $role_id = $this->role_id_created_by_account_admin_user;
 
-        $roleUpdate = $this->accountRolesUpdate(
+        $update = $this->update(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -397,19 +399,19 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
 
-        $roleUpdate->assertStatus(200);
+        $update->assertStatus(200);
 
-        $rolesShow = $this->accountRolesShow(
+        $show = $this->show(
             $this->main_account_slug,
             $role_id,
             $token
         );
-        $rolesShow->assertOk();
+        $show->assertOk();
 
-        $this->assertEquals("Role By Admin Updated", $rolesShow->json()['data']['name']);
+        $this->assertEquals("Role By Admin Updated", $show->json()['data']['name']);
         $this->assertEquals(
             ["user:view", "user:create", "role:view", "role:create"],
-            $rolesShow->json()['data']['permissions']
+            $show->json()['data']['permissions']
         );
     }
 
@@ -418,7 +420,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $token = $this->account_user_rolemanage_token;
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
-        $roleUpdate = $this->accountRolesUpdate(
+        $update = $this->update(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -428,19 +430,19 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
 
-        $roleUpdate->assertStatus(200);
+        $update->assertStatus(200);
 
-        $rolesShow = $this->accountRolesShow(
+        $show = $this->show(
             $this->main_account_slug,
             $role_id,
             $token
         );
-        $rolesShow->assertOk();
+        $show->assertOk();
 
-        $this->assertEquals("Role By Role Manager Updated", $rolesShow->json()['data']['name']);
+        $this->assertEquals("Role By Role Manager Updated", $show->json()['data']['name']);
         $this->assertEquals(
             ["user:view", "user:create", "role:view", "role:create"],
-            $rolesShow->json()['data']['permissions']
+            $show->json()['data']['permissions']
         );
     }
 
@@ -449,7 +451,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $token = $this->account_user_usermanage_token;
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
-        $roleUpdate = $this->accountRolesUpdate(
+        $update = $this->update(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -459,7 +461,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
 
-        $roleUpdate->assertStatus(403);
+        $update->assertStatus(403);
 
     }
 
@@ -468,7 +470,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $token = $this->account_user_visitor_token;
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
-        $roleUpdate = $this->accountRolesUpdate(
+        $update = $this->update(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -478,7 +480,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
 
-        $roleUpdate->assertStatus(403);
+        $update->assertStatus(403);
 
     }
 
@@ -488,7 +490,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -505,7 +507,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -521,7 +523,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $token = $this->account_user_admin_token_device_1;
         $role_id = $this->role_id_created_by_account_admin_user;
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -545,7 +547,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $token = $this->account_user_admin_token_device_1;
         $role_id = $this->role_id_created_by_account_admin_user;
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -555,7 +557,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $deleteResponse->assertStatus(200);
 
-        $showResponse = $this->accountRolesShow(
+        $showResponse = $this->show(
             $this->main_account_slug,
             $role_id,
             $token
@@ -570,7 +572,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -580,7 +582,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $deleteResponse->assertStatus(200);
 
-        $showResponse = $this->accountRolesShow(
+        $showResponse = $this->show(
             $this->main_account_slug,
             $role_id,
             $token
@@ -591,7 +593,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     public function testRolesRestoreWithVisitorUser(): void
     {
-        $restoreResponse = $this->accountRolesRestore(
+        $restoreResponse = $this->restore(
             $this->main_account_slug,
             $this->main_account_role_admin_id,
             $this->account_user_visitor_token
@@ -601,7 +603,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     public function testRolesRestoreWithUserManagerUser(): void
     {
-        $restoreResponse = $this->accountRolesRestore(
+        $restoreResponse = $this->restore(
             $this->main_account_slug,
             $this->main_account_role_admin_id,
             $this->account_user_usermanage_token
@@ -611,14 +613,14 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     public function testRolesRestoreWithRoleManagerUser(): void
     {
-        $restoreResponse = $this->accountRolesRestore(
+        $restoreResponse = $this->restore(
             $this->main_account_slug,
             $this->role_id_created_by_account_rolemanage_user,
             $this->account_user_rolemanage_token
         );
         $restoreResponse->assertStatus(200);
 
-        $showResponse = $this->accountRolesShow(
+        $showResponse = $this->show(
             $this->main_account_slug,
             $this->role_id_created_by_account_rolemanage_user,
             $this->account_user_rolemanage_token
@@ -628,14 +630,14 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     public function testRolesRestoreWithAdminUser(): void
     {
-        $restoreResponse = $this->accountRolesRestore(
+        $restoreResponse = $this->restore(
             $this->main_account_slug,
             $this->role_id_created_by_account_admin_user,
             $this->account_user_admin_token_device_1
         );
         $restoreResponse->assertStatus(200);
 
-        $showResponse = $this->accountRolesShow(
+        $showResponse = $this->show(
             $this->main_account_slug,
             $this->role_id_created_by_account_admin_user,
             $this->account_user_admin_token_device_1
@@ -649,7 +651,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $role_id = $this->role_id_created_by_account_rolemanage_user;
 
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -659,44 +661,44 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $deleteResponse->assertStatus(200);
 
-        $rolesListResponse = $this->accountRolesList(
+        $listResponse = $this->list(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(5, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(5, $listResponse['total']);
 
-        $rolesListResponse = $this->accountRolesListArchived(
+        $listResponse = $this->listArchived(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(1, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(1, $listResponse['total']);
 
-        $rolesListArchived = $this->accountRolesForceDelete(
+        $forceDeleteResponse = $this->forceDelete(
             $this->main_account_slug,
             $role_id,
             $token
         );
-        $rolesListArchived->assertOk();
+        $forceDeleteResponse->assertOk();
 
-        $rolesListResponse = $this->accountRolesList(
+        $listResponse = $this->list(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(5, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(5, $listResponse['total']);
 
-        $rolesListResponse = $this->accountRolesListArchived(
+        $istResponse = $this->listArchived(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(0, $rolesListResponse['total']);
+        $istResponse->assertOk();
+        $this->assertArrayHasKey('total', $istResponse);
+        $this->assertEquals(0, $istResponse['total']);
 
     }
 
@@ -706,7 +708,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $role_id = $this->role_id_created_by_account_admin_user;
 
 
-        $deleteResponse = $this->accountRolesDelete(
+        $deleteResponse = $this->deleteItem(
             $this->main_account_slug,
             $role_id,
             $token,
@@ -716,45 +718,45 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $deleteResponse->assertStatus(200);
 
-        $rolesListResponse = $this->accountRolesList(
+        $listResponse = $this->list(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(4, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(4, $listResponse['total']);
 
-        $rolesListResponse = $this->accountRolesListArchived(
+        $listResponse = $this->listArchived(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(1, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(1, $listResponse['total']);
 
-        $rolesListArchived = $this->accountRolesForceDelete(
+        $listArchived = $this->forceDelete(
             $this->main_account_slug,
             $role_id,
             $token
         );
-        $rolesListArchived->assertOk();
+        $listArchived->assertOk();
 
-        $rolesListResponse = $this->accountRolesList(
+        $listResponse = $this->list(
             $this->main_account_slug,
             $token
         );
 
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(4, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(4, $listResponse['total']);
 
-        $rolesListResponse = $this->accountRolesListArchived(
+        $listResponse = $this->listArchived(
             $this->main_account_slug,
             $token
         );
-        $rolesListResponse->assertOk();
-        $this->assertArrayHasKey('total', $rolesListResponse);
-        $this->assertEquals(0, $rolesListResponse['total']);
+        $listResponse->assertOk();
+        $this->assertArrayHasKey('total', $listResponse);
+        $this->assertEquals(0, $listResponse['total']);
 
     }
 
@@ -803,11 +805,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesList(string $account_slug, string $token): TestResponse
+    protected function list(string $account_slug, string $token): TestResponse
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -815,11 +817,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesListArchived(string $account_slug, string $token): TestResponse
+    protected function listArchived(string $account_slug, string $token): TestResponse
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles?archived=true",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug?archived=true",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -827,11 +829,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesCreate(string $account_slug, string $token, array $data): TestResponse
+    protected function create(string $account_slug, string $token, array $data): TestResponse
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $token",
@@ -840,11 +842,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesShow(string $account_slug, string $roleId, string $token): TestResponse
+    protected function show(string $account_slug, string $resourceId, string $token): TestResponse
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -852,11 +854,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesUpdate(string $account_slug, string $roleId, string $token, array $data): TestResponse
+    protected function update(string $account_slug, string $resourceId, string $token, array $data): TestResponse
     {
         return $this->json(
             method: 'patch',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $token",
@@ -865,11 +867,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesDelete(string $account_slug, string $roleId, string $token, array $data): TestResponse
+    protected function deleteItem(string $account_slug, string $resourceId, string $token, array $data): TestResponse
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $token",
@@ -878,11 +880,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesForceDelete(string $account_slug, string $roleId, string $token): TestResponse
+    protected function forceDelete(string $account_slug, string $resourceId, string $token): TestResponse
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId/force_delete",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId/force_delete",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -890,11 +892,11 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
     }
 
-    protected function accountRolesRestore(string $account_slug, string $roleId, string $token): TestResponse
+    protected function restore(string $account_slug, string $resourceId, string $token): TestResponse
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/roles/$roleId/restore",
+            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId/restore",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'

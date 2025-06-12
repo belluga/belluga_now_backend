@@ -113,4 +113,8 @@ enum TestVariableLabels: string {
 
     case ROLE_ID_CREATED_BY_ACCOUNT_ROLEMANAGE_USER = "role.id.created_by_account_rolemanage_user";
 
+    case USER_ID_CREATED_BY_ACCOUNT_ADMIN_USER = "user.id.created_by_account_admin_user";
+
+    case USER_ID_CREATED_BY_ACCOUNT_USERMANAGE_USER = "user.id.created_by_account_rolemanage_user";
+
 }

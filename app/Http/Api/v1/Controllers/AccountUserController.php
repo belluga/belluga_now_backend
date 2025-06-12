@@ -123,9 +123,17 @@ class AccountUserController extends Controller
 
         $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();;
 
-        // Impede que o usuário atual seja excluído
         if ($user->_id === Auth::id()) {
-            return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
+            return response()->json(
+                [
+                    'message' => 'Não é possível excluir o próprio usuário',
+                    'errors' => [
+                        "user_id" => [
+                            'Não é possível excluir o próprio usuário'
+                        ]
+                    ]
+                ],
+                422);
         }
 
         //remove relationships
@@ -160,7 +168,14 @@ class AccountUserController extends Controller
             ->firstOrFail();
 
         if ($user->_id === Auth::id()) {
-            return response()->json(['message' => 'Não é possível excluir o próprio usuário'], 422);
+            return response()->json([
+                'message' => 'Não é possível excluir o próprio usuário',
+                'errors' => [
+                    "user_id" => [
+                        "Não é possível excluir o próprio usuário"
+                    ]
+                ]
+            ], 422);
         }
 
         $user->forceDelete();
@@ -184,7 +199,10 @@ class AccountUserController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
+            return response()->json([
+                'message' => 'Dados inválidos',
+                'errors' => $validator->errors()
+            ], 422);
         }
 
         $user->password = Hash::make($request->input('password'));
@@ -213,6 +231,11 @@ class AccountUserController extends Controller
 
             return response()->json([
                     "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
+                    'errors' => [
+                        'emails' => [
+                            "Erro ao adicionar emails. Tente novamente mais tarde"
+                        ]
+                    ]
                 ],
                422
             );
@@ -237,6 +260,11 @@ class AccountUserController extends Controller
         }catch (\Exception $e){
             return response()->json([
                 "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
+                "errors" => [
+                    "emails" => [
+                        "Erro ao adicionar emails. Tente novamente mais tarde."
+                    ]
+                ]
             ],
                 422
             );
