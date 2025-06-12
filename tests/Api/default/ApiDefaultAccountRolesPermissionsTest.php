@@ -236,6 +236,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $this->account_user_visitor_token = $responseUserVisitor->json()['data']['token'];
     }
 
+    public function testLoginCrossAccount(): void {}
+
+    public function testLoginCrossTenant(): void {}
+
     public function testRolesListWithAdminUser(): void {
         $listAdmin = $this->list(
             $this->main_account_slug,
@@ -267,6 +271,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $listVisitor->assertStatus(403);
     }
+
+    public function testRolesListWithCrossAccount(): void {}
+
+    public function testRolesListWithCrossTenant(): void {}
 
     public function testRolesCreateWithAdminUser(): void
     {
@@ -330,6 +338,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     }
 
+    public function testRolesCreateWithCrossAccount(): void {}
+
+    public function testRolesCreateWithCrossTenant(): void {}
+
     public function testRolesShowWithAdminUser(): void
     {
         $show = $this->show(
@@ -383,6 +395,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $show->assertStatus(403);
     }
+
+    public function testRolesShowWithCrossAccount(): void {}
+
+    public function testRolesShowWithCrossTenant(): void {}
 
     public function testRolesUpdateWithAdminUser(): void
     {
@@ -484,6 +500,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     }
 
+    public function testRolesUpdateWithCrossAccount(): void {}
+
+    public function testRolesUpdateWithCrossTenant(): void {}
+
     public function testRolesDeleteWithUserManagerUser(): void
     {
         $token = $this->account_user_usermanage_token;
@@ -566,6 +586,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     }
 
+    public function testRolesDeleteWithCrossAccount(): void {}
+
+    public function testRolesDeleteWithCrossTenant(): void {}
+
     public function testRolesDeleteWithRoleManagerUser(): void
     {
         $token = $this->account_user_rolemanage_token;
@@ -644,6 +668,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $showResponse->assertOk();
     }
+
+    public function testRolesRestoreWithCrossAccount(): void {}
+
+    public function testRolesRestoreWithCrossTenant(): void {}
 
     public function testRolesDeleteFlowWithRoleManagerUser(): void
     {

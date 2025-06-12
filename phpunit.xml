@@ -13,9 +13,12 @@
             <file>tests/Api/default/ApiDefaultAdminUserTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminAuthTest.php</file>
             <file>tests/Api/default/ApiDefaultAdminTenantTest.php</file>
-            <file>tests/Api/default/ApiDefaultAdminPermissionsTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountApiValidationTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminRolesPermissionsTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminUsersPermissionsTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminTenantsPermissionsTest.php</file>
+            <file>tests/Api/default/ApiDefaultAdminAccountsPermissionsTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountRolesTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountUsersManageTest.php</file>
             <file>tests/Api/default/ApiDefaultAccountRolesPermissionsTest.php</file>

@@ -242,6 +242,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->account_user_visitor_token = $responseUserVisitor->json()['data']['token'];
     }
 
+    public function testLoginCrossAccount(): void {}
+
+    public function testLoginCrossTenant(): void {}
+
     public function testListWithAdminUser(): void {
         $listAdmin = $this->list(
             $this->main_account_slug,
@@ -273,6 +277,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         );
         $listVisitor->assertStatus(403);
     }
+
+    public function testListWithCrossAccount(): void {}
+
+    public function testListWithCrossTenant(): void {}
 
     public function testCreateWithAdminUser(): void
     {
@@ -353,6 +361,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
+    public function testCreateWithCrossAccount(): void {}
+
+    public function testCreateWithCrossTenant(): void {}
+
     public function testShowWithAdminUser(): void
     {
         $show = $this->show(
@@ -413,6 +425,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         );
         $show->assertStatus(403);
     }
+
+    public function testShowWithCrossAccount(): void {}
+
+    public function testShowWithCrossTenant(): void {}
 
     public function testUpdateWithAdminUser(): void
     {
@@ -502,6 +518,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $update->assertStatus(403);
 
     }
+
+    public function testUpdateWithCrossAccount(): void {}
+
+    public function testUpdateWithCrossTenant(): void {}
 
     public function testDeleteWithUserManagerUser(): void
     {
@@ -596,6 +616,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
+    public function testRolesDeleteWithCrossAccount(): void {}
+
+    public function testRolesDeleteWithCrossTenant(): void {}
+
     public function testRolesRestoreWithVisitorUser(): void
     {
         $restoreResponse = $this->restore(
@@ -651,6 +675,10 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         );
         $showResponse->assertOk();
     }
+
+    public function testRolesRestoreWithCrossAccount(): void {}
+
+    public function testRolesRestoreWithCrossTenant(): void {}
 
     public function testRolesDeleteFlowWithUserManagerUser(): void
     {
