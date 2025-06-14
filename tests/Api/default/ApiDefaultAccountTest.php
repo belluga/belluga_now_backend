@@ -8,39 +8,115 @@ use Tests\TestCaseAuthenticated;
 
 class ApiDefaultAccountTest extends TestCaseAuthenticated
 {
-    protected string $tenant_subdomain {
+    protected string $tenant_1_subdomain {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_SUBDOMAIN->value);
+        }
+    }
+
+    protected string $tenant_2_subdomain {
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_SUBDOMAIN->value);
         }
     }
 
-    protected string $main_account_id {
+    protected string $tenant_1_main_account_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_1_MAIN_ACCOUNT_ID->value, $value);
+            $this->tenant_1_main_account_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_MAIN_ACCOUNT_ID->value);
+        }
+    }
+
+    protected string $tenant_1_main_account_slug {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_1_MAIN_ACCOUNT_SLUG->value, $value);
+            $this->tenant_1_main_account_slug = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_MAIN_ACCOUNT_SLUG->value);
+        }
+    }
+
+    protected string $tenant_2_main_account_id {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ID->value, $value);
-            $this->main_account_id = $value;
+            $this->tenant_2_main_account_id = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_ID->value);
         }
     }
 
-    protected string $main_account_role_admin_id {
+    protected string $tenant_2_secondary_account_id {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value, $value);
-            $this->main_account_role_admin_id = $value;
+            $this->setGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_ID->value, $value);
+            $this->tenant_2_secondary_account_id = $value;
         }
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_ID->value);
         }
     }
 
-    protected string $main_account_slug {
+    protected string $tenant_2_main_account_role_admin_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_ADMIN_ID->value, $value);
+            $this->tenant_2_main_account_role_admin_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
+    protected string $tenant_1_main_account_role_admin_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_1_ACCOUNT_ROLE_ADMIN_ID->value, $value);
+            $this->tenant_1_main_account_role_admin_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
+    protected string $secondary_account_role_admin_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::SECONDARY_ACCOUNT_ROLE_ADMIN_ID->value, $value);
+            $this->secondary_account_role_admin_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
+    protected string $tenant_2_main_account_slug {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value, $value);
-            $this->main_account_slug = $value;
+            $this->tenant_2_main_account_slug = $value;
         }
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value);
+        }
+    }
+
+    protected string $secondary_account_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_ID->value, $value);
+            $this->secondary_account_id = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_ID->value);
+        }
+    }
+
+    protected string $secondary_account_slug {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_SLUG->value, $value);
+            $this->secondary_account_slug = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_SLUG->value);
         }
     }
 
@@ -74,7 +150,6 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
                     "type" => "cpf",
                     "number" => fake()->cnpj(false)
                 ],
-                "permissions" => ["user.view", "user.create"],
             ]
         );
 
@@ -94,14 +169,80 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
             ]
         ]);
 
-        $this->main_account_id = $response->json()['data']['account']['id'];
-        $this->main_account_slug = $response->json()['data']['account']['slug'];
-        $this->main_account_role_admin_id = $response->json()['data']['role']['id'];
+        $this->tenant_2_main_account_id = $response->json()['data']['account']['id'];
+        $this->tenant_2_main_account_slug = $response->json()['data']['account']['slug'];
+        $this->tenant_2_main_account_role_admin_id = $response->json()['data']['role']['id'];
+    }
+
+    public function testAccountMainTenantCreate(): void
+    {
+        $response = $this->accountCreateTenant1(
+            [
+                "name" => fake()->company(),
+                "document" => [
+                    "type" => "cpf",
+                    "number" => fake()->cnpj(false)
+                ],
+            ]
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonStructure([
+            "data" => [
+                "account" => [
+                    "id",
+                    "name",
+                    "slug",
+                    "created_at"
+                ],
+                "role" => [
+                    "id",
+                    "slug"
+                ]
+            ]
+        ]);
+
+        $this->tenant_1_main_account_id = $response->json()['data']['account']['id'];
+        $this->tenant_1_main_account_slug = $response->json()['data']['account']['slug'];
+        $this->tenant_1_main_account_role_admin_id = $response->json()['data']['role']['id'];
+    }
+
+    public function testAccountCreateSecondary(): void
+    {
+        $response = $this->accountCreate(
+            [
+                "name" => fake()->company(),
+                "document" => [
+                    "type" => "cpf",
+                    "number" => fake()->cnpj(false)
+                ],
+            ]
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonStructure([
+            "data" => [
+                "account" => [
+                    "id",
+                    "name",
+                    "slug",
+                    "created_at"
+                ],
+                "role" => [
+                    "id",
+                    "slug"
+                ]
+            ]
+        ]);
+
+        $this->secondary_account_id = $response->json()['data']['account']['id'];
+        $this->secondary_account_slug = $response->json()['data']['account']['slug'];
+        $this->secondary_account_role_admin_id = $response->json()['data']['role']['id'];
     }
 
     public function testAccountShow(): void
     {
-        $rolesShow = $this->accountShow($this->main_account_slug);
+        $rolesShow = $this->accountShow($this->tenant_2_main_account_slug);
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
             "data" => [
@@ -116,7 +257,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
         $new_company_name = fake()->company() . " Updated";
 
         $roleUpdate = $this->accountUpdate(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             [
                 "name" => $new_company_name,
                 "document" => [
@@ -133,7 +274,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
             "cpf",
             $roleUpdate->json()['data']['document']['type']
         );
-        $this->main_account_slug = $roleUpdate->json()['data']['slug'];
+        $this->tenant_2_main_account_slug = $roleUpdate->json()['data']['slug'];
     }
 
     public function testAccountDelete(): void
@@ -235,7 +376,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts",
             headers: $this->getHeaders(),
         );
     }
@@ -244,7 +385,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts?archived=true",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts?archived=true",
             headers: $this->getHeaders(),
         );
     }
@@ -253,7 +394,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug",
             headers: $this->getHeaders(),
         );
     }
@@ -262,7 +403,17 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts",
+            data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function accountCreateTenant1(array $data): TestResponse
+    {
+        return $this->json(
+            method: 'post',
+            uri: "http://{$this->tenant_1_subdomain}.localhost/api/accounts",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -272,7 +423,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'patch',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -282,7 +433,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug",
             headers: $this->getHeaders(),
         );
     }
@@ -291,7 +442,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/restore",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/restore",
             headers: $this->getHeaders(),
         );
     }
@@ -300,7 +451,7 @@ class ApiDefaultAccountTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/force_delete",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/force_delete",
             headers: $this->getHeaders(),
         );
     }

@@ -21,6 +21,12 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $secondary_account_slug {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_SLUG->value);
+        }
+    }
+
     protected string $secondary_role_id {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::SECONDARY_ROLE_ID->value, $value);
@@ -31,39 +37,39 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
         }
     }
 
-    protected string $main_account_role_admin_id {
+    protected string $tenant_2_main_account_role_admin_id {
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_ADMIN_ID->value);
         }
     }
 
-    protected string $main_account_role_usermanage_id {
+    protected string $tenant_2_main_account_role_usermanage_id {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_USERMANAGE_ID->value, $value);
-            $this->main_account_role_usermanage_id = $value;
+            $this->setGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_USERMANAGE_ID->value, $value);
+            $this->tenant_2_main_account_role_usermanage_id = $value;
         }
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_USERMANAGE_ID->value);
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_USERMANAGE_ID->value);
         }
     }
 
-    protected string $main_account_role_rolemanage_id {
+    protected string $tenant_2_main_account_role_rolemanage_id {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_ROLEMANAGE_ID->value, $value);
-            $this->main_account_role_rolemanage_id = $value;
+            $this->setGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_ROLEMANAGE_ID->value, $value);
+            $this->tenant_2_main_account_role_rolemanage_id = $value;
         }
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ROLEMANAGE_ID->value);
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_ROLEMANAGE_ID->value);
         }
     }
 
-    protected string $main_account_role_visitor_id {
+    protected string $tenant_2_main_account_role_visitor_id {
         set(string $value) {
-            $this->setGlobal(TestVariableLabels::ACCOUNT_ROLE_VISITOR_ID->value, $value);
-            $this->main_account_role_visitor_id = $value;
+            $this->setGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_VISITOR_ID->value, $value);
+            $this->tenant_2_main_account_role_visitor_id = $value;
         }
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_VISITOR_ID->value);
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_VISITOR_ID->value);
         }
     }
 
@@ -162,7 +168,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             $this->main_account_slug,
             $this->secondary_role_id,
             [
-                "role_id" => $this->main_account_role_admin_id
+                "role_id" => $this->tenant_2_main_account_role_admin_id
             ]
         );
         $deleteResponse->assertStatus(200);
@@ -216,7 +222,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             $this->main_account_slug,
             $this->secondary_role_id,
             [
-                "role_id" => $this->main_account_role_admin_id
+                "role_id" => $this->tenant_2_main_account_role_admin_id
             ]
         );
         $restoreResponse->assertStatus(200);
@@ -256,7 +262,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
         $response->assertStatus(201);
-        $this->main_account_role_usermanage_id = $response->json()['data']['id'];
+        $this->tenant_2_main_account_role_usermanage_id = $response->json()['data']['id'];
 
         $response = $this->accountRolesCreate(
             $this->main_account_slug,
@@ -267,7 +273,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
         $response->assertStatus(201);
-        $this->main_account_role_rolemanage_id = $response->json()['data']['id'];
+        $this->tenant_2_main_account_role_rolemanage_id = $response->json()['data']['id'];
 
         $response = $this->accountRolesCreate(
             $this->main_account_slug,
@@ -278,7 +284,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
             ]
         );
         $response->assertStatus(201);
-        $this->main_account_role_visitor_id = $response->json()['data']['id'];
+        $this->tenant_2_main_account_role_visitor_id = $response->json()['data']['id'];
 
         $rolesList = $this->accountRolesList($this->main_account_slug);
         $rolesList->assertOk();

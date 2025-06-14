@@ -65,6 +65,13 @@ class ApiDefaultInitializeTest extends TestCase {
         }
     }
 
+    protected string $tenant_1_subdomain {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_1_SUBDOMAIN->value, $value);
+            $this->tenant_1_subdomain = $value;
+        }
+    }
+
     protected string $main_user_id {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::LANDLORD_USER_ID->value, $value);
@@ -106,6 +113,7 @@ class ApiDefaultInitializeTest extends TestCase {
         $this->main_user_id = $response->json()['data']['user']["id"];
         $this->landlord_token = $response->json()['data']['token'];
         $this->tenant_1_slug = $response->json()['data']['tenant']["slug"];
+        $this->tenant_1_subdomain = $response->json()['data']['tenant']["subdomain"];
         $this->main_role_id = $response->json()['data']["role"]["id"];
     }
 

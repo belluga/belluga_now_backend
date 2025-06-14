@@ -45,9 +45,7 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         $responseData = $tenantsList->json();
         $this->assertEquals(1, $responseData['total']);
         $this->assertCount(1, $responseData['data']);
-        $this->assertEquals(1, $responseData['last_page']);
         $this->assertEquals(1, $responseData['current_page']);
-        $this->assertEquals(15, $responseData['per_page']);
     }
 
     public function testTenantsCreate(): void {

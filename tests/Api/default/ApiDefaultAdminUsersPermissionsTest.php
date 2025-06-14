@@ -14,6 +14,7 @@ class ApiDefaultAdminUsersPermissionsTest extends TestCaseAuthenticated
     public function testListNoPermission(): void {}
 
     public function testListWithPermissionCrossTenant(): void {}
+
     public function testCreateWithPermission(): void {}
 
     public function testCreateNoPermission(): void {}

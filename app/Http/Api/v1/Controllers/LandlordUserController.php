@@ -5,12 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
-use App\Http\Api\v1\Requests\LandlordUserUpdateRequest;
+use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\AccountUser;
 use App\Models\Landlord\Role;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,10 +29,11 @@ class LandlordUserController extends Controller
      */
     public function index(Request $request): LengthAwarePaginator
     {
-        return LandlordUser::with('tenants')
-            ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->paginate(20);
-//        return response()->json($users);
+        return LandlordUser::when(
+            $request->has('archived'),
+            fn ($query, $name) => $query->onlyTrashed()
+        )
+        ->paginate();
     }
 
     /**
@@ -79,7 +79,7 @@ class LandlordUserController extends Controller
     /**
      * Atualiza um usuário existente do landlord
      */
-    public function update(LandlordUserUpdateRequest $request, string $user_id): JsonResponse
+    public function update(UserUpdateRequest $request, string $user_id): JsonResponse
     {
         $this->user = LandlordUser::findOrFail($user_id)
             ?? abort(404);
@@ -109,10 +109,10 @@ class LandlordUserController extends Controller
         try {
             switch( $method){
                 case 'post':
-                    $users->each(fn($user) => $tenant->users()->attach($user));
+                    $users->each(fn($user) => $user->haveAccessTo()->attach($tenant));
                     break;
                 case 'delete':
-                    $users->each(fn($user) => $tenant->users()->attach($user));
+                    $users->each(fn($user) => $user->haveAccessTo()->dettach($tenant));
                     break;
                 default:
                     abort(422, "Not found an action for this method.");
@@ -138,16 +138,11 @@ class LandlordUserController extends Controller
     public function forceDestroy($user_id): JsonResponse {
         $user = LandlordUser::onlyTrashed()->findOrFail($user_id);
 
-        DB::beginTransaction();
         try{
-            $user->tenants()->detach();
             $user->forceDelete();
         }catch (\Exception $e){
-            DB::rollBack();
             return response()->json(["errors" => ["relationships" => ["Error deleting relationships."]]]);
         }
-        DB::commit();
-
 
         return response()->json();
     }

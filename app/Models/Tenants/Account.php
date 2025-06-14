@@ -6,6 +6,7 @@ namespace App\Models\Tenants;
 
 use App\Traits\DemandPermissions;
 use App\Traits\OwnRoles;
+use Illuminate\Support\Facades\Context;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\HasMany;
@@ -16,6 +17,10 @@ use Spatie\Sluggable\SlugOptions;
 class Account extends Model
 {
     use UsesTenantConnection, SoftDeletes, HasSlug, DemandPermissions, OwnRoles;
+
+    static protected string $container_key = 'currentAccount';
+
+    static protected string $context_key = 'accountId';
 
     protected $fillable = [
         'name',
@@ -44,4 +49,41 @@ class Account extends Model
             ->generateSlugsFrom('name')
             ->saveSlugsTo('slug');
     }
+
+    public function forget(): static
+    {
+        app()->forgetInstance(static::$container_key);
+
+        Context::forget(static::$context_key);
+
+        return $this;
+    }
+
+    public static function current(): ?static
+    {
+
+        if (! app()->has(static::$container_key)) {
+            return null;
+        }
+
+        return app(static::$container_key);
+    }
+
+    public function makeCurrent(): static
+    {
+        if ($this->isCurrent()) {
+            return $this;
+        }
+
+        app()->instance(static::$container_key, $this);
+
+        Context::add(static::$context_key, $this->id);
+
+        return $this;
+    }
+
+    public function isCurrent(): bool {
+        return $this->id === Context::get(static::$context_key);
+    }
+
 }

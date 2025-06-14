@@ -104,7 +104,7 @@ class ApiDefaultAdminRolesPermissionsTest extends TestCaseAuthenticated
             method: 'delete',
             uri: "admin/api/roles/$roleId",
             data: [
-                "role_id" => $this->main_role_id,
+//                "role_id" => $this->main_role_id,
             ],
             headers: $this->getHeaders(),
         );

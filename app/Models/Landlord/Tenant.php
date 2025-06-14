@@ -66,11 +66,6 @@ class Tenant extends BaseTenant
         return null;
     }
 
-    public function tenants(): BelongsToMany
-    {
-        return $this->belongsToMany(LandlordUser::class);
-    }
-
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()

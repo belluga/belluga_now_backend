@@ -11,10 +11,7 @@ class InitializeTenancy
         $tenant_find_class = config('multitenancy.tenant_finder');
 
         $tenant = new $tenant_find_class()->findForRequest($request);
-
-        if($tenant){
-            $tenant->makeCurrent();
-        }
+        $tenant->makeCurrent();
 
         return $next($request);
     }

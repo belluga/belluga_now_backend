@@ -21,9 +21,9 @@ class ApiDefaultAccountApiValidationTest extends TestCaseAuthenticated
         }
     }
 
-    protected string $main_role_id {
+    protected string $tenant_2_main_role_id {
         get {
-            return $this->getGlobal(TestVariableLabels::ACCOUNT_ROLE_ADMIN_ID->value);
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ACCOUNT_ROLE_ADMIN_ID->value);
         }
     }
 
@@ -53,7 +53,7 @@ class ApiDefaultAccountApiValidationTest extends TestCaseAuthenticated
 
         $response = $this->accountRolesUpdate(
             $this->main_account_slug,
-            $this->main_role_id
+            $this->tenant_2_main_role_id
         );
 
         $response->assertStatus(422);
@@ -67,11 +67,9 @@ class ApiDefaultAccountApiValidationTest extends TestCaseAuthenticated
 
     public function testAccountRolesDelete(): void
     {
-
-
         $deleteResponse = $this->accountRolesDelete(
             $this->main_account_slug,
-            $this->main_role_id,
+            $this->tenant_2_main_role_id,
             []
         );
         $deleteResponse->assertStatus(422);

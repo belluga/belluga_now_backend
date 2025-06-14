@@ -42,18 +42,30 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(base_path('routes/api/tenant_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
 
             Route::prefix('api/accounts/{account_slug}')
-                ->middleware('tenant')
+                ->middleware(['tenant'])
                 ->group(base_path('routes/api/account_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
         }
     )
     ->withMiddleware(function (Middleware $middleware) {
+
         $middleware
-            ->group('tenant', [
-                StartSession::class,
-                \App\Http\Middleware\InitializeTenancy::class,
-                \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
-                \Spatie\Multitenancy\Http\Middleware\EnsureValidTenantSession::class,
-            ]);
+            ->group(
+                "account",
+                [
+                    StartSession::class,
+                    \App\Http\Middleware\InitializeAccount::class,
+                    \App\Http\Middleware\CheckAccountAccess::class,
+                ]
+            );
+
+        $middleware
+            ->group('tenant',
+                [
+                    StartSession::class,
+                    \App\Http\Middleware\InitializeTenancy::class,
+                    \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
+                ]
+            );
 
         $middleware->alias([
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,

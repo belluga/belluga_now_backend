@@ -25,7 +25,7 @@ class TenantController extends Controller
     {
 
         $user = auth()->guard('sanctum')->user();
-        return $user->tenants()
+        return $user->haveAccessTo()
             ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->with('domains')->paginate($request->get('per_page', 15));
     }
@@ -35,7 +35,7 @@ class TenantController extends Controller
         $user = auth()->guard('sanctum')->user();
 
         try {
-            $tenant = $user->tenants()->create($request->validated());
+            $tenant = $user->haveAccessTo()->create($request->validated());
         } catch (BulkWriteException $e) {
             abort(422, "Something went wrong when trying to create the tenant.");
         }
@@ -49,7 +49,7 @@ class TenantController extends Controller
     {
 
         $user = auth()->guard('sanctum')->user();
-        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+        $tenant = $user->haveAccessTo()->where('slug', $tenant_slug)->first();
 
         if($tenant){
             return response()->json([
@@ -76,7 +76,7 @@ class TenantController extends Controller
     public function restore(string $tenant_slug): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-        $tenant = $user->tenants()->onlyTrashed()->where('slug', $tenant_slug)->first();
+        $tenant = $user->haveAccessTo()->onlyTrashed()->where('slug', $tenant_slug)->first();
         $tenant->restore();
 
         return response()->json([]);
@@ -86,7 +86,7 @@ class TenantController extends Controller
     {
         $user = auth()->guard('sanctum')->user();
 
-        $tenant = $user->tenants()->where('slug', $tenant_slug)->first();
+        $tenant = $user->haveAccessTo()->where('slug', $tenant_slug)->first();
 
         $tenant->delete();
 

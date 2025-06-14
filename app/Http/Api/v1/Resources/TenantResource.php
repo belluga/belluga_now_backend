@@ -19,7 +19,7 @@ class TenantResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'slug' => $this->slug,
-            'sub_domains' => $this->subdomain
+            'subdomain' => $this->subdomain
         ];
     }
 }

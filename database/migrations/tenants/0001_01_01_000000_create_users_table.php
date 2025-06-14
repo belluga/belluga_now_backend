@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('users', function (Blueprint $collection) {
+        Schema::create('account_users', function (Blueprint $collection) {
             $collection->unique('emails');
             $collection->index('tenant_ids');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
@@ -33,7 +33,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('users');
+        Schema::dropIfExists('account_users');
         Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
     }

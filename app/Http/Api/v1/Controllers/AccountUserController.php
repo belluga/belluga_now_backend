@@ -7,8 +7,11 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Requests\AccountUserEmailsAddRequest;
 use App\Http\Api\v1\Requests\AccountUserEmailsRemoveRequest;
 use App\Http\Api\v1\Requests\TenantUserCreateRequest;
+use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\LandlordUser;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Role;
 use Illuminate\Http\JsonResponse;
@@ -54,6 +57,7 @@ class AccountUserController extends Controller
             $role = Role::where('_id', new ObjectId($request->role_id))->firstOrFail();
 
             $role->users()->save($user);
+            $user->haveAccessTo()->attach(Account::current());
             DB::commit();
         }catch (\Exception $e){
             DB::rollBack();
@@ -75,38 +79,11 @@ class AccountUserController extends Controller
     /**
      * Atualiza um usuário existente
      */
-    public function update(Request $request): JsonResponse
+    public function update(UserUpdateRequest $request): JsonResponse
     {
-        $user_id = $request->route("user_id");
+        $user = AccountUser::findOrFail($request->route("user_id"));
 
-        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();;
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'string|max:255',
-            'email' => 'string|email|max:255|unique:tenant.tenant_users,email,' . $user_id . ',_id',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
-        }
-
-        if ($request->has('name')) {
-            $user->name = $request->input('name');
-        }
-
-        if ($request->has('email')) {
-            $user->email = $request->input('email');
-        }
-
-        if ($request->has('role_id')) {
-            $user->role_id = $request->input('role_id');
-        }
-
-        if ($request->has('account_id')) {
-            $user->account_id = $request->input('account_id');
-        }
-
-        $user->save();
+        $user->update($request->validated());
 
         return response()->json([
             'message' => 'Usuário atualizado com sucesso',

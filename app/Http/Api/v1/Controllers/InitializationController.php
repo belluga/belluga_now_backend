@@ -56,7 +56,7 @@ class InitializationController extends Controller
 
             $new_user->role()->associate($admin_role);
 
-            $new_user->tenants()->attach($new_tenant);
+            $new_user->haveAccessTo()->attach($new_tenant);
 
             foreach($request->user['emails'] as $email){
                 $new_user->addEmail($email);
