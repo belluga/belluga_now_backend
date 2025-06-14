@@ -283,6 +283,18 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $secondary_account_slug {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_2_SECONDARY_ACCOUNT_SLUG->value);
+        }
+    }
+
+    protected string $secondary_account_role_admin_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_ROLE_ADMIN_ID->value);
+        }
+    }
+
     protected string $tenant_2_account_user_visitor_password {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_ACCOUNT_USER_VISITOR_PASSWORD->value, $value);
@@ -494,14 +506,14 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         $this->secondary_account_user_admin_email = fake()->email();
         $this->secondary_account_user_admin_password = fake()->password(8);
 
-        $response = $this->accountUserCreate([
+        $response = $this->accountUserCreateSecondaryAccount([
             "name" => $this->secondary_account_user_admin_name,
             "emails" => [
                 $this->secondary_account_user_admin_email,
             ],
             "password" => $this->secondary_account_user_admin_password,
             "password_confirmation" => $this->secondary_account_user_admin_password,
-            "role_id" => $this->tenant_2_main_account_role_admin_id,
+            "role_id" => $this->secondary_account_role_admin_id,
 
         ]);
 
@@ -678,6 +690,15 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         return $this->json(
             method: 'post',
             uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$this->tenant_2_main_account_slug/users",
+            data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function accountUserCreateSecondaryAccount(array $data): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$this->secondary_account_slug/users",
             data: $data,
             headers: $this->getHeaders(),
         );

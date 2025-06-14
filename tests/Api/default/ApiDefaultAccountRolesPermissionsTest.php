@@ -385,21 +385,21 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $listVisitor->assertStatus(403);
     }
 
-//    public function testRolesListWithCrossAccount(): void {
-//        $listVisitor = $this->list(
-//            $this->tenant_2_main_account_slug,
-//            $this->secondary_account_user_admin_token
-//        );
-//        $listVisitor->assertStatus(401);
-//    }
-//
-//    public function testRolesListWithCrossTenant(): void {
-//        $listVisitor = $this->list(
-//            $this->tenant_2_main_account_slug,
-//            $this->tenant_1_account_user_admin_token
-//        );
-//        $listVisitor->assertStatus(401);
-//    }
+    public function testRolesListWithCrossAccount(): void {
+        $listVisitor = $this->list(
+            $this->tenant_2_main_account_slug,
+            $this->secondary_account_user_admin_token
+        );
+        $listVisitor->assertStatus(401);
+    }
+
+    public function testRolesListWithCrossTenant(): void {
+        $listVisitor = $this->list(
+            $this->tenant_2_main_account_slug,
+            $this->tenant_1_account_user_admin_token
+        );
+        $listVisitor->assertStatus(401);
+    }
 
     public function testRolesCreateWithAdminUser(): void
     {
@@ -463,9 +463,31 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesCreateWithCrossAccount(): void {}
+    public function testRolesCreateWithCrossAccount(): void {
+        $create = $this->create(
+            $this->tenant_2_main_account_slug,
+            $this->secondary_account_user_admin_token,
+            [
+                "name" => "Role By Visitor",
+                "description" => "Role for testing purposes created by Visitor User",
+                "permissions" => ["user:view", "user:create", "role:view"],
+            ]
+        );
+        $create->assertStatus(401);
+    }
 
-    public function testRolesCreateWithCrossTenant(): void {}
+    public function testRolesCreateWithCrossTenant(): void {
+        $create = $this->create(
+            $this->tenant_2_main_account_slug,
+            $this->tenant_1_account_user_admin_token,
+            [
+                "name" => "Role By Visitor",
+                "description" => "Role for testing purposes created by Visitor User",
+                "permissions" => ["user:view", "user:create", "role:view"],
+            ]
+        );
+        $create->assertStatus(401);
+    }
 
     public function testRolesShowWithAdminUser(): void
     {
@@ -521,9 +543,23 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $show->assertStatus(403);
     }
 
-    public function testRolesShowWithCrossAccount(): void {}
+    public function testRolesShowWithCrossAccount(): void {
+        $show = $this->show(
+            $this->tenant_2_main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->secondary_account_user_admin_token
+        );
+        $show->assertStatus(401);
+    }
 
-    public function testRolesShowWithCrossTenant(): void {}
+    public function testRolesShowWithCrossTenant(): void {
+        $show = $this->show(
+            $this->tenant_2_main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->tenant_1_account_user_admin_token
+        );
+        $show->assertStatus(401);
+    }
 
     public function testRolesUpdateWithAdminUser(): void
     {
@@ -625,9 +661,39 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesUpdateWithCrossAccount(): void {}
+    public function testRolesUpdateWithCrossAccount(): void {
+        $token = $this->secondary_account_user_admin_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
 
-    public function testRolesUpdateWithCrossTenant(): void {}
+        $update = $this->update(
+            $this->tenant_2_main_account_slug,
+            $role_id,
+            $token,
+            [
+                "name" => "Role By User Manager Updated",
+                "permissions" => ["user:view", "user:create", "role:view", "role:create"],
+            ]
+        );
+
+        $update->assertStatus(401);
+    }
+
+    public function testRolesUpdateWithCrossTenant(): void {
+        $token = $this->tenant_1_account_user_admin_token;
+        $role_id = $this->role_id_created_by_account_rolemanage_user;
+
+        $update = $this->update(
+            $this->tenant_2_main_account_slug,
+            $role_id,
+            $token,
+            [
+                "name" => "Role By User Manager Updated",
+                "permissions" => ["user:view", "user:create", "role:view", "role:create"],
+            ]
+        );
+
+        $update->assertStatus(401);
+    }
 
     public function testRolesDeleteWithUserManagerUser(): void
     {
@@ -711,9 +777,35 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesDeleteWithCrossAccount(): void {}
+    public function testRolesDeleteWithCrossAccount(): void {
+        $token = $this->secondary_account_user_admin_token;
+        $role_id = $this->role_id_created_by_account_admin_user;
 
-    public function testRolesDeleteWithCrossTenant(): void {}
+        $deleteResponse = $this->deleteItem(
+            $this->tenant_2_main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->tenant_2_main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(401);
+    }
+
+    public function testRolesDeleteWithCrossTenant(): void {
+        $token = $this->tenant_1_account_user_admin_token;
+        $role_id = $this->role_id_created_by_account_admin_user;
+
+        $deleteResponse = $this->deleteItem(
+            $this->tenant_2_main_account_slug,
+            $role_id,
+            $token,
+            [
+                "role_id" => $this->tenant_2_main_account_role_visitor_id
+            ]
+        );
+        $deleteResponse->assertStatus(401);
+    }
 
     public function testRolesDeleteWithRoleManagerUser(): void
     {
@@ -777,6 +869,24 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         $showResponse->assertOk();
     }
 
+    public function testRolesRestoreWithCrossAccount(): void {
+        $restoreResponse = $this->restore(
+            $this->tenant_2_main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->secondary_account_user_admin_token
+        );
+        $restoreResponse->assertStatus(401);
+    }
+
+    public function testRolesRestoreWithCrossTenant(): void {
+        $restoreResponse = $this->restore(
+            $this->tenant_2_main_account_slug,
+            $this->role_id_created_by_account_admin_user,
+            $this->tenant_1_account_user_admin_token
+        );
+        $restoreResponse->assertStatus(401);
+    }
+
     public function testRolesRestoreWithAdminUser(): void
     {
         $restoreResponse = $this->restore(
@@ -793,10 +903,6 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
         $showResponse->assertOk();
     }
-
-    public function testRolesRestoreWithCrossAccount(): void {}
-
-    public function testRolesRestoreWithCrossTenant(): void {}
 
     public function testRolesDeleteFlowWithRoleManagerUser(): void
     {
