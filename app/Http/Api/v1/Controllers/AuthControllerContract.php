@@ -59,7 +59,7 @@ abstract class AuthControllerContract extends Controller
         $user = $request->user();
 
         if(!$user){
-            abort(403, "Unauthorized");
+            abort(401, "Unauthorized");
         }
 
         return response()->json([
