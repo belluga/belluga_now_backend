@@ -11,21 +11,55 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     protected string $resource_slug = "users";
 
-    protected string $base_api_url {
+    protected string $tenant_2_base_api_url {
         get {
-            return "http://{$this->tenant_subdomain}.localhost/api/";
+            return "http://{$this->tenant_2_subdomain}.localhost/api/";
         }
     }
 
-    protected string $tenant_subdomain {
+    protected string $tenant_1_base_api_url {
+        get {
+            return "http://{$this->tenant_1_subdomain}.localhost/api/";
+        }
+    }
+
+    protected string $tenant_2_subdomain {
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_SUBDOMAIN->value);
         }
     }
 
-    protected string $main_account_slug {
+    protected string $tenant_1_subdomain {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_SUBDOMAIN->value);
+        }
+    }
+
+    protected string $tenant_2_main_account_slug {
         get {
             return $this->getGlobal(TestVariableLabels::TENANT_2_MAIN_ACCOUNT_SLUG->value);
+        }
+    }
+
+    protected string $tenant_1_account_user_admin_email {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_ACCOUNT_USER_ADMIN_EMAIL->value);
+        }
+    }
+
+    protected string $tenant_1_account_user_admin_password {
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_ACCOUNT_USER_ADMIN_PASSWORD->value);
+        }
+    }
+
+    protected string $tenant_1_account_user_admin_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_1_ACCOUNT_USER_ADMIN_TOKEN->value, $value);
+            $this->tenant_1_account_user_admin_token = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::TENANT_1_ACCOUNT_USER_ADMIN_TOKEN->value);
         }
     }
 
@@ -167,6 +201,40 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         }
     }
 
+    protected string $secondary_account_user_admin_name {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_USER_ADMIN_NAME->value);
+        }
+    }
+
+    protected string $secondary_account_user_admin_email {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_USER_ADMIN_EMAIL->value);
+        }
+    }
+
+    protected string $secondary_account_user_admin_password {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_USER_ADMIN_PASSWORD->value);
+        }
+    }
+
+    protected string $secondary_account_user_admin_id {
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_USER_ADMIN_ID->value);
+        }
+    }
+
+    protected string $secondary_account_user_admin_token {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::SECONDARY_ACCOUNT_USER_ADMIN_TOKEN->value, $value);
+            $this->secondary_account_user_admin_token = $value;
+        }
+        get {
+            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_USER_ADMIN_TOKEN->value);
+        }
+    }
+
     public function testLoginAdminSuccess(): void {
         $responseUserAdmin = $this->userLogin([
                 "email" => $this->tenant_2_account_user_admin_email_1,
@@ -242,13 +310,29 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->tenant_2_account_user_visitor_token = $responseUserVisitor->json()['data']['token'];
     }
 
-    public function testLoginCrossAccount(): void {}
+    public function testLoginCrossAccount(): void {
+        $responseUserVisitor = $this->userLogin([
+                "email" => $this->secondary_account_user_admin_email,
+                "password" => $this->secondary_account_user_admin_password,
+                "device_name" => "test",
+            ]
+        );
+        $responseUserVisitor->assertStatus(200);
+    }
 
-    public function testLoginCrossTenant(): void {}
+    public function testLoginCrossTenant(): void {
+        $responseUserVisitor = $this->userLoginTenant1([
+                "email" => $this->tenant_1_account_user_admin_email,
+                "password" => $this->tenant_1_account_user_admin_password,
+                "device_name" => "test",
+            ]
+        );
+        $responseUserVisitor->assertStatus(200);
+    }
 
     public function testListWithAdminUser(): void {
         $listAdmin = $this->list(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_admin_token_device_1
         );
         $listAdmin->assertOk();
@@ -256,7 +340,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     public function testListWithUserManageUser(): void {
         $listUserManage = $this->list(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_usermanage_token
         );
         $listUserManage->assertOk();
@@ -264,7 +348,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     public function testListWithRoleManageUser(): void {
         $listRoleManage = $this->list(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_rolemanage_token
         );
         $listRoleManage->assertOk();
@@ -272,20 +356,32 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     public function testListWithVisitorUser(): void {
         $listVisitor = $this->list(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_visitor_token
         );
         $listVisitor->assertStatus(403);
     }
 
-    public function testListWithCrossAccount(): void {}
+    public function testListWithCrossAccount(): void {
+        $listVisitor = $this->list(
+            $this->tenant_2_main_account_slug,
+            $this->secondary_account_user_admin_token
+        );
+        $listVisitor->assertStatus(401);
+    }
 
-    public function testListWithCrossTenant(): void {}
+    public function testListWithCrossTenant(): void {
+        $listVisitor = $this->list(
+            $this->tenant_2_main_account_slug,
+            $this->tenant_1_account_user_admin_token
+        );
+        $listVisitor->assertStatus(401);
+    }
 
     public function testCreateWithAdminUser(): void
     {
         $create = $this->create(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_admin_token_device_1,
             [
                 "name" => fake()->name,
@@ -305,7 +401,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testCreateWithRoleManageUser(): void
     {
         $create = $this->create(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_rolemanage_token,
             [
                 "name" => fake()->name,
@@ -325,7 +421,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testCreateWithUserManageUser(): void
     {
         $create = $this->create(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_usermanage_token,
             [
                 "name" => fake()->name,
@@ -345,7 +441,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testCreateWithVisitorUser(): void
     {
         $create = $this->create(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_visitor_token,
             [
                 "name" => fake()->name,
@@ -361,14 +457,44 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testCreateWithCrossAccount(): void {}
+    public function testCreateWithCrossAccount(): void {
+        $create = $this->create(
+            $this->tenant_2_main_account_slug,
+            $this->secondary_account_user_admin_token,
+            [
+                "name" => fake()->name,
+                "emails" => [
+                    fake()->email,
+                    fake()->email,
+                ],
+                "password" => fake()->password(8),
+                "role_id" => $this->tenant_2_main_account_role_visitor_id,
+            ]
+        );
+        $create->assertStatus(401);
+    }
 
-    public function testCreateWithCrossTenant(): void {}
+    public function testCreateWithCrossTenant(): void {
+        $create = $this->create(
+            $this->tenant_2_main_account_slug,
+            $this->tenant_1_account_user_admin_token,
+            [
+                "name" => fake()->name,
+                "emails" => [
+                    fake()->email,
+                    fake()->email,
+                ],
+                "password" => fake()->password(8),
+                "role_id" => $this->tenant_2_main_account_role_visitor_id,
+            ]
+        );
+        $create->assertStatus(401);
+    }
 
     public function testShowWithAdminUser(): void
     {
         $show = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_admin_user,
             $this->tenant_2_account_user_admin_token_device_1
         );
@@ -385,7 +511,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testShowWithRoleManagerUser(): void
     {
         $show = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_admin_user,
             $this->tenant_2_account_user_rolemanage_token
         );
@@ -402,7 +528,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testShowWithUserManagerUser(): void
     {
         $show = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_admin_user,
             $this->tenant_2_account_user_usermanage_token
         );
@@ -419,16 +545,30 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testShowWithVisitorUser(): void
     {
         $show = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_admin_user,
             $this->tenant_2_account_user_visitor_token
         );
         $show->assertStatus(403);
     }
 
-    public function testShowWithCrossAccount(): void {}
+    public function testShowWithCrossAccount(): void {
+        $show = $this->show(
+            $this->tenant_2_main_account_slug,
+            $this->user_id_created_by_account_admin_user,
+            $this->secondary_account_user_admin_token
+        );
+        $show->assertStatus(401);
+    }
 
-    public function testShowWithCrossTenant(): void {}
+    public function testShowWithCrossTenant(): void {
+        $show = $this->show(
+            $this->tenant_2_main_account_slug,
+            $this->user_id_created_by_account_admin_user,
+            $this->tenant_1_account_user_admin_token
+        );
+        $show->assertStatus(401);
+    }
 
     public function testUpdateWithAdminUser(): void
     {
@@ -436,7 +576,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $user_id = $this->user_id_created_by_account_admin_user;
 
         $update = $this->update(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token,
             [
@@ -447,7 +587,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $update->assertStatus(200);
 
         $show = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -463,7 +603,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $user_id = $this->user_id_created_by_account_usermanage_user;
 
         $update = $this->update(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token,
             [
@@ -481,7 +621,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $user_id = $this->user_id_created_by_account_usermanage_user;
 
         $update = $this->update(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token,
             [
@@ -491,7 +631,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $update->assertOk();
 
         $show = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -507,7 +647,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $user_id = $this->user_id_created_by_account_usermanage_user;
 
         $update = $this->update(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token,
             [
@@ -519,9 +659,37 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testUpdateWithCrossAccount(): void {}
+    public function testUpdateWithCrossAccount(): void {
+        $token = $this->secondary_account_user_admin_token;
+        $user_id = $this->user_id_created_by_account_usermanage_user;
 
-    public function testUpdateWithCrossTenant(): void {}
+        $update = $this->update(
+            $this->tenant_2_main_account_slug,
+            $user_id,
+            $token,
+            [
+                "name" => "Name By Role Manager Updated",
+            ]
+        );
+
+        $update->assertStatus(401);
+    }
+
+    public function testUpdateWithCrossTenant(): void {
+        $token = $this->tenant_1_account_user_admin_token;
+        $user_id = $this->user_id_created_by_account_usermanage_user;
+
+        $update = $this->update(
+            $this->tenant_2_main_account_slug,
+            $user_id,
+            $token,
+            [
+                "name" => "Name By Role Manager Updated",
+            ]
+        );
+
+        $update->assertStatus(401);
+    }
 
     public function testDeleteWithUserManagerUser(): void
     {
@@ -530,14 +698,14 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
         $deleteResponse->assertStatus(200);
 
         $showResponse = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -552,7 +720,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -565,7 +733,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $user_id = $this->tenant_2_account_user_admin_id;
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -586,14 +754,14 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $user_id = $this->user_id_created_by_account_admin_user;
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
         $deleteResponse->assertStatus(200);
 
         $showResponse = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -608,7 +776,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
@@ -616,31 +784,71 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesDeleteWithCrossAccount(): void {}
+    public function testRolesDeleteWithCrossAccount(): void {
+        $token = $this->secondary_account_user_admin_token;
+        $user_id = $this->user_id_created_by_account_usermanage_user;
 
-    public function testRolesDeleteWithCrossTenant(): void {}
+
+        $deleteResponse = $this->deleteItem(
+            $this->tenant_2_main_account_slug,
+            $user_id,
+            $token
+        );
+        $deleteResponse->assertStatus(401);
+    }
+
+    public function testRolesDeleteWithCrossTenant(): void {
+        $token = $this->tenant_1_account_user_admin_token;
+        $user_id = $this->user_id_created_by_account_usermanage_user;
+
+
+        $deleteResponse = $this->deleteItem(
+            $this->tenant_2_main_account_slug,
+            $user_id,
+            $token
+        );
+        $deleteResponse->assertStatus(401);
+    }
 
     public function testRolesRestoreWithVisitorUser(): void
     {
         $restoreResponse = $this->restore(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->tenant_2_main_account_role_admin_id,
             $this->tenant_2_account_user_visitor_token
         );
         $restoreResponse->assertStatus(403);
     }
 
+    public function testRolesRestoreWithCrossAccount(): void {
+        $restoreResponse = $this->restore(
+            $this->tenant_2_main_account_slug,
+            $this->tenant_2_main_account_role_admin_id,
+            $this->secondary_account_user_admin_token
+        );
+        $restoreResponse->assertStatus(401);
+    }
+
+    public function testRolesRestoreWithCrossTenant(): void {
+        $restoreResponse = $this->restore(
+            $this->tenant_2_main_account_slug,
+            $this->tenant_2_main_account_role_admin_id,
+            $this->tenant_1_account_user_admin_token
+        );
+        $restoreResponse->assertStatus(401);
+    }
+
     public function testRolesRestoreWithUserManagerUser(): void
     {
         $restoreResponse = $this->restore(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_usermanage_user,
             $this->tenant_2_account_user_usermanage_token
         );
         $restoreResponse->assertStatus(200);
 
         $showResponse = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_usermanage_user,
             $this->tenant_2_account_user_rolemanage_token
         );
@@ -651,7 +859,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testRolesRestoreWithRoleManagerUser(): void
     {
         $restoreResponse = $this->restore(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_usermanage_user,
             $this->tenant_2_account_user_rolemanage_token
         );
@@ -662,23 +870,19 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     public function testRolesRestoreWithAdminUser(): void
     {
         $restoreResponse = $this->restore(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_admin_user,
             $this->tenant_2_account_user_admin_token_device_1
         );
         $restoreResponse->assertStatus(200);
 
         $showResponse = $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $this->user_id_created_by_account_admin_user,
             $this->tenant_2_account_user_admin_token_device_1
         );
         $showResponse->assertOk();
     }
-
-    public function testRolesRestoreWithCrossAccount(): void {}
-
-    public function testRolesRestoreWithCrossTenant(): void {}
 
     public function testRolesDeleteFlowWithUserManagerUser(): void
     {
@@ -687,14 +891,14 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token,
         );
         $deleteResponse->assertStatus(200);
 
         $listResponse = $this->listArchived(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $token
         );
         $listResponse->assertOk();
@@ -702,21 +906,21 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->assertEquals(1, $listResponse['total']);
 
         $forceDeleteResponse = $this->forceDelete(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
         $forceDeleteResponse->assertOk();
 
         $showResponse =  $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
         $showResponse->assertStatus(404);
 
         $istResponse = $this->listArchived(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $token
         );
         $istResponse->assertOk();
@@ -732,14 +936,14 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
 
         $deleteResponse = $this->deleteItem(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token,
         );
         $deleteResponse->assertStatus(200);
 
         $listResponse = $this->listArchived(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $token
         );
         $listResponse->assertOk();
@@ -747,21 +951,21 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->assertEquals(1, $listResponse['total']);
 
         $listArchived = $this->forceDelete(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
         $listArchived->assertOk();
 
         $showResponse =  $this->show(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $user_id,
             $token
         );
         $showResponse->assertStatus(404);
 
         $listResponse = $this->listArchived(
-            $this->main_account_slug,
+            $this->tenant_2_main_account_slug,
             $token
         );
         $listResponse->assertOk();
@@ -798,7 +1002,15 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     protected function userLogin(array $data): TestResponse {
         return $this->json(
             method: 'post',
-            uri: $this->base_api_url."auth/login",
+            uri: $this->tenant_2_base_api_url."auth/login",
+            data: $data
+        );
+    }
+
+    protected function userLoginTenant1(array $data): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: $this->tenant_1_base_api_url."auth/login",
             data: $data
         );
     }
@@ -806,7 +1018,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     protected function userLogout(array $data, string $token): TestResponse {
         return $this->json(
             method: 'post',
-            uri: $this->base_api_url."auth/logout",
+            uri: $this->tenant_2_base_api_url."auth/logout",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $token",
@@ -819,7 +1031,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -831,7 +1043,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug?archived=true",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug?archived=true",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -843,7 +1055,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $token",
@@ -856,7 +1068,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -868,7 +1080,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'patch',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $token",
@@ -881,7 +1093,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -893,7 +1105,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId/force_delete",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId/force_delete",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
@@ -905,7 +1117,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId/restore",
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$account_slug/$this->resource_slug/$resourceId/restore",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'
