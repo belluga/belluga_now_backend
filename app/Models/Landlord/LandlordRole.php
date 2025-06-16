@@ -10,7 +10,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
-class Role extends Model
+class LandlordRole extends Model
 {
     use UsesLandlordConnection, SoftDeletes, HasSlug, DemandPermissions;
 

@@ -57,7 +57,7 @@ class AccountUserController extends Controller
             $role = Role::where('_id', new ObjectId($request->role_id))->firstOrFail();
 
             $role->users()->save($user);
-            $user->haveAccessTo()->attach(Account::current());
+            $user->attachAccount(Account::current(), $role);
             DB::commit();
         }catch (\Exception $e){
             DB::rollBack();

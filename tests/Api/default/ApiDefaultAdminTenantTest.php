@@ -72,6 +72,7 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
 
         $tenantsList = $this->tenantsList();
         $tenantsList->assertOk();
+
         $this->assertEquals(2, $tenantsList->json()['total']);
     }
 
@@ -98,6 +99,8 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
                 "created_at",
             ],
         ]);
+
+        $this->assertEquals($this->tenant_1_slug, $tenantsShow->json()['data']['slug']);
     }
 
     public function testTenantsSoftDelete(): void

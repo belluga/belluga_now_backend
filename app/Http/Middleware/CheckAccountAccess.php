@@ -7,6 +7,7 @@ use App\Models\Tenants\AccountUser;
 use Closure;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Auth;
+use MongoDB\BSON\ObjectId;
 
 class CheckAccountAccess
 {
@@ -23,9 +24,9 @@ class CheckAccountAccess
         }
     }
 
-    protected LandlordUser|AccountUser $user {
+    protected $user {
         get {
-            return Auth::user()->load('role');
+            return Auth::user();
         }
     }
 
@@ -50,6 +51,6 @@ class CheckAccountAccess
     }
 
     protected function checkUserAccess(string $checkId): bool {
-        return in_array($checkId, $this->user->getAccessToIds());
+        return in_array(new ObjectId($checkId), $this->user->getAccessToIds());
     }
 }

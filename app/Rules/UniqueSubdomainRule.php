@@ -19,8 +19,7 @@ class UniqueSubdomainRule implements ValidationRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        $query = DB::connection('landlord')
-            ->table('tenants')
+        $query = DB::table('tenants')
             ->where('subdomain', strtolower($value));
 
         if ($this->tenant_slug) {

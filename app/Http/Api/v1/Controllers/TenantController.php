@@ -8,6 +8,7 @@ use App\Http\Api\v1\Requests\TenantStoreRequest;
 use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
+use App\Models\Landlord\TenantRole;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -23,11 +24,12 @@ class TenantController extends Controller
 
     public function index(Request $request): LengthAwarePaginator
     {
-
         $user = auth()->guard('sanctum')->user();
-        return $user->haveAccessTo()
+
+        return Tenant::whereRaw(["_id" => ['$in' => $user->getAccessToIds()]] )
             ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->with('domains')->paginate($request->get('per_page', 15));
+            ->with('domains')
+            ->paginate($request->get('per_page', 15));
     }
 
     public function store(TenantStoreRequest $request): JsonResponse
@@ -35,8 +37,18 @@ class TenantController extends Controller
         $user = auth()->guard('sanctum')->user();
 
         try {
-            $tenant = $user->haveAccessTo()->create($request->validated());
+//            DB::beginTransaction();
+            $tenant = Tenant::create($request->validated());
+            $tenant_admin_role = TenantRole::create([
+                "name" => "Admin",
+                "description" => "Administrador",
+                "permissions" => ["*"],
+            ]);
+
+            $user->attachTenant($tenant, $tenant_admin_role);
+//            DB::commit();
         } catch (BulkWriteException $e) {
+//            DB::rollBack();
             abort(422, "Something went wrong when trying to create the tenant.");
         }
 
@@ -47,9 +59,9 @@ class TenantController extends Controller
 
     public function show(string $tenant_slug): JsonResponse
     {
-
-        $user = auth()->guard('sanctum')->user();
-        $tenant = $user->haveAccessTo()->where('slug', $tenant_slug)->first();
+        $tenant = Tenant::where('slug', $tenant_slug)
+            ->whereRaw(["_id" => ['$in' => $this->getUserTenantIds()]] )
+            ->first();
 
         if($tenant){
             return response()->json([
@@ -73,10 +85,12 @@ class TenantController extends Controller
         ], 200);
     }
 
-    public function restore(string $tenant_slug): JsonResponse
+    public function restore(Request $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-        $tenant = $user->haveAccessTo()->onlyTrashed()->where('slug', $tenant_slug)->first();
+        $tenant = Tenant::where('slug', $request->route('tenant_slug'))
+            ->onlyTrashed()
+            ->whereRaw(["_id" => ['$in' => $this->getUserTenantIds()]] )
+            ->first();
         $tenant->restore();
 
         return response()->json([]);
@@ -84,9 +98,9 @@ class TenantController extends Controller
 
     public function destroy(string $tenant_slug): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        $tenant = $user->haveAccessTo()->where('slug', $tenant_slug)->first();
+        $tenant = Tenant::where('slug', $tenant_slug)
+            ->whereRaw(["_id" => ['$in' => $this->getUserTenantIds()]] )
+            ->first();
 
         $tenant->delete();
 
@@ -119,5 +133,10 @@ class TenantController extends Controller
         return collect($received_params)
             ->reject(fn ($value, $key) => in_array($key, $guarded) )
             ->toArray();
+    }
+
+    private function getUserTenantIds(): array {
+        $user = auth()->guard('sanctum')->user();
+        return $user->getAccessToIds();
     }
 }

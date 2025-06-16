@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('roles', function (Blueprint $collection) {
+        Schema::create('landlord_roles', function (Blueprint $collection) {
             $collection->index('permissions');
             $collection->unique('slug');
             $collection->index(['created_at' => -1, "updated_at" => -1], );

@@ -7,7 +7,7 @@ use App\Http\Api\v1\Requests\LandlordRoleStoreRequest;
 use App\Http\Api\v1\Requests\LandlordRoleUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\Role;
+use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +23,7 @@ class LandlordRolesController extends Controller
     {
         $user = auth()->guard('sanctum')->user();
 
-        $roles = Role::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+        $roles = LandlordRole::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
 
         return response()->json($roles);
@@ -37,7 +37,7 @@ class LandlordRolesController extends Controller
         $user = auth()->guard('sanctum')->user();
 
         $tenant = Tenant::where('slug', $tenant_slug)->firstOrFail();
-        $roles = Role::tenantRoles($tenant->id)->paginate(15);
+        $roles = LandlordRole::tenantRoles($tenant->id)->paginate(15);
 
         return response()->json($roles);
     }
@@ -52,7 +52,7 @@ class LandlordRolesController extends Controller
         try {
             DB::beginTransaction();
 
-            $role = Role::create([
+            $role = LandlordRole::create([
                 ...$request->validated(),
             ]);
 
@@ -85,7 +85,7 @@ class LandlordRolesController extends Controller
         try {
             DB::beginTransaction();
 
-            $role = Role::create([
+            $role = LandlordRole::create([
                 ...$request->validated(),
                 'is_system_role' => false,
                 'tenant_id' => $tenant->id,
@@ -115,7 +115,7 @@ class LandlordRolesController extends Controller
     public function show(string $role_id): JsonResponse
     {
 
-        $role = Role::findOrFail($role_id);
+        $role = LandlordRole::findOrFail($role_id);
 
         return response()->json([
             'data' => $role
@@ -128,7 +128,7 @@ class LandlordRolesController extends Controller
     public function update(LandlordRoleUpdateRequest $request, string $role_id): JsonResponse
     {
 
-        $role = Role::findOrFail($role_id);
+        $role = LandlordRole::findOrFail($role_id);
         $role->update($request->validated());
 
         return response()->json([
@@ -142,21 +142,25 @@ class LandlordRolesController extends Controller
     public function destroy(LandlordRoleDestroyRequest $request): JsonResponse
     {
 
-        $role = Role::findOrFail($request->route("role_id"));
+        $role = LandlordRole::findOrFail($request->route("role_id"));
 
-        // Don't allow deletion of default roles
-        if ($role->is_default) {
-            abort(422, 'Cannot delete a default role.');
+        DB::beginTransaction();
+        try {
+            LandlordUser::where("role_id", $role->id)
+                ->update(['role_id' => $request->validated()['role_id']]);;
+
+            $role->delete();
+            DB::commit();
+        }catch (\Exception $e){
+            DB::rollBack();
+            abort(422, "Erro ao excluir role. Tente novamente mais tarde.");
         }
-
-        $role->users()->update(['role_id' => $request->validated()['role_id']]);
-        $role->delete();
 
         return response()->json([], 200);
     }
 
     public function forceDestroy($user_id): JsonResponse {
-        $role = Role::onlyTrashed()->findOrFail($user_id);
+        $role = LandlordRole::onlyTrashed()->findOrFail($user_id);
 
         DB::beginTransaction();
         try{
@@ -177,7 +181,7 @@ class LandlordRolesController extends Controller
     public function restore(string $role_id): JsonResponse
     {
 
-        $role = Role::onlyTrashed()
+        $role = LandlordRole::onlyTrashed()
             ->where('_id', $role_id)
             ->firstOrFail();
 
@@ -192,7 +196,7 @@ class LandlordRolesController extends Controller
     public function assignRoleToUser(string $role_id, string $user_id): JsonResponse
     {
 
-        $role = Role::findOrFail($role_id);
+        $role = LandlordRole::findOrFail($role_id);
         $user = LandlordUser::findOrFail($user_id);
 
         $user->role()->associate($role);
@@ -207,7 +211,7 @@ class LandlordRolesController extends Controller
     public function removeRoleFromUser(string $role_id, string $user_id): JsonResponse
     {
 
-        $role = Role::findOrFail($role_id);
+        $role = LandlordRole::findOrFail($role_id);
         $user = LandlordUser::findOrFail($user_id);
 
         $user->roles()->detach($role->id);

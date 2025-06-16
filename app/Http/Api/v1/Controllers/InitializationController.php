@@ -7,9 +7,10 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Api\v1\Resources\TenantResource;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Role;
+use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\TenantRole;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -43,9 +44,14 @@ class InitializationController extends Controller
             $new_tenant->addDomains($request->tenant["domains"]);
 
             $new_tenant->makeCurrent();
-            $admin_role = Role::create([
-                ...$request->validated()['role'],
-                'is_system_role' => true,
+            $admin_role = LandlordRole::create([
+                ...$request->validated()['role']
+            ]);
+
+            $tenant_role = TenantRole::create([
+                "name" => "Admin",
+                'description' => 'Administrador',
+                "permissions" => ["*"]
             ]);
 
             $new_user = LandlordUser::create([
@@ -54,9 +60,9 @@ class InitializationController extends Controller
                 "password" => $request->user['password']
             ]);
 
-            $new_user->role()->associate($admin_role);
+            $admin_role->users()->save($new_user);
 
-            $new_user->haveAccessTo()->attach($new_tenant);
+            $new_user->attachTenant($new_tenant, $tenant_role);
 
             foreach($request->user['emails'] as $email){
                 $new_user->addEmail($email);
@@ -66,12 +72,12 @@ class InitializationController extends Controller
 
             $new_tenant->forgetCurrent();
 
+            DB::connection('landlord')->commit();
+
         }catch (\Exception $e){
-            print_r($e->getMessage());
             DB::connection('landlord')->rollBack();
             throw $e;
         }
-        DB::connection('landlord')->commit();
 
         return response()->json([
             "data" => [

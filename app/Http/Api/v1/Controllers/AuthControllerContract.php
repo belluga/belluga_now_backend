@@ -26,9 +26,7 @@ abstract class AuthControllerContract extends Controller
     public function login(LoginEmailRequest $request): JsonResponse
     {
 
-        $user = $this->userModel::where('emails', "all", [$request->email])
-            ->with('role')
-            ->first();
+        $user = $this->userModel::where('emails', "all", [$request->email])->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             throw new HttpResponseException(response()->json([
@@ -39,11 +37,7 @@ abstract class AuthControllerContract extends Controller
             ], 403));
         }
 
-        $token = $user->createToken(
-                $request->device_name,
-                $user->role->permissions
-            )
-            ->plainTextToken;
+        $token = $user->createToken($request->device_name)->plainTextToken;
 
         return response()->json([
             'data' => [
