@@ -9,6 +9,7 @@ use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\TenantRole;
+use App\Models\Landlord\TenantRoleTemplate;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -24,9 +25,7 @@ class TenantController extends Controller
 
     public function index(Request $request): LengthAwarePaginator
     {
-        $user = auth()->guard('sanctum')->user();
-
-        return Tenant::whereRaw(["_id" => ['$in' => $user->getAccessToIds()]] )
+        return Tenant::whereRaw(["_id" => ['$in' => $this->getAccessObjectIds()]] )
             ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->with('domains')
             ->paginate($request->get('per_page', 15));
@@ -39,13 +38,21 @@ class TenantController extends Controller
         try {
 //            DB::beginTransaction();
             $tenant = Tenant::create($request->validated());
-            $tenant_admin_role = TenantRole::create([
+            $tenant_admin_role = TenantRoleTemplate::create([
                 "name" => "Admin",
                 "description" => "Administrador",
                 "permissions" => ["*"],
             ]);
 
-            $user->attachTenant($tenant, $tenant_admin_role);
+//            $tenant_role = new TenantRole([
+//                ...$tenant_admin_role->attributesToArray(),
+//                "tenant_id" => $tenant->id,
+//            ]);
+
+            $user->tenantRoles()->create([
+                ...$tenant_admin_role->attributesToArray(),
+                "tenant_id" => $tenant->id,
+            ]);
 //            DB::commit();
         } catch (BulkWriteException $e) {
 //            DB::rollBack();
@@ -60,7 +67,7 @@ class TenantController extends Controller
     public function show(string $tenant_slug): JsonResponse
     {
         $tenant = Tenant::where('slug', $tenant_slug)
-            ->whereRaw(["_id" => ['$in' => $this->getUserTenantIds()]] )
+            ->whereRaw(["_id" => ['$in' => $this->getAccessObjectIds()]] )
             ->first();
 
         if($tenant){
@@ -89,7 +96,7 @@ class TenantController extends Controller
     {
         $tenant = Tenant::where('slug', $request->route('tenant_slug'))
             ->onlyTrashed()
-            ->whereRaw(["_id" => ['$in' => $this->getUserTenantIds()]] )
+            ->whereRaw(["_id" => ['$in' => $this->getAccessObjectIds()]] )
             ->first();
         $tenant->restore();
 
@@ -99,7 +106,7 @@ class TenantController extends Controller
     public function destroy(string $tenant_slug): JsonResponse
     {
         $tenant = Tenant::where('slug', $tenant_slug)
-            ->whereRaw(["_id" => ['$in' => $this->getUserTenantIds()]] )
+            ->whereRaw(["_id" => ['$in' => $this->getAccessObjectIds()]] )
             ->first();
 
         $tenant->delete();
@@ -135,8 +142,8 @@ class TenantController extends Controller
             ->toArray();
     }
 
-    private function getUserTenantIds(): array {
+    private function getAccessObjectIds(): array {
         $user = auth()->guard('sanctum')->user();
-        return $user->getAccessToIds();
+        return array_map(fn($id) => new \MongoDB\BSON\ObjectId($id), $user->getAccessToIds());
     }
 }

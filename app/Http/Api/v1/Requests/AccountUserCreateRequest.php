@@ -7,7 +7,7 @@ namespace App\Http\Api\v1\Requests;
 use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-class TenantUserCreateRequest extends FormRequest
+class AccountUserCreateRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -29,10 +29,10 @@ class TenantUserCreateRequest extends FormRequest
             'emails' => [
                 'required',
                 'array',
-                new UniqueArrayItemRule('tenant', 'users', 'emails', )
+                new UniqueArrayItemRule('tenant', 'account_users', 'emails', )
             ],
             'password' => 'required|string|min:8',
-            'role_id' => 'required|string|exists:tenant.roles,_id'
+            'role_id' => 'required|string|exists:tenant.account_role_templates,_id'
         ];
     }
 }

@@ -5,7 +5,7 @@ namespace App\Http\Api\v1\Requests;
 use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-class RolesUpdateRequest extends FormRequest
+class AccountRoleTemplatesStoreRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -23,11 +23,10 @@ class RolesUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['sometimes', 'string', 'max:255'],
+            'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'permissions' => ['sometimes', 'array', new UniqueArrayItemRule("tenant", "roles", "permissions")],
+            'permissions' => ['required', 'array'],
             'permissions.*' => ['required', 'string', 'regex:/^[a-z]+(?:-[a-z]+)*:(?:\*|[a-z]+)$/'],
-            'is_default' => ['boolean'],
         ];
     }
 }

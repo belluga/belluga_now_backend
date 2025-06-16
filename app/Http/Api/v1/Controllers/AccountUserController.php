@@ -6,14 +6,14 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\AccountUserEmailsAddRequest;
 use App\Http\Api\v1\Requests\AccountUserEmailsRemoveRequest;
-use App\Http\Api\v1\Requests\TenantUserCreateRequest;
+use App\Http\Api\v1\Requests\AccountUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Models\Tenants\Role;
+use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -49,15 +49,18 @@ class AccountUserController extends Controller
     /**
      * Cria um novo usuário para o tenant atual
      */
-    public function store(TenantUserCreateRequest $request): JsonResponse
+    public function store(AccountUserCreateRequest $request): JsonResponse
     {
         DB::beginTransaction();
         try {
             $user = AccountUser::create($request->validated());
-            $role = Role::where('_id', new ObjectId($request->role_id))->firstOrFail();
+            $role = AccountRoleTemplate::where('_id', new ObjectId($request->role_id))->firstOrFail();
 
-            $role->users()->save($user);
-            $user->attachAccount(Account::current(), $role);
+            $user->tenantRoles()->create([
+                ...$role->attributesToArray(),
+                'account_id' =>Account::current()->id,
+            ]);
+
             DB::commit();
         }catch (\Exception $e){
             DB::rollBack();

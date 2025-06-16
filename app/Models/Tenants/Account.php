@@ -39,8 +39,8 @@ class Account extends Model
         return $this->hasMany(AccountUser::class);
     }
 
-    public function roles(): HasMany {
-        return $this->hasMany(Role::class);
+    public function roleTemplates(): HasMany {
+        return $this->hasMany(AccountRoleTemplate::class);
     }
 
     public function getSlugOptions(): SlugOptions

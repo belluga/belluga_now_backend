@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\AccountUser;
 use Closure;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Auth;
 use MongoDB\BSON\ObjectId;
@@ -44,13 +45,13 @@ class CheckAccountAccess
         }
 
         if(!$this->have_access){
-            abort(401, "You don't have access to this account");
+            throw new AuthenticationException();
         }
 
         return $next($request);
     }
 
     protected function checkUserAccess(string $checkId): bool {
-        return in_array(new ObjectId($checkId), $this->user->getAccessToIds());
+        return in_array($checkId, $this->user->getAccessToIds());
     }
 }

@@ -8,10 +8,10 @@ use App\Traits\HaveMultipleEmails;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use MongoDB\BSON\ObjectId;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsTo;
+use MongoDB\Laravel\Relations\EmbedsMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
 class LandlordUser extends Authenticatable {
@@ -34,34 +34,14 @@ class LandlordUser extends Authenticatable {
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
-//        'access_roles' => AsArrayObject::class,
     ];
 
-    public function role(): BelongsTo {
+    public function landlordRole(): BelongsTo {
         return $this->belongsTo(LandlordRole::class);
     }
 
-    public function attachTenant(Tenant $tenant, TenantRole $role):void {
-        if(!in_array($tenant->id, $this->getAccessToIds())){
-            $this->push(
-                "access_roles",
-                [
-                    "item_id" => new ObjectId($tenant->id),
-                    "item_type" => get_class($tenant),
-                    "role_id" => new ObjectId($role->id),
-                    "role_slug" => $role->slug,
-                    "role_type" => get_class($role),
-                    "permissions" => $role->permissions,
-                ]
-            );
-            $this->refresh();
-        }
-    }
-
-    public function detachTenant(Tenant $tenant):void {
-        if(in_array($tenant, $this->getAccessToIds())){
-            $this->pull($this->haveAccessToKey, $tenant->id);
-        }
+    public function tenantRoles(): EmbedsMany {
+        return $this->embedsMany(TenantRole::class, 'tenant_roles');
     }
 
     public function hasAccessTo(Tenant $tenant):bool {
@@ -70,11 +50,10 @@ class LandlordUser extends Authenticatable {
 
     public function getAccessToIds(): array{
 
-        $access_array = $this->access_roles ?? [];
+        $tenant_roles_array = $this->tenant_roles ?? [];
 
-        return collect($access_array)
-            ->where('item_type', "==", Tenant::class)
-            ->pluck('item_id')
+        return collect($tenant_roles_array)
+            ->pluck('tenant_id')
             ->toArray();
     }
 
@@ -93,8 +72,8 @@ class LandlordUser extends Authenticatable {
     {
         $tenant = $tenant ?? Tenant::current();
 
-        return collect($this->access_roles)
-            ->where('item_id', $tenant->id)
+        return collect($this->tenant_roles)
+            ->where('tenant_id', "==", $tenant->id)
             ->pluck('permissions')
             ->flatten()
             ->unique()
@@ -105,12 +84,7 @@ class LandlordUser extends Authenticatable {
     protected function getLandlordPermissions(): array
     {
         $role = LandlordRole::find($this->landlord_role_id)->first();
-
-        return $role
-            ->pluck('permissions')
-            ->flatten()
-            ->unique()
-            ->toArray();
+        return $role->permissions ?? [];
     }
 
 

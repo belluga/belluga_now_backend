@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\AccountRolesDeleteRequest;
-use App\Http\Api\v1\Requests\RolesStoreRequest;
-use App\Http\Api\v1\Requests\RolesUpdateRequest;
+use App\Http\Api\v1\Requests\AccountRoleTemplatesStoreRequest;
+use App\Http\Api\v1\Requests\AccountRolesUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\Role;
+use App\Models\Tenants\AccountRoleTemplate;
+use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,30 +21,19 @@ class AccountRolesController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $roles = Role::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+        $roles = AccountRoleTemplate::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
 
         return response()->json($roles);
     }
 
-    public function store(RolesStoreRequest $request): JsonResponse
+    public function store(AccountRoleTemplatesStoreRequest $request): JsonResponse
     {
-        $account_slug = $request->route('account_slug');
 
-        $account = Account::where('slug', $account_slug)
-            ->firstOrFail();
+        $account = Account::current();
 
         try {
-            DB::beginTransaction();
-
-            $role = $account->roles()->create(
-                [
-                    ...$request->validated(),
-                    'account_id' => $account->id,
-                ]
-            );
-
-            DB::commit();
+            $role = $account->roleTemplates()->create($request->validated());
 
             return response()->json([
                 'data' => $role
@@ -53,7 +43,7 @@ class AccountRolesController extends Controller
             DB::rollBack();
 
             if (str_contains($e->getMessage(), 'E11000')) {
-                abort(422, 'Role already exists.');
+                abort(422, 'Role already exists for this account.');
             }
 
             abort(422, 'Something went wrong when trying to create the role.');
@@ -63,19 +53,19 @@ class AccountRolesController extends Controller
     public function show(string $account_slug, string $role_id): JsonResponse
     {
 
-        $account = Account::where('slug', $account_slug)->firstOrFail();
+        $account = Account::current();
 
-        $role = $account->roles()->where('_id', new ObjectId($role_id))->firstOrFail();
+        $role = $account->roleTemplates()->where('_id', new ObjectId($role_id))->firstOrFail();
 
         return response()->json([
             'data' => $role
         ]);
     }
 
-    public function update(RolesUpdateRequest $request): JsonResponse
+    public function update(AccountRolesUpdateRequest $request): JsonResponse
     {
-        $account = Account::where('slug', $request->route("account_slug") )->firstOrFail();
-        $role = $account->roles()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
+        $account = Account::current();
+        $role = $account->roleTemplates()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
 
         if(empty($request->validated())){
             return response()->json([
@@ -99,10 +89,10 @@ class AccountRolesController extends Controller
     {
         if($request->route("role_id") == $request->validated()['role_id']){
             return response()->json([
-                "message" => "Role ID backgrount should be different from the role ID to be deleted.",
+                "message" => "Role ID background should be different from the role ID to be deleted.",
                 "errors" => [
                     "role_id" => [
-                        "Role ID backgrount should be different from the role ID to be deleted."
+                        "Role ID background should be different from the role ID to be deleted."
                     ],
                 ]
             ],
@@ -110,14 +100,27 @@ class AccountRolesController extends Controller
             );
         }
 
-        $account = Account::where('slug', $request->route("account_slug") )->firstOrFail();
-        $role = $account->roles()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
+        $account = Account::current();
+        $role_to_delete = $account->roleTemplates()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
+        $role_background = $account->roleTemplates()->where('_id', new ObjectId($request->validated()['role_id']))->firstOrFail();
 
         try{
             DB::beginTransaction();
 
-            $role->users()->update(['role_id' => $request->validated()['role_id']]);
-            $role->delete();
+            $account_users = AccountUser::where("account_roles.slug", $role_to_delete->slug)
+                ->where("account_roles.account_id", $account->id)
+                ->get();
+
+            foreach ($account_users as $account_user) {
+                $account_user->accountRoles()
+                    ->where("account_roles.role_slug", $role_to_delete->slug)
+                    ->update([
+                        'slug' => $role_background->slug,
+                        'permissions' => $role_background->permissions,
+                    ]);
+            }
+
+            $role_to_delete->delete();
 
             DB::commit();
         }catch (\Exception $e){
@@ -139,9 +142,9 @@ class AccountRolesController extends Controller
 
     public function restore(string $account_slug, string $role_id): JsonResponse
     {
-        $account = Account::where('slug', $account_slug)->firstOrFail();
+        $account = Account::current();
 
-        $role = $account->roles()
+        $role = $account->roleTemplates()
             ->onlyTrashed()
             ->where('_id', new ObjectId($role_id))
             ->firstOrFail();
@@ -155,9 +158,9 @@ class AccountRolesController extends Controller
 
     public function forceDestroy(string $account_slug, string $role_id): JsonResponse
     {
-        $account = Account::where('slug', $account_slug)->firstOrFail();
+        $account = Account::current();
 
-        $role = $account->roles()
+        $role = $account->roleTemplates()
             ->onlyTrashed()
             ->where('_id', new ObjectId($role_id))
             ->firstOrFail();

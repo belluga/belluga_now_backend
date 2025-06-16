@@ -7,7 +7,6 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\AccountUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,19 +16,10 @@ use MongoDB\Driver\Exception\BulkWriteException;
 
 class AccountController extends Controller
 {
-
-//    protected ?Tenant $tenant;
-
-//    public function index(Request $request): LengthAwarePaginator
-//    {
-//        $user = auth()->guard('sanctum')->user();
-//        return $user->tenants()->with('domains')->paginate($request->get('per_page', 15));
-//    }
-
     public function index(Request $request): LengthAwarePaginator
     {
-
-        return Account::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+        return Account::whereRaw(["_id" => ['$in' => $this->getAccessObjectIds()]] )
+            ->when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
     }
 
@@ -41,7 +31,7 @@ class AccountController extends Controller
 
             $account = Account::create($request->validated());
 
-            $role = $account->roles()->create([
+            $role = $account->roleTemplates()->create([
                 'name' => 'Admin',
                 'description' => 'Administrador',
                 'permissions' => [
@@ -147,6 +137,11 @@ class AccountController extends Controller
         DB::commit();
 
         return response()->json();
+    }
+
+    private function getAccessObjectIds(): array {
+        $user = auth()->guard('sanctum')->user();
+        return array_map(fn($id) => new \MongoDB\BSON\ObjectId($id), $user->getAccessToIds());
     }
 
 //    protected function filterGuardedParameters(array $received_params): array {

@@ -171,6 +171,7 @@ class ApiDefaultAccountRolesTest extends TestCaseAuthenticated
                 "role_id" => $this->tenant_2_main_account_role_admin_id
             ]
         );
+
         $deleteResponse->assertStatus(200);
 
         $rolesList = $this->accountRolesList($this->main_account_slug);

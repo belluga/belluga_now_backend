@@ -15,6 +15,8 @@ return new class extends Migration
             $collection->unique('emails');
             $collection->index('landlord_role_id');
             $collection->index('tenant_ids');
+            $collection->index('tenant_roles.slug');
+            $collection->index('tenant_roles.tenant_id');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
 

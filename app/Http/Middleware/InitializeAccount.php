@@ -9,6 +9,7 @@ class InitializeAccount
 {
     public function handle($request, Closure $next)
     {
+
         $account_slug = $request->route('account_slug');
         $account = Account::where("slug", $account_slug)->first();
 
@@ -22,6 +23,7 @@ class InitializeAccount
         $account->makeCurrent();
 
         return $next($request);
+
     }
 
 

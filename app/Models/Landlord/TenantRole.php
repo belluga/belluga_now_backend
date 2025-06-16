@@ -2,28 +2,22 @@
 
 namespace App\Models\Landlord;
 
-use App\Traits\DemandPermissions;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use MongoDB\Laravel\Eloquent\Model;
-use MongoDB\Laravel\Eloquent\SoftDeletes;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
-use Spatie\Sluggable\HasSlug;
-use Spatie\Sluggable\SlugOptions;
 
 class TenantRole extends Model
 {
-    use UsesLandlordConnection, SoftDeletes, HasSlug, DemandPermissions;
+    use UsesLandlordConnection;
 
     protected $fillable = [
         'name',
         'slug',
         'permissions',
+        'tenant_id'
     ];
 
-    public function getSlugOptions(): SlugOptions
-    {
-        return SlugOptions::create()
-            ->generateSlugsFrom('name')
-            ->allowDuplicateSlugs()
-            ->saveSlugsTo('slug');
+    public function tenant(): BelongsTo {
+        return $this->belongsTo(Tenant::class);
     }
 }

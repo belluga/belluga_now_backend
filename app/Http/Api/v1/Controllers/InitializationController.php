@@ -11,6 +11,7 @@ use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\TenantRole;
+use App\Models\Landlord\TenantRoleTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -48,7 +49,7 @@ class InitializationController extends Controller
                 ...$request->validated()['role']
             ]);
 
-            $tenant_role = TenantRole::create([
+            $admin_tenant_template = TenantRoleTemplate::create([
                 "name" => "Admin",
                 'description' => 'Administrador',
                 "permissions" => ["*"]
@@ -62,7 +63,10 @@ class InitializationController extends Controller
 
             $admin_role->users()->save($new_user);
 
-            $new_user->attachTenant($new_tenant, $tenant_role);
+            $new_user->tenantRoles()->create([
+                ...$admin_tenant_template->attributesToArray(),
+                'tenant_id' => $new_tenant->id,
+            ]);
 
             foreach($request->user['emails'] as $email){
                 $new_user->addEmail($email);

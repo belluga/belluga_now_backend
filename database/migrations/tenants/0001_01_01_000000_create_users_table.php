@@ -13,7 +13,8 @@ return new class extends Migration
     {
         Schema::create('account_users', function (Blueprint $collection) {
             $collection->unique('emails');
-            $collection->index('tenant_ids');
+            $collection->index('tenant_roles.slug');
+            $collection->index('tenant_roles.account_id');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
 

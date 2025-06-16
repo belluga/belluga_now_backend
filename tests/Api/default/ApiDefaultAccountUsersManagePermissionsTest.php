@@ -368,6 +368,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $this->secondary_account_user_admin_token
         );
         $listVisitor->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $listVisitor->json()['message']);
     }
 
     public function testListWithCrossTenant(): void {
@@ -376,6 +377,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $this->tenant_1_account_user_admin_token
         );
         $listVisitor->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $listVisitor->json()['message']);
     }
 
     public function testCreateWithAdminUser(): void
@@ -472,6 +474,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             ]
         );
         $create->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $create->json()['message']);
     }
 
     public function testCreateWithCrossTenant(): void {
@@ -489,6 +492,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             ]
         );
         $create->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $create->json()['message']);
     }
 
     public function testShowWithAdminUser(): void
@@ -559,6 +563,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $this->secondary_account_user_admin_token
         );
         $show->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $show->json()['message']);
     }
 
     public function testShowWithCrossTenant(): void {
@@ -568,6 +573,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $this->tenant_1_account_user_admin_token
         );
         $show->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $show->json()['message']);
     }
 
     public function testUpdateWithAdminUser(): void
@@ -673,6 +679,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         );
 
         $update->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $update->json()['message']);
     }
 
     public function testUpdateWithCrossTenant(): void {
@@ -689,6 +696,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         );
 
         $update->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $update->json()['message']);
     }
 
     public function testDeleteWithUserManagerUser(): void
@@ -795,6 +803,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $token
         );
         $deleteResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $deleteResponse->json()['message']);
     }
 
     public function testRolesDeleteWithCrossTenant(): void {
@@ -808,6 +817,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $token
         );
         $deleteResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $deleteResponse->json()['message']);
     }
 
     public function testRolesRestoreWithVisitorUser(): void
@@ -827,6 +837,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $this->secondary_account_user_admin_token
         );
         $restoreResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $restoreResponse->json()['message']);
     }
 
     public function testRolesRestoreWithCrossTenant(): void {
@@ -836,6 +847,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
             $this->tenant_1_account_user_admin_token
         );
         $restoreResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $restoreResponse->json()['message']);
     }
 
     public function testRolesRestoreWithUserManagerUser(): void

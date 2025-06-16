@@ -358,6 +358,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->tenant_2_main_account_slug,
             $this->tenant_2_account_user_admin_token_device_1
         );
+
         $listAdmin->assertOk();
     }
 
@@ -390,7 +391,10 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->tenant_2_main_account_slug,
             $this->secondary_account_user_admin_token
         );
+
         $listVisitor->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $listVisitor->json()['message']);
+
     }
 
     public function testRolesListWithCrossTenant(): void {
@@ -399,6 +403,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->tenant_1_account_user_admin_token
         );
         $listVisitor->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $listVisitor->json()['message']);
     }
 
     public function testRolesCreateWithAdminUser(): void
@@ -474,6 +479,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
         $create->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $create->json()['message']);
     }
 
     public function testRolesCreateWithCrossTenant(): void {
@@ -487,6 +493,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
         $create->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $create->json()['message']);
     }
 
     public function testRolesShowWithAdminUser(): void
@@ -550,6 +557,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->secondary_account_user_admin_token
         );
         $show->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $show->json()['message']);
     }
 
     public function testRolesShowWithCrossTenant(): void {
@@ -559,6 +567,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->tenant_1_account_user_admin_token
         );
         $show->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $show->json()['message']);
     }
 
     public function testRolesUpdateWithAdminUser(): void
@@ -676,6 +685,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
 
         $update->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $update->json()['message']);
     }
 
     public function testRolesUpdateWithCrossTenant(): void {
@@ -693,6 +703,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
         );
 
         $update->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $update->json()['message']);
     }
 
     public function testRolesDeleteWithUserManagerUser(): void
@@ -790,6 +801,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
         $deleteResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $deleteResponse->json()['message']);
     }
 
     public function testRolesDeleteWithCrossTenant(): void {
@@ -805,6 +817,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             ]
         );
         $deleteResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $deleteResponse->json()['message']);
     }
 
     public function testRolesDeleteWithRoleManagerUser(): void
@@ -876,6 +889,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->secondary_account_user_admin_token
         );
         $restoreResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $restoreResponse->json()['message']);
     }
 
     public function testRolesRestoreWithCrossTenant(): void {
@@ -885,6 +899,7 @@ class ApiDefaultAccountRolesPermissionsTest extends TestCaseAuthenticated
             $this->tenant_1_account_user_admin_token
         );
         $restoreResponse->assertStatus(401);
+        $this->assertEquals("Unauthenticated.", $restoreResponse->json()['message']);
     }
 
     public function testRolesRestoreWithAdminUser(): void

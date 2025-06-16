@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Traits;
 
-use App\Models\Tenants\Role;
+use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 trait OwnRoles
@@ -14,6 +14,6 @@ trait OwnRoles
      */
     public function roles(): MorphMany
     {
-        return $this->morphMany(Role::class, 'owner');
+        return $this->morphMany(AccountRoleTemplate::class, 'owner');
     }
 }
