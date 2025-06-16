@@ -76,41 +76,6 @@ class LandlordUserController extends Controller
         ]);
     }
 
-    public function tenantUserManage(TenantLandlordUserAttachRequest $request, $tenant_slug): JsonResponse {
-
-        $tenant = Tenant::findBySlug($tenant_slug) ?? abort(422, "Tenant not found");
-
-        $users = LandlordUser::whereIn('_id', request()->user_ids)->get();
-
-        if(count($users) < 1){
-            abort(422, "No users found");
-        }
-
-        $method = strtolower($request->method());
-
-        DB::beginTransaction();
-        try {
-            switch( $method){
-                case 'post':
-                    $users->each(fn($user) => $user->haveAccessTo()->attach($tenant));
-                    break;
-                case 'delete':
-                    $users->each(fn($user) => $user->haveAccessTo()->dettach($tenant));
-                    break;
-                default:
-                    abort(422, "Not found an action for this method.");
-            }
-        }catch (\Exception $e){
-            DB::rollBack();
-            print_r($e->getMessage());
-            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
-        }
-
-        DB::commit();
-
-        return response()->json();
-    }
-
     public function restore($user_id): JsonResponse {
         $user = LandlordUser::onlyTrashed()->findOrFail($user_id);
         $user->restore();

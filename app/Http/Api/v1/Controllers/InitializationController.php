@@ -49,11 +49,13 @@ class InitializationController extends Controller
                 ...$request->validated()['role']
             ]);
 
-            $admin_tenant_template = TenantRoleTemplate::create([
-                "name" => "Admin",
-                'description' => 'Administrador',
-                "permissions" => ["*"]
-            ]);
+            $admin_tenant_template = $new_tenant->roleTemplates()->create(
+                [
+                    "name" => "Admin",
+                    'description' => 'Administrador',
+                    "permissions" => ["*"]
+                ]
+            );
 
             $new_user = LandlordUser::create([
                 "name" => $request->user['name'],
@@ -86,7 +88,10 @@ class InitializationController extends Controller
         return response()->json([
             "data" => [
                 "user" => $new_user->toArray(),
-                "tenant" => TenantResource::make($new_tenant),
+                "tenant" => [
+                    ...$new_tenant->attributesToArray(),
+                    "role_admin_id" => $admin_tenant_template->id,
+                ],
                 "role" => $admin_role->toArray(),
                 "token" => $token
             ]

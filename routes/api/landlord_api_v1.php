@@ -5,7 +5,7 @@ use App\Http\Api\v1\Controllers\TenantController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
-use App\Http\Api\v1\Controllers\LandlordRolesTemplatesController;
+use App\Http\Api\v1\Controllers\LandlordRolesController;
 
 Route::prefix('initialize')->middleware('guest')->group(function () {
     Route::post('/', [InitializationController::class, 'initialize'])
@@ -58,16 +58,6 @@ Route::prefix('tenants')->group(function () {
     Route::delete('/{tenant_slug}/force_delete', [TenantController::class, 'forceDestroy'])
         ->middleware('auth:sanctum', 'abilities:tenants:delete')
         ->name('tenants.destroy');
-
-    Route::group(['prefix' => '/{tenant_slug}/users'], function () {
-        Route::post('/', [LandlordUserController::class, 'tenantUserManage'])
-            ->middleware('auth:sanctum', 'abilities:tenants:manage')
-            ->name('manage.tenants.users.attach');
-
-        Route::delete('/', [LandlordUserController::class, 'tenantUserManage'])
-            ->middleware('auth:sanctum', 'abilities:tenants:manage')
-            ->name('manage.tenants.users.detach');
-    });
 });
 
 Route::prefix('users')->group(function () {
@@ -106,19 +96,19 @@ Route::prefix('users')->group(function () {
 
 Route::middleware(['auth:sanctum'])->group(function () {
     // System Roles
-    Route::get('roles', [LandlordRolesTemplatesController::class, 'index']);
-    Route::post('roles', [LandlordRolesTemplatesController::class, 'storeSystemRole']);
-    Route::get('roles/{role_id}', [LandlordRolesTemplatesController::class, 'show']);
-    Route::patch('roles/{role_id}', [LandlordRolesTemplatesController::class, 'update']);
-    Route::delete('roles/{role_id}', [LandlordRolesTemplatesController::class, 'destroy']);
-    Route::delete('roles/{role_id}/force_delete', [LandlordRolesTemplatesController::class, 'forceDestroy']);
-    Route::post('roles/{role_id}/restore', [LandlordRolesTemplatesController::class, 'restore']);
+    Route::get('roles', [LandlordRolesController::class, 'index']);
+    Route::post('roles', [LandlordRolesController::class, 'storeSystemRole']);
+    Route::get('roles/{role_id}', [LandlordRolesController::class, 'show']);
+    Route::patch('roles/{role_id}', [LandlordRolesController::class, 'update']);
+    Route::delete('roles/{role_id}', [LandlordRolesController::class, 'destroy']);
+    Route::delete('roles/{role_id}/force_delete', [LandlordRolesController::class, 'forceDestroy']);
+    Route::post('roles/{role_id}/restore', [LandlordRolesController::class, 'restore']);
 
     // Tenant Roles
-    Route::get('tenants/{tenant_slug}/roles', [LandlordRolesTemplatesController::class, 'tenantRoles']);
-    Route::post('tenants/{tenant_slug}/roles', [LandlordRolesTemplatesController::class, 'storeTenantRole']);
+    Route::get('tenants/{tenant_slug}/roles', [LandlordRolesController::class, 'tenantRoles']);
+    Route::post('tenants/{tenant_slug}/roles', [LandlordRolesController::class, 'storeTenantRole']);
 
     // Role Assignment
-    Route::post('roles/{role_id}/users/{user_id}', [LandlordRolesTemplatesController::class, 'assignRoleToUser']);
-    Route::delete('roles/{role_id}/users/{user_id}', [LandlordRolesTemplatesController::class, 'removeRoleFromUser']);
+    Route::post('roles/{role_id}/users/{user_id}', [LandlordRolesController::class, 'assignRoleToUser']);
+    Route::delete('roles/{role_id}/users/{user_id}', [LandlordRolesController::class, 'removeRoleFromUser']);
 });

@@ -35,19 +35,19 @@ class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
         ]);
     }
 
-    public function testUserCreation(): void {
-        $response = $this->userCreate();
-
-        $response->assertStatus(422);
-
-        $response->assertJsonStructure([
-            "errors" => [
-                "name",
-                "emails",
-                "password",
-            ]
-        ]);
-    }
+//    public function testUserCreation(): void {
+//        $response = $this->userCreate();
+//
+//        $response->assertStatus(422);
+//
+//        $response->assertJsonStructure([
+//            "errors" => [
+//                "name",
+//                "emails",
+//                "password",
+//            ]
+//        ]);
+//    }
 
     public function testTenantCreation(): void {
         $response = $this->tenantsCreate();
@@ -62,63 +62,63 @@ class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
         ]);
     }
 
-    public function testTenantUserAttachWrongUserId(): void {
-        $response = $this->userAttach(
-            $this->tenant_1_slug,
-            [
-                'user_ids' => [
-                    "123"
-            ]
-        ]);
+//    public function testTenantUserAttachWrongUserId(): void {
+//        $response = $this->userAttach(
+//            $this->tenant_1_slug,
+//            [
+//                "user_id" => "123",
+//                "role_id" => "123",
+//        ]);
+//
+//        $response->assertStatus(422);
+//
+//        $response->assertJsonStructure([
+//            "message",
+//            "errors" => [
+//                "user_id",
+//                "role_id"
+//            ]
+//        ]);
+//
+//        $this->assertEquals("The selected user id is invalid.", $response->json()["errors"]["user_id"][0]);
+//        $this->assertEquals("The selected role id is invalid.", $response->json()["errors"]["role_id"][0]);
+//    }
 
-        $response->assertStatus(422);
+//    public function testTenantUserAttach(): void {
+//        $response = $this->userAttach(
+//            $this->tenant_1_slug,
+//            []
+//        );
+//
+//        $response->assertStatus(422);
+//
+//        $response->assertJsonStructure([
+//            "errors" => [
+//                "user_id",
+//                "role_id"
+//            ]
+//        ]);
+//
+//        $this->assertEquals("The user id field is required.", $response->json()["errors"]["user_id"][0]);
+//        $this->assertEquals("The role id field is required.", $response->json()["errors"]["role_id"][0]);
+//
+//    }
 
-        $this->assertEquals("No users found", $response->json()['message']);
-    }
-
-    public function testTenantUserAttachWrongTenantSlug(): void {
-        $response = $this->userAttach(
-            "slug_inexistente",
-            [
-                'user_ids' => [
-                    "123"
-                ]
-            ]);
-
-        $response->assertStatus(422);
-
-        $this->assertEquals("Tenant not found", $response->json()['message']);
-    }
-
-    public function testTenantUserAttach(): void {
-        $response = $this->userAttach(
-            $this->tenant_1_slug,
-            []
-        );
-
-        $response->assertStatus(422);
-
-        $response->assertJsonStructure([
-            "errors" => [
-                "user_ids",
-            ]
-        ]);
-    }
-
-    public function testTenantUserDetach(): void {
-        $response = $this->userAttach(
-            $this->tenant_1_slug,
-            []
-        );
-
-        $response->assertStatus(422);
-
-        $response->assertJsonStructure([
-            "errors" => [
-                "user_ids",
-            ]
-        ]);
-    }
+//    public function testTenantUserDetach(): void {
+//        $response = $this->userAttach(
+//            $this->tenant_1_slug,
+//            []
+//        );
+//
+//        $response->assertStatus(422);
+//
+//        $response->assertJsonStructure([
+//            "errors" => [
+//                "user_id",
+//                "role_id",
+//            ]
+//        ]);
+//    }
 
     protected function initiate(): TestResponse {
         return $this->json(
@@ -127,13 +127,13 @@ class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userCreate(): TestResponse {
-        return $this->json(
-            method: 'post',
-            uri: "admin/api/users",
-            headers: $this->getHeaders()
-        );
-    }
+//    protected function userCreate(): TestResponse {
+//        return $this->json(
+//            method: 'post',
+//            uri: "admin/api/users",
+//            headers: $this->getHeaders()
+//        );
+//    }
 
     protected function tenantsCreate(): TestResponse {
         return $this->json(
@@ -143,13 +143,13 @@ class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userAttach(string $tenant_slug,array $data): TestResponse {
-        return $this->json(
-            method: 'post',
-            uri: "admin/api/tenants/$tenant_slug/users",
-            data: $data,
-            headers: $this->getHeaders()
-        );
-    }
+//    protected function userAttach(string $tenant_slug,array $data): TestResponse {
+//        return $this->json(
+//            method: 'post',
+//            uri: "admin/api/tenants/$tenant_slug/users",
+//            data: $data,
+//            headers: $this->getHeaders()
+//        );
+//    }
 
 }

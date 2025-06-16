@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Api\v1\Requests\TenantStoreRequest;
 use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\TenantRole;
 use App\Models\Landlord\TenantRoleTemplate;
@@ -16,6 +18,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
 
 class TenantController extends Controller
@@ -38,19 +41,15 @@ class TenantController extends Controller
         try {
 //            DB::beginTransaction();
             $tenant = Tenant::create($request->validated());
-            $tenant_admin_role = TenantRoleTemplate::create([
+
+            $tenant_admin_role_template = $tenant->roleTemplates()->create([
                 "name" => "Admin",
                 "description" => "Administrador",
                 "permissions" => ["*"],
             ]);
 
-//            $tenant_role = new TenantRole([
-//                ...$tenant_admin_role->attributesToArray(),
-//                "tenant_id" => $tenant->id,
-//            ]);
-
             $user->tenantRoles()->create([
-                ...$tenant_admin_role->attributesToArray(),
+                ...$tenant_admin_role_template->attributesToArray(),
                 "tenant_id" => $tenant->id,
             ]);
 //            DB::commit();
@@ -60,7 +59,10 @@ class TenantController extends Controller
         }
 
         return response()->json([
-            'data' => $tenant,
+            'data' => [
+                ...$tenant->attributesToArray(),
+                "role_admin_id" => $tenant_admin_role_template->id,
+            ],
         ], 201);
     }
 
@@ -130,6 +132,45 @@ class TenantController extends Controller
         }
 
         DB::connection("landlord")->commit();
+
+        return response()->json();
+    }
+
+    public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
+
+        $tenant = Tenant::current();
+
+        $user = LandlordUser::where('_id', request()->user_id)->firstOrFail();
+
+        $role = $tenant->roleTemplates()->where('_id', new ObjectId(request()->role_id))->firstOrFail();
+
+        $method = strtolower($request->method());
+
+        try {
+            switch( $method){
+                case 'post':
+                    $user->tenantRoles()->create([
+                        ...$role->attributesToArray(),
+                        "tenant_id" => $tenant->id
+                    ]);
+                    break;
+                case 'delete':
+                    $role_to_delete = $user->tenantRoles()
+                        ->where('slug', $role->slug)
+                        ->where('tenant_id', $tenant->id)
+                        ->first();
+
+                    if ($role_to_delete) {
+                        $role_to_delete->delete();
+                        $user->save();
+                    }
+                    break;
+                default:
+                    abort(422, "Not found an action for this method.");
+            }
+        }catch (\Exception $e){
+            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
+        }
 
         return response()->json();
     }

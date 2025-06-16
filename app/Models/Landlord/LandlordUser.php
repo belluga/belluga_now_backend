@@ -44,10 +44,6 @@ class LandlordUser extends Authenticatable {
         return $this->embedsMany(TenantRole::class, 'tenant_roles');
     }
 
-    public function hasAccessTo(Tenant $tenant):bool {
-        return in_array($tenant->id, $this->getAccessToIds());
-    }
-
     public function getAccessToIds(): array{
 
         $tenant_roles_array = $this->tenant_roles ?? [];

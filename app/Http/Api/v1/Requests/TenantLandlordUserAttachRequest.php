@@ -24,9 +24,8 @@ class TenantLandlordUserAttachRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'user_ids' => 'required|array',
-            'user_ids.*' => 'string|max:255',
-            //role
+            'user_id' => 'required|string|max:255|exists:landlord.landlord_users,_id',
+            'role_id' => 'required|string|exists:landlord.tenant_role_templates,_id'
         ];
     }
 }

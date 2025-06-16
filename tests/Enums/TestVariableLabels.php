@@ -33,6 +33,8 @@ enum TestVariableLabels: string {
 
     case TENANT_1_MAIN_ACCOUNT_SLUG = "tenant.1.main.account.slug";
 
+    case TENANT_2_ID = "tenant.2.id";
+
     case TENANT_2_SLUG = "tenant.2.slug";
 
     case TENANT_2_SUBDOMAIN = "tenant.2.subdomain";
@@ -153,4 +155,5 @@ enum TestVariableLabels: string {
 
     case USER_ID_CREATED_BY_ACCOUNT_USERMANAGE_USER = "user.id.created_by_account_rolemanage_user";
 
+    case TENANT_2_ROLE_TEMPLATE_ADMIN_ID = "tenant.2.role.template.admin.id";
 }

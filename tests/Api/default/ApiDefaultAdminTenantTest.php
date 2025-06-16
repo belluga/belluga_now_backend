@@ -15,6 +15,13 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         }
     }
 
+    protected string $tenant_2_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_ID->value, $value);
+            $this->tenant_2_id = $value;
+        }
+    }
+
     protected string $tenant_2_slug {
         set(string $value) {
             $this->setGlobal(TestVariableLabels::TENANT_2_SLUG->value, $value);
@@ -32,9 +39,13 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         }
     }
 
-    protected ?string $secondary_landlord_user_id {
-        get {
-            return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_ID->value);
+    protected string $tenant_2_role_template_admin_id {
+        set(string $value) {
+            $this->setGlobal(TestVariableLabels::TENANT_2_ROLE_TEMPLATE_ADMIN_ID->value, $value);
+            $this->tenant_2_role_template_admin_id = $value;
+        }
+        get{
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ROLE_TEMPLATE_ADMIN_ID->value);
         }
     }
 
@@ -69,6 +80,8 @@ class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
         ]);
 
         $this->tenant_2_slug = $response->json()['data']['slug'];
+        $this->tenant_2_id = $response->json()['data']['id'];
+        $this->tenant_2_role_template_admin_id = $response->json()['data']['role_admin_id'];
 
         $tenantsList = $this->tenantsList();
         $tenantsList->assertOk();

@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
+use App\Http\Api\v1\Controllers\TenantController;
+use App\Http\Api\v1\Controllers\LandlordUserController;
 
 
 
@@ -49,43 +51,18 @@ Route::middleware('auth:sanctum')
         Route::prefix('users')
             ->group(function () {
 
-                Route::get('/', [AccountUserController::class, 'index'])
-                ->name('tenant.users.index');
+                Route::post('/', [TenantController::class, 'tenantUserManage'])
+                    ->middleware('auth:sanctum', 'abilities:tenant-users:create,tenant-users:update')
+                    ->name('manage.tenants.users.attach');
 
-                Route::post('/', [AccountUserController::class, 'store'])
-                    ->name('tenant.users.store');
+                Route::delete('/', [TenantController::class, 'tenantUserManage'])
+                    ->middleware('auth:sanctum', 'abilities:tenant-users:delete')
+                    ->name('manage.tenants.users.detach');
 
-                Route::get('/{user_id}', [AccountUserController::class, 'show'])
+                Route::get('/{user_id}', [LandlordUserController::class, 'show'])
+                    ->middleware('auth:sanctum', 'abilities:tenant-users:view')
                     ->name('tenant.users.show');
 
-                Route::patch('/{user_id}', [AccountUserController::class, 'update'])
-                    ->name('tenant.users.update');
-
-                Route::delete('/{user_id}', [AccountUserController::class, 'destroy'])
-                    ->name('tenant.users.destroy');
-
-                Route::delete('/{user_id}/force_delete', [AccountUserController::class, 'forceDestroy'])
-                    ->middleware('abilities:landlord-users:write')
-                    ->name('tenant.users.force_destroy');
-
-                Route::post('/{user_id}/restore', [AccountUserController::class, 'restore'])
-                    ->middleware('abilities:landlord-users:write')
-                    ->name('tenant.users.restore');
-
-                // Perfil do usuário atual
-                Route::get('/profile', [AccountUserController::class, 'profile'])
-                    ->name('tenant.users.profile');
-
-                Route::put('/profile', [AccountUserController::class, 'updateProfile'])
-                    ->name('tenant.users.profile.update');
-
-                // Alterar senha
-                Route::put('/{id}/password', [AccountUserController::class, 'updatePassword'])
-                    ->name('tenant.users.password.update');
-
-                // Ativar/desativar usuário
-                Route::patch('/{id}/toggle-active', [AccountUserController::class, 'toggleActive'])
-                    ->name('tenant.users.toggle-active');
             });
 
         Route::prefix('accounts')

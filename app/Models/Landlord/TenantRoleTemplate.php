@@ -20,6 +20,10 @@ class TenantRoleTemplate extends Model
         'permissions',
     ];
 
+    public function tenant(): BelongsTo {
+        return $this->belongsTo(Tenant::class);
+    }
+
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()

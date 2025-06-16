@@ -31,6 +31,10 @@ class Tenant extends BaseTenant
         'domains',
     ];
 
+    public function roleTemplates(): HasMany {
+        return $this->hasMany(TenantRoleTemplate::class);
+    }
+
     public function domains(): HasMany
     {
         return $this->hasMany(Domains::class);

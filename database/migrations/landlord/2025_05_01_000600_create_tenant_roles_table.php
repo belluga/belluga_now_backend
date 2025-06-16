@@ -11,9 +11,9 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('landlord_role_templates', function (Blueprint $collection) {
+        Schema::create('tenant_role_templates', function (Blueprint $collection) {
             $collection->index('permissions');
-            $collection->unique('slug');
+            $collection->unique(['slug', 'tenant_id']);
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
     }
