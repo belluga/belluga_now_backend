@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
 use Illuminate\Http\Request;
 
-class LandlordRolesController extends Controller
+class LandlordRolesTemplatesController extends Controller
 {
     /**
      * Display a listing of the roles.
