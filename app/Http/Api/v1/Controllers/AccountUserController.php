@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Http\Api\v1\Requests\AccountUserEmailsAddRequest;
 use App\Http\Api\v1\Requests\AccountUserEmailsRemoveRequest;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
+use App\Http\Api\v1\Requests\UpdatePasswordRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
@@ -32,6 +33,7 @@ class AccountUserController extends Controller
     {
         $users = AccountUser::
             when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
+            ->where("account_roles.account_id", Account::current()->id)
             ->paginate();
 
         return response()->json($users);
@@ -42,7 +44,7 @@ class AccountUserController extends Controller
      */
     public function show(Request $request): JsonResponse
     {
-        $user = AccountUser::where('_id', new ObjectId($request->route("user_id")))->firstOrFail();
+        $user = $this->getFirstUserByRouteOrFail();
         return response()->json(['data' => $user]);
     }
 
@@ -53,14 +55,16 @@ class AccountUserController extends Controller
     {
         DB::beginTransaction();
         try {
-            $user = AccountUser::create($request->validated());
-            $role = AccountRoleTemplate::where('_id', new ObjectId($request->role_id))->firstOrFail();
+            $user = $this->findOrCreateUser($request->validated());;
 
-            $user->tenantRoles()->create([
-                ...$role->attributesToArray(),
-                'account_id' =>Account::current()->id,
-            ]);
+            if(!$user->haveAccessTo(Account::current())){
+                $role_template = AccountRoleTemplate::where('_id', new ObjectId($request->role_id))->firstOrFail();
 
+                $user->tenantRoles()->create([
+                    ...$role_template->attributesToArray(),
+                    'account_id' =>Account::current()->id,
+                ]);
+            }
             DB::commit();
         }catch (\Exception $e){
             DB::rollBack();
@@ -84,8 +88,7 @@ class AccountUserController extends Controller
      */
     public function update(UserUpdateRequest $request): JsonResponse
     {
-        $user = AccountUser::findOrFail($request->route("user_id"));
-
+        $user = $this->getFirstUserByRouteOrFail();
         $user->update($request->validated());
 
         return response()->json([
@@ -99,9 +102,7 @@ class AccountUserController extends Controller
      */
     public function destroy(Request $request): JsonResponse
     {
-        $user_id = $request->route("user_id");
-
-        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();;
+        $user = $this->getFirstUserByRouteOrFail();
 
         if ($user->_id === Auth::id()) {
             return response()->json(
@@ -116,10 +117,18 @@ class AccountUserController extends Controller
                 422);
         }
 
-        //remove relationships
-        $user->delete();
+        $user->tenantRoles()
+            ->where("account_id", Account::current()->id)
+            ->first()
+            ->delete();
 
-        return response()->json(['message' => 'Usuário removido com sucesso']);
+        $user_have_no_account_access = count($user->getAccessToIds()) == 0;
+
+        if($user_have_no_account_access){
+            $user->delete();
+        }
+
+        return response()->json(['message' => 'Usuário removido da conta com sucesso']);
     }
 
     public function restore(Request $request): JsonResponse {
@@ -128,6 +137,7 @@ class AccountUserController extends Controller
 
         $user = AccountUser::onlyTrashed()
             ->where("_id", new ObjectId($user_id))
+            ->where("account_roles.account_id", Account::current()->id)
             ->firstOrFail();
 
         $user->restore();
@@ -141,11 +151,7 @@ class AccountUserController extends Controller
 
     public function forceDestroy(Request $request): JsonResponse {
 
-        $user_id = $request->route("user_id");
-
-        $user = AccountUser::onlyTrashed()
-            ->where("_id", new ObjectId($user_id))
-            ->firstOrFail();
+        $user = $this->getFirstUserByRouteOrFail();
 
         if ($user->_id === Auth::id()) {
             return response()->json([
@@ -166,24 +172,9 @@ class AccountUserController extends Controller
     /**
      * Atualiza a senha de um usuário
      */
-    public function updatePassword(Request $request): JsonResponse
+    public function updatePassword(UpdatePasswordRequest $request): JsonResponse
     {
-        $user_id = $request->route("user_id");
-
-        $user = AccountUser::onlyTrashed()
-            ->where("_id", new ObjectId($user_id))
-            ->firstOrFail();
-
-        $validator = Validator::make($request->all(), [
-            'password' => 'required|string|min:8|confirmed',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Dados inválidos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+        $user = $this->getFirstUserByRouteOrFail();
 
         $user->password = Hash::make($request->input('password'));
         $user->save();
@@ -193,10 +184,7 @@ class AccountUserController extends Controller
 
     public function addEmails(AccountUserEmailsAddRequest $request): JsonResponse
     {
-        $user_id = $request->route("user_id");
-
-        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();
-
+        $user = $this->getFirstUserByRouteOrFail();
         $new_emails = $request->input('emails');
 
         try{
@@ -229,10 +217,7 @@ class AccountUserController extends Controller
 
     public function removeEmails(AccountUserEmailsRemoveRequest $request): JsonResponse
     {
-        $user_id = $request->route("user_id");
-
-        $user = AccountUser::where("_id", new ObjectId($user_id))->firstOrFail();
-
+        $user = $this->getFirstUserByRouteOrFail();
         $remove_emails = $request->input('emails');
 
         try{
@@ -254,5 +239,23 @@ class AccountUserController extends Controller
             'message' => 'Usuário atualizado com sucesso',
             'data' => $user
         ]);
+    }
+
+    private function getFirstUserByRouteOrFail(): AccountUser {
+        $user_id = request()->route("user_id");
+
+        return AccountUser::where("_id", new ObjectId($user_id))
+            ->where("account_roles.account_id", Account::current()->id)
+            ->firstOrFail();
+    }
+
+    private function findOrCreateUser(array $data): AccountUser {
+        $user = AccountUser::where('emails', 'elemMatch', [ '$in' => $data['emails']])
+            ->first();
+        if(!$user){
+            $user = AccountUser::create($data);
+        }
+
+        return $user;
     }
 }

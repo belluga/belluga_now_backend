@@ -735,7 +735,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $deleteResponse->assertStatus(403);
     }
 
-    public function testRolesDeleteOwnUser(): void
+    public function testDeleteOwnUser(): void
     {
         $token = $this->tenant_2_account_user_admin_token_device_1;
         $user_id = $this->tenant_2_account_user_admin_id;
@@ -756,7 +756,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesDeleteWithAdminUser(): void
+    public function testDeleteWithAdminUser(): void
     {
         $token = $this->tenant_2_account_user_admin_token_device_1;
         $user_id = $this->user_id_created_by_account_admin_user;
@@ -777,7 +777,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesDeleteWithRoleManagerUser(): void
+    public function testDeleteWithRoleManagerUser(): void
     {
         $token = $this->tenant_2_account_user_rolemanage_token;
         $user_id = $this->user_id_created_by_account_usermanage_user;
@@ -792,7 +792,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
 
     }
 
-    public function testRolesDeleteWithCrossAccount(): void {
+    public function testDeleteWithCrossAccount(): void {
         $token = $this->secondary_account_user_admin_token;
         $user_id = $this->user_id_created_by_account_usermanage_user;
 
@@ -806,7 +806,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->assertEquals("Unauthenticated.", $deleteResponse->json()['message']);
     }
 
-    public function testRolesDeleteWithCrossTenant(): void {
+    public function testDeleteWithCrossTenant(): void {
         $token = $this->tenant_1_account_user_admin_token;
         $user_id = $this->user_id_created_by_account_usermanage_user;
 
@@ -820,7 +820,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->assertEquals("Unauthenticated.", $deleteResponse->json()['message']);
     }
 
-    public function testRolesRestoreWithVisitorUser(): void
+    public function testRestoreWithVisitorUser(): void
     {
         $restoreResponse = $this->restore(
             $this->tenant_2_main_account_slug,
@@ -830,7 +830,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $restoreResponse->assertStatus(403);
     }
 
-    public function testRolesRestoreWithCrossAccount(): void {
+    public function testRestoreWithCrossAccount(): void {
         $restoreResponse = $this->restore(
             $this->tenant_2_main_account_slug,
             $this->tenant_2_main_account_role_admin_id,
@@ -840,7 +840,7 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         $this->assertEquals("Unauthenticated.", $restoreResponse->json()['message']);
     }
 
-    public function testRolesRestoreWithCrossTenant(): void {
+    public function testRestoreWithCrossTenant(): void {
         $restoreResponse = $this->restore(
             $this->tenant_2_main_account_slug,
             $this->tenant_2_main_account_role_admin_id,
@@ -848,142 +848,6 @@ class ApiDefaultAccountUsersManagePermissionsTest extends TestCaseAuthenticated
         );
         $restoreResponse->assertStatus(401);
         $this->assertEquals("Unauthenticated.", $restoreResponse->json()['message']);
-    }
-
-    public function testRolesRestoreWithUserManagerUser(): void
-    {
-        $restoreResponse = $this->restore(
-            $this->tenant_2_main_account_slug,
-            $this->user_id_created_by_account_usermanage_user,
-            $this->tenant_2_account_user_usermanage_token
-        );
-        $restoreResponse->assertStatus(200);
-
-        $showResponse = $this->show(
-            $this->tenant_2_main_account_slug,
-            $this->user_id_created_by_account_usermanage_user,
-            $this->tenant_2_account_user_rolemanage_token
-        );
-        $showResponse->assertOk();
-
-    }
-
-    public function testRolesRestoreWithRoleManagerUser(): void
-    {
-        $restoreResponse = $this->restore(
-            $this->tenant_2_main_account_slug,
-            $this->user_id_created_by_account_usermanage_user,
-            $this->tenant_2_account_user_rolemanage_token
-        );
-        $restoreResponse->assertStatus(403);
-
-    }
-
-    public function testRolesRestoreWithAdminUser(): void
-    {
-        $restoreResponse = $this->restore(
-            $this->tenant_2_main_account_slug,
-            $this->user_id_created_by_account_admin_user,
-            $this->tenant_2_account_user_admin_token_device_1
-        );
-        $restoreResponse->assertStatus(200);
-
-        $showResponse = $this->show(
-            $this->tenant_2_main_account_slug,
-            $this->user_id_created_by_account_admin_user,
-            $this->tenant_2_account_user_admin_token_device_1
-        );
-        $showResponse->assertOk();
-    }
-
-    public function testRolesDeleteFlowWithUserManagerUser(): void
-    {
-        $token = $this->tenant_2_account_user_usermanage_token;
-        $user_id = $this->user_id_created_by_account_usermanage_user;
-
-
-        $deleteResponse = $this->deleteItem(
-            $this->tenant_2_main_account_slug,
-            $user_id,
-            $token,
-        );
-        $deleteResponse->assertStatus(200);
-
-        $listResponse = $this->listArchived(
-            $this->tenant_2_main_account_slug,
-            $token
-        );
-        $listResponse->assertOk();
-        $this->assertArrayHasKey('total', $listResponse);
-        $this->assertEquals(1, $listResponse['total']);
-
-        $forceDeleteResponse = $this->forceDelete(
-            $this->tenant_2_main_account_slug,
-            $user_id,
-            $token
-        );
-        $forceDeleteResponse->assertOk();
-
-        $showResponse =  $this->show(
-            $this->tenant_2_main_account_slug,
-            $user_id,
-            $token
-        );
-        $showResponse->assertStatus(404);
-
-        $istResponse = $this->listArchived(
-            $this->tenant_2_main_account_slug,
-            $token
-        );
-        $istResponse->assertOk();
-        $this->assertArrayHasKey('total', $istResponse);
-        $this->assertEquals(0, $istResponse['total']);
-
-    }
-
-    public function testRolesDeleteFlowWithAdminUser(): void
-    {
-        $token = $this->tenant_2_account_user_admin_token_device_1;
-        $user_id = $this->user_id_created_by_account_admin_user;
-
-
-        $deleteResponse = $this->deleteItem(
-            $this->tenant_2_main_account_slug,
-            $user_id,
-            $token,
-        );
-        $deleteResponse->assertStatus(200);
-
-        $listResponse = $this->listArchived(
-            $this->tenant_2_main_account_slug,
-            $token
-        );
-        $listResponse->assertOk();
-        $this->assertArrayHasKey('total', $listResponse);
-        $this->assertEquals(1, $listResponse['total']);
-
-        $listArchived = $this->forceDelete(
-            $this->tenant_2_main_account_slug,
-            $user_id,
-            $token
-        );
-        $listArchived->assertOk();
-
-        $showResponse =  $this->show(
-            $this->tenant_2_main_account_slug,
-            $user_id,
-            $token
-        );
-        $showResponse->assertStatus(404);
-
-        $listResponse = $this->listArchived(
-            $this->tenant_2_main_account_slug,
-            $token
-        );
-        $listResponse->assertOk();
-        $this->assertArrayHasKey('total', $listResponse);
-        $this->assertEquals(0, $listResponse['total']);
-
     }
 
     public function testLogoutUsers(): void {

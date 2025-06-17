@@ -6,12 +6,15 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\AccountUpdateRequest;
+use App\Http\Api\v1\Requests\AccountUserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
 
 class AccountController extends Controller
@@ -135,6 +138,45 @@ class AccountController extends Controller
         }
 
         DB::commit();
+
+        return response()->json();
+    }
+
+    public function tenantUserManage(AccountUserAttachRequest $request): JsonResponse {
+
+        $account = Account::current();
+
+        $user = AccountUser::where('_id', request()->user_id)->firstOrFail();
+
+        $role = $account->roleTemplates()->where('_id', new ObjectId(request()->role_id))->firstOrFail();
+
+        $method = strtolower($request->method());
+
+        try {
+            switch( $method){
+                case 'post':
+                    $user->tenantRoles()->create([
+                        ...$role->attributesToArray(),
+                        "account_id" => $account->id
+                    ]);
+                    break;
+                case 'delete':
+                    $role_to_delete = $user->tenantRoles()
+                        ->where('slug', $role->slug)
+                        ->where('account_id', $account->id)
+                        ->first();
+
+                    if ($role_to_delete) {
+                        $role_to_delete->delete();
+                        $user->save();
+                    }
+                    break;
+                default:
+                    abort(422, "Not found an action for this method.");
+            }
+        }catch (\Exception $e){
+            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
+        }
 
         return response()->json();
     }

@@ -609,7 +609,7 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         $this->assertNotEquals($this->tenant_2_account_user_to_delete_email_3, $accountUserShow->json()['data']['emails'][0]);
     }
 
-    public function testAccountDelete(): void {
+    public function testAccountDetachOrDelete(): void {
         $rolesList = $this->accountUsersList();
         $rolesList->assertOk();
 
@@ -636,54 +636,6 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
 
         $showDeleted = $this->accountUserShow($this->tenant_2_account_user_to_delete_id);
         $showDeleted->assertStatus(404);
-    }
-
-    public function testAccountRestore(): void {
-        $restoreResponse = $this->accountUserRestore($this->tenant_2_account_user_to_delete_id);
-        $restoreResponse->assertStatus(200);
-
-        // Should be able to get the restored role
-        $showResponse = $this->accountUserShow($this->tenant_2_account_user_to_delete_id);
-        $showResponse->assertOk();
-
-        $rolesList = $this->accountUsersListArchived();
-        $rolesList->assertOk();
-
-        $responseData = $rolesList->json();
-        $this->assertArrayHasKey('total', $responseData);
-        $this->equalTo(4, $responseData['total']);
-    }
-
-    public function testAccountDeleteFlow(): void {
-        $responseListWithCreated = $this->accountUsersList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());
-        $this->equalTo(5, $responseListWithCreated->json()['total']);
-
-        $responseListArchived = $this->accountUsersListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());
-        $this->equalTo(0, $responseListArchived->json()['total']);
-
-        $restoreResponse = $this->accountUserDelete($this->tenant_2_account_user_to_delete_id);
-        $restoreResponse->assertStatus(200);
-
-        $responseListWithCreated = $this->accountUsersList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());
-        $this->equalTo(4, $responseListWithCreated->json()['total']);
-
-        $responseListArchived = $this->accountUsersListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());
-        $this->equalTo(1, $responseListArchived->json()['total']);
-
-        $restoreResponse = $this->accountUserForceDelete($this->tenant_2_account_user_to_delete_id);
-        $restoreResponse->assertStatus(200);
-
-        $responseListWithCreated = $this->accountUsersList();
-        $this->assertArrayHasKey('total', $responseListWithCreated->json());
-        $this->equalTo(4, $responseListWithCreated->json()['total']);
-
-        $responseListArchived = $this->accountUsersListArchived();
-        $this->assertArrayHasKey('total', $responseListArchived->json());
-        $this->equalTo(0, $responseListArchived->json()['total']);
     }
 
     protected function accountUserCreate(array $data): TestResponse {

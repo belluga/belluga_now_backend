@@ -40,7 +40,7 @@ class AccountUser extends Authenticatable {
         return $this->embedsMany(AccountRole::class, 'account_roles');
     }
 
-    public function hasAccessTo(Account $account):bool {
+    public function haveAccessTo(Account $account):bool {
         return in_array($account->id, $this->getAccessToIds());
     }
 
