@@ -29,7 +29,6 @@ class AccountUserCreateRequest extends FormRequest
             'emails' => [
                 'required',
                 'array',
-                new UniqueArrayItemRule('tenant', 'account_users', 'emails', )
             ],
             'password' => 'required|string|min:8',
             'role_id' => 'required|string|exists:tenant.account_role_templates,_id'

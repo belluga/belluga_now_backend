@@ -521,6 +521,39 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         $this->secondary_account_user_admin_id = $response->json()['data']["id"];
     }
 
+    public function testAttachExistentUserToAccount():void {
+
+        $response = $this->accountUserCreate([
+            "name" => $this->secondary_account_user_admin_name,
+            "emails" => [
+                $this->secondary_account_user_admin_email,
+            ],
+            "password" => $this->secondary_account_user_admin_password,
+            "password_confirmation" => $this->secondary_account_user_admin_password,
+            "role_id" => $this->secondary_account_role_admin_id,
+        ]);
+
+        $response->assertStatus(201);
+
+        $responseShow = $this->accountUserShow($this->secondary_account_user_admin_id);
+
+        $responseShow->assertStatus(200);
+    }
+
+    public function testAccountUserDetach(): void {
+        $responseShow = $this->accountUserShow($this->secondary_account_user_admin_id);
+        $responseShow->assertStatus(200);
+
+        $responseDelete = $this->accountUserDelete($this->secondary_account_user_admin_id);
+        $responseDelete->assertStatus(200);
+
+        $responseShowTenant2 = $this->accountUserShow($this->secondary_account_user_admin_id);
+        $responseShowTenant2->assertStatus(404);
+
+        $responseShowTenant1 = $this->accountUserShowSecondaryAccount($this->secondary_account_user_admin_id);
+        $responseShowTenant1->assertStatus(200);
+    }
+
     public function testAccountUsersList(): void {
 
         $accountUserList = $this->accountUsersList();
@@ -685,6 +718,14 @@ class ApiDefaultAccountUsersManageTest extends TestCaseAuthenticated
         return $this->json(
             method: 'get',
             uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$this->tenant_2_main_account_slug/users/$user_id",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function accountUserShowSecondaryAccount(string $user_id): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "http://{$this->tenant_2_subdomain}.localhost/api/accounts/$this->secondary_account_slug/users/$user_id",
             headers: $this->getHeaders(),
         );
     }
