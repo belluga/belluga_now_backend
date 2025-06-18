@@ -125,6 +125,7 @@ class TenantController extends Controller
         DB::connection("landlord")->beginTransaction();
         try {
             $tenant->domains()->delete();
+            $tenant->roleTemplates()->delete();
             $tenant->forceDelete();
         } catch (\Exception $e) {
             DB::connection("landlord")->rollBack();
@@ -132,45 +133,6 @@ class TenantController extends Controller
         }
 
         DB::connection("landlord")->commit();
-
-        return response()->json();
-    }
-
-    public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
-
-        $tenant = Tenant::current();
-
-        $user = LandlordUser::where('_id', request()->user_id)->firstOrFail();
-
-        $role = $tenant->roleTemplates()->where('_id', new ObjectId(request()->role_id))->firstOrFail();
-
-        $method = strtolower($request->method());
-
-        try {
-            switch( $method){
-                case 'post':
-                    $user->tenantRoles()->create([
-                        ...$role->attributesToArray(),
-                        "tenant_id" => $tenant->id
-                    ]);
-                    break;
-                case 'delete':
-                    $role_to_delete = $user->tenantRoles()
-                        ->where('slug', $role->slug)
-                        ->where('tenant_id', $tenant->id)
-                        ->first();
-
-                    if ($role_to_delete) {
-                        $role_to_delete->delete();
-                        $user->save();
-                    }
-                    break;
-                default:
-                    abort(422, "Not found an action for this method.");
-            }
-        }catch (\Exception $e){
-            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
-        }
 
         return response()->json();
     }

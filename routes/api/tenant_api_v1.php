@@ -7,6 +7,7 @@ use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\TenantController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
+use App\Http\Api\v1\Controllers\TenantUsersController;
 
 
 
@@ -48,20 +49,53 @@ Route::middleware('auth:sanctum')
             return response()->json(['authenticated' => true]);
         });
 
-        Route::prefix('users')
+        Route::prefix('tenant-users')
             ->group(function () {
 
-                Route::post('/', [TenantController::class, 'tenantUserManage'])
+                Route::post('/', [LandlordUserController::class, 'tenantUserManage'])
                     ->middleware('auth:sanctum', 'abilities:tenant-users:create,tenant-users:update')
                     ->name('manage.tenants.users.attach');
 
-                Route::delete('/', [TenantController::class, 'tenantUserManage'])
+                Route::delete('/', [LandlordUserController::class, 'tenantUserManage'])
                     ->middleware('auth:sanctum', 'abilities:tenant-users:delete')
                     ->name('manage.tenants.users.detach');
 
                 Route::get('/{user_id}', [LandlordUserController::class, 'show'])
                     ->middleware('auth:sanctum', 'abilities:tenant-users:view')
                     ->name('tenant.users.show');
+
+            });
+
+        Route::prefix('account-users')
+            ->group(function () {
+
+                Route::get('/', [TenantUsersController::class, 'index'])
+                    ->middleware('auth:sanctum', 'abilities:account-users:view')
+                    ->name('manage.account-users.list');
+
+                Route::post('/', [TenantUsersController::class, 'accountUserManage'])
+                    ->middleware('auth:sanctum', 'abilities:account-users:create,account-users:update')
+                    ->name('manage.account-users.attach');
+
+                Route::delete('/', [TenantUsersController::class, 'accountUserManage'])
+                    ->middleware('auth:sanctum', 'abilities:account-users:delete')
+                    ->name('manage.account-users.detach');
+
+                Route::get('/{user_id}', [TenantUsersController::class, 'show'])
+                    ->middleware('auth:sanctum', 'abilities:account-users:view')
+                    ->name('manage.account-users.show');
+
+                Route::delete('/{user_id}', [TenantUsersController::class, 'destroy'])
+                    ->middleware('auth:sanctum', 'abilities:account-users:delete')
+                    ->name('manage.account-users.destroy');
+
+                Route::post('/{user_id}/restore', [TenantUsersController::class, 'restore'])
+                    ->middleware('auth:sanctum', "abilities:account-users:create,account-users:update,account-users:delete")
+                    ->name('manage.account-users.restore');
+
+                Route::delete('/{user_id}/force_destroy', [TenantUsersController::class, 'forceDestroy'])
+                    ->middleware('auth:sanctum', "abilities:account-users:delete")
+                    ->name('manage.account-users.force_destroy');;
 
             });
 

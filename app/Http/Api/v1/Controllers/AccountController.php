@@ -142,7 +142,7 @@ class AccountController extends Controller
         return response()->json();
     }
 
-    public function tenantUserManage(AccountUserAttachRequest $request): JsonResponse {
+    public function accountUserManage(AccountUserAttachRequest $request): JsonResponse {
 
         $account = Account::current();
 

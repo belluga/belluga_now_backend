@@ -8,15 +8,17 @@ use Tests\Enums\TestVariableLabels;
 use Tests\TestCase;
 use Tests\TestCaseAuthenticated;
 
-class ApiDefaultAdminUserTenantRoleTest extends TestCaseAuthenticated {
+class ApiDefaultTenantApiTenantUsersTest extends TestCaseAuthenticated {
 
     protected string $secondary_landlord_user_id {
         get {
             return $this->getGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_ID->value);
         }
-        set(string $value) {
-            $this->setGlobal(TestVariableLabels::SECONDARY_LANDLORD_USER_ID->value, $value);
-            $this->secondary_landlord_user_id = $value;
+    }
+
+    protected string $tenant_2_role_template_admin_id {
+        get{
+            return $this->getGlobal(TestVariableLabels::TENANT_2_ROLE_TEMPLATE_ADMIN_ID->value);
         }
     }
 
@@ -32,13 +34,8 @@ class ApiDefaultAdminUserTenantRoleTest extends TestCaseAuthenticated {
         }
     }
 
-    protected string $tenant_2_role_template_admin_id {
-        get{
-            return $this->getGlobal(TestVariableLabels::TENANT_2_ROLE_TEMPLATE_ADMIN_ID->value);
-        }
-    }
-
     public function testUserAttachTenant(): void {
+
         $response = $this->tenantUserAttach([
             "user_id" => $this->secondary_landlord_user_id,
             "role_id" => $this->tenant_2_role_template_admin_id,
@@ -63,7 +60,7 @@ class ApiDefaultAdminUserTenantRoleTest extends TestCaseAuthenticated {
         $this->assertEquals($this->tenant_2_id, $responseShow->json()['data']['tenant_roles'][0]['tenant_id']);
     }
 
-    public function testUserDettachTenant(): void {
+    public function testUserDettachAccount(): void {
         $response = $this->tenantUserDettach([
             "user_id" => $this->secondary_landlord_user_id,
             "role_id" => $this->tenant_2_role_template_admin_id,
@@ -86,7 +83,7 @@ class ApiDefaultAdminUserTenantRoleTest extends TestCaseAuthenticated {
     protected function tenantUserShow(string $user_id): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "http://$this->tenant_2_subdomain.localhost/api/users/$user_id",
+            uri: "http://$this->tenant_2_subdomain.localhost/api/tenant-users/$user_id",
             headers: $this->getHeaders(),
         );
     }
@@ -94,7 +91,7 @@ class ApiDefaultAdminUserTenantRoleTest extends TestCaseAuthenticated {
     protected function tenantUserAttach(array $data): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "http://$this->tenant_2_subdomain.localhost/api/users",
+            uri: "http://$this->tenant_2_subdomain.localhost/api/tenant-users",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -103,7 +100,7 @@ class ApiDefaultAdminUserTenantRoleTest extends TestCaseAuthenticated {
     protected function tenantUserDettach(array $data): TestResponse {
         return $this->json(
             method: 'delete',
-            uri: "http://$this->tenant_2_subdomain.localhost/api/users",
+            uri: "http://$this->tenant_2_subdomain.localhost/api/tenant-users",
             data: $data,
             headers: $this->getHeaders(),
         );

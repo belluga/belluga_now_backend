@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use MongoDB\BSON\ObjectId;
 
 class LandlordUserController extends Controller
 {
@@ -39,9 +40,7 @@ class LandlordUserController extends Controller
      */
     public function show(string $user_id): JsonResponse
     {
-        $user = LandlordUser::findOrFail($user_id)
-            ?? abort(404);
-
+        $user = LandlordUser::where("_id", new ObjectId($user_id))->firstOrFail();
 
         return response()->json(['data' => $user]);
     }
@@ -137,6 +136,45 @@ class LandlordUserController extends Controller
         $user->save();
 
         return response()->json(['message' => 'Senha atualizada com sucesso']);
+    }
+
+    public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
+
+        $tenant = Tenant::current();
+
+        $user = LandlordUser::where('_id', new ObjectId(request()->user_id))->firstOrFail();
+
+        $role = $tenant->roleTemplates()->where('_id', new ObjectId(request()->role_id))->firstOrFail();
+
+        $method = strtolower($request->method());
+
+        try {
+            switch( $method){
+                case 'post':
+                    $user->tenantRoles()->create([
+                        ...$role->attributesToArray(),
+                        "tenant_id" => $tenant->id
+                    ]);
+                    break;
+                case 'delete':
+                    $role_to_delete = $user->tenantRoles()
+                        ->where('slug', $role->slug)
+                        ->where('tenant_id', $tenant->id)
+                        ->first();
+
+                    if ($role_to_delete) {
+                        $role_to_delete->delete();
+                        $user->save();
+                    }
+                    break;
+                default:
+                    abort(422, "Not found an action for this method.");
+            }
+        }catch (\Exception $e){
+            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
+        }
+
+        return response()->json();
     }
 
     protected function filterGuardedParameters(array $received_params): array {
