@@ -52,12 +52,6 @@ Route::prefix('tenants')->group(function () {
     Route::delete('/{tenant_slug}/force_delete', [TenantController::class, 'forceDestroy'])
         ->middleware('auth:sanctum', 'abilities:tenants:delete')
         ->name('tenants.destroy');
-
-    // Tenant Roles
-    Route::get('{tenant_slug}/roles', [LandlordRolesController::class, 'tenantRoles'])
-        ->middleware('auth:sanctum', 'abilities:landlord-users:update,tenants:manage');
-    Route::post('{tenant_slug}/roles', [LandlordRolesController::class, 'storeTenantRole'])
-        ->middleware('auth:sanctum', 'abilities:landlord-users:update,tenants:manage');;
 });
 
 Route::prefix('users')->group(function () {
@@ -115,27 +109,4 @@ Route::prefix('roles')->group(function () {
 
     Route::post('{role_id}/restore', [LandlordRolesController::class, 'restore'])
         ->middleware('auth:sanctum', 'abilities:landlord-roles:update,landlord-roles:delete');
-});
-
-Route::prefix('tenant/{tenant_slug}/roles')->group(function () {
-    Route::get('/', [TenantRolesController::class, 'index'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:view');
-
-    Route::post('/', [TenantRolesController::class, 'store'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:create');
-
-    Route::get('{role_id}', [TenantRolesController::class, 'show'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:view');
-
-    Route::patch('{role_id}', [TenantRolesController::class, 'update'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:update');
-
-    Route::delete('{role_id}', [TenantRolesController::class, 'destroy'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:delete');
-
-    Route::delete('{role_id}/force_delete', [TenantRolesController::class, 'forceDestroy'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:delete');
-
-    Route::post('{role_id}/restore', [TenantRolesController::class, 'restore'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:update,tenant-roles:delete');
 });

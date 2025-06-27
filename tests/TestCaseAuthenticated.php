@@ -6,12 +6,9 @@ use Tests\Helpers\AccountEnvironments;
 
 abstract class TestCaseAuthenticated extends TestCase
 {
-    protected function getHeaders(AccountEnvironments $accountEnv = AccountEnvironments::MAIN): array {
+    protected function getHeaders(): array {
 
-        $token = match ($accountEnv) {
-            AccountEnvironments::MAIN => $this->landlord->user_superadmin->token,
-            AccountEnvironments::SECONDARY => $this->account_user_admin_token_device_1,
-        };
+        $token = $this->landlord->user_superadmin->token;
 
         return [
             'Authorization' => "Bearer $token",

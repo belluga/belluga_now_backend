@@ -61,12 +61,18 @@ abstract class ApiDefaultTenantsMiddlewareTestContract extends TestCaseTenant
         $response->assertStatus(200);
     }
 
-    public function testListNoPermission(): void {
+    public function testListWithAdmin(): void {
+        $rolesList = $this->list(
+            $this->getHeader($this->tenant->user_admin)
+        );
+
+        $rolesList->assertStatus(200);
+    }
+
+    public function testListCrossNoPermission(): void {
         $rolesList = $this->list(
             $this->getHeader($this->landlord->user_cross_tenant_visitor)
         );
-
-        print_r($rolesList->json());
 
         $rolesList->assertStatus(403);
     }
@@ -76,17 +82,13 @@ abstract class ApiDefaultTenantsMiddlewareTestContract extends TestCaseTenant
             $this->getHeader($this->landlord->user_cross_tenant_admin)
         );
 
-        print_r($rolesList->json());
-
-        $rolesList->assertStatus(403);
+        $rolesList->assertStatus(200);
     }
 
     public function testListWithAccountPermission(): void {
         $rolesList = $this->list(
             $this->getHeader($this->tenant->account_primary->user_admin)
         );
-
-        print_r($rolesList->json());
 
         $rolesList->assertStatus(401);
     }
@@ -95,8 +97,6 @@ abstract class ApiDefaultTenantsMiddlewareTestContract extends TestCaseTenant
         $rolesList = $this->list(
             $this->getHeader($this->tenant_cross->user_admin)
         );
-
-        print_r($rolesList->json());
 
         $rolesList->assertStatus(403);
     }

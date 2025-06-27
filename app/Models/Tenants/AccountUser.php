@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Tenants;
 
 use App\Traits\HaveMultipleEmails;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -56,6 +57,10 @@ class AccountUser extends Authenticatable {
     public function getPermissions(?Account $account = null): array
     {
         $account = $account ?? Account::current();
+
+        if(!$account){
+            throw new AuthenticationException();
+        }
 
         return collect($this->account_roles)
             ->where('account_id', "==", $account->id)

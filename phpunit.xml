@@ -30,7 +30,7 @@
         <testsuite name="Api-Default-Middleware">
             <file>tests/Api/default/Admin/ApiDefaultAdminMiddlewareTest.php</file>
             <directory>tests/Api/default/Tenants/Middleware</directory>
-            <file>tests/Api/default/Accounts/ApiDefaultAccountsMiddlewareTest.php</file>
+            <directory>tests/Api/default/Accounts/Middleware</directory>
         </testsuite>
 <!--        <testsuite name="Api-V1">-->
 <!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->

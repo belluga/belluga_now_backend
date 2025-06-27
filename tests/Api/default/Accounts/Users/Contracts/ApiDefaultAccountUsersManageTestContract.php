@@ -25,6 +25,8 @@ abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
             $this->account->role_admin
         );
         $response->assertStatus(201);
+
+        print_r($this->account->user_admin);
     }
 
     public function testAccountUserUserManagerCreation(): void {

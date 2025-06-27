@@ -6,6 +6,7 @@ use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
+use App\Http\Api\v1\Controllers\TenantRolesController;
 
 
 Route::prefix('auth')
@@ -120,3 +121,26 @@ Route::prefix('accounts')
                     ->name('tenant.accounts.force_destroy');
             });
     });
+
+Route::prefix('roles')->group(function () {
+    Route::get('/', [TenantRolesController::class, 'index'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:view');
+
+    Route::post('/', [TenantRolesController::class, 'store'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:create');
+
+    Route::get('{role_id}', [TenantRolesController::class, 'show'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:view');
+
+    Route::patch('{role_id}', [TenantRolesController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:update');
+
+    Route::delete('{role_id}', [TenantRolesController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:delete');
+
+    Route::delete('{role_id}/force_delete', [TenantRolesController::class, 'forceDestroy'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:delete');
+
+    Route::post('{role_id}/restore', [TenantRolesController::class, 'restore'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:update,tenant-roles:delete');
+});

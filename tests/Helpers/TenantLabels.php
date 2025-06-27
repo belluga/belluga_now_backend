@@ -62,7 +62,7 @@ class TenantLabels extends Labels {
     public UserLabels $user_roles_manager {
         get {
             return new UserLabels(
-                $this->base_label.".users.admin"
+                $this->base_label.".users.roles_manager"
             );
         }
     }
@@ -70,7 +70,7 @@ class TenantLabels extends Labels {
     public UserLabels $user_users_manager {
         get {
             return new UserLabels(
-                $this->base_label.".users.admin"
+                $this->base_label.".users.users_manager"
             );
         }
     }
@@ -78,7 +78,7 @@ class TenantLabels extends Labels {
     public UserLabels $user_visitor {
         get {
             return new UserLabels(
-                $this->base_label.".users.admin"
+                $this->base_label.".users.visitor"
             );
         }
     }

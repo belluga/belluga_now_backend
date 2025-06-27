@@ -23,19 +23,8 @@ class TenantRolesController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $tenant_slug = $request->route("tenant_slug");
-
-        $tenant = Tenant::whereRaw([
-                "_id" => ['$in' => $this->getAccessObjectIds()],
-                "slug" => $tenant_slug])
-            ->firstOrFail();
-
-        if(!$tenant){
-            abort(404, "Tenant not found or you don't have access to it..");
-        }
-
         $roles = TenantRoleTemplate::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->where("tenant_id", $tenant->id)
+            ->where("tenant_id", Tenant::current()->id)
             ->paginate(15);
 
         return response()->json($roles);
@@ -44,17 +33,12 @@ class TenantRolesController extends Controller
     /**
      * Store a newly created tenant role.
      */
-    public function store(TenantRoleStoreRequest $request, string $tenant_slug): JsonResponse
+    public function store(TenantRoleStoreRequest $request): JsonResponse
     {
-        $tenant = Tenant::whereRaw([
-                "slug" => $tenant_slug,
-                "_id" => ['$in' => $this->getAccessObjectIds()]])
-            ->firstOrFail();
-
         try {
             $role = TenantRoleTemplate::create([
                 ...$request->validated(),
-                'tenant_id' => $tenant->id,
+                'tenant_id' => Tenant::current()->id,
             ]);
 
             return response()->json([
@@ -74,15 +58,10 @@ class TenantRolesController extends Controller
     /**
      * Display the specified role.
      */
-    public function show(string $tenant_slug, string $role_id): JsonResponse
+    public function show(string $role_id): JsonResponse
     {
-        $tenant = Tenant::whereRaw([
-                "slug" => $tenant_slug,
-                "_id" => ['$in' => $this->getAccessObjectIds()]])
-            ->firstOrFail();
-
         $role = TenantRoleTemplate::where("_id", new ObjectId($role_id))
-            ->where("tenant_id", $tenant->id)
+            ->where("tenant_id", Tenant::current()->id)
             ->firstOrFail();
 
         return response()->json([
@@ -93,15 +72,11 @@ class TenantRolesController extends Controller
     /**
      * Update the specified role in storage.
      */
-    public function update(TenantRoleUpdateRequest $request, string $tenant_slug, string $role_id): JsonResponse
+    public function update(TenantRoleUpdateRequest $request, string $role_id): JsonResponse
     {
-        $tenant = Tenant::whereRaw([
-                "slug" => $tenant_slug,
-                "_id" => ['$in' => $this->getAccessObjectIds()]])
-            ->firstOrFail();
 
         $role = TenantRoleTemplate::where("_id", new ObjectId($role_id))
-            ->where("tenant_id", $tenant->id)
+            ->where("tenant_id", Tenant::current()->id)
             ->firstOrFail();
 
         $role->update($request->validated());
@@ -114,15 +89,11 @@ class TenantRolesController extends Controller
     /**
      * Remove the specified role from storage.
      */
-    public function destroy(TenantRoleDestroyRequest $request, string $tenant_slug, string $role_id): JsonResponse
+    public function destroy(TenantRoleDestroyRequest $request, string $role_id): JsonResponse
     {
-        $tenant = Tenant::whereRaw([
-            "slug" => $tenant_slug,
-            "_id" => ['$in' => $this->getAccessObjectIds()]])
-            ->firstOrFail();
 
         $role = TenantRoleTemplate::where("_id", new ObjectId($role_id))
-            ->where("tenant_id", $tenant->id)
+            ->where("tenant_id", Tenant::current()->id)
             ->firstOrFail();
 
         DB::beginTransaction();
@@ -140,16 +111,12 @@ class TenantRolesController extends Controller
         return response()->json([], 200);
     }
 
-    public function forceDestroy(string $tenant_slug, string $role_id): JsonResponse {
+    public function forceDestroy(string $role_id): JsonResponse {
 
-        $tenant = Tenant::whereRaw([
-            "slug" => $tenant_slug,
-            "_id" => ['$in' => $this->getAccessObjectIds()]])
-            ->firstOrFail();
 
         $role = TenantRoleTemplate::onlyTrashed()
             ->where("_id", new ObjectId($role_id))
-            ->where("tenant_id", $tenant->id)
+            ->where("tenant_id", Tenant::current()->id)
             ->firstOrFail();
 
         DB::beginTransaction();
@@ -168,17 +135,12 @@ class TenantRolesController extends Controller
     /**
      * Restore a soft-deleted role.
      */
-    public function restore(string $tenant_slug, string $role_id): JsonResponse
+    public function restore(string $role_id): JsonResponse
     {
-
-        $tenant = Tenant::whereRaw([
-            "slug" => $tenant_slug,
-            "_id" => ['$in' => $this->getAccessObjectIds()]])
-            ->firstOrFail();
 
         $role = TenantRoleTemplate::onlyTrashed()
             ->where("_id", new ObjectId($role_id))
-            ->where("tenant_id", $tenant->id)
+            ->where("tenant_id", Tenant::current()->id)
             ->firstOrFail();
 
         $role->restore();

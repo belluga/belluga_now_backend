@@ -40,7 +40,7 @@ class DomainTenantFinder extends TenantFinder
         $parts_request = explode('.', request()->getHost());
         $subdomain = $parts_request[0];
 
-        return app(IsTenant::class)::where('subdomain', $subdomain)->firstOrFail();
+        return app(IsTenant::class)::where('subdomain', $subdomain)->first();
     }
 
     protected function isRequestFromApp(): bool {
