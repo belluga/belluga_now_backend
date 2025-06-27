@@ -17,6 +17,7 @@ class TenantRoleTemplate extends Model
     protected $fillable = [
         'name',
         'slug',
+        'tenant_id',
         'permissions',
     ];
 

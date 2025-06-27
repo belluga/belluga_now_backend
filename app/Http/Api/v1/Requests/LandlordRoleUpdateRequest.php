@@ -2,7 +2,6 @@
 
 namespace App\Http\Api\v1\Requests;
 
-use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class LandlordRoleUpdateRequest extends FormRequest
@@ -25,7 +24,7 @@ class LandlordRoleUpdateRequest extends FormRequest
         return [
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'permissions' => ['sometimes', 'array', new UniqueArrayItemRule("landlord", "roles","permissions", )],
+            'permissions' => ['sometimes', 'array'],
             'permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
             'is_default' => ['boolean'],
         ];

@@ -1,6 +1,7 @@
 <?php
+
 namespace Tests;
-use App\Models\Landlord\Tenant;
+
 use Illuminate\Support\Facades\Artisan;
 
 trait MigrateFreshSeedOnce

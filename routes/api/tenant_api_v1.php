@@ -1,20 +1,18 @@
 <?php
 
-use App\Http\Api\v1\Controllers\AccountUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Http\Api\v1\Controllers\TenantController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
 
 
-
 Route::prefix('auth')
     ->group(function () {
+
     Route::post('/login', [AuthControllerAccount::class, 'login'])
-        ->name('tenant.auth.login');
+            ->name('tenant.auth.login');
 
     Route::middleware(['auth:sanctum'])
         ->group(function () {
@@ -42,89 +40,83 @@ Route::prefix('domains')
 });
 
 // Rotas protegidas para o tenant
-Route::middleware('auth:sanctum')
-    ->group(function () {
-    // Rota para verificar autenticação
-        Route::get('/check', function () {
-            return response()->json(['authenticated' => true]);
-        });
-
-        Route::prefix('tenant-users')
-            ->group(function () {
-
-                Route::post('/', [LandlordUserController::class, 'tenantUserManage'])
-                    ->middleware('auth:sanctum', 'abilities:tenant-users:create,tenant-users:update')
-                    ->name('manage.tenants.users.attach');
-
-                Route::delete('/', [LandlordUserController::class, 'tenantUserManage'])
-                    ->middleware('auth:sanctum', 'abilities:tenant-users:delete')
-                    ->name('manage.tenants.users.detach');
-
-                Route::get('/{user_id}', [LandlordUserController::class, 'show'])
-                    ->middleware('auth:sanctum', 'abilities:tenant-users:view')
-                    ->name('tenant.users.show');
-
-            });
-
-        Route::prefix('account-users')
-            ->group(function () {
-
-                Route::get('/', [TenantUsersController::class, 'index'])
-                    ->middleware('auth:sanctum', 'abilities:account-users:view')
-                    ->name('manage.account-users.list');
-
-                Route::post('/', [TenantUsersController::class, 'accountUserManage'])
-                    ->middleware('auth:sanctum', 'abilities:account-users:create,account-users:update')
-                    ->name('manage.account-users.attach');
-
-                Route::delete('/', [TenantUsersController::class, 'accountUserManage'])
-                    ->middleware('auth:sanctum', 'abilities:account-users:delete')
-                    ->name('manage.account-users.detach');
-
-                Route::get('/{user_id}', [TenantUsersController::class, 'show'])
-                    ->middleware('auth:sanctum', 'abilities:account-users:view')
-                    ->name('manage.account-users.show');
-
-                Route::delete('/{user_id}', [TenantUsersController::class, 'destroy'])
-                    ->middleware('auth:sanctum', 'abilities:account-users:delete')
-                    ->name('manage.account-users.destroy');
-
-                Route::post('/{user_id}/restore', [TenantUsersController::class, 'restore'])
-                    ->middleware('auth:sanctum', "abilities:account-users:create,account-users:update,account-users:delete")
-                    ->name('manage.account-users.restore');
-
-                Route::delete('/{user_id}/force_destroy', [TenantUsersController::class, 'forceDestroy'])
-                    ->middleware('auth:sanctum', "abilities:account-users:delete")
-                    ->name('manage.account-users.force_destroy');;
-
-            });
-
-        Route::prefix('accounts')
-            ->group(function () {
-                Route::get('/', [AccountController::class, 'index'])
-                    ->name('tenant.accounts.list');
-
-                Route::post('/', [AccountController::class, 'store'])
-                    ->name('tenant.accounts.create');
-
-                Route::prefix('{account_slug}')
-                    ->group(function () {
-                        Route::get('/', [AccountController::class, 'show'])
-                            ->name('tenant.accounts.show');
-
-                        Route::patch('/', [AccountController::class, 'update'])
-                            ->name('tenant.accounts.update');
-
-                        Route::delete('/', [AccountController::class, 'destroy'])
-                            ->name('tenant.accounts.destroy');
-
-                        Route::post('/restore', [AccountController::class, 'restore'])
-                            ->name('tenant.accounts.restore');
-
-                        Route::post('/force_delete', [AccountController::class, 'forceDestroy'])
-                            ->name('tenant.accounts.force_destroy');
-                    });
-            });
-
-
+Route::get('/check', function () {
+    return response()->json(['authenticated' => true]);
 });
+
+Route::prefix('tenant-users')
+    ->group(function () {
+
+        Route::post('/', [LandlordUserController::class, 'tenantUserManage'])
+            ->middleware('auth:sanctum', 'abilities:tenant-users:create,tenant-users:update')
+            ->name('manage.tenants.users.attach');
+
+        Route::delete('/', [LandlordUserController::class, 'tenantUserManage'])
+            ->middleware('auth:sanctum', 'abilities:tenant-users:delete')
+            ->name('manage.tenants.users.detach');
+
+        Route::get('/{user_id}', [LandlordUserController::class, 'show'])
+            ->middleware('auth:sanctum', 'abilities:tenant-users:view')
+            ->name('tenant.users.show');
+
+    });
+
+Route::prefix('users')
+    ->group(function () {
+
+        Route::get('/', [TenantUsersController::class, 'index'])
+            ->middleware('auth:sanctum', 'abilities:account-users:view')
+            ->name('manage.account-users.list');
+
+        Route::post('/', [TenantUsersController::class, 'accountUserManage'])
+            ->middleware('auth:sanctum', 'abilities:account-users:create,account-users:update')
+            ->name('manage.account-users.attach');
+
+        Route::delete('/', [TenantUsersController::class, 'accountUserManage'])
+            ->middleware('auth:sanctum', 'abilities:account-users:delete')
+            ->name('manage.account-users.detach');
+
+        Route::get('/{user_id}', [TenantUsersController::class, 'show'])
+            ->middleware('auth:sanctum', 'abilities:account-users:view')
+            ->name('manage.account-users.show');
+
+        Route::delete('/{user_id}', [TenantUsersController::class, 'destroy'])
+            ->middleware('auth:sanctum', 'abilities:account-users:delete')
+            ->name('manage.account-users.destroy');
+
+        Route::post('/{user_id}/restore', [TenantUsersController::class, 'restore'])
+            ->middleware('auth:sanctum', "abilities:account-users:create,account-users:update,account-users:delete")
+            ->name('manage.account-users.restore');
+
+        Route::delete('/{user_id}/force_destroy', [TenantUsersController::class, 'forceDestroy'])
+            ->middleware('auth:sanctum', "abilities:account-users:delete")
+            ->name('manage.account-users.force_destroy');;
+
+    });
+
+Route::prefix('accounts')
+    ->group(function () {
+        Route::get('/', [AccountController::class, 'index'])
+            ->name('tenant.accounts.list');
+
+        Route::post('/', [AccountController::class, 'store'])
+            ->name('tenant.accounts.create');
+
+        Route::prefix('{account_slug}')
+            ->group(function () {
+                Route::get('/', [AccountController::class, 'show'])
+                    ->name('tenant.accounts.show');
+
+                Route::patch('/', [AccountController::class, 'update'])
+                    ->name('tenant.accounts.update');
+
+                Route::delete('/', [AccountController::class, 'destroy'])
+                    ->name('tenant.accounts.destroy');
+
+                Route::post('/restore', [AccountController::class, 'restore'])
+                    ->name('tenant.accounts.restore');
+
+                Route::post('/force_delete', [AccountController::class, 'forceDestroy'])
+                    ->name('tenant.accounts.force_destroy');
+            });
+    });

@@ -61,7 +61,7 @@ class LandlordUser extends Authenticatable {
             return $this->getTenantPermissions();
         }
 
-        return $this->getLandlordPermissions();
+        return $this->landlordRole->permissions;
     }
 
     protected function getTenantPermissions(?Tenant $tenant = null): array
@@ -75,12 +75,6 @@ class LandlordUser extends Authenticatable {
             ->unique()
             ->toArray();
 
-    }
-
-    protected function getLandlordPermissions(): array
-    {
-        $role = LandlordRole::find($this->landlord_role_id)->first();
-        return $role->permissions ?? [];
     }
 
 

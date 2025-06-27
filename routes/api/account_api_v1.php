@@ -5,16 +5,6 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AccountRolesTemplatesController;
 use App\Http\Api\v1\Controllers\AccountUserController;
 
-Route::prefix('auth')
-    ->group(function () {
-        Route::post('/login', [AuthControllerAccount::class, 'login'])
-            ->name('tenant.auth.login');
-
-        Route::post('/logout', [AuthControllerAccount::class, 'logout'])
-            ->middleware('auth:sanctum')
-            ->name('tenant.auth.login');
-    });
-
 Route::middleware('auth:sanctum')
     ->group(function (){
         Route::prefix('users')

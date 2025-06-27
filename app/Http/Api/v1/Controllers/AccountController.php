@@ -90,7 +90,6 @@ class AccountController extends Controller
 
     public function destroy(Request $request): JsonResponse
     {
-
         $account = Account::where('slug', $request->route('account_slug'))->firstOrFail();
 
         try {

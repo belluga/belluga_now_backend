@@ -8,6 +8,7 @@ use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
@@ -50,7 +51,17 @@ class LandlordUserController extends Controller
      */
     public function store(LandlordUserCreateRequest $request): JsonResponse
     {
-        $user = LandlordUser::create($request->validated());
+        $role = LandlordRole::where("_id", $request->validated()['role_id'])->firstOrFail();;
+
+        try{
+            DB::beginTransaction();
+            $user = LandlordUser::create($request->validated());
+            $role->users()->save($user);
+            DB::commit();
+        }catch (\Exception $e){
+            DB::rollBack();
+            abort(422, "An error occurred while trying to create the user.");
+        }
 
         return response()->json([
             'message' => 'Usuário do landlord criado com sucesso',

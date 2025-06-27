@@ -17,8 +17,12 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/healh',
         then: function () {
+            Route::prefix('initialize')
+                ->middleware('guest')
+                ->group(base_path('routes/api/initialize.php'));
+
             Route::prefix('admin/api/v1')
-//                ->middleware('api')
+                ->middleware('landlord')
                 ->group(base_path('routes/api/landlord_api_v1.php'));
 
             Route::prefix('api/v1')
@@ -34,7 +38,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->group(base_path('routes/api/api_v2.php'));
 
             Route::prefix('admin/api')
-//                ->middleware('api')
+                ->middleware('landlord')
                 ->group(base_path('routes/api/landlord_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
 
             Route::prefix('api')
@@ -50,11 +54,20 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware
             ->group(
+                "landlord",
+                [
+                    \App\Http\Middleware\LandlordValidation::class,
+                ]
+            );
+
+        $middleware
+            ->group(
                 "account",
                 [
                     StartSession::class,
                     \App\Http\Middleware\InitializeAccount::class,
-                    \App\Http\Middleware\CheckAccountAccess::class,
+                    \Spatie\Multitenancy\Http\Middleware\NeedsTenant::class,
+                    \App\Http\Middleware\CheckUserAccess::class,
                 ]
             );
 

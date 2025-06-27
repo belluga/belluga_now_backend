@@ -8,7 +8,6 @@ use App\Traits\HaveMultipleEmails;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use MongoDB\BSON\ObjectId;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\EmbedsMany;
@@ -42,6 +41,10 @@ class AccountUser extends Authenticatable {
 
     public function haveAccessTo(Account $account):bool {
         return in_array($account->id, $this->getAccessToIds());
+    }
+
+    public function isActive(): bool {
+        return $this->deleted_at === null;
     }
 
     public function getAccessToIds(): array{

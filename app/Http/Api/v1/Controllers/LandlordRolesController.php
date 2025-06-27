@@ -8,7 +8,6 @@ use App\Http\Api\v1\Requests\LandlordRoleUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\LandlordRole;
-use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -30,66 +29,16 @@ class LandlordRolesController extends Controller
     }
 
     /**
-     * Display a listing of the tenant roles.
-     */
-    public function tenantRoles(string $tenant_slug): JsonResponse
-    {
-        $user = auth()->guard('sanctum')->user();
-
-        $tenant = Tenant::where('slug', $tenant_slug)->firstOrFail();
-        $roles = LandlordRole::tenantRoles($tenant->id)->paginate(15);
-
-        return response()->json($roles);
-    }
-
-    /**
      * Store a newly created system role.
      */
-    public function storeSystemRole(LandlordRoleStoreRequest $request): JsonResponse
+    public function store(LandlordRoleStoreRequest $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
 
         try {
             DB::beginTransaction();
 
             $role = LandlordRole::create([
                 ...$request->validated(),
-            ]);
-
-            DB::commit();
-
-            return response()->json([
-                'data' => $role
-            ], 201);
-
-        } catch (BulkWriteException $e) {
-            DB::rollBack();
-
-            if (str_contains($e->getMessage(), 'E11000')) {
-                abort(422, 'Role already exists.');
-            }
-
-            abort(422, 'Something went wrong when trying to create the role.');
-        }
-    }
-
-    /**
-     * Store a newly created tenant role.
-     */
-    public function storeTenantRole(LandlordRoleStoreRequest $request, string $tenant_slug): JsonResponse
-    {
-        $user = auth()->guard('sanctum')->user();
-
-        $tenant = Tenant::where('slug', $tenant_slug)->firstOrFail();
-
-        try {
-            DB::beginTransaction();
-
-            $role = LandlordRole::create([
-                ...$request->validated(),
-                'is_system_role' => false,
-                'tenant_id' => $tenant->id,
-                'creator_id' => $user->id
             ]);
 
             DB::commit();

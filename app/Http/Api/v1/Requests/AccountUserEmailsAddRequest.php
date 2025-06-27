@@ -27,7 +27,8 @@ class AccountUserEmailsAddRequest extends FormRequest
         return [
             'emails' => [
                 'required',
-                new UniqueArrayItemRule('tenant', 'users', 'emails', )
+                'array',
+                new UniqueArrayItemRule('tenant', 'account_users', 'emails', )
             ],
         ];
     }

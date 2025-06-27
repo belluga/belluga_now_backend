@@ -25,8 +25,10 @@ class AccountUserEmailsRemoveRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'emails' => "required|array",
-            'emails.*' => 'email',
+            'email' => [
+                'required',
+                'email'
+            ],
         ];
     }
 }

@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use MongoDB\BSON\ObjectId;
+use Illuminate\Validation\ValidationException;
 
 class AccountUserController extends Controller
 {
@@ -55,7 +56,11 @@ class AccountUserController extends Controller
     {
         DB::beginTransaction();
         try {
-            $user = $this->findOrCreateUser($request->validated());;
+            $user = $this->findOrCreateUser($request->validated());
+
+            if(!$user->isActive()){
+                $user->restore();
+            }
 
             if(!$user->haveAccessTo(Account::current())){
                 $role_template = AccountRoleTemplate::where('_id', new ObjectId($request->role_id))->firstOrFail();
@@ -88,6 +93,13 @@ class AccountUserController extends Controller
      */
     public function update(UserUpdateRequest $request): JsonResponse
     {
+
+        if(empty($request->validated())){
+            throw ValidationException::withMessages([
+                'empty' => "Nenhum dado recebido para atualizar."
+            ]);
+        }
+
         $user = $this->getFirstUserByRouteOrFail();
         $user->update($request->validated());
 
@@ -218,10 +230,16 @@ class AccountUserController extends Controller
     public function removeEmails(AccountUserEmailsRemoveRequest $request): JsonResponse
     {
         $user = $this->getFirstUserByRouteOrFail();
-        $remove_emails = $request->input('emails');
+        $remove_email = $request->input('email');
+
+        if(count($user->emails) <= 1) {
+            throw ValidationException::withMessages([
+                'email' => ['Você não pode remover o único email da conta. Adicione outro email antes de remover esse.'],
+            ]);
+        }
 
         try{
-            $user->pull('emails', $remove_emails);
+            $user->pull('emails', $remove_email);
         }catch (\Exception $e){
             return response()->json([
                 "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
@@ -250,8 +268,12 @@ class AccountUserController extends Controller
     }
 
     private function findOrCreateUser(array $data): AccountUser {
-        $user = AccountUser::where('emails', 'elemMatch', [ '$in' => $data['emails']])
-            ->first();
+
+        $user = AccountUser::withTrashed()
+            ->whereRaw([
+                'emails' => ['$in' => $data['emails']]
+            ])->first();
+
         if(!$user){
             $user = AccountUser::create($data);
         }

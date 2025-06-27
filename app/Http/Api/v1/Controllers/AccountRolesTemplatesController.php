@@ -101,7 +101,9 @@ class AccountRolesTemplatesController extends Controller
         }
 
         $account = Account::current();
+
         $role_to_delete = $account->roleTemplates()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
+
         $role_background = $account->roleTemplates()->where('_id', new ObjectId($request->validated()['role_id']))->firstOrFail();
 
         try{

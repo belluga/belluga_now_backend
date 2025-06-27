@@ -1,0 +1,245 @@
+<?php
+
+namespace Tests\Api\default\Admin;
+
+use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
+use Tests\TestCaseAuthenticated;
+
+class ApiDefaultAdminTenantTest extends TestCaseAuthenticated {
+
+    public function testTenantsList(): void {
+        $tenantsList = $this->tenantsList();
+        $tenantsList->assertOk();
+
+        $responseData = $tenantsList->json();
+        $this->assertEquals(1, $responseData['total']);
+        $this->assertCount(1, $responseData['data']);
+        $this->assertEquals(1, $responseData['current_page']);
+    }
+
+    public function testTenantsCreate(): void {
+
+        $response = $this->tenantsCreate([
+            "name" =>  $this->landlord->tenant_secondary->name,
+            "subdomain" => $this->landlord->tenant_secondary->subdomain,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonStructure([
+            "data" => [
+                "name",
+                "subdomain",
+                "slug",
+                "database",
+                "created_at",
+            ]
+        ]);
+
+        $this->landlord->tenant_secondary->slug = $response->json()['data']['slug'];
+        $this->landlord->tenant_secondary->id = $response->json()['data']['id'];
+
+        $this->landlord->tenant_secondary->role_admin->name = "Admin";
+        $this->landlord->tenant_secondary->role_admin->id = $response->json()['data']['role_admin_id'];
+
+        $tenantsList = $this->tenantsList();
+        $tenantsList->assertOk();
+
+        $this->assertEquals(2, $tenantsList->json()['total']);
+    }
+
+    public function testTenantsCreateDisposable(): void {
+
+        $response = $this->tenantsCreate([
+            "name" =>  $this->landlord->tenant_disposable->name,
+            "subdomain" => $this->landlord->tenant_disposable->subdomain,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonStructure([
+            "data" => [
+                "name",
+                "subdomain",
+                "slug",
+                "database",
+                "created_at",
+            ]
+        ]);
+
+        $this->landlord->tenant_disposable->slug = $response->json()['data']['slug'];
+        $this->landlord->tenant_disposable->id = $response->json()['data']['id'];
+        $this->landlord->tenant_disposable->role_admin->id = $response->json()['data']['role_admin_id'];
+
+        $tenantsList = $this->tenantsList();
+        $tenantsList->assertOk();
+
+        $this->assertEquals(3, $tenantsList->json()['total']);
+    }
+
+    public function testTenantsCreateExistentSubdomain(): void {
+
+        $response = $this->tenantsCreate([
+            "name" => fake()->company(),
+            "subdomain" => $this->landlord->tenant_disposable->subdomain,
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertEquals("The subdomain has already been taken", $response->json()['message']);
+    }
+
+    public function testTenantsShow(): void {
+        $tenantsShow = $this->tenantsShow($this->landlord->tenant_disposable->slug);
+        $tenantsShow->assertOk();
+        $tenantsShow->assertJsonStructure([
+            "data" => [
+                "name",
+                "subdomain",
+                "slug",
+                "database",
+                "created_at",
+            ],
+        ]);
+
+        $this->assertEquals($this->landlord->tenant_disposable->slug, $tenantsShow->json()['data']['slug']);
+    }
+
+    public function testTenantsSoftDelete(): void
+    {
+        $deleteResponse = $this->tenantsDelete($this->landlord->tenant_disposable->slug);
+        $deleteResponse->assertStatus(200);
+
+        $listResponse = $this->tenantsList();
+        $listResponse->assertOk();
+        $this->assertEquals(2, $listResponse->json('total'));
+    }
+
+    public function testTenantsListArchived(): void
+    {
+        $archivedResponse = $this->tenantsListArchived();
+        $archivedResponse->assertOk();
+        $data = $archivedResponse->json();
+
+        $this->assertGreaterThanOrEqual(1, $data['total'] ?? 0);
+        $this->assertNotEmpty($data['data'] ?? []);
+        $this->assertEquals($this->landlord->tenant_disposable->slug, $data['data'][0]['slug']);
+    }
+
+    public function testTenantsRestore(): void
+    {
+        $restoreResponse = $this->tenantsRestore($this->landlord->tenant_disposable->slug);
+        $restoreResponse->assertStatus(200);
+
+        $listResponse = $this->tenantsList();
+        $this->assertEquals(3, $listResponse->json('total') ?? 0);
+    }
+
+    public function testTenantsUpdate(): void {
+        $tenantUpdate = $this->tenantsUpdate(
+            $this->landlord->tenant_disposable->slug,
+            [
+                "name" => "Updated Tenant",
+            ]
+        );
+
+        $tenantUpdate->assertStatus(200);
+
+        $new_slug = Str::slug("Updated Tenant");
+
+        $tenantsShow = $this->tenantsShow($new_slug);
+        $tenantsShow->assertOk();
+
+        $this->assertEquals("Updated Tenant", $tenantsShow->json()['data']['name']);
+
+        $this->landlord->tenant_disposable->slug = $tenantsShow->json()['data']['slug'];
+    }
+
+    public function testTenantsDeleteFlow(): void {
+
+        $response = $this->tenantsList();
+        $this->assertEquals(3, count($response['data']));
+
+        $response = $this->tenantsDelete($this->landlord->tenant_disposable->slug);
+        $response->assertStatus(200);
+
+        $response = $this->tenantsList();
+        $this->assertEquals(2, count($response['data']));
+
+        $response = $this->tenantsListArchived();
+        $this->assertEquals(1, count($response['data']));
+
+        $response = $this->tenantsForceDelete($this->landlord->tenant_disposable->slug);
+        $response->assertStatus(200);
+
+        $response = $this->tenantsList();
+        $this->assertEquals(2, count($response['data']));
+
+        $response = $this->tenantsListArchived();
+        $this->assertEquals(0, count($response['data']));
+    }
+
+    protected function tenantsList(): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "admin/api/tenants",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsShow(string $slug): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "admin/api/tenants/$slug",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsCreate(array $data): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "admin/api/tenants",
+            data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsUpdate(string $slug ,array $data): TestResponse {
+        return $this->json(
+            method: 'patch',
+            uri: "admin/api/tenants/$slug",
+            data: $data,
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsDelete(string $tenant_slug): TestResponse {
+        return $this->json(
+            method: 'delete',
+            uri: "admin/api/tenants/$tenant_slug",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsForceDelete(string $tenant_slug): TestResponse {
+        return $this->json(
+            method: 'delete',
+            uri: "admin/api/tenants/$tenant_slug/force_delete",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsRestore(string $tenant_slug): TestResponse {
+        return $this->json(
+            method: 'post',
+            uri: "admin/api/tenants/$tenant_slug/restore",
+            headers: $this->getHeaders(),
+        );
+    }
+
+    protected function tenantsListArchived(): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "admin/api/tenants?archived=true",
+            headers: $this->getHeaders(),
+        );
+    }
+}
