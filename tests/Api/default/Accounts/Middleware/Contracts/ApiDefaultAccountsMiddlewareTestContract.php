@@ -70,10 +70,6 @@ abstract class ApiDefaultAccountsMiddlewareTestContract extends TestCaseAccount
 
     public function testLoginCrossAccountUsers():void {
 
-        print("testLoginCrossAdmin > ");
-
-        print_r($this->account_cross->user_admin);
-
         $response = $this->accountLogin($this->account_cross->user_admin);
         $response->assertStatus(200);
 
@@ -151,18 +147,6 @@ abstract class ApiDefaultAccountsMiddlewareTestContract extends TestCaseAccount
     }
 
     public function testListTenantAdmin(): void {
-
-        print("testListTenantAdmin > ");
-
-        print_r([
-            "user" => [
-                "id" => $this->tenant->user_admin->user_id,
-                "name" => $this->tenant->user_admin->name,
-            ],
-            "role" => [
-
-            ]
-        ]);
 
         $rolesList = $this->list(
             $this->getUserHeaders(

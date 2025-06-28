@@ -20,8 +20,8 @@ Route::prefix('auth')
             Route::post('/logout', [AuthControllerAccount::class, 'logout'])
                 ->name('tenant.auth.logout');
 
-            Route::post('/refresh', [AuthControllerAccount::class, 'refresh'])
-                ->name('tenant.auth.refresh');
+            Route::get('/token_validate', [AuthControllerAccount::class, 'loginByToken'])
+                ->name('tenant.auth.check');
         });
 });
 

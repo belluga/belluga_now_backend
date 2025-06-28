@@ -101,6 +101,42 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
     }
 
+    public function testLoginWithToken(): void {
+        $response = $this->userLoginWithToken($this->landlord->user_superadmin->token);
+        $response->assertStatus(200);
+
+        $response->assertJsonStructure([
+            "data" => [
+                "user"
+            ]
+        ]);
+
+        $response = $this->userLoginWithToken($this->landlord->user_cross_tenant_admin->token);
+        $response->assertStatus(200);
+
+        $response->assertJsonStructure([
+            "data" => [
+                "user"
+            ]
+        ]);
+    }
+
+    public function testLoginWithTokenError(): void {
+        $response = $this->userLoginWithToken("123");
+        $response->assertStatus(401);
+    }
+
+    protected function userLoginWithToken(string $token): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "admin/api/auth/token_validate",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
+
     protected function userLogout(?string $device = null, ?bool $all_devices = null): TestResponse {
         return $this->json(
             method: 'post',

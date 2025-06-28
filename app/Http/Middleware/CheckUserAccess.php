@@ -54,22 +54,6 @@ class CheckUserAccess
     }
 
     protected function checkUserAccess(string $checkId): bool {
-
-        print_r([
-            "tenant" => [
-                "id" => Tenant::current()->id,
-                "slug" => Tenant::current()->slug,
-            ],
-            "user" => [
-                "id" => $this->user->id,
-                "name" =>  $this->user->name,
-                "have_access_to" => $this->user->getAccessToIds()
-            ],
-            "test" => [
-                "check" => $checkId,
-            ]
-        ]);
-
         return in_array($checkId, $this->user->getAccessToIds());
     }
 }

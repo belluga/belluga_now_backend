@@ -14,7 +14,7 @@ Route::prefix('auth')->group(function () {
             Route::post('/login', [AuthControllerLandlord::class, 'login'])
                 ->name('admin.auth.login');
 
-            Route::post('/check', [AuthControllerLandlord::class, 'loginByToken'])
+            Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
                 ->middleware(['auth:sanctum'])
                 ->name('admin.auth.check');
         });

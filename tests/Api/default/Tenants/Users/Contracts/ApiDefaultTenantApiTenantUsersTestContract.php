@@ -10,9 +10,6 @@ use Tests\Helpers\UserLabels;
 abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant {
 
     public function testUsersCreateAndAttachAdmin(): void {
-
-        print("testUsersCreateAndAttachAdmin > ");
-
         $this->userCreate(
             $this->tenant->user_admin,
             $this->landlord->role_visitor);
@@ -20,17 +17,6 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
         $this->userAttachTenant(
             $this->tenant->user_admin,
             $this->tenant->role_admin);
-
-        print_r([
-            "user" => [
-                "name" => $this->tenant->user_admin->name,
-                "user_id" => $this->tenant->user_admin->user_id
-            ],
-            "role" => [
-                "name" => $this->tenant->role_admin->name,
-                "id" => $this->tenant->role_admin->id
-            ]
-        ]);
     }
 
     public function testUsersCreateAndAttachUsersManager(): void {
@@ -55,7 +41,6 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
 
     public function testUsersCreateAndAttachVisitor(): void {
 
-        print("testUsersCreateAndAttachVisitor > ");
         $this->userCreate(
             $this->tenant->user_visitor,
             $this->landlord->role_visitor);
@@ -63,18 +48,6 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
         $this->userAttachTenant(
             $this->tenant->user_visitor,
             $this->tenant->role_roles_manager);
-
-        print_r([
-            "user" => [
-                "name" => $this->tenant->user_visitor->name,
-                "user_id" => $this->tenant->user_visitor->user_id,
-            ],
-            "role" => [
-                "name" => $this->tenant->role_visitor->name,
-                "id" => $this->tenant->role_visitor->id
-            ]
-
-        ]);
     }
 
     public function testAttachLandlordUsers(): void {
@@ -100,8 +73,6 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
 
         $responseShow = $this->tenantUserShow($this->tenant->user_visitor->user_id);
 
-        print_r($responseShow->json());
-
         $responseShow->assertStatus(200);
         $responseShow->assertJsonStructure([
             "data" => [
@@ -118,8 +89,6 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
             "user_id" => $user->user_id,
             "role_id" => $role->id,
         ]);
-
-        print_r($response->json());
 
         $response->assertStatus(200);
 

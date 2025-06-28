@@ -88,4 +88,43 @@ abstract class ApiDefaultAccountAuthTestContract extends TestCaseAccount
         $this->account->user_visitor->token = "";
 
     }
+
+    public function testLogin(): void {
+
+        $responseUserAdmin = $this->accountLogin($this->account->user_admin);
+
+        $responseUserAdmin->assertStatus(200);
+        $this->account->user_admin->token = $responseUserAdmin->json()['data']['token'];
+
+
+        $responseUserAdmin = $this->accountLogin($this->account->user_visitor);
+
+        $responseUserAdmin->assertStatus(200);
+        $this->account->user_visitor->token = $responseUserAdmin->json()['data']['token'];
+    }
+
+    public function testLoginWithToken(): void {
+        $response = $this->accountTokenValidate($this->account->user_admin->token);
+        $response->assertStatus(200);
+
+        $response->assertJsonStructure([
+            "data" => [
+                "user"
+            ]
+        ]);
+
+        $response = $this->accountTokenValidate($this->account->user_visitor->token);
+        $response->assertStatus(200);
+
+        $response->assertJsonStructure([
+            "data" => [
+                "user"
+            ]
+        ]);
+    }
+
+    public function testLoginWithTokenError(): void {
+        $response = $this->accountTokenValidate("123");
+        $response->assertStatus(401);
+    }
 }

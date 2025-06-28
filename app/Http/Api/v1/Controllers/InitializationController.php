@@ -5,13 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Api\v1\Requests\InitializeRequest;
-use App\Http\Api\v1\Resources\TenantResource;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\TenantRole;
-use App\Models\Landlord\TenantRoleTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 

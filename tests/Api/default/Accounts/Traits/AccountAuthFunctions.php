@@ -69,4 +69,15 @@ trait AccountAuthFunctions
 
         return $response;
     }
+
+    protected function accountTokenValidate(string $token): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "http://{$this->tenant->subdomain}.localhost/api/auth/token_validate",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
+        );
+    }
 }

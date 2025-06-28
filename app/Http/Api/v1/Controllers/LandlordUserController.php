@@ -157,23 +157,15 @@ class LandlordUserController extends Controller
 
         $role = $tenant->roleTemplates()->where('_id', new ObjectId(request()->role_id))->firstOrFail();
 
-        print("user: $user->id | $role->name > ");
-        print("160 - ");
-
         $method = strtolower($request->method());
 
         try {
             switch( $method){
                 case 'post':
-                    print("167 - ");
-                    $role = $user->tenantRoles()->create([
+                    $user->tenantRoles()->create([
                         ...$role->attributesToArray(),
                         "tenant_id" => $tenant->id
                     ]);
-
-                    print("created role > ");
-                    print_r($role->toArray());
-
                     break;
                 case 'delete':
                     $role_to_delete = $user->tenantRoles()
@@ -181,12 +173,9 @@ class LandlordUserController extends Controller
                         ->where('tenant_id', $tenant->id)
                         ->first();
 
-                    print("deleted role > ");
-                    print_r($role_to_delete->toArray());
-
                     if ($role_to_delete) {
                         $role_to_delete->delete();
-//                        $user->save();
+                        $user->save();
                     }
                     break;
                 default:
