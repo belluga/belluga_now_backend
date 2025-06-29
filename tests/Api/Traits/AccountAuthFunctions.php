@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Api\default\Accounts\Traits;
+namespace Tests\Api\Traits;
 
 use Illuminate\Testing\TestResponse;
 use Tests\Helpers\TenantLabels;

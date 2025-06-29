@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
-use App\Traits\DemandPermissions;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Context;
 use MongoDB\Laravel\Eloquent\Model;
@@ -16,7 +15,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class Account extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug, DemandPermissions, OwnRoles;
+    use UsesTenantConnection, SoftDeletes, HasSlug, OwnRoles;
 
     static protected string $container_key = 'currentAccount';
 

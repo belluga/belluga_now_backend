@@ -2,11 +2,9 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Landlord\Tenant;
 use Closure;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Context;
-use Illuminate\Support\Facades\Auth;
 
 class CheckUserAccess
 {

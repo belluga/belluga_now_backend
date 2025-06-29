@@ -2,7 +2,6 @@
 
 namespace App\Http\Api\v1\Requests;
 
-use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AccountRolesUpdateRequest extends FormRequest

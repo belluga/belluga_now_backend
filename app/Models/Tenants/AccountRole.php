@@ -7,7 +7,6 @@ namespace App\Models\Tenants;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Relations\BelongsTo;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
-use Spatie\Sluggable\SlugOptions;
 
 class AccountRole extends Model
 {

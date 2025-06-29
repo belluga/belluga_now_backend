@@ -3,9 +3,9 @@
 namespace Tests\Api\default\Tenants\Middleware\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
-use Tests\Api\default\Admin\Traits\AdminAuthFunctions;
-use Tests\Api\default\Admin\Traits\AdminRoleFunctions;
+use Tests\Api\Traits\AccountAuthFunctions;
+use Tests\Api\Traits\AdminAuthFunctions;
+use Tests\Api\Traits\AdminRoleFunctions;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;

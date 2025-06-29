@@ -2,7 +2,7 @@
 
 namespace Tests\Api\default\Accounts\Profile\Contracts;
 
-use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
+use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AccountProfileFunctions;
 use Tests\TestCaseAccount;
 

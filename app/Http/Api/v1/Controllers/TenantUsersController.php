@@ -4,23 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
-use App\Http\Api\v1\Requests\TenantStoreRequest;
-use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use App\Models\Landlord\TenantRole;
-use App\Models\Landlord\TenantRoleTemplate;
-use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\ObjectId;
-use MongoDB\Driver\Exception\BulkWriteException;
 
 class TenantUsersController extends Controller
 {

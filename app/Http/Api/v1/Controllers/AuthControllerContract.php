@@ -9,8 +9,6 @@ use App\Http\Api\v1\Requests\RegisterUserRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\Tenant;
-use App\Models\Tenants\Account;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

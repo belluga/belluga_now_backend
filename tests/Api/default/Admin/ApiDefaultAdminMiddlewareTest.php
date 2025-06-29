@@ -3,9 +3,9 @@
 namespace Tests\Api\default\Admin;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
-use Tests\Api\default\Admin\Traits\AdminAuthFunctions;
-use Tests\Api\default\Admin\Traits\AdminRoleFunctions;
+use Tests\Api\Traits\AccountAuthFunctions;
+use Tests\Api\Traits\AdminAuthFunctions;
+use Tests\Api\Traits\AdminRoleFunctions;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCase;
 

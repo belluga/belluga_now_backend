@@ -2,7 +2,6 @@
 
 namespace App\Models\Landlord;
 
-use App\Traits\DemandPermissions;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsTo;
@@ -12,7 +11,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class TenantRoleTemplate extends Model
 {
-    use UsesLandlordConnection, SoftDeletes, HasSlug, DemandPermissions;
+    use UsesLandlordConnection, SoftDeletes, HasSlug;
 
     protected $fillable = [
         'name',

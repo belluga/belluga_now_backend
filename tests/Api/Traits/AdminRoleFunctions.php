@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Api\default\Admin\Traits;
+namespace Tests\Api\Traits;
 
 use Illuminate\Testing\TestResponse;
 

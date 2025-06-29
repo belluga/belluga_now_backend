@@ -3,7 +3,7 @@
 namespace Tests\Api\default\Admin;
 
 use Illuminate\Support\Facades\DB;
-use Tests\Api\default\Admin\Traits\AdminAuthFunctions;
+use Tests\Api\Traits\AdminAuthFunctions;
 use Tests\Api\Traits\AdminProfileFunctions;
 use Tests\TestCaseAuthenticated;
 

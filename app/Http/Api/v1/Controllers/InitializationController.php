@@ -68,7 +68,7 @@ class InitializationController extends Controller
             ]);
 
             foreach($request->user['emails'] as $email){
-                $new_user->addEmail($email);
+                $new_user->emails = [$email];
             }
 
             $token = $new_user->createToken("Initialization Token")->plainTextToken;

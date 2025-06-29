@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
-use App\Traits\HaveMultipleEmails;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -16,7 +15,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class AccountUser extends Authenticatable {
 
-    use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesTenantConnection, HaveMultipleEmails;
+    use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesTenantConnection;
 
     protected $table = 'account_users';
 

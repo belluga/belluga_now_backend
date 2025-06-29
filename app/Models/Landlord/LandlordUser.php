@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
-use App\Traits\HaveMultipleEmails;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -16,7 +15,7 @@ use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
 class LandlordUser extends Authenticatable {
 
-    use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesLandlordConnection, HaveMultipleEmails;
+    use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesLandlordConnection;
 
     protected $table = 'landlord_users';
 
