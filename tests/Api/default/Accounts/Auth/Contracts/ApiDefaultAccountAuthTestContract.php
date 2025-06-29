@@ -2,9 +2,9 @@
 
 namespace Tests\Api\default\Accounts\Auth\Contracts;
 
-use Tests\Api\default\Accounts\Contracts\TestCaseAccount;
 use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
 use Tests\Helpers\UserLabels;
+use Tests\TestCaseAccount;
 
 abstract class ApiDefaultAccountAuthTestContract extends TestCaseAccount
 {

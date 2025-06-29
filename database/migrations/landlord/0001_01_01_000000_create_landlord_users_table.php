@@ -13,15 +13,16 @@ return new class extends Migration
     {
         Schema::create('landlord_users', function (Blueprint $collection) {
             $collection->unique('emails');
+            $collection->sparse_and_unique('phones');
             $collection->index('landlord_role_id');
-            $collection->index('tenant_ids');
             $collection->index('tenant_roles.slug');
             $collection->index('tenant_roles.tenant_id');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
 
         Schema::create('password_reset_tokens', function (Blueprint $collection) {
-            $collection->unique('email');
+            $collection->unique('user_id');
+            $collection->index('token');
         });
 
         Schema::create('sessions', function (Blueprint $collection) {

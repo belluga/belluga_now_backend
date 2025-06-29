@@ -3,8 +3,8 @@
 namespace Tests\Api\default\Tenants\Account\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Tenants\Contracts\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
+use Tests\TestCaseTenant;
 
 class ApiDefaultTenantAccountsTestContract extends TestCaseTenant
 {
@@ -17,7 +17,7 @@ class ApiDefaultTenantAccountsTestContract extends TestCaseTenant
 
     protected string $base_api_url {
         get{
-            return "{$this->base_api}accounts/";
+            return "{$this->base_api_tenant}accounts/";
         }
     }
 

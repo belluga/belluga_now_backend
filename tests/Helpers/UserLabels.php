@@ -14,6 +14,16 @@ class UserLabels extends Labels {
         }
     }
 
+    public string $password_reset_token {
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".password_reset_token", $value);
+            $this->password_reset_token = $value;
+        }
+        get {
+            return $this->getGlobal($this->base_label . ".password_reset_token");
+        }
+    }
+
     public string $user_id {
         set(string $value) {
             $this->setGlobal($this->base_label . ".user_id", $value);

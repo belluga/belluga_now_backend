@@ -5,23 +5,51 @@ use App\Http\Api\v1\Controllers\LandlordUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
 use App\Http\Api\v1\Controllers\LandlordRolesController;
-use App\Http\Api\v1\Controllers\TenantRolesController;
+use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+
+Route::prefix('profile')
+    ->middleware(['auth:sanctum'])
+    ->group(function () {
+        Route::patch('/password', [ProfileControllerLandlord::class, 'updatePassword'])
+            ->name('admin.profile.check');
+
+        Route::patch('/', [ProfileControllerLandlord::class, 'updateProfile'])
+            ->name('admin.profile.check');
+
+        Route::patch('/emails', [ProfileControllerLandlord::class, 'addEmails'])
+            ->name('admin.profile.add_emails');
+
+        Route::delete('/emails', [ProfileControllerLandlord::class, 'removeEmail'])
+            ->name('admin.profile.remove_emails');
+
+        Route::patch('/phones', [ProfileControllerLandlord::class, 'addPhones'])
+            ->name('admin.profile.add_phones');
+
+        Route::delete('/phones', [ProfileControllerLandlord::class, 'removePhone'])
+            ->name('admin.profile.remove_phones');
+});
 
 Route::prefix('auth')->group(function () {
-    Route::withoutMiddleware('landlord')
-        ->group(function () {
-
-            Route::post('/login', [AuthControllerLandlord::class, 'login'])
-                ->name('admin.auth.login');
-
-            Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
-                ->middleware(['auth:sanctum'])
-                ->name('admin.auth.check');
-        });
 
     Route::post('/logout', [AuthControllerLandlord::class, 'logout'])
         ->middleware(['auth:sanctum'])
         ->name('admin.auth.logout');
+
+    Route::withoutMiddleware('landlord')
+        ->group(function () {
+            Route::post('/login', [AuthControllerLandlord::class, 'login'])
+                ->name('admin.auth.login');
+
+            Route::post('/password_token', [ProfileControllerLandlord::class, 'generateToken'])
+                ->name('admin.auth.token');
+
+            Route::post('/password_reset', [ProfileControllerLandlord::class, 'resetPassword'])
+                ->name('admin.auth.password_reset');
+
+            Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
+                ->middleware(['auth:sanctum'])
+                ->name('admin.profile.check');
+        });
 });
 
 Route::prefix('tenants')->group(function () {

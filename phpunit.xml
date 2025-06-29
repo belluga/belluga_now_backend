@@ -14,6 +14,7 @@
             <file>tests/Api/default/Admin/ApiDefaultAdminRolesTest.php</file>
             <file>tests/Api/default/Admin/ApiDefaultAdminUserTest.php</file>
             <file>tests/Api/default/Admin/ApiDefaultAdminAuthTest.php</file>
+            <file>tests/Api/default/Admin/ApiDefaultAdminProfileTest.php</file>
             <file>tests/Api/default/Admin/ApiDefaultAdminTenantTest.php</file>
         </testsuite>
         <testsuite name="Api-Default-Tenant">
@@ -25,6 +26,7 @@
             <directory>tests/Api/default/Accounts/Roles</directory>
             <directory>tests/Api/default/Accounts/Users</directory>
             <directory>tests/Api/default/Accounts/Auth</directory>
+            <directory>tests/Api/default/Accounts/Profile</directory>
             <directory>tests/Api/default/Accounts/Validation</directory>
         </testsuite>
         <testsuite name="Api-Default-Middleware">
@@ -32,6 +34,8 @@
             <directory>tests/Api/default/Tenants/Middleware</directory>
             <directory>tests/Api/default/Accounts/Middleware</directory>
         </testsuite>
+
+
 <!--        <testsuite name="Api-V1">-->
 <!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->
 <!--            <file>tests/Api/v1/ApiV1PaymentSettingsIuguTest.php</file>-->
@@ -44,15 +48,6 @@
 <!--            <file>tests/Api/v2/ApiV2OrdersValidationTest.php</file>-->
 <!--            <file>tests/Api/v2/ApiV2OrdersCreationTest.php</file>-->
 <!--            <file>tests/Api/v2/ApiV2WebhookTest.php</file>-->
-<!--        </testsuite>-->
-<!--        <testsuite name="ViewModel">-->
-<!--            <file>tests/View/ViewModel/CheckoutViewModelTest.php</file>-->
-<!--        </testsuite>-->
-<!--        <testsuite name="View">-->
-<!--            <file>tests/View/CheckoutViewTest.php</file>-->
-<!--        </testsuite>-->
-<!--        <testsuite name="Feature">-->
-<!--            <file>tests/Feature/CreditCardSubmitTest.php</file>-->
 <!--        </testsuite>-->
     </testsuites>
     <source>

@@ -7,7 +7,7 @@ namespace App\Http\Api\v1\Requests;
 use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
 
-class AccountUserEmailsAddRequest extends FormRequest
+class PhonesAddRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -25,11 +25,11 @@ class AccountUserEmailsAddRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'emails' => [
+            'phones' => [
                 'required',
                 'array',
-                new UniqueArrayItemRule('tenant', 'account_users', 'emails', )
             ],
+            'phones.*' => 'required|string'
         ];
     }
 }

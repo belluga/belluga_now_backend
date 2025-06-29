@@ -3,15 +3,15 @@
 namespace Tests\Api\default\Accounts\Roles\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Accounts\Contracts\TestCaseAccount;
 use Tests\Helpers\RoleLabels;
+use Tests\TestCaseAccount;
 
 abstract class ApiDefaultAccountRolesTestContract extends TestCaseAccount
 {
 
     protected string $base_api_url {
         get{
-            return $this->base_api."roles";
+            return $this->base_api_account."roles";
         }
     }
 

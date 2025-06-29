@@ -1,0 +1,103 @@
+<?php
+
+namespace Tests\Api\default\Accounts\Profile\Contracts;
+
+use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
+use Tests\Api\Traits\AccountProfileFunctions;
+use Tests\TestCaseAccount;
+
+abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
+
+    use AccountProfileFunctions, AccountAuthFunctions;
+
+    private string $temporary_email_1 = "temporaryemail1@gmail.com";
+
+    private string $temporary_email_2 = "temporaryemail2@gmail.com";
+
+    protected string $base_api_url {
+        get{
+            return "http://{$this->tenant->subdomain}.localhost/api/";
+        }
+    }
+
+    public function testAccountUserUpdate(): void {
+
+        $this->accountLogin($this->account->user_visitor);
+
+        $roleUpdate = $this->profileUpdate(
+            $this->account->user_visitor,
+            [
+                "name" => "Updated Account Name",
+            ]
+        );
+
+        print_r($roleUpdate->json());
+
+        $roleUpdate->assertStatus(200);
+
+        $this->assertEquals("Updated Account Name", $roleUpdate->json()['name']);
+
+    }
+
+    public function testAccountUserAddEmail(): void {
+
+        $roleUpdate = $this->profileAddEmails(
+            $this->account->user_visitor,
+            [
+                $this->temporary_email_1,
+                $this->temporary_email_2,
+            ]
+        );
+
+        $roleUpdate->assertStatus(200);
+
+        $this->assertContains($this->temporary_email_1, $roleUpdate->json()['data']['emails']);
+        $this->assertContains($this->temporary_email_2, $roleUpdate->json()['data']['emails']);
+    }
+
+    public function testAccountUserRemoveEmail(): void
+    {
+
+        $addEmailsResponse = $this->profileRemoveEmail(
+            $this->account->user_visitor,
+            $this->temporary_email_1
+        );
+
+        $addEmailsResponse->assertStatus(200);
+
+        $addEmailsResponse = $this->profileRemoveEmail(
+            $this->account->user_visitor,
+            $this->temporary_email_2
+        );
+
+        $addEmailsResponse->assertStatus(200);
+
+        $addEmailsResponse = $this->profileRemoveEmail(
+            $this->account->user_visitor,
+            $this->account->user_visitor->email_2
+        );
+
+        $addEmailsResponse->assertStatus(200);
+
+        $this->assertNotContains($this->account->user_visitor->email_2, $addEmailsResponse->json()['data']['emails']);
+        $this->assertContains($this->account->user_visitor->email_1, $addEmailsResponse->json()['data']['emails']);
+
+        $addEmailsResponse = $this->profileRemoveEmail(
+            $this->account->user_visitor,
+            $this->account->user_visitor->email_1
+        );
+
+        $addEmailsResponse->assertStatus(422);
+
+        $this->assertEquals(
+            "Você não pode remover o único email da conta. Adicione outro email antes de remover esse.",
+            $addEmailsResponse->json()['message']);
+
+        $addEmailsResponse->assertJsonStructure([
+            "message",
+            "errors" => [
+                "email"
+            ]
+        ]);
+    }
+}

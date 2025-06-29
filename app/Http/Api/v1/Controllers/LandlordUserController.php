@@ -16,8 +16,6 @@ use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
 use MongoDB\BSON\ObjectId;
 
 class LandlordUserController extends Controller
@@ -128,26 +126,7 @@ class LandlordUserController extends Controller
         return response()->json(['message' => 'Usuário do landlord removido com sucesso']);
     }
 
-    /**
-     * Atualiza a senha de um usuário do landlord
-     */
-    public function updatePassword(Request $request, string $id): JsonResponse
-    {
-        $user = LandlordUser::findOrFail($id);
 
-        $validator = Validator::make($request->all(), [
-            'password' => 'required|string|min:8|confirmed',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Dados inválidos', 'errors' => $validator->errors()], 422);
-        }
-
-        $user->password = Hash::make($request->input('password'));
-        $user->save();
-
-        return response()->json(['message' => 'Senha atualizada com sucesso']);
-    }
 
     public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
 

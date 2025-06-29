@@ -4,14 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Http\Api\v1\Requests\AccountUserEmailsAddRequest;
-use App\Http\Api\v1\Requests\AccountUserEmailsRemoveRequest;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
-use App\Http\Api\v1\Requests\UpdatePasswordRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AccountRoleTemplate;
@@ -19,8 +15,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
 use MongoDB\BSON\ObjectId;
 use Illuminate\Validation\ValidationException;
 
@@ -93,7 +87,6 @@ class AccountUserController extends Controller
      */
     public function update(UserUpdateRequest $request): JsonResponse
     {
-
         if(empty($request->validated())){
             throw ValidationException::withMessages([
                 'empty' => "Nenhum dado recebido para atualizar."
@@ -179,84 +172,6 @@ class AccountUserController extends Controller
         $user->forceDelete();
 
         return response()->json();
-    }
-
-    /**
-     * Atualiza a senha de um usuário
-     */
-    public function updatePassword(UpdatePasswordRequest $request): JsonResponse
-    {
-        $user = $this->getFirstUserByRouteOrFail();
-
-        $user->password = Hash::make($request->input('password'));
-        $user->save();
-
-        return response()->json(['message' => 'Senha atualizada com sucesso']);
-    }
-
-    public function addEmails(AccountUserEmailsAddRequest $request): JsonResponse
-    {
-        $user = $this->getFirstUserByRouteOrFail();
-        $new_emails = $request->input('emails');
-
-        try{
-            $user->push('emails', $new_emails);
-        }catch (\Exception $e){
-            if (str_contains($e->getMessage(), 'E11000')) {
-                return response()->json([
-                    'message' => 'An email already exists.',
-                    'errors' => ['emails' => ["One of the emails given already exists.."]]
-                ], 422);
-            }
-
-            return response()->json([
-                    "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
-                    'errors' => [
-                        'emails' => [
-                            "Erro ao adicionar emails. Tente novamente mais tarde"
-                        ]
-                    ]
-                ],
-               422
-            );
-        }
-
-        return response()->json([
-            'message' => 'Usuário atualizado com sucesso',
-            'data' => $user
-        ]);
-    }
-
-    public function removeEmails(AccountUserEmailsRemoveRequest $request): JsonResponse
-    {
-        $user = $this->getFirstUserByRouteOrFail();
-        $remove_email = $request->input('email');
-
-        if(count($user->emails) <= 1) {
-            throw ValidationException::withMessages([
-                'email' => ['Você não pode remover o único email da conta. Adicione outro email antes de remover esse.'],
-            ]);
-        }
-
-        try{
-            $user->pull('emails', $remove_email);
-        }catch (\Exception $e){
-            return response()->json([
-                "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
-                "errors" => [
-                    "emails" => [
-                        "Erro ao adicionar emails. Tente novamente mais tarde."
-                    ]
-                ]
-            ],
-                422
-            );
-        }
-
-        return response()->json([
-            'message' => 'Usuário atualizado com sucesso',
-            'data' => $user
-        ]);
     }
 
     private function getFirstUserByRouteOrFail(): AccountUser {

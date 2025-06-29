@@ -3,9 +3,9 @@
 namespace Tests\Api\default\Tenants\Users\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Tenants\Contracts\TestCaseTenant;
 use Tests\Helpers\RoleLabels;
 use Tests\Helpers\UserLabels;
+use Tests\TestCaseTenant;
 
 abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant {
 

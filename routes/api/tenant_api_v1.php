@@ -7,13 +7,41 @@ use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
+use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 
+Route::prefix('profile')
+    ->middleware(['auth:sanctum'])
+    ->group(function () {
+        Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword'])
+            ->name('admin.profile.check');
+
+        Route::patch('/', [ProfileControllerTenant::class, 'updateProfile'])
+            ->name('admin.profile.check');
+
+        Route::patch('/emails', [ProfileControllerTenant::class, 'addEmails'])
+            ->name('admin.profile.add_emails');
+
+        Route::delete('/emails', [ProfileControllerTenant::class, 'removeEmail'])
+            ->name('admin.profile.remove_emails');
+
+        Route::patch('/phones', [ProfileControllerTenant::class, 'addPhones'])
+            ->name('admin.profile.add_phones');
+
+        Route::delete('/phones', [ProfileControllerTenant::class, 'removePhone'])
+            ->name('admin.profile.remove_phones');
+    });
 
 Route::prefix('auth')
     ->group(function () {
 
-    Route::post('/login', [AuthControllerAccount::class, 'login'])
+        Route::post('/login', [AuthControllerAccount::class, 'login'])
             ->name('tenant.auth.login');
+
+        Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken'])
+            ->name('admin.auth.token');
+
+        Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword'])
+            ->name('admin.auth.password_reset');
 
     Route::middleware(['auth:sanctum'])
         ->group(function () {
@@ -24,6 +52,7 @@ Route::prefix('auth')
                 ->name('tenant.auth.check');
         });
 });
+
 
 Route::prefix('domains')
     ->group(function (){

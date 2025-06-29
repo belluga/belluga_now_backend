@@ -3,21 +3,17 @@
 namespace Tests\Api\default\Accounts\Users\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Accounts\Contracts\TestCaseAccount;
 use Tests\Helpers\RoleLabels;
 use Tests\Helpers\UserLabels;
+use Tests\TestCaseAccount;
 
 abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
 {
     protected string $base_api_url {
         get{
-            return $this->base_api."users/";
+            return $this->base_api_account."users/";
         }
     }
-
-    private string $temporary_email_1 = "temporaryemail1@gmail.com";
-
-    private string $temporary_email_2 = "temporaryemail2@gmail.com";
 
     public function testAccountUserAdminCreation(): void {
         $response = $this->createUser(
@@ -89,103 +85,6 @@ abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
         $this->assertArrayHasKey('total', $accountUserList->json());
         $this->equalTo(4, $accountUserList->json()['total']);
 
-    }
-
-    public function testAccountUserUpdate(): void {
-        $roleUpdate = $this->accountUserUpdate(
-            $this->account->user_disposable->user_id,
-            [
-                "name" => "Updated Account Name",
-            ]
-        );
-
-        $roleUpdate->assertStatus(200);
-
-        $rolesShow = $this->accountUserShow($this->account->user_disposable->user_id);
-        $rolesShow->assertOk();
-
-        $this->assertEquals("Updated Account Name", $rolesShow->json()['data']['name']);
-
-    }
-
-    public function testAccountUserAddEmail(): void {
-
-        $roleUpdate = $this->accountUserAddEmails(
-            $this->account->user_disposable->user_id,
-            [
-                "emails" => [
-                    $this->temporary_email_1,
-                    $this->temporary_email_2,
-                ],
-            ]
-        );
-
-        $roleUpdate->assertStatus(200);
-
-        $rolesShow = $this->accountUserShow($this->account->user_disposable->user_id);
-        $rolesShow->assertOk();
-
-        $this->assertCount(4, $rolesShow->json()['data']['emails']);
-        $this->assertEquals($this->temporary_email_1, $rolesShow->json()['data']['emails'][2]);
-        $this->assertEquals($this->temporary_email_2, $rolesShow->json()['data']['emails'][3]);
-    }
-
-    public function testAccountUserRemoveEmail(): void
-    {
-
-        $addEmailsResponse = $this->accountUserRemoveEmails(
-            $this->account->user_disposable->user_id,
-            [
-                "email" => $this->temporary_email_1
-            ]
-        );
-
-        $addEmailsResponse->assertStatus(200);
-
-        $addEmailsResponse = $this->accountUserRemoveEmails(
-            $this->account->user_disposable->user_id,
-            [
-                "email" => $this->temporary_email_2
-            ]
-        );
-
-        $addEmailsResponse->assertStatus(200);
-
-        $addEmailsResponse = $this->accountUserRemoveEmails(
-            $this->account->user_disposable->user_id,
-            [
-                "email" => $this->account->user_disposable->email_2
-            ]
-        );
-
-        $addEmailsResponse->assertStatus(200);
-
-        $accountUserShow = $this->accountUserShow($this->account->user_disposable->user_id);
-        $accountUserShow->assertOk();
-
-        $this->assertCount(1, $accountUserShow->json()['data']['emails']);
-        $this->assertNotContains($this->account->user_disposable->email_2, $accountUserShow->json()['data']['emails']);
-        $this->assertContains($this->account->user_disposable->email_1, $accountUserShow->json()['data']['emails']);
-
-        $addEmailsResponse = $this->accountUserRemoveEmails(
-            $this->account->user_disposable->user_id,
-            [
-                "email" => $this->account->user_disposable->email_1
-            ]
-        );
-
-        $addEmailsResponse->assertStatus(422);
-
-        $this->assertEquals(
-            "Você não pode remover o único email da conta. Adicione outro email antes de remover esse.",
-            $addEmailsResponse->json()['message']);
-
-        $addEmailsResponse->assertJsonStructure([
-            "message",
-            "errors" => [
-                "email"
-            ]
-        ]);
     }
 
     public function testAccountDetachOrDelete(): void {

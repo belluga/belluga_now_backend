@@ -3,14 +3,17 @@
 namespace Tests\Api\default\Accounts\Validation\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Accounts\Contracts\TestCaseAccount;
+use Tests\Api\Traits\AccountProfileFunctions;
+use Tests\TestCaseAccount;
 
 abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccount
 {
 
+    use AccountProfileFunctions;
+
     protected string $base_api_url {
         get{
-            return $this->base_api;
+            return $this->base_api_account;
         }
     }
 
@@ -78,9 +81,9 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
 
     public function testAccountUserEmailRemove(): void {
 
-        $response = $this->userEmailRemove(
-            $this->account->user_visitor->user_id,
-            []);
+        $response = $this->profileRemoveEmail(
+            $this->account->user_visitor,
+            "");
 
         $response->assertStatus(422);
         $response->assertJsonStructure([
@@ -88,57 +91,13 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
             "errors" => [
                 "email"
             ]
-        ]);
-
-        $response = $this->userEmailRemove(
-            $this->account->user_visitor->user_id,
-            [
-                "email" => $this->account->user_visitor->email_2
-            ]);
-
-        $response->assertStatus(200);
-
-        $response = $this->userEmailRemove(
-            $this->account->user_visitor->user_id,
-            [
-                "email" => $this->account->user_visitor->email_1
-            ]);
-
-        $response->assertStatus(422);
-        $this->assertEquals(
-            "Você não pode remover o único email da conta. Adicione outro email antes de remover esse.",
-            $response->json()['message']);
-
-        $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "email"
-            ]
-        ]);
-    }
-
-    public function testAccountUserEmailAddRepeated(): void {
-        $response = $this->userEmailAdd(
-            $this->account->user_visitor->user_id,
-            [
-                "emails" => [
-                    $this->account->user_users_manager->email_1
-                ]
-            ]);
-        $response->assertStatus(422);
-
-        $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "emails",
-            ],
         ]);
     }
 
     public function testAccountUserEmailAddEmpty(): void {
 
-        $response = $this->userEmailAdd(
-            $this->account->user_visitor->user_id,
+        $response = $this->profileAddEmails(
+            $this->account->user_visitor,
             []);
         $response->assertStatus(422);
 
@@ -149,21 +108,19 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
             ],
         ]);
 
-        $response = $this->userEmailAdd(
-            $this->account->user_visitor->user_id,
+        $response = $this->profileAddEmails(
+            $this->account->user_visitor,
             [
-                "emails" => [
-                    $this->account->user_visitor->email_1,
-                    $this->account->user_visitor->email_2,
-                ]
+                $this->account->user_visitor->email_1,
+                $this->account->user_visitor->email_2,
             ]);
         $response->assertStatus(200);
     }
 
     public function testAccountUserUpdate(): void {
 
-        $response = $this->userUpdate(
-            $this->account->user_visitor->user_id,
+        $response = $this->profileUpdate(
+            $this->account->user_visitor,
             []);
         $response->assertStatus(422);
 
@@ -212,37 +169,10 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
         );
     }
 
-    protected function userUpdate(string $user_id, array $data): TestResponse {
-        return $this->json(
-            method: 'patch',
-            uri: "{$this->base_api_url}users/$user_id",
-            data: $data,
-            headers: $this->getHeaders(),
-        );
-    }
-
     protected function userDelete(array $data): TestResponse {
         return $this->json(
             method: 'delete',
             uri: "{$this->base_api_url}users",
-            data: $data,
-            headers: $this->getHeaders(),
-        );
-    }
-
-    protected function userEmailAdd(string $user_id, array $data): TestResponse {
-        return $this->json(
-            method: 'patch',
-            uri: "{$this->base_api_url}users/$user_id/emails",
-            data: $data,
-            headers: $this->getHeaders(),
-        );
-    }
-
-    protected function userEmailRemove(string $user_id, array $data): TestResponse {
-        return $this->json(
-            method: 'delete',
-            uri: "{$this->base_api_url}users/$user_id/emails",
             data: $data,
             headers: $this->getHeaders(),
         );

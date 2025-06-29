@@ -7,7 +7,10 @@ use Tests\Helpers\UserLabels;
 
 trait AdminAuthFunctions
 {
-    protected function adminLogout(UserLabels $user, ?string $device_name, ?bool $all_devices): TestResponse {
+    protected function adminLogout(
+        UserLabels $user,
+        ?string $device_name = null,
+        ?bool $all_devices = null): TestResponse {
 
         $payload = [];
         if ($device_name !== null) {

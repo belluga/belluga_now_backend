@@ -11,6 +11,12 @@ abstract class TestCase extends BaseTestCase {
 
     protected string $prefix = "default";
 
+    protected string $api_url_admin {
+        get {
+            return "admin/api";
+        }
+    }
+
     protected Landlord $landlord {
         get {
             return new Landlord("landlord");

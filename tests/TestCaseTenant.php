@@ -1,19 +1,15 @@
 <?php
 
-namespace Tests\Api\default\Tenants\Contracts;
+namespace Tests;
 
-use Illuminate\Testing\TestResponse;
-use Tests\Helpers\AccountLabels;
-use Tests\Helpers\RoleLabels;
 use Tests\Helpers\TenantLabels;
-use Tests\TestCaseAuthenticated;
 
 abstract class TestCaseTenant extends TestCaseAuthenticated {
     abstract protected TenantLabels $tenant {
         get;
     }
 
-    protected string $base_api {
+    protected string $base_api_tenant {
         get {
             return "http://{$this->tenant->subdomain}.localhost/api/";
         }

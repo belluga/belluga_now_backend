@@ -13,19 +13,21 @@ return new class extends Migration
     {
         Schema::create('account_users', function (Blueprint $collection) {
             $collection->unique('emails');
+            $collection->sparse_and_unique('phones');
             $collection->index('tenant_roles.slug');
             $collection->index('tenant_roles.account_id');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });
 
-        Schema::create('password_reset_tokens', function (Blueprint $table) {
-            $table->unique('email');
+        Schema::create('password_reset_tokens', function (Blueprint $collection) {
+            $collection->unique('user_id');
+            $collection->index('token');
         });
 
-        Schema::create('sessions', function (Blueprint $table) {
-            $table->unique('id');
-            $table->sparse('user_id');
-            $table->index(['last_activity', -1]);
+        Schema::create('sessions', function (Blueprint $collection) {
+            $collection->unique('id');
+            $collection->sparse('user_id');
+            $collection->index(['last_activity', -1]);
         });
     }
 

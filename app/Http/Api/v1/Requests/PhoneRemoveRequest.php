@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Rules\UniqueArrayItemRule;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Contracts\Validation\Validator;
-use Illuminate\Http\Exceptions\HttpResponseException;
 
-class UpdatePasswordRequest extends FormRequest
+class PhoneRemoveRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -26,14 +25,10 @@ class UpdatePasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'password' => 'required|string|min:8|confirmed',
+            'phone' => [
+                'required',
+                'string'
+            ],
         ];
-    }
-
-    public function failedValidation(Validator $validator)
-    {
-        throw new HttpResponseException(response()->json([
-            'errors' => $validator->errors()
-        ], 422));
     }
 }

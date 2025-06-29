@@ -2,10 +2,15 @@
 
 namespace Tests;
 
-use Tests\Helpers\AccountEnvironments;
-
 abstract class TestCaseAuthenticated extends TestCase
 {
+
+    protected string $base_api_url {
+        get {
+            return "admin/api/";
+        }
+    }
+
     protected function getHeaders(): array {
 
         $token = $this->landlord->user_superadmin->token;

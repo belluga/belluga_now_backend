@@ -6,9 +6,9 @@ use Illuminate\Testing\TestResponse;
 use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
 use Tests\Api\default\Admin\Traits\AdminAuthFunctions;
 use Tests\Api\default\Admin\Traits\AdminRoleFunctions;
-use Tests\Api\default\Tenants\Contracts\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
+use Tests\TestCaseTenant;
 
 abstract class ApiDefaultTenantsMiddlewareTestContract extends TestCaseTenant
 {

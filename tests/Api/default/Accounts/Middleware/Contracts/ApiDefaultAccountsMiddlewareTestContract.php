@@ -3,13 +3,13 @@
 namespace Tests\Api\default\Accounts\Middleware\Contracts;
 
 use Illuminate\Testing\TestResponse;
-use Tests\Api\default\Accounts\Contracts\TestCaseAccount;
 use Tests\Api\default\Accounts\Traits\AccountAuthFunctions;
 use Tests\Api\default\Admin\Traits\AdminAuthFunctions;
 use Tests\Api\default\Admin\Traits\AdminRoleFunctions;
 use Tests\Helpers\AccountLabels;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
+use Tests\TestCaseAccount;
 
 abstract class ApiDefaultAccountsMiddlewareTestContract extends TestCaseAccount
 {
@@ -25,7 +25,7 @@ abstract class ApiDefaultAccountsMiddlewareTestContract extends TestCaseAccount
 
     protected string $base_api_url {
         get{
-            return $this->base_api."roles";
+            return $this->base_api_account."roles";
         }
     }
 
