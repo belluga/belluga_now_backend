@@ -210,20 +210,20 @@ abstract class ProfileControllerContract extends Controller
         $user = auth()->guard('sanctum')->user();
         $remove_phone = $request->input('phone');
 
-        try{
+//        try{
             $user->pull('phones', $remove_phone);
-        }catch (\Exception $e){
-            return response()->json([
-                "message" => "Erro ao adicionar telefone. Tente novamente mais tarde.",
-                "errors" => [
-                    "emails" => [
-                        "Erro ao adicionar telefone. Tente novamente mais tarde."
-                    ]
-                ]
-            ],
-                422
-            );
-        }
+//        }catch (\Exception $e){
+//            return response()->json([
+//                "message" => "Erro ao remover telefone. Tente novamente mais tarde.",
+//                "errors" => [
+//                    "emails" => [
+//                        "Erro ao remover telefone. Tente novamente mais tarde."
+//                    ]
+//                ]
+//            ],
+//                422
+//            );
+//        }
 
         return response()->json([
             'message' => 'Telefone removido com sucesso',

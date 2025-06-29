@@ -12,12 +12,30 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('landlord_users', function (Blueprint $collection) {
-            $collection->unique('emails');
-            $collection->sparse_and_unique('phones');
             $collection->index('landlord_role_id');
             $collection->index('tenant_roles.slug');
             $collection->index('tenant_roles.tenant_id');
             $collection->index(['created_at' => -1, "updated_at" => -1], );
+
+            $collection->index(
+                ['emails' => 1],
+                options: [
+                    'unique' => true,
+                    'name' => 'unique_emails_if_present',
+                    'partialFilterExpression' => [
+                        'emails.0' => ['$exists' => true]
+                    ]
+                ]);
+
+            $collection->index(
+                ['phones' => 1],
+                options: [
+                    'unique' => true,
+                    'name' => 'unique_phones_if_present',
+                    'partialFilterExpression' => [
+                        'phones.0' => ['$exists' => true]
+                    ]
+                ]);
         });
 
         Schema::create('password_reset_tokens', function (Blueprint $collection) {

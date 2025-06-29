@@ -14,6 +14,10 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
     private string $temporary_email_2 = "temporaryemail2@gmail.com";
 
+    private string $temporary_phone_1 = "5531996419823";
+
+    private string $temporary_phone_2 = "5533999999999";
+
     protected string $base_api_url {
         get{
             return "http://{$this->tenant->subdomain}.localhost/api/";
@@ -30,8 +34,6 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
                 "name" => "Updated Account Name",
             ]
         );
-
-        print_r($roleUpdate->json());
 
         $roleUpdate->assertStatus(200);
 
@@ -53,6 +55,26 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
         $this->assertContains($this->temporary_email_1, $roleUpdate->json()['data']['emails']);
         $this->assertContains($this->temporary_email_2, $roleUpdate->json()['data']['emails']);
+    }
+
+    public function testAccountUserAddEmailRepeated(): void {
+
+        $this->accountLogin($this->account->user_users_manager);
+
+        $userUpdate = $this->profileAddEmails(
+            $this->account->user_users_manager,
+            [
+                $this->temporary_email_1,
+            ]
+        );
+
+        $userUpdate->assertStatus(422);
+
+        $userUpdate ->assertJsonStructure([
+            "errors" => [
+                "emails"
+            ]
+        ]);
     }
 
     public function testAccountUserRemoveEmail(): void
@@ -99,5 +121,70 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
                 "email"
             ]
         ]);
+    }
+
+    public function testAccountUserAddPhones(): void {
+
+        $update = $this->profileAddPhones(
+            $this->account->user_visitor,
+            [
+                $this->temporary_phone_1,
+            ]
+        );
+
+        $update->assertStatus(200);
+        $this->assertContains($this->temporary_phone_1, $update->json()['data']['phones']);
+
+
+        $update = $this->profileAddPhones(
+            $this->account->user_users_manager,
+            [
+                $this->temporary_phone_2,
+            ]
+        );
+
+        $update->assertStatus(200);
+        $this->assertContains($this->temporary_phone_2, $update->json()['data']['phones']);
+    }
+
+    public function testAccountUserAddPhoneRepeated(): void {
+
+        $this->accountLogin($this->account->user_users_manager);
+
+        $update = $this->profileAddPhones(
+            $this->account->user_users_manager,
+            [
+                $this->temporary_phone_1,
+            ]
+        );
+
+        $update->assertStatus(422);
+
+        $update ->assertJsonStructure([
+            "errors" => [
+                "phones"
+            ]
+        ]);
+    }
+
+    public function testAccountUserRemovePhone(): void
+    {
+
+        $response = $this->profileRemovePhone(
+            $this->account->user_visitor,
+            $this->temporary_phone_1
+        );
+
+        $response->assertStatus(200);
+
+        $response = $this->profileRemovePhone(
+            $this->account->user_users_manager,
+            $this->temporary_phone_2
+        );
+
+        $response->assertStatus(200);
+
+        $this->assertNotContains($this->temporary_phone_1, $response->json()['data']['phones']);
+        $this->assertNotContains($this->temporary_phone_2, $response->json()['data']['phones']);
     }
 }

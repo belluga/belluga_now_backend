@@ -15,7 +15,7 @@ class Landlord extends Labels {
     public UserLabels $user_cross_tenant_admin {
         get {
             return new UserLabels(
-                $this->base_label.".users.tenant_manager"
+                $this->base_label.".users.cross_tenant_admin"
             );
         }
     }
@@ -23,7 +23,7 @@ class Landlord extends Labels {
     public UserLabels $user_cross_tenant_visitor {
         get {
             return new UserLabels(
-                $this->base_label.".users.users_manager"
+                $this->base_label.".users.cross_tenant_visitor"
             );
         }
     }

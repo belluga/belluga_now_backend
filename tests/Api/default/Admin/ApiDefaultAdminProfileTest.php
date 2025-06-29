@@ -24,6 +24,8 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
     private string $temporary_phone_2 = "5533999999999";
 
+
+
     public function testTokenGenerate(): void {
         $response = $this->generateToken($this->landlord->user_cross_tenant_admin->email_1);
         $response->assertOk();
@@ -71,8 +73,6 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
     public function testUpdatePassword(): void {
 
-        $this->adminLogin($this->landlord->user_cross_tenant_admin);
-
         $this->landlord->user_cross_tenant_admin->password = fake()->password(8);
 
         $response = $this->passwordUpdate(
@@ -89,9 +89,15 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
     }
 
-    public function testUpdateProfile(): void {
+    public function testLoginUsers(): void {
+        $response = $this->adminLogin($this->landlord->user_cross_tenant_admin);
+        $response->assertOk();
 
-        $this->adminLogin($this->landlord->user_cross_tenant_admin);
+        $response = $this->adminLogin($this->landlord->user_cross_tenant_visitor);
+        $response->assertOk();
+    }
+
+    public function testUpdateProfile(): void {
 
         $this->landlord->user_cross_tenant_admin->name = fake()->name()." Name Created Updating Profile";
 
@@ -124,8 +130,6 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
     }
 
     public function testAddEmailsRepeated(): void {
-
-        $this->adminLogin($this->landlord->user_cross_tenant_visitor);
 
         $userUpdate = $this->profileAddEmails(
             $this->landlord->user_cross_tenant_visitor,
@@ -162,19 +166,31 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
         $this->assertNotContains($this->temporary_email_2, $userUpdate->json()['data']['emails']);
     }
 
-    public function testAddPhones(): void {
+    public function testAddPhoneToFirstUser(): void {
 
         $userUpdate = $this->profileAddPhones(
             $this->landlord->user_cross_tenant_admin,
             [
                 $this->temporary_phone_1,
-                $this->temporary_phone_2,
             ]
         );
 
         $userUpdate->assertStatus(200);
 
         $this->assertContains($this->temporary_phone_1, $userUpdate->json()['data']['phones']);
+    }
+
+    public function testAddPhoneToSecondUser(): void {
+
+        $userUpdate = $this->profileAddPhones(
+            $this->landlord->user_cross_tenant_visitor,
+            [
+                $this->temporary_phone_2,
+            ]
+        );
+
+        $userUpdate->assertStatus(200);
+
         $this->assertContains($this->temporary_phone_2, $userUpdate->json()['data']['phones']);
     }
 
@@ -198,7 +214,7 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
         ]);
     }
 
-    public function testRemovePhones(): void {
+    public function testRemovePhoneFromFirsUser(): void {
         $userUpdate = $this->profileRemovePhone(
             $this->landlord->user_cross_tenant_admin,
             $this->temporary_phone_1,
@@ -206,10 +222,11 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
         $userUpdate->assertStatus(200);
 
         $this->assertNotContains($this->temporary_phone_1, $userUpdate->json()['data']['phones']);
+    }
 
-
+    public function testRemovePhoneFromSecondUser(): void {
         $userUpdate = $this->profileRemovePhone(
-            $this->landlord->user_cross_tenant_admin,
+            $this->landlord->user_cross_tenant_visitor,
             $this->temporary_phone_2,
         );
         $userUpdate->assertStatus(200);
