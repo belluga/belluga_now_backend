@@ -14,10 +14,12 @@ use App\Http\Api\v1\Requests\UpdatePasswordRequest;
 use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
+use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Propaganistas\LaravelPhone\PhoneNumber;
 
 abstract class ProfileControllerContract extends Controller
 {
@@ -175,10 +177,19 @@ abstract class ProfileControllerContract extends Controller
     public function addPhones(PhonesAddRequest $request): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-        $new_phones = $request->input('phones');
+        $phones_raw = $request->input('phones');
 
         try{
-            $user->push('phones', $new_phones);
+            $phone_numbers = $this->validatePhoneNumbers($phones_raw);
+
+            if(empty($phone_numbers)){
+                throw ValidationException::withMessages([
+                   "phones" => "None of the provided phones are valid. Please provide a valid phone number."
+                ]);
+            }
+
+            $user->push('phones', $phone_numbers);
+
         }catch (\Exception $e){
             if (str_contains($e->getMessage(), 'E11000')) {
                 return response()->json([
@@ -210,24 +221,45 @@ abstract class ProfileControllerContract extends Controller
         $user = auth()->guard('sanctum')->user();
         $remove_phone = $request->input('phone');
 
-//        try{
-            $user->pull('phones', $remove_phone);
-//        }catch (\Exception $e){
-//            return response()->json([
-//                "message" => "Erro ao remover telefone. Tente novamente mais tarde.",
-//                "errors" => [
-//                    "emails" => [
-//                        "Erro ao remover telefone. Tente novamente mais tarde."
-//                    ]
-//                ]
-//            ],
-//                422
-//            );
-//        }
+        try{
+            $remove_phone_parsed = PhoneNumberParser::parse($remove_phone);
+
+            if(!$remove_phone_parsed){
+                throw ValidationException::withMessages([
+                    'phone' => 'The provided phone number is invalid. Please provide a valid phone number.'
+                ]);
+            }
+
+            $user->pull('phones', $remove_phone_parsed);
+        }catch (\Exception $e){
+            return response()->json([
+                "message" => "Erro ao remover telefone. Tente novamente mais tarde.",
+                "errors" => [
+                    "emails" => [
+                        "Erro ao remover telefone. Tente novamente mais tarde."
+                    ]
+                ]
+            ],
+                422
+            );
+        }
 
         return response()->json([
             'message' => 'Telefone removido com sucesso',
             'data' => $user
         ]);
+    }
+
+    protected function validatePhoneNumbers(array $phones_raw): array
+    {
+        $validated_phone_numbers = [];
+        foreach ($phones_raw as $phone) {
+            $parsed_phpne = PhoneNumberParser::parse($phone);
+            if($parsed_phpne){
+                $validated_phone_numbers[] = $parsed_phpne;
+            }
+        }
+
+        return $validated_phone_numbers;
     }
 }

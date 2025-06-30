@@ -12,6 +12,7 @@
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.10.1",
         "mongodb/laravel-mongodb": "^5.4",
+        "propaganistas/laravel-phone": "^6.0",
         "spatie/laravel-multitenancy": "^4.0",
         "spatie/laravel-sluggable": "^3.7"
     },

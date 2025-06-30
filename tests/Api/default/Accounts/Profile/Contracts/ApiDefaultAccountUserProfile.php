@@ -2,6 +2,7 @@
 
 namespace Tests\Api\default\Accounts\Profile\Contracts;
 
+use App\Support\Helpers\PhoneNumberParser;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AccountProfileFunctions;
 use Tests\TestCaseAccount;
@@ -123,7 +124,15 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
         ]);
     }
 
-    public function testAccountUserAddPhones(): void {
+    public function testAccountUserAddPhonesFirstUser(): void {
+
+        print_r([
+            "user" => [
+                "id" => $this->account->user_visitor->user_id,
+                "name" => $this->account->user_visitor->name,
+            ],
+            "phone" => $this->temporary_phone_1,
+        ]);
 
         $update = $this->profileAddPhones(
             $this->account->user_visitor,
@@ -133,8 +142,10 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
         );
 
         $update->assertStatus(200);
-        $this->assertContains($this->temporary_phone_1, $update->json()['data']['phones']);
+        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_1), $update->json()['data']['phones']);
+    }
 
+    public function testAccountUserAddPhonesSecondUser(): void {
 
         $update = $this->profileAddPhones(
             $this->account->user_users_manager,
@@ -144,7 +155,7 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
         );
 
         $update->assertStatus(200);
-        $this->assertContains($this->temporary_phone_2, $update->json()['data']['phones']);
+        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_2), $update->json()['data']['phones']);
     }
 
     public function testAccountUserAddPhoneRepeated(): void {
@@ -167,7 +178,7 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
         ]);
     }
 
-    public function testAccountUserRemovePhone(): void
+    public function testAccountUserRemovePhoneFirstUser(): void
     {
 
         $response = $this->profileRemovePhone(
@@ -177,14 +188,17 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
         $response->assertStatus(200);
 
+        $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_1), $response->json()['data']['phones']);
+    }
+
+    public function testAccountUserRemovePhoneSecondUser(): void
+    {
         $response = $this->profileRemovePhone(
             $this->account->user_users_manager,
             $this->temporary_phone_2
         );
 
         $response->assertStatus(200);
-
-        $this->assertNotContains($this->temporary_phone_1, $response->json()['data']['phones']);
-        $this->assertNotContains($this->temporary_phone_2, $response->json()['data']['phones']);
+        $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_2), $response->json()['data']['phones']);
     }
 }

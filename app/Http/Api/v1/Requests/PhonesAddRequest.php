@@ -28,7 +28,7 @@ class PhonesAddRequest extends FormRequest
                 'required',
                 'array',
             ],
-            'phones.*' => 'required|string'
+            'phones.*' => 'required|phone:INTERNATIONAL,BR'
         ];
     }
 }

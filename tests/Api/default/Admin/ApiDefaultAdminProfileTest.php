@@ -2,6 +2,7 @@
 
 namespace Tests\Api\default\Admin;
 
+use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Support\Facades\DB;
 use Tests\Api\Traits\AdminAuthFunctions;
 use Tests\Api\Traits\AdminProfileFunctions;
@@ -22,7 +23,7 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
     private string $temporary_phone_1 = "5531996419823";
 
-    private string $temporary_phone_2 = "5533999999999";
+    private string $temporary_phone_2 = "27996419823";
 
 
 
@@ -177,7 +178,7 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
         $userUpdate->assertStatus(200);
 
-        $this->assertContains($this->temporary_phone_1, $userUpdate->json()['data']['phones']);
+        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_1), $userUpdate->json()['data']['phones']);
     }
 
     public function testAddPhoneToSecondUser(): void {
@@ -191,7 +192,9 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
         $userUpdate->assertStatus(200);
 
-        $this->assertContains($this->temporary_phone_2, $userUpdate->json()['data']['phones']);
+        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_2), $userUpdate->json()['data']['phones']);
+        $this->assertCount(1, $userUpdate->json()['data']['phones']);
+
     }
 
     public function testAddPhonesRepeated(): void {
@@ -219,9 +222,10 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
             $this->landlord->user_cross_tenant_admin,
             $this->temporary_phone_1,
         );
+
         $userUpdate->assertStatus(200);
 
-        $this->assertNotContains($this->temporary_phone_1, $userUpdate->json()['data']['phones']);
+        $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_1), $userUpdate->json()['data']['phones']);
     }
 
     public function testRemovePhoneFromSecondUser(): void {
@@ -231,6 +235,6 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
         );
         $userUpdate->assertStatus(200);
 
-        $this->assertNotContains($this->temporary_phone_2, $userUpdate->json()['data']['phones']);
+        $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_2), $userUpdate->json()['data']['phones']);
     }
 }

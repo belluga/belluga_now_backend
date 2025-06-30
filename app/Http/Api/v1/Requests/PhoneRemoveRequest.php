@@ -26,7 +26,8 @@ class PhoneRemoveRequest extends FormRequest
         return [
             'phone' => [
                 'required',
-                'string'
+                'string',
+                'phone:INTERNATIONAL,BR'
             ],
         ];
     }
