@@ -3,12 +3,25 @@
 namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Tests\Helpers\Landlord;
 
 abstract class TestCase extends BaseTestCase {
 
     use MigrateFreshSeedOnce;
 
     protected string $prefix = "default";
+
+    protected string $api_url_admin {
+        get {
+            return "admin/api";
+        }
+    }
+
+    protected Landlord $landlord {
+        get {
+            return new Landlord("landlord");
+        }
+    }
 
     protected function getGlobal($key): mixed{
         global $params;

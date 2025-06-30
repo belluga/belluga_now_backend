@@ -2,29 +2,18 @@
 
 namespace Tests;
 
-use Tests\Enums\AccountEnvironments;
-use Tests\Enums\TestVariableLabels;
-
 abstract class TestCaseAuthenticated extends TestCase
 {
-    protected string $main_account_token {
+
+    protected string $base_api_url {
         get {
-            return $this->getGlobal(TestVariableLabels::MAIN_ACCOUNT_TOKEN->value);
+            return "admin/api/";
         }
     }
 
-    protected string $secondary_account_token {
-        get {
-            return $this->getGlobal(TestVariableLabels::SECONDARY_ACCOUNT_TOKEN->value);
-        }
-    }
+    protected function getHeaders(): array {
 
-    protected function getHeaders(AccountEnvironments $accountEnv = AccountEnvironments::MAIN): array {
-
-        $token = match ($accountEnv) {
-            AccountEnvironments::MAIN => $this->main_account_token,
-            AccountEnvironments::SECONDARY => $this->secondary_account_token,
-        };
+        $token = $this->landlord->user_superadmin->token;
 
         return [
             'Authorization' => "Bearer $token",

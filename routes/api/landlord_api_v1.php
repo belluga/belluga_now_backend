@@ -1,0 +1,140 @@
+<?php
+
+use App\Http\Api\v1\Controllers\TenantController;
+use App\Http\Api\v1\Controllers\LandlordUserController;
+use Illuminate\Support\Facades\Route;
+use App\Http\Api\v1\Controllers\AuthControllerLandlord;
+use App\Http\Api\v1\Controllers\LandlordRolesController;
+use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+
+Route::prefix('profile')
+    ->middleware(['auth:sanctum'])
+    ->group(function () {
+        Route::patch('/password', [ProfileControllerLandlord::class, 'updatePassword'])
+            ->name('admin.profile.check');
+
+        Route::patch('/', [ProfileControllerLandlord::class, 'updateProfile'])
+            ->name('admin.profile.check');
+
+        Route::patch('/emails', [ProfileControllerLandlord::class, 'addEmails'])
+            ->name('admin.profile.add_emails');
+
+        Route::delete('/emails', [ProfileControllerLandlord::class, 'removeEmail'])
+            ->name('admin.profile.remove_emails');
+
+        Route::patch('/phones', [ProfileControllerLandlord::class, 'addPhones'])
+            ->name('admin.profile.add_phones');
+
+        Route::delete('/phones', [ProfileControllerLandlord::class, 'removePhone'])
+            ->name('admin.profile.remove_phones');
+});
+
+Route::prefix('auth')->group(function () {
+
+    Route::post('/logout', [AuthControllerLandlord::class, 'logout'])
+        ->middleware(['auth:sanctum'])
+        ->name('admin.auth.logout');
+
+    Route::withoutMiddleware('landlord')
+        ->group(function () {
+            Route::post('/login', [AuthControllerLandlord::class, 'login'])
+                ->name('admin.auth.login');
+
+            Route::post('/password_token', [ProfileControllerLandlord::class, 'generateToken'])
+                ->name('admin.auth.token');
+
+            Route::post('/password_reset', [ProfileControllerLandlord::class, 'resetPassword'])
+                ->name('admin.auth.password_reset');
+
+            Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
+                ->middleware(['auth:sanctum'])
+                ->name('admin.profile.check');
+        });
+});
+
+Route::prefix('tenants')->group(function () {
+    Route::get('/', [TenantController::class, 'index'])
+        ->middleware('auth:sanctum', 'abilities:tenants:read')
+        ->name('tenants.index');
+
+    Route::post('/', [TenantController::class, 'store'])
+        ->middleware('auth:sanctum', 'abilities:tenants:create')
+        ->name('tenants.store');
+
+    Route::get('/{tenant_slug}', [TenantController::class, 'show'])
+        ->middleware('auth:sanctum', 'abilities:tenants:read')
+        ->name('tenants.show');
+
+    Route::patch('/{tenant_slug}', [TenantController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:tenants:create,tenants:update')
+        ->name('tenants.update');
+
+    Route::delete('/{tenant_slug}', [TenantController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:tenants:delete')
+        ->name('tenants.destroy');
+
+    Route::post('/{tenant_slug}/restore', [TenantController::class, 'restore'])
+        ->middleware('auth:sanctum', 'abilities:tenants:manage')
+        ->name('tenants.restore');
+
+    Route::delete('/{tenant_slug}/force_delete', [TenantController::class, 'forceDestroy'])
+        ->middleware('auth:sanctum', 'abilities:tenants:delete')
+        ->name('tenants.destroy');
+});
+
+Route::prefix('users')->group(function () {
+    Route::get('/', [LandlordUserController::class, 'index'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:read')
+        ->name('users.index');
+
+    Route::post('/', [LandlordUserController::class, 'store'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:create')
+        ->name('users.store');
+
+    Route::get('/{user_id}', [LandlordUserController::class, 'show'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:read')
+        ->name('users.show');
+
+    Route::patch('/{user_id}', [LandlordUserController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:update,landlord-users:create')
+        ->name('users.update');
+
+    Route::delete('/{user_id}/force_delete', [LandlordUserController::class, 'forceDestroy'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:delete')
+        ->name('users.destroy');
+
+    Route::post('/{user_id}/restore', [LandlordUserController::class, 'restore'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:update,landlord-users:delete')
+        ->name('users.restore');
+
+    Route::delete('/{user_id}', [LandlordUserController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:landlord-users:delete')
+        ->name('users.force_destroy');
+//
+//    // Alterar senha
+//    Route::put('/{id}/password', [UserController::class, 'updatePassword'])
+//        ->name('users.password.update');
+});
+
+Route::prefix('roles')->group(function () {
+    Route::get('/', [LandlordRolesController::class, 'index'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:view');
+
+    Route::post('/', [LandlordRolesController::class, 'store'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:create');
+
+    Route::get('{role_id}', [LandlordRolesController::class, 'show'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:view');
+
+    Route::patch('{role_id}', [LandlordRolesController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:update');
+
+    Route::delete('{role_id}', [LandlordRolesController::class, 'destroy'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:delete');
+
+    Route::delete('{role_id}/force_delete', [LandlordRolesController::class, 'forceDestroy'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:delete');
+
+    Route::post('{role_id}/restore', [LandlordRolesController::class, 'restore'])
+        ->middleware('auth:sanctum', 'abilities:landlord-roles:update,landlord-roles:delete');
+});

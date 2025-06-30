@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -31,7 +33,6 @@ class UserAttachRequest extends FormRequest
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'success' => false,
             'errors' => $validator->errors()
         ], 422));
     }

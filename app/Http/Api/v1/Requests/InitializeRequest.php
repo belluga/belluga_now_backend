@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -24,19 +26,24 @@ class InitializeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'string',
-            'email' => 'required|string|email',
-            'password' => 'required|string',
-            'account.name' => 'string|required',
-            'account.document' => 'string|required',
-            'account.address' => 'string|required'
+            'tenant.name' => 'required|string',
+            'tenant.subdomain' => 'required|string',
+            'tenant.domains' => 'required|array',
+            'user.name' => 'string',
+            'user.emails' => 'required|array',
+            'user.emails.*' => 'email',
+            'user.password' => 'required|string',
+            'role.name' => ['required', 'string', 'max:255'],
+            'role.description' => ['nullable', 'string', 'max:1000'],
+            'role.permissions' => ['required', 'array'],
+            'role.permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
+            'role.is_default' => ['boolean'],
         ];
     }
 
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'success' => false,
             'errors' => $validator->errors()
         ], 422));
     }

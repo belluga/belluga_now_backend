@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -26,7 +28,8 @@ class RegisterUserRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
+            'emails' => 'required|array',
+            'emails.*' => 'required|string|email|max:255|unique:landlord_users',
             'password' => ['required', 'confirmed', Password::defaults()],
             'device_name' => 'required',
         ];
@@ -35,7 +38,6 @@ class RegisterUserRequest extends FormRequest
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'success' => false,
             'errors' => $validator->errors()
         ], 422));
     }

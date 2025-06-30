@@ -2,10 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\Category;
-use App\Models\Module;
-use App\Models\User;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\Landlord\Tenant;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -15,12 +12,18 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // Primeiro, criamos o administrador do sistema (landlord)
+        $this->call(LandlordUserSeeder::class);
 
-        User::factory()->create([
-            'name' => 'Super Admin',
-            'email' => 'test@example.com',
-        ]);
+        // Em seguida, criamos os tenants com suas configurações específicas
+        $this->call(TenantSeeder::class);
 
-        Category::factory()->count(5)->create();
+        // Depois, populamos cada tenant com seus dados
+        $this->call(GuitarChordsTenantSeeder::class);
+    }
+
+    public function initialize(): void
+    {
+        Tenant::factory()->initialize();
     }
 }

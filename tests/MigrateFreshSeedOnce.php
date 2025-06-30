@@ -1,5 +1,7 @@
 <?php
+
 namespace Tests;
+
 use Illuminate\Support\Facades\Artisan;
 
 trait MigrateFreshSeedOnce
@@ -17,7 +19,10 @@ trait MigrateFreshSeedOnce
     {
         parent::setUp();
         if (!static::$setUpHasRunOnce) {
-            Artisan::call('migrate:fresh');
+
+            Artisan::call('tenants:artisan "migrate:fresh --database=tenant --path=database/migrations/tenants"');
+
+            Artisan::call('migrate:fresh --database=landlord --path=database/migrations/landlord');
 //            Artisan::call(
 //                'db:seed', ['--class' => 'DatabaseSeeder']
 //            );
