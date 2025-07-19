@@ -15,6 +15,24 @@ use Illuminate\Support\Facades\DB;
 class InitializationController extends Controller
 {
 
+    public function isInitialized(): JsonResponse {
+        $users_count = LandlordUser::all()->count();
+        $tenants_count = Tenant::all()->count();
+
+        if($users_count > 0 || $tenants_count > 0){
+            return response()->json(
+                [
+                    "success" => false,
+                    "message" => "Sistema já inicializado",
+                    "errors" => [
+                        "user" => ["Sistema já inicializado"]
+                    ]],
+                403);
+        }
+
+        return response()->json();
+    }
+
     public function initialize(InitializeRequest $request): JsonResponse {
 
         $users_count = LandlordUser::all()->count();
