@@ -12,6 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('account_role_templates', function (Blueprint $collection) {
+            $collection->index('permissions');
             $collection->unique(['account_id' => -1, 'slug' => -1]);
             $collection->index(['created_at' => -1, "updated_at" => -1], );
         });

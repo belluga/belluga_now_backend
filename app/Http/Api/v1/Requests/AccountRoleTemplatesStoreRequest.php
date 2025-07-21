@@ -25,7 +25,7 @@ class AccountRoleTemplatesStoreRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
             'permissions' => ['required', 'array'],
-            'permissions.*' => ['required', 'string', 'regex:/^[a-z]+(?:-[a-z]+)*:(?:\*|[a-z]+)$/'],
+            'permissions.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
         ];
     }
 }

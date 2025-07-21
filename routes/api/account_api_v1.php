@@ -29,14 +29,6 @@ Route::middleware('auth:sanctum')
                 Route::delete('/{user_id}', [AccountUserController::class, 'destroy'])
                     ->middleware('account', "abilities:account-users:delete")
                     ->name('tenant.users.destroy');
-
-                Route::delete('/{user_id}/force_delete', [AccountUserController::class, 'forceDestroy'])
-                    ->middleware('account', "abilities:account-users:delete")
-                    ->name('tenant.users.force_destroy');
-
-                Route::post('/{user_id}/restore', [AccountUserController::class, 'restore'])
-                    ->middleware('account', "abilities:account-users:create,account-users:update,account-users:delete")
-                    ->name('tenant.users.restore');
             });
 
         Route::prefix("roles")

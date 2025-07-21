@@ -152,7 +152,9 @@ abstract class ApiDefaultAccountRolesTestContract extends TestCaseAccount
             $this->account->role_disposable,
             [
                 "name" => "Updated {$this->account->role_disposable->name}",
-                "permissions" => ["account-users:view", "account-users:create", "account-users:update"],
+                "permissions" => [
+                    "add" => ["account-users:view", "account-users:create", "account-users:update"]
+                ],
             ]
         );
 
@@ -181,7 +183,7 @@ abstract class ApiDefaultAccountRolesTestContract extends TestCaseAccount
         $deleteResponse = $this->accountRolesDelete(
             $this->account->role_disposable,
             [
-                "role_id" => $this->account->role_visitor->id
+                "background_role_id" => $this->account->role_visitor->id
             ]
         );
 
@@ -235,7 +237,7 @@ abstract class ApiDefaultAccountRolesTestContract extends TestCaseAccount
         $restoreResponse = $this->accountRolesDelete(
             $this->account->role_disposable,
             [
-                "role_id" => $this->account->role_visitor->id
+                "background_role_id" => $this->account->role_visitor->id
             ]
         );
         $restoreResponse->assertStatus(200);

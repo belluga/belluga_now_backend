@@ -79,7 +79,37 @@ class TenantRolesController extends Controller
             ->where("tenant_id", Tenant::current()->id)
             ->firstOrFail();
 
-        $role->update($request->validated());
+        $validated = $request->validated();
+
+        if (isset($validated['permissions'])) {
+            $permissions = $validated['permissions'];
+
+            if (isset($permissions['set'])) {
+                // The 'set' operation overwrites everything.
+                // Using array_values and array_unique for data consistency.
+                $role->permissions = array_values(array_unique($permissions['set']));
+            } else {
+                // Start with the role's current permissions.
+                $currentPermissions = $role->permissions ?? [];
+
+                // 1. First, process additions.
+                if (isset($permissions['add'])) {
+                    $currentPermissions = array_merge($currentPermissions, $permissions['add']);
+                }
+
+                // 2. Then, process removals on the updated list.
+                if (isset($permissions['remove'])) {
+                    $currentPermissions = array_diff($currentPermissions, $permissions['remove']);
+                }
+
+                // 3. Finally, ensure uniqueness and re-index the keys for MongoDB.
+                $role->permissions = array_values(array_unique($currentPermissions));
+            }
+
+            unset($validated['permissions']);
+        }
+
+        $role->update($validated);
 
         return response()->json([
             'data' => $role
@@ -99,7 +129,7 @@ class TenantRolesController extends Controller
         DB::beginTransaction();
         try {
             LandlordUser::where("role_id", $role->id)
-                ->update(['role_id' => $request->validated()['role_id']]);;
+                ->update(['role_id' => $request->validated()['background_role_id']]);;
 
             $role->delete();
             DB::commit();

@@ -12,7 +12,8 @@ class Domains extends Model
     use UsesLandlordConnection, SoftDeletes;
 
     protected $fillable = [
-        'path'
+        'path',
+        'type'
     ];
 
     public function tenant(): BelongsTo {

@@ -151,7 +151,7 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
     protected function tenantUserShow(string $user_id): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/tenant-users/$user_id",
+            uri: "http://{$this->tenant->subdomain}.localhost/admin/api/users/$user_id",
             headers: $this->getHeaders(),
         );
     }

@@ -160,7 +160,10 @@ class ApiDefaultAdminRolesTest extends TestCaseAuthenticated
             $this->landlord->role_disposable->id,
             [
                 "name" => "Updated Role Name",
-                "permissions" => ["user.view", "user.create", "role.view", "role.create"],
+                "permissions" => [
+                    "add" => ["user:view", "user:create", "role:view", "role:create"],
+                    "remove" => ["profile:view", "profile:update"],
+                ],
             ]
         );
 
@@ -171,7 +174,7 @@ class ApiDefaultAdminRolesTest extends TestCaseAuthenticated
 
         $this->assertEquals("Updated Role Name", $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["user.view", "user.create", "role.view", "role.create"],
+            ["user:view", "user:create", "role:view", "role:create"],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -278,7 +281,7 @@ class ApiDefaultAdminRolesTest extends TestCaseAuthenticated
             method: 'delete',
             uri: "admin/api/roles/$roleId",
             data: [
-                "role_id" => $this->landlord->role_visitor->id,
+                "background_role_id" => $this->landlord->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );

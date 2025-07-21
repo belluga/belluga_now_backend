@@ -49,7 +49,7 @@ class DomainTenantFinder extends TenantFinder
 
     protected function isRequestFromSubdomain(): bool {
         $host = request()->getHost();
-        $parts_request = explode('.', $host);
+        $parts_request = explode('.', $host, 2);
 
         if (count($parts_request) >= 2) {
             $parts_config = explode('://', config('app.url'));
