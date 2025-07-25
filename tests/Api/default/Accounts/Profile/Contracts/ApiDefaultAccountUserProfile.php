@@ -126,14 +126,6 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
     public function testAccountUserAddPhonesFirstUser(): void {
 
-        print_r([
-            "user" => [
-                "id" => $this->account->user_visitor->user_id,
-                "name" => $this->account->user_visitor->name,
-            ],
-            "phone" => $this->temporary_phone_1,
-        ]);
-
         $update = $this->profileAddPhones(
             $this->account->user_visitor,
             [
