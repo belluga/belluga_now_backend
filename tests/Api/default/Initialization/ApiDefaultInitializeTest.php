@@ -8,6 +8,9 @@ use Tests\TestCase;
 class ApiDefaultInitializeTest extends TestCase {
 
     public function testInitiate(): void {
+        
+        $response = $this->initiateCheck();        
+        $response->assertStatus(200); 
 
         $this->landlord->user_superadmin->name = fake()->name();
         $this->landlord->user_superadmin->email_1 = fake()->email();
@@ -46,6 +49,10 @@ class ApiDefaultInitializeTest extends TestCase {
     public function testInitiateAgain(): void {
         $response = $this->initiate();
         $response->assertStatus(403);
+        
+
+        $response = $this->initiateCheck();
+        $response->assertStatus(403);
 
         $response->assertJsonStructure([
             "message",
@@ -58,6 +65,13 @@ class ApiDefaultInitializeTest extends TestCase {
             method: 'post',
             uri: "initialize",
             data: $this->payloadInitiate(),
+        );
+    }
+
+    protected function initiateCheck(): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "initialize",
         );
     }
 
