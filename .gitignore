@@ -1,3 +1,5 @@
+bootstrap/cache/
+storage/
 /local/*
 /.phpunit.cache
 /node_modules
