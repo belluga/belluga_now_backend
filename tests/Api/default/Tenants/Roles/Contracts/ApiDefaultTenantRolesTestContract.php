@@ -166,7 +166,10 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
             $this->tenant->role_disposable->id,
             [
                 "name" => "Updated Role Name",
-                "permissions" => ["user.view", "user.create", "role.view", "role.create"],
+                "permissions" => [
+                    "add" => ["user:view", "user:create", "role:view", "role:create"],
+                    "remove" => ["profile:view", "profile:update"],
+                ],
             ]
         );
 
@@ -177,7 +180,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
 
         $this->assertEquals("Updated Role Name", $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["user.view", "user.create", "role.view", "role.create"],
+            ["user:view", "user:create", "role:view", "role:create"],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -286,7 +289,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
             method: 'delete',
             uri: "http://{$this->tenant->subdomain}.localhost/api/roles/$roleId",
             data: [
-                "role_id" => $this->landlord->tenant_primary->role_visitor->id,
+                "background_role_id" => $this->landlord->tenant_primary->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );

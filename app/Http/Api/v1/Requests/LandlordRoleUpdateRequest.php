@@ -24,8 +24,13 @@ class LandlordRoleUpdateRequest extends FormRequest
         return [
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'permissions' => ['sometimes', 'array'],
-            'permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
+            'permissions' => ['required', 'array', 'min:1'],
+            'permissions.add' => ['sometimes', 'array', 'prohibits:permissions.set'],
+            'permissions.remove' => ['sometimes', 'array', 'prohibits:permissions.set'],
+            'permissions.set' => ['sometimes', 'array', 'prohibits:permissions.add,permissions.remove'],
+            'permissions.add.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'permissions.remove.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'permissions.set.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
             'is_default' => ['boolean'],
         ];
     }

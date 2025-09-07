@@ -85,10 +85,6 @@ Route::prefix('tenant-users')
             ->middleware('auth:sanctum', 'abilities:tenant-users:delete')
             ->name('manage.tenants.users.detach');
 
-        Route::get('/{user_id}', [LandlordUserController::class, 'show'])
-            ->middleware('auth:sanctum', 'abilities:tenant-users:view')
-            ->name('tenant.users.show');
-
     });
 
 Route::prefix('users')
@@ -97,14 +93,6 @@ Route::prefix('users')
         Route::get('/', [TenantUsersController::class, 'index'])
             ->middleware('auth:sanctum', 'abilities:account-users:view')
             ->name('manage.account-users.list');
-
-        Route::post('/', [TenantUsersController::class, 'accountUserManage'])
-            ->middleware('auth:sanctum', 'abilities:account-users:create,account-users:update')
-            ->name('manage.account-users.attach');
-
-        Route::delete('/', [TenantUsersController::class, 'accountUserManage'])
-            ->middleware('auth:sanctum', 'abilities:account-users:delete')
-            ->name('manage.account-users.detach');
 
         Route::get('/{user_id}', [TenantUsersController::class, 'show'])
             ->middleware('auth:sanctum', 'abilities:account-users:view')

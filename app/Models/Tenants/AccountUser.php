@@ -36,7 +36,7 @@ class AccountUser extends Authenticatable {
         'password' => 'hashed',
     ];
 
-    public function tenantRoles(): EmbedsMany {
+    public function accountRoles(): EmbedsMany {
         return $this->embedsMany(AccountRole::class, 'account_roles');
     }
 

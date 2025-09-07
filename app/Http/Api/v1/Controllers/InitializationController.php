@@ -95,7 +95,7 @@ class InitializationController extends Controller
 
             DB::connection('landlord')->commit();
 
-        }catch (\Exception $e){
+        }catch (\Throwable $e){
             DB::connection('landlord')->rollBack();
             throw $e;
         }

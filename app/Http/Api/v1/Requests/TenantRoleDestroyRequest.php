@@ -22,7 +22,7 @@ class TenantRoleDestroyRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'role_id' => 'required|string|exists:landlord.tenant_role_templates,_id'
+            'background_role_id' => 'required|string|exists:landlord.tenant_role_templates,_id'
         ];
     }
 }

@@ -51,10 +51,9 @@ class Tenant extends BaseTenant
     {
         foreach ($domains as $domain) {
             try {
-                $this->domains()->create(
-                    ["path" => $domain], [
+                $this->domains()->create([
                     "type" => "web",
-                    "path" => $domain,
+                    "path" => $domain
                 ]);
             } catch (BulkWriteException $e) {
                 if (str_contains($e->getMessage(), 'E11000')) {

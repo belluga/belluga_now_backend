@@ -22,7 +22,9 @@ class AccountRolesDeleteRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'role_id' => 'required|string|exists:tenant.account_role_templates,_id'
+            'background_role_id' => 'required|string|exists:tenant.account_role_templates,_id'
         ];
     }
+
+
 }
