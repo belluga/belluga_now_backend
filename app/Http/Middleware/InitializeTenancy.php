@@ -13,11 +13,9 @@ class InitializeTenancy
 
         $tenant = new $tenant_find_class()->findForRequest($request);
 
-        if(!$tenant){
-            abort(400, "Tenant not found");
+        if($tenant){
+            $tenant->makeCurrent();
         }
-
-        $tenant->makeCurrent();
 
         return $next($request);
     }

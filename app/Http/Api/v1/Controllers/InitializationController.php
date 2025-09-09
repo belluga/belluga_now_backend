@@ -27,10 +27,10 @@ class InitializationController extends Controller
                     "errors" => [
                         "user" => ["Sistema já inicializado"]
                     ]],
-                403);
+                200);
         }
 
-        return response()->json();
+        return response()->json(status: 403);
     }
 
     public function initialize(InitializeRequest $request): JsonResponse {
