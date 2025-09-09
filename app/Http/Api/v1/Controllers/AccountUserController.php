@@ -59,7 +59,7 @@ class AccountUserController extends Controller
             if(!$user->haveAccessTo(Account::current())){
                 $role_template = AccountRoleTemplate::where('_id', new ObjectId($request->role_id))->firstOrFail();
 
-                $user->tenantRoles()->create([
+                $user->accountRoles()->create([
                     ...$role_template->attributesToArray(),
                     'account_id' =>Account::current()->id,
                 ]);
@@ -122,7 +122,7 @@ class AccountUserController extends Controller
                 422);
         }
 
-        $user->tenantRoles()
+        $user->accountRoles()
             ->where("account_id", Account::current()->id)
             ->first()
             ->delete();
@@ -134,44 +134,6 @@ class AccountUserController extends Controller
         }
 
         return response()->json(['message' => 'Usuário removido da conta com sucesso']);
-    }
-
-    public function restore(Request $request): JsonResponse {
-
-        $user_id = $request->route("user_id");
-
-        $user = AccountUser::onlyTrashed()
-            ->where("_id", new ObjectId($user_id))
-            ->where("account_roles.account_id", Account::current()->id)
-            ->firstOrFail();
-
-        $user->restore();
-
-        return response()->json(
-            [
-                "data" => UserResource::make($user)
-            ]
-        );
-    }
-
-    public function forceDestroy(Request $request): JsonResponse {
-
-        $user = $this->getFirstUserByRouteOrFail();
-
-        if ($user->_id === Auth::id()) {
-            return response()->json([
-                'message' => 'Não é possível excluir o próprio usuário',
-                'errors' => [
-                    "user_id" => [
-                        "Não é possível excluir o próprio usuário"
-                    ]
-                ]
-            ], 422);
-        }
-
-        $user->forceDelete();
-
-        return response()->json();
     }
 
     private function getFirstUserByRouteOrFail(): AccountUser {

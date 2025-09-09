@@ -8,9 +8,9 @@ use Tests\TestCase;
 class ApiDefaultInitializeTest extends TestCase {
 
     public function testInitiate(): void {
-        
-        $response = $this->initiateCheck();        
-        $response->assertStatus(200); 
+
+        $response = $this->initiateCheck();
+        $response->assertStatus(200);
 
         $this->landlord->user_superadmin->name = fake()->name();
         $this->landlord->user_superadmin->email_1 = fake()->email();
@@ -49,7 +49,7 @@ class ApiDefaultInitializeTest extends TestCase {
     public function testInitiateAgain(): void {
         $response = $this->initiate();
         $response->assertStatus(403);
-        
+
 
         $response = $this->initiateCheck();
         $response->assertStatus(403);
@@ -88,9 +88,6 @@ class ApiDefaultInitializeTest extends TestCase {
             "tenant" => [
                 "name" => $this->landlord->tenant_primary->name,
                 "subdomain" => $this->landlord->tenant_primary->subdomain,
-                "domains" => [
-                    "localhost"
-                ]
             ],
             "role" => [
                 "name" =>  $this->landlord->role_superadmin->name,

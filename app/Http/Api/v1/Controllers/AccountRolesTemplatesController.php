@@ -78,7 +78,37 @@ class AccountRolesTemplatesController extends Controller
             ], 422);
         }
 
-        $role->update($request->validated());
+        $validated = $request->validated();
+
+        if (isset($validated['permissions'])) {
+            $permissions = $validated['permissions'];
+
+            if (isset($permissions['set'])) {
+                // The 'set' operation overwrites everything.
+                // Using array_values and array_unique for data consistency.
+                $role->permissions = array_values(array_unique($permissions['set']));
+            } else {
+                // Start with the role's current permissions.
+                $currentPermissions = $role->permissions ?? [];
+
+                // 1. First, process additions.
+                if (isset($permissions['add'])) {
+                    $currentPermissions = array_merge($currentPermissions, $permissions['add']);
+                }
+
+                // 2. Then, process removals on the updated list.
+                if (isset($permissions['remove'])) {
+                    $currentPermissions = array_diff($currentPermissions, $permissions['remove']);
+                }
+
+                // 3. Finally, ensure uniqueness and re-index the keys for MongoDB.
+                $role->permissions = array_values(array_unique($currentPermissions));
+            }
+
+            unset($validated['permissions']);
+        }
+
+        $role->update($validated);
 
         return response()->json([
             'data' => $role
@@ -87,7 +117,7 @@ class AccountRolesTemplatesController extends Controller
 
     public function destroy(AccountRolesDeleteRequest $request): JsonResponse
     {
-        if($request->route("role_id") == $request->validated()['role_id']){
+        if($request->route("role_id") == $request->validated()['background_role_id']){
             return response()->json([
                 "message" => "Role ID background should be different from the role ID to be deleted.",
                 "errors" => [
@@ -104,7 +134,7 @@ class AccountRolesTemplatesController extends Controller
 
         $role_to_delete = $account->roleTemplates()->where('_id', new ObjectId($request->route("role_id")))->firstOrFail();
 
-        $role_background = $account->roleTemplates()->where('_id', new ObjectId($request->validated()['role_id']))->firstOrFail();
+        $role_background = $account->roleTemplates()->where('_id', new ObjectId($request->validated()['background_role_id']))->firstOrFail();
 
         try{
             DB::beginTransaction();

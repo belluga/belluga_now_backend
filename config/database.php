@@ -121,13 +121,13 @@ return [
         'landlord' => [
             'driver' => 'mongodb',
             'dsn' => env('DB_URI_LANDLORD'),
-            'database' => env('DB_DATABASE_LANDLORD', 'landlord'),
+            'database' => env('DB_DATABASE_LANDLORD', 'default_landlord'),
         ],
 
         'tenant' => [
             'driver' => 'mongodb',
             'dsn' => env('DB_URI_TENANTS'),
-            'database' => env('DB_DATABASE_TENANT', 'default_tenant_db'),
+            'database' => env('DB_DATABASE_TENANTS', 'default_tenant_db'),
         ],
 
     ],

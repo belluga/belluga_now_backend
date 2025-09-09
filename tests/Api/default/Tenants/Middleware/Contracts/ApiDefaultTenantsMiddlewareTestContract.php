@@ -112,7 +112,7 @@ abstract class ApiDefaultTenantsMiddlewareTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles",
             data: $data,
             headers: $headers,
         );
@@ -122,7 +122,7 @@ abstract class ApiDefaultTenantsMiddlewareTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles",
             headers: $headers,
         );
     }

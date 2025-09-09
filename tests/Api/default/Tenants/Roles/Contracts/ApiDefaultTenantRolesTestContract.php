@@ -166,7 +166,10 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
             $this->tenant->role_disposable->id,
             [
                 "name" => "Updated Role Name",
-                "permissions" => ["user.view", "user.create", "role.view", "role.create"],
+                "permissions" => [
+                    "add" => ["user:view", "user:create", "role:view", "role:create"],
+                    "remove" => ["profile:view", "profile:update"],
+                ],
             ]
         );
 
@@ -177,7 +180,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
 
         $this->assertEquals("Updated Role Name", $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["user.view", "user.create", "role.view", "role.create"],
+            ["user:view", "user:create", "role:view", "role:create"],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -237,7 +240,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles",
             headers: $this->getHeaders(),
         );
     }
@@ -246,7 +249,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles//?archived=true",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles//?archived=true",
             headers: $this->getHeaders(),
         );
     }
@@ -255,7 +258,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles/$roleId",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles/$roleId",
             headers: $this->getHeaders(),
         );
     }
@@ -264,7 +267,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -274,7 +277,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'patch',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles/$roleId",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles/$roleId",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -284,9 +287,9 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles/$roleId",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles/$roleId",
             data: [
-                "role_id" => $this->landlord->tenant_primary->role_visitor->id,
+                "background_role_id" => $this->landlord->tenant_primary->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );
@@ -296,7 +299,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles/$roleId/force_delete",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles/$roleId/force_delete",
             headers: $this->getHeaders(),
         );
     }
@@ -305,7 +308,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/roles/$roleId/restore",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/roles/$roleId/restore",
             headers: $this->getHeaders(),
         );
     }

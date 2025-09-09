@@ -10,7 +10,7 @@ use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 
 Route::prefix('profile')
-    ->middleware(['auth:sanctum'])
+    ->middleware('auth:sanctum')
     ->group(function () {
         Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword'])
             ->name('admin.profile.check');
@@ -43,7 +43,7 @@ Route::prefix('auth')
         Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword'])
             ->name('admin.auth.password_reset');
 
-    Route::middleware(['auth:sanctum'])
+    Route::middleware('auth:sanctum')
         ->group(function () {
             Route::post('/logout', [AuthControllerAccount::class, 'logout'])
                 ->name('tenant.auth.logout');
@@ -85,10 +85,6 @@ Route::prefix('tenant-users')
             ->middleware('auth:sanctum', 'abilities:tenant-users:delete')
             ->name('manage.tenants.users.detach');
 
-        Route::get('/{user_id}', [LandlordUserController::class, 'show'])
-            ->middleware('auth:sanctum', 'abilities:tenant-users:view')
-            ->name('tenant.users.show');
-
     });
 
 Route::prefix('users')
@@ -97,14 +93,6 @@ Route::prefix('users')
         Route::get('/', [TenantUsersController::class, 'index'])
             ->middleware('auth:sanctum', 'abilities:account-users:view')
             ->name('manage.account-users.list');
-
-        Route::post('/', [TenantUsersController::class, 'accountUserManage'])
-            ->middleware('auth:sanctum', 'abilities:account-users:create,account-users:update')
-            ->name('manage.account-users.attach');
-
-        Route::delete('/', [TenantUsersController::class, 'accountUserManage'])
-            ->middleware('auth:sanctum', 'abilities:account-users:delete')
-            ->name('manage.account-users.detach');
 
         Route::get('/{user_id}', [TenantUsersController::class, 'show'])
             ->middleware('auth:sanctum', 'abilities:account-users:view')

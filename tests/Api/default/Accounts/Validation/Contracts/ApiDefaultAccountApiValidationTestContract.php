@@ -42,7 +42,7 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
         $response->assertJsonStructure([
             "message",
             "errors" => [
-                "empty",
+                "permissions",
             ]
         ]);
     }
@@ -58,7 +58,7 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
         $deleteResponse->assertJsonStructure([
            "message",
            "errors" => [
-               "role_id"
+               "background_role_id"
            ]
         ]);
     }

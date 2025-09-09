@@ -21,7 +21,7 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
     protected string $base_api_url {
         get{
-            return "http://{$this->tenant->subdomain}.localhost/api/";
+            return "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/";
         }
     }
 
