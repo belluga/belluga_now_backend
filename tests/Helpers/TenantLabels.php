@@ -47,7 +47,7 @@ class TenantLabels extends Labels {
 
     public string $base_api_url {
         get {
-            return "http://$this->subdomain.localhost/api/";
+            return "http://$this->subdomain.".env('APP_HOST')."/api/";
         }
     }
 

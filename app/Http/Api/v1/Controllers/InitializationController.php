@@ -57,7 +57,10 @@ class InitializationController extends Controller
                 "subdomain" => $request->tenant["subdomain"]
             ]);
 
-            $new_tenant->addDomains($request->tenant["domains"]);
+            if(isset($request->tenant["domains"])){
+                $new_tenant->addDomains($request->tenant["domains"]);
+            }
+
 
             $new_tenant->makeCurrent();
             $admin_role = LandlordRole::create([

@@ -28,7 +28,7 @@ class InitializeRequest extends FormRequest
         return [
             'tenant.name' => 'required|string',
             'tenant.subdomain' => 'required|string',
-            'tenant.domains' => 'required|array',
+            'tenant.domains' => ['nullable', 'array'],
             'user.name' => 'string',
             'user.emails' => 'required|array',
             'user.emails.*' => 'email',

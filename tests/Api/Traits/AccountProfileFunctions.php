@@ -9,7 +9,7 @@ trait AccountProfileFunctions {
 
     protected string $profile_api_base {
         get {
-            return "http://{$this->tenant->subdomain}.localhost/api/";
+            return "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/";
         }
     }
 

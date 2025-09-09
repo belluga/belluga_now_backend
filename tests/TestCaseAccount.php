@@ -13,7 +13,7 @@ abstract class TestCaseAccount extends TestCaseTenant {
 
     protected string $base_api_account {
         get {
-            return "http://{$this->tenant->subdomain}.localhost/api/accounts/{$this->account->slug}/";
+            return "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/accounts/{$this->account->slug}/";
         }
     }
 }

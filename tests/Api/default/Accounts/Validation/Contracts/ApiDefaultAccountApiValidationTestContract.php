@@ -38,8 +38,6 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
 
         $response = $this->accountRolesUpdate($this->account->role_visitor->id);
 
-        print_r($response->json());;
-
         $response->assertStatus(422);
         $response->assertJsonStructure([
             "message",

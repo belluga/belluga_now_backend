@@ -151,7 +151,7 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
     protected function tenantUserShow(string $user_id): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.localhost/admin/api/users/$user_id",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/admin/api/users/$user_id",
             headers: $this->getHeaders(),
         );
     }
@@ -159,7 +159,7 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
     protected function tenantUserAttach(array $data): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/tenant-users",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/tenant-users",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -168,7 +168,7 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
     protected function tenantUserDettach(array $data): TestResponse {
         return $this->json(
             method: 'delete',
-            uri: "http://{$this->tenant->subdomain}.localhost/api/tenant-users",
+            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/tenant-users",
             data: $data,
             headers: $this->getHeaders(),
         );

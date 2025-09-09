@@ -16,7 +16,6 @@ class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
             "errors" => [
                 "tenant.name",
                 "tenant.subdomain",
-                "tenant.domains",
                 "user.emails",
                 "user.password",
             ]

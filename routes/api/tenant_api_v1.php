@@ -10,7 +10,7 @@ use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 
 Route::prefix('profile')
-    ->middleware(['auth:sanctum'])
+    ->middleware('auth:sanctum')
     ->group(function () {
         Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword'])
             ->name('admin.profile.check');
@@ -43,7 +43,7 @@ Route::prefix('auth')
         Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword'])
             ->name('admin.auth.password_reset');
 
-    Route::middleware(['auth:sanctum'])
+    Route::middleware('auth:sanctum')
         ->group(function () {
             Route::post('/logout', [AuthControllerAccount::class, 'logout'])
                 ->name('tenant.auth.logout');
