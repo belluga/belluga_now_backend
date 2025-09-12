@@ -51,10 +51,11 @@ class InitializeRequest extends FormRequest
             'brandingData.themeDataSettings.lightSchemeData.secondarySeedColor' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
             'brandingData.logoSettings' => ['required', 'array'],
-            'logoSettings.lightLogoUri' => ['nullable', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.darkLogoUri'  => ['nullable', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.lightIconUri' => ['nullable', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.darkIconUri'  => ['nullable', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logoSettings.faviconUri' => ['required', 'image', 'mimes:ico', 'max:2048'],
+            'logoSettings.lightLogoUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logoSettings.darkLogoUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logoSettings.lightIconUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logoSettings.darkIconUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
         ];
     }
 

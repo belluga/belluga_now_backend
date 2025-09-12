@@ -62,8 +62,8 @@ class InitializationController extends Controller
             $logoSettingsFromRequest = $brandingDataFromRequest['logoSettings'] ?? [];
             $uploadedLogoPaths = [];
 
-            // Handle file uploads for logos
-            $logoKeys = ['lightLogoUri', 'darkLogoUri', 'lightIconUri', 'darkIconUri'];
+            // Handle file uploads for logos    
+            $logoKeys = ['lightLogoUri', 'darkLogoUri', 'lightIconUri', 'darkIconUri', 'faviconUri'];
             foreach ($logoKeys as $key) {
                 if ($request->hasFile("brandingData.logoSettings.$key")) {
                     // Store the file and get the path
