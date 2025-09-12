@@ -1,13 +1,14 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\DomainController;
-use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
-use App\Http\Api\v1\Controllers\TenantUsersController;
-use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Controllers\TenantRolesController;
+use App\Http\Api\v1\Controllers\TenantUsersController;
+use App\Http\Api\v1\Controllers\TenantBrandingController;
+use Illuminate\Support\Facades\Route;
 
 Route::prefix('profile')
     ->middleware('auth:sanctum')
@@ -160,4 +161,9 @@ Route::prefix('roles')->group(function () {
 
     Route::post('{role_id}/restore', [TenantRolesController::class, 'restore'])
         ->middleware('auth:sanctum', 'abilities:tenant-roles:update,tenant-roles:delete');
+});
+
+Route::prefix('branding')->group(function () {
+    Route::post('/', [TenantBrandingController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:tenant-roles:view');
 });

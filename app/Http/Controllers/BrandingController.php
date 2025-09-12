@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class BrandingController extends Controller
 {
@@ -35,36 +37,14 @@ class BrandingController extends Controller
     protected function _buildTenantManifest(): array {
 
         $tenant = Tenant::current();
-
-        return [
-            'name'             => $tenant->name,
-//            'short_name'       => $tenant->short_name,
-            'short_name'       => "tssdfsdf",
-            'start_url'        => '.',
-            'display'          => 'standalone',
-            'background_color' => $tenant->primary_color,
-            'theme_color'      => $tenant->primary_color,
-            'description'      => 'Portal do ' . $tenant->description,
-            'icons' => [
-                [
-                    'src'   => $tenant->icon_192_url, // Full URL to the public asset
-                    'sizes' => '192x192',
-                    'type'  => 'image/png',
-                ],
-                [
-                    'src'   => $tenant->icon_512_url,
-                    'sizes' => '512x512',
-                    'type'  => 'image/png',
-                ],
-            ],
-        ];
+        return $tenant->getManifestData();
     }
 
     protected function _buildLandlordManifest(): array {
         return [
             'name'             => 'Portal',
             'short_name'       => 'Portal',
-            'start_url'        => '.',
+            'start_url'        => '/',
             'display'          => 'standalone',
             'background_color' => '#ffffff',
             'theme_color'      => '#ffffff',
@@ -76,7 +56,7 @@ class BrandingController extends Controller
     /**
      * Serves the favicon.ico file for the current tenant from storage.
      */
-    public function getFavicon(Request $request)
+    public function getFavicon(Request $request): Response|BinaryFileResponse
     {
         $tenant = Tenant::current();
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
+use App\DataObjects\Branding\BrandingData;
 use App\Traits\HasOwner;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
@@ -24,6 +25,8 @@ class Tenant extends BaseTenant
     protected $fillable = [
         'name',
         'slug',
+        'description',
+        'branding_data',
         'database',
         'subdomain',
         'app_domains',
@@ -66,6 +69,31 @@ class Tenant extends BaseTenant
         }
 
         return null;
+    }
+
+    public function getManifestData(): array {
+
+        return [
+            'name'             => $this->name,
+            'short_name'       => $this->slug,
+            'description'      => 'Portal do ' . $this->description,
+            'start_url'        => '/',
+            'display'          => 'standalone',
+            'background_color' => $this->primary_color,
+            'theme_color'      => $this->primary_color,
+            'icons' => [
+                [
+                    'src'   => $this->icon_192_url, // Full URL to the public asset
+                    'sizes' => '192x192',
+                    'type'  => 'image/png',
+                ],
+                [
+                    'src'   => $this->icon_512_url,
+                    'sizes' => '512x512',
+                    'type'  => 'image/png',
+                ],
+            ],
+        ];
     }
 
     public function getSlugOptions(): SlugOptions
@@ -115,4 +143,8 @@ class Tenant extends BaseTenant
         ]);
 
     }
+
+    protected $casts = [
+        'branding_data' => BrandingData::class,
+    ];
 }
