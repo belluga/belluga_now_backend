@@ -2,6 +2,8 @@
 
 namespace Tests\Api\default\Initialization;
 
+use Illuminate\Http\UploadedFile;
+
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -10,7 +12,7 @@ class ApiDefaultInitializeTest extends TestCase {
     public function testInitiate(): void {
 
         $response = $this->initiateCheck();
-        $response->assertStatus(200);
+        $response->assertStatus(403);
 
         $this->landlord->user_superadmin->name = fake()->name();
         $this->landlord->user_superadmin->email_1 = fake()->email();
@@ -25,17 +27,47 @@ class ApiDefaultInitializeTest extends TestCase {
 
         $response->assertJsonStructure([
             "data" => [
-                "token",
                 "user" => [
                     "name",
                     "emails",
+                    "token"
                 ],
-                "tenant"
+                "tenant" => [
+                    "name",
+                    "subdomain",
+                    "slug"
+                ],
+                "role" => [
+                    "name",
+                    "permissions"
+                ],
+                "landlord" => [
+                    "name",
+                    "branding_data" => [
+                        "theme_data_settings"=> [
+                            "dark_scheme_data" => [
+                                "primary_seed_color",
+                                "secondary_seed_color"
+                            ],
+                            "light_scheme_data"=> [
+                                "primary_seed_color",
+                                "secondary_seed_color"
+                            ]
+                        ],
+                        "logo_settings" => [
+                            "favicon_uri",
+                            "light_logo_uri",
+                            "dark_logo_uri",
+                            "light_icon_uri",
+                            "dark_icon_uri"
+                        ]
+                    ]
+                ]
             ],
         ]);
 
         $this->landlord->user_superadmin->user_id = $response->json()['data']['user']["id"];
-        $this->landlord->user_superadmin->token = $response->json()['data']['token'];
+        $this->landlord->user_superadmin->token = $response->json()['data']['user']['token'];
 
         $this->landlord->tenant_primary->slug = $response->json()['data']['tenant']["slug"];
         $this->landlord->tenant_primary->id = $response->json()['data']['tenant']["id"];
@@ -52,7 +84,7 @@ class ApiDefaultInitializeTest extends TestCase {
 
 
         $response = $this->initiateCheck();
-        $response->assertStatus(403);
+        $response->assertStatus(200);
 
         $response->assertJsonStructure([
             "message",
@@ -61,10 +93,9 @@ class ApiDefaultInitializeTest extends TestCase {
     }
 
     protected function initiate(): TestResponse {
-        return $this->json(
-            method: 'post',
-            uri: "initialize",
-            data: $this->payloadInitiate(),
+        return $this->post(
+            'initialize',
+            $this->payloadInitiate()
         );
     }
 
@@ -77,6 +108,9 @@ class ApiDefaultInitializeTest extends TestCase {
 
     protected function payloadInitiate(): array {
         return [
+            "landlord" => [
+                "name" => fake()->company()
+            ],
             "user" => [
                 "name" => $this->landlord->user_superadmin->name,
                 "emails" => [
@@ -94,9 +128,28 @@ class ApiDefaultInitializeTest extends TestCase {
                 "permissions" => [
                     "*"
                 ],
+            ],
+            "branding_data" => [
+                "theme_data_settings" => [
+                    "dark_scheme_data" => [
+                        'primary_seed_color' => '#000000',
+                        'secondary_seed_color' => '#CCCCCC',
+                    ],
+                    "light_scheme_data" => [
+                        'primary_seed_color' => '#FFFFFF',
+                        'secondary_seed_color' => '#CCCCCC',
+                    ]
+                ],
+                'logo_settings' => [
+                    // Images as real uploaded files
+                    'light_icon_uri' => UploadedFile::fake()->image('light-icon.png', 192, 192),
+                    'dark_icon_uri' => UploadedFile::fake()->image('dark-icon.png', 192, 192),
+                    'light_logo_uri' => UploadedFile::fake()->image('light-logo.png', 512, 256),
+                    'dark_logo_uri' => UploadedFile::fake()->image('dark-logo.png', 512, 256),
+                    // Real ICO file upload (1 KB, mime type image/x-icon)
+                    'favicon_uri' => UploadedFile::fake()->create('favicon.ico', 1, 'image/x-icon'),
+                ]
             ]
         ];
-
-
     }
 }

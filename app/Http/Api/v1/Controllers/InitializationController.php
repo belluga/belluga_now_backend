@@ -6,7 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\DataObjects\Branding\BrandingData;
 use App\DataObjects\Branding\ColorSchemeData;
-use App\DataObjects\Branding\LogoSettingsLandlord;
+use App\DataObjects\Branding\LogoSettings;
 use App\DataObjects\Branding\ThemeDataSettings;
 use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Controllers\Controller;
@@ -58,16 +58,16 @@ class InitializationController extends Controller
 
         DB::connection('landlord')->beginTransaction();
         try {
-            $brandingDataFromRequest = $validated['brandingData'];
-            $logoSettingsFromRequest = $brandingDataFromRequest['logoSettings'] ?? [];
+            $brandingDataFromRequest = $validated['branding_data'];
+            $logoSettingsFromRequest = $brandingDataFromRequest['logo_settings'] ?? [];
             $uploadedLogoPaths = [];
 
             // Handle file uploads for logos
-            $logoKeys = ['lightLogoUri', 'darkLogoUri', 'lightIconUri', 'darkIconUri', 'faviconUri'];
+            $logoKeys = ['light_logo_uri', 'dark_logo_uri', 'light_icon_uri', 'dark_icon_uri', 'favicon_uri'];
             foreach ($logoKeys as $key) {
-                if ($request->hasFile("brandingData.logoSettings.$key")) {
+                if ($request->hasFile("branding_data.logo_settings.$key")) {
                     // Store the file and get the path
-                    $path = $request->file("brandingData.logoSettings.$key")->store('landlord/branding/logos', 'public');
+                    $path = $request->file("branding_data.logo_settings.$key")->store('landlord/branding/logos', 'public');
                     $uploadedLogoPaths[$key] = Storage::url($path);
                 }
             }
@@ -78,11 +78,11 @@ class InitializationController extends Controller
 
             // --- ✅ 1. CONSTRUIR O OBJETO BRANDINGDATA ---
             $brandingData = new BrandingData(
-                themeDataSettings: new ThemeDataSettings(
-                    darkSchemeData: ColorSchemeData::fromArray(["brightness" => "dark", ...$brandingDataFromRequest['themeDataSettings']['darkSchemeData']]),
-                    lightSchemeData: ColorSchemeData::fromArray(["brightness" => "light", ...$brandingDataFromRequest['themeDataSettings']['lightSchemeData']])
+                theme_data_settings: new ThemeDataSettings(
+                    dark_scheme_data: ColorSchemeData::fromArray(["brightness" => "dark", ...$brandingDataFromRequest['theme_data_settings']['dark_scheme_data']]),
+                    light_scheme_data: ColorSchemeData::fromArray(["brightness" => "light", ...$brandingDataFromRequest['theme_data_settings']['light_scheme_data']])
                 ),
-                logoSettings: new LogoSettingsLandlord(...$logoSettingsData)
+                logo_settings: new LogoSettings(...$logoSettingsData)
             );
 
             // --- ✅ 2. CRIAR O LANDLORD ---
@@ -145,16 +145,16 @@ class InitializationController extends Controller
 
         return response()->json([
             "data" => [
-                "user" => $new_user->toArray(),
+                "user" => [
+                    "token" => $token,
+                    ...$new_user->toArray()
+                ],
                 "tenant" => [
                     ...$new_tenant->attributesToArray(),
                     "role_admin_id" => $admin_tenant_template->id,
                 ],
                 "role" => $admin_role->toArray(),
-                "landlord" => [
-                    ...$landlord->toArray(),
-                    "token" => $token
-                ],
+                "landlord" => $landlord->toArray(),
             ]
         ], 201);
 

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Storage;
 class LandlordBrandingController extends Controller
 {
 
-    protected array $logoKeys = ['lightLogoUri', 'darkLogoUri', 'lightIconUri', 'darkIconUri', 'faviconUri'];
+    protected array $logoKeys = ['light_logoUri', 'dark_logoUri', 'light_icon_uri', 'dark_icon_uri', 'favicon_uri'];
 
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
@@ -25,7 +25,7 @@ class LandlordBrandingController extends Controller
 
         // 2) Build a complete Tenant Branding array where all missing fields are empty strings
         $brandingArray = $newData;
-        $brandingArray['logoSettings'] = $uploadedLogoUrls;
+        $brandingArray['logo_settings'] = $uploadedLogoUrls;
         $final_branding = array_replace_recursive($landlord->branding_data->toArray(), $brandingArray);
 
         // 3) Create a BrandingData DTO from the tenant-only array and save it
@@ -70,7 +70,7 @@ class LandlordBrandingController extends Controller
 
         $urls = [];
         foreach ($this->logoKeys as $key) {
-            $fileKey = "logoSettings.{$key}";
+            $fileKey = "logo_settings.{$key}";
             if ($request->hasFile($fileKey)) {
                 $path = $request->file($fileKey)->store("landlord/logos", 'public');
                 $urls[$key] = Storage::disk('public')->url($path);
@@ -96,25 +96,25 @@ class LandlordBrandingController extends Controller
         foreach ($this->logoKeys as $k) {
             // Priority: uploaded URL > provided string > empty
             $logo[$k] = $uploadedLogoUrls[$k]
-                ?? (string)($newData['logoSettings'][$k] ?? '')
+                ?? (string)($newData['logo_settings'][$k] ?? '')
                 ?? '';
         }
 
         // Normalize theme data (fill empties for missing)
         $dark = [
-            'primarySeedColor'   => (string)($newData['themeDataSettings']['darkSchemeData']['primarySeedColor'] ?? ''),
-            'secondarySeedColor' => (string)($newData['themeDataSettings']['darkSchemeData']['secondarySeedColor'] ?? ''),
+            'primary_seed_color'   => (string)($newData['theme_data_settings']['dark_scheme_data']['primary_seed_color'] ?? ''),
+            'secondary_seed_color' => (string)($newData['theme_data_settings']['dark_scheme_data']['secondary_seed_color'] ?? ''),
         ];
         $light = [
-            'primarySeedColor'   => (string)($newData['themeDataSettings']['lightSchemeData']['primarySeedColor'] ?? ''),
-            'secondarySeedColor' => (string)($newData['themeDataSettings']['lightSchemeData']['secondarySeedColor'] ?? ''),
+            'primary_seed_color'   => (string)($newData['theme_data_settings']['light_scheme_data']['primary_seed_color'] ?? ''),
+            'secondary_seed_color' => (string)($newData['theme_data_settings']['light_scheme_data']['secondary_seed_color'] ?? ''),
         ];
 
         return [
-            'logoSettings' => $logo,
-            'themeDataSettings' => [
-                'darkSchemeData' => $dark,
-                'lightSchemeData' => $light,
+            'logo_settings' => $logo,
+            'theme_data_settings' => [
+                'dark_scheme_data' => $dark,
+                'light_scheme_data' => $light,
             ],
         ];
     }

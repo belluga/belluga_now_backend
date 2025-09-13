@@ -5,23 +5,23 @@ namespace App\DataObjects\Branding;
 readonly class ColorSchemeData
 {
     public function __construct(
-        public string $primarySeedColor,
-        public string $secondarySeedColor,
+        public string $primary_seed_color,
+        public string $secondary_seed_color,
     ) {}
 
     public static function fromArray(array $data): self
     {
         return new self(
-            primarySeedColor: $data['primarySeedColor'],
-            secondarySeedColor: $data['secondarySeedColor'],
+            primary_seed_color: $data['primary_seed_color'],
+            secondary_seed_color: $data['secondary_seed_color'],
         );
     }
 
     public function toArray(): array
     {
         return [
-            'primarySeedColor' => $this->primarySeedColor,
-            'secondarySeedColor' => $this->secondarySeedColor,
+            'primary_seed_color' => $this->primary_seed_color,
+            'secondary_seed_color' => $this->secondary_seed_color,
         ];
     }
 }

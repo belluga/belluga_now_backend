@@ -5,8 +5,8 @@ namespace App\DataObjects\Branding;
 readonly class ThemeDataSettings
 {
     public function __construct(
-        public ColorSchemeData $darkSchemeData,
-        public ColorSchemeData $lightSchemeData,
+        public ColorSchemeData $dark_scheme_data,
+        public ColorSchemeData $light_scheme_data,
     ) {}
 
     /**
@@ -15,8 +15,8 @@ readonly class ThemeDataSettings
     public static function fromArray(array $data): self
     {
         return new self(
-            darkSchemeData: ColorSchemeData::fromArray($data['darkSchemeData']),
-            lightSchemeData: ColorSchemeData::fromArray($data['lightSchemeData'])
+            dark_scheme_data: ColorSchemeData::fromArray($data['dark_scheme_data']),
+            light_scheme_data: ColorSchemeData::fromArray($data['light_scheme_data'])
         );
     }
 
@@ -26,8 +26,8 @@ readonly class ThemeDataSettings
     public function toArray(): array
     {
         return [
-            'darkSchemeData' => $this->darkSchemeData->toArray(),
-            'lightSchemeData' => $this->lightSchemeData->toArray(),
+            'dark_scheme_data' => $this->dark_scheme_data->toArray(),
+            'light_scheme_data' => $this->light_scheme_data->toArray(),
         ];
     }
 }

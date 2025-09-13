@@ -41,22 +41,22 @@ class InitializeRequest extends FormRequest
             'role.permissions' => ['required', 'array'],
             'role.permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
             'role.is_default' => ['boolean'],
-            'brandingData' => ['required', 'array'],
 
-            'brandingData.themeDataSettings' => ['required', 'array'],
-            'brandingData.themeDataSettings.darkSchemeData.primarySeedColor' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'brandingData.themeDataSettings.darkSchemeData.secondarySeedColor' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'branding_data' => ['required', 'array'],
+            'branding_data.theme_data_settings' => ['required', 'array'],
+            'branding_data.theme_data_settings.dark_scheme_data.primary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'branding_data.theme_data_settings.dark_scheme_data.secondary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
-            'brandingData.themeDataSettings.lightSchemeData.primarySeedColor' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'brandingData.themeDataSettings.lightSchemeData.secondarySeedColor' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'branding_data.theme_data_settings.light_scheme_data.primary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'branding_data.theme_data_settings.light_scheme_data.secondary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
-            'brandingData.logoSettings' => ['required', 'array'],
-            'brandingData.logoSettings.faviconUri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'
+            'branding_data.logo_settings' => ['required', 'array'],
+            'branding_data.logo_settings.favicon_uri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'
 , 'max:2048'],
-            'brandingData.logoSettings.lightLogoUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'brandingData.logoSettings.darkLogoUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'brandingData.logoSettings.lightIconUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'brandingData.logoSettings.darkIconUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'branding_data.logo_settings.light_logo_uri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'branding_data.logo_settings.dark_logo_uri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'branding_data.logo_settings.light_icon_uri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'branding_data.logo_settings.dark_icon_uri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
         ];
     }
 

@@ -5,11 +5,11 @@ namespace App\DataObjects\Branding;
 readonly class LogoSettings
 {
     public function __construct(
-        public string $faviconUri,
-        public string $lightLogoUri,
-        public string $darkLogoUri,
-        public string $lightIconUri,
-        public string $darkIconUri,
+        public string $favicon_uri,
+        public string $light_logo_uri,
+        public string $dark_logo_uri,
+        public string $light_icon_uri,
+        public string $dark_icon_uri,
     ) {}
 
     /**
@@ -18,11 +18,11 @@ readonly class LogoSettings
     public static function fromArray(array $data): self
     {
         return new self(
-            faviconUri: $data['faviconUri'],
-            lightLogoUri: $data['lightLogoUri'],
-            darkLogoUri: $data['darkLogoUri'],
-            lightIconUri: $data['lightIconUri'],
-            darkIconUri: $data['darkIconUri']
+            favicon_uri: $data['favicon_uri'],
+            light_logo_uri: $data['light_logo_uri'],
+            dark_logo_uri: $data['dark_logo_uri'],
+            light_icon_uri: $data['light_icon_uri'],
+            dark_icon_uri: $data['dark_icon_uri']
         );
     }
 
@@ -32,11 +32,11 @@ readonly class LogoSettings
     public function toArray(): array
     {
         return [
-            'faviconUri' => $this->faviconUri,
-            'lightLogoUri' => $this->lightLogoUri,
-            'darkLogoUri' => $this->darkLogoUri,
-            'lightIconUri' => $this->lightIconUri,
-            'darkIconUri' => $this->darkIconUri,
+            'favicon_uri' => $this->favicon_uri,
+            'light_logo_uri' => $this->light_logo_uri,
+            'dark_logo_uri' => $this->dark_logo_uri,
+            'light_icon_uri' => $this->light_icon_uri,
+            'dark_icon_uri' => $this->dark_icon_uri,
         ];
     }
 }

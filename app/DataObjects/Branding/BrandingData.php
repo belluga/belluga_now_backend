@@ -8,8 +8,8 @@ namespace App\DataObjects\Branding;
 readonly class BrandingData
 {
     public function __construct(
-        public ThemeDataSettings $themeDataSettings,
-        public LogoSettings $logoSettings,
+        public ThemeDataSettings $theme_data_settings,
+        public LogoSettings $logo_settings,
     ) {}
 
     /**
@@ -18,8 +18,8 @@ readonly class BrandingData
     public static function fromArray(array $data): self
     {
         return new self(
-            themeDataSettings: ThemeDataSettings::fromArray($data['themeDataSettings']),
-            logoSettings: LogoSettings::fromArray($data['logoSettings'])
+            theme_data_settings: ThemeDataSettings::fromArray($data['theme_data_settings']),
+            logo_settings: LogoSettings::fromArray($data['logo_settings'])
         );
     }
 
@@ -29,8 +29,8 @@ readonly class BrandingData
     public function toArray(): array
     {
         return [
-            'themeDataSettings' => $this->themeDataSettings->toArray(),
-            'logoSettings' => $this->logoSettings->toArray(),
+            'themeDataSettings' => $this->theme_data_settings->toArray(),
+            'logoSettings' => $this->logo_settings->toArray(),
         ];
     }
 }

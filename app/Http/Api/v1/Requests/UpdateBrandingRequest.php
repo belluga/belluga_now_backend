@@ -23,18 +23,18 @@ class UpdateBrandingRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'themeDataSettings' => ['sometimes', 'array'],
-            'themeDataSettings.darkSchemeData.primarySeedColor' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'themeDataSettings.darkSchemeData.secondarySeedColor' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'theme_data_settings' => ['sometimes', 'array'],
+            'theme_data_settings.dark_scheme_data.primary_seed_color' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'theme_data_settings.dark_scheme_data.secondary_seed_color' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
-            'themeDataSettings.lightSchemeData.primarySeedColor' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'themeDataSettings.lightSchemeData.secondarySeedColor' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'theme_data_settings.light_scheme_data.primary_seed_color' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'theme_data_settings.light_scheme_data.secondary_seed_color' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
-            'logoSettings' => ['sometimes', 'array'],
-            'logoSettings.lightLogoUri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.darkLogoUri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.lightIconUri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.darkIconUri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logo_settings' => ['sometimes', 'array'],
+            'logo_settings.light_logo_uri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logo_settings.dark_logo_uri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logo_settings.light_icon_uri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logo_settings.dark_icon_uri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
         ];
     }
 }
