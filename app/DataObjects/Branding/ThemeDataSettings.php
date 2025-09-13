@@ -14,22 +14,9 @@ readonly class ThemeDataSettings
      */
     public static function fromArray(array $data): self
     {
-        print("fromArray ThemeDataSettings");
-        print_r($data);
         return new self(
-            darkSchemeData: ColorSchemeData::fromArray(
-                [
-                        "brightness" => "dark",
-                    ...$data['darkSchemeData']
-                ]
-            ),
-
-            lightSchemeData: ColorSchemeData::fromArray(
-                [
-                    "brightness" => "light",
-                    ...$data['lightSchemeData']
-                ]
-            )
+            darkSchemeData: ColorSchemeData::fromArray($data['darkSchemeData']),
+            lightSchemeData: ColorSchemeData::fromArray($data['lightSchemeData'])
         );
     }
 

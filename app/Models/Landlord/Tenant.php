@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
-use App\DataObjects\Branding\BrandingData;
 use App\Traits\HasOwner;
+use App\Traits\HaveBranding;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -20,13 +20,12 @@ use Spatie\Sluggable\SlugOptions;
 
 class Tenant extends BaseTenant
 {
-    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
+    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles, HaveBranding;
 
     protected $fillable = [
         'name',
         'slug',
         'description',
-        'branding_data',
         'database',
         'subdomain',
         'app_domains',
@@ -144,7 +143,5 @@ class Tenant extends BaseTenant
 
     }
 
-    protected $casts = [
-        'branding_data' => BrandingData::class,
-    ];
+    protected $casts = [];
 }

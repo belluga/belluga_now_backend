@@ -10,30 +10,32 @@ use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 
-class TenantBrandingController extends Controller
+class LandlordBrandingController extends Controller
 {
 
     protected array $logoKeys = ['lightLogoUri', 'darkLogoUri', 'lightIconUri', 'darkIconUri', 'faviconUri'];
 
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
-        $tenant = Tenant::current();
+        $landlord = Landlord::singleton();
         $newData = $request->validated();
 
         // 1) Process logo uploads into URLs (no merging with landlord here)
         $uploadedLogoUrls = $this->processLogoUploads($request);
 
         // 2) Build a complete Tenant Branding array where all missing fields are empty strings
-        $tenantBrandingArray = $this->buildTenantBrandingArrayWithEmpties($newData, $uploadedLogoUrls);
+        $brandingArray = $newData;
+        $brandingArray['logoSettings'] = $uploadedLogoUrls;
+        $final_branding = array_replace_recursive($landlord->branding_data->toArray(), $brandingArray);
 
         // 3) Create a BrandingData DTO from the tenant-only array and save it
-        $newBrandingData = BrandingData::fromArray($tenantBrandingArray);
-        $tenant->branding_data = $newBrandingData;
-        $tenant->save();
+        $newBrandingData = BrandingData::fromArray($final_branding);
+        $landlord->branding_data = $newBrandingData;
+        $landlord->save();
 
         return response()->json([
             'message' => 'Branding data updated successfully.',
-            'branding_data' => $tenant->branding_data,
+            'branding_data' => $landlord->branding_data->toArray(),
         ]);
     }
 
@@ -42,15 +44,8 @@ class TenantBrandingController extends Controller
      */
     public function show(): JsonResponse
     {
-        $tenant = Tenant::current();
         $landlord = Landlord::singleton();
-
-        $landlordArray = $landlord->branding_data?->toArray();
-        $tenantArray = $this->_filterEmptyBrandingValues($tenant->branding_data->toArray());
-
-        $merged = array_replace_recursive($landlordArray, $tenantArray);
-
-        return response()->json($merged);
+        return response()->json($landlord->branding_data->toArray());
     }
 
     protected function _filterEmptyBrandingValues(array $branding_array): array {
@@ -77,7 +72,7 @@ class TenantBrandingController extends Controller
         foreach ($this->logoKeys as $key) {
             $fileKey = "logoSettings.{$key}";
             if ($request->hasFile($fileKey)) {
-                $path = $request->file($fileKey)->store("tenants/{$tenant->slug}/logos", 'public');
+                $path = $request->file($fileKey)->store("landlord/logos", 'public');
                 $urls[$key] = Storage::disk('public')->url($path);
             }
         }

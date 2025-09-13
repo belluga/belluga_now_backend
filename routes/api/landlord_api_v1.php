@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\TenantController;
+use App\Http\Api\v1\Controllers\LandlordBrandingController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
@@ -137,4 +138,14 @@ Route::prefix('roles')->group(function () {
 
     Route::post('{role_id}/restore', [LandlordRolesController::class, 'restore'])
         ->middleware('auth:sanctum', 'abilities:landlord-roles:update,landlord-roles:delete');
+});
+
+Route::prefix('branding')->group(function () {
+
+    Route::get('/', [LandlordBrandingController::class, 'show'])
+        ->withoutMiddleware(['auth:sanctum', 'landlord']);
+
+    Route::post('/', [LandlordBrandingController::class, 'update'])
+        ->middleware('auth:sanctum', 'abilities:tenant-branding:update');
+
 });

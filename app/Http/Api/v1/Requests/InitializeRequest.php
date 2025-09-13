@@ -51,11 +51,12 @@ class InitializeRequest extends FormRequest
             'brandingData.themeDataSettings.lightSchemeData.secondarySeedColor' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
             'brandingData.logoSettings' => ['required', 'array'],
-            'logoSettings.faviconUri' => ['required', 'image', 'mimes:ico', 'max:2048'],
-            'logoSettings.lightLogoUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.darkLogoUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.lightIconUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logoSettings.darkIconUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'brandingData.logoSettings.faviconUri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'
+, 'max:2048'],
+            'brandingData.logoSettings.lightLogoUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'brandingData.logoSettings.darkLogoUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'brandingData.logoSettings.lightIconUri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'brandingData.logoSettings.darkIconUri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
         ];
     }
 

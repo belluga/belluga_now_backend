@@ -164,6 +164,10 @@ Route::prefix('roles')->group(function () {
 });
 
 Route::prefix('branding')->group(function () {
+
+    Route::get('/', [TenantBrandingController::class, 'show']);
+
     Route::post('/', [TenantBrandingController::class, 'update'])
-        ->middleware('auth:sanctum', 'abilities:tenant-roles:view');
+        ->middleware('auth:sanctum', 'abilities:tenant-branding:update');
+
 });
