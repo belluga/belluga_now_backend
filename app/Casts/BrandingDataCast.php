@@ -5,6 +5,7 @@ namespace App\Casts;
 use App\DataObjects\Branding\BrandingData;
 use App\DataObjects\Branding\ColorSchemeData;
 use App\DataObjects\Branding\LogoSettings;
+use App\DataObjects\Branding\PwaIcon;
 use App\DataObjects\Branding\ThemeDataSettings;
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use InvalidArgumentException;
@@ -30,11 +31,18 @@ class BrandingDataCast implements CastsAttributes
         $data = is_string($value) ? json_decode($value, true) : (array) $value;
 
         return new BrandingData(
-            themeDataSettings: new ThemeDataSettings(
-                darkSchemeData: ColorSchemeData::fromArray((array) $data['themeDataSettings']['darkSchemeData']),
-                lightSchemeData: ColorSchemeData::fromArray((array) $data['themeDataSettings']['lightSchemeData'])
+            theme_data_settings: new ThemeDataSettings(
+                dark_scheme_data: ColorSchemeData::fromArray((array) $data['theme_data_settings']['dark_scheme_data']),
+                light_scheme_data: ColorSchemeData::fromArray((array) $data['theme_data_settings']['light_scheme_data'])
             ),
-            logoSettings: new LogoSettings(...(array) $data['logoSettings'])
+            logo_settings: new LogoSettings(
+                favicon_uri: $data['logo_settings']['favicon_uri'] ?? '',
+                light_logo_uri: $data['logo_settings']['light_logo_uri'] ?? '',
+                dark_logo_uri: $data['logo_settings']['dark_logo_uri'] ?? '',
+                light_icon_uri: $data['logo_settings']['light_icon_uri'] ?? '',
+                dark_icon_uri: $data['logo_settings']['dark_icon_uri'] ?? '',
+                pwa_icon: PwaIcon::fromArray($data['logo_settings']['pwa_icon'])
+            )
         );
     }
 

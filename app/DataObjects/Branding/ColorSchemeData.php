@@ -12,8 +12,8 @@ readonly class ColorSchemeData
     public static function fromArray(array $data): self
     {
         return new self(
-            primary_seed_color: $data['primary_seed_color'],
-            secondary_seed_color: $data['secondary_seed_color'],
+            primary_seed_color: $data['primary_seed_color'] ?? '',
+            secondary_seed_color: $data['secondary_seed_color' ?? ''],
         );
     }
 

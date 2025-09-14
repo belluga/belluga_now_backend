@@ -29,8 +29,8 @@ readonly class BrandingData
     public function toArray(): array
     {
         return [
-            'themeDataSettings' => $this->theme_data_settings->toArray(),
-            'logoSettings' => $this->logo_settings->toArray(),
+            'theme_data_settings' => $this->theme_data_settings->toArray(),
+            'logo_settings' => $this->logo_settings->toArray(),
         ];
     }
 }

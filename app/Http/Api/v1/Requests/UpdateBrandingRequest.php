@@ -35,6 +35,9 @@ class UpdateBrandingRequest extends FormRequest
             'logo_settings.dark_logo_uri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
             'logo_settings.light_icon_uri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
             'logo_settings.dark_icon_uri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logo_settings.favicon_uri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'
+                , 'max:2048'],
+            'logo_settings.pwa_icon'       => ['sometimes', 'image', 'mimes:png', 'max:5120'],
         ];
     }
 }

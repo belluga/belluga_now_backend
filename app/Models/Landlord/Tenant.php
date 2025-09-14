@@ -74,12 +74,12 @@ class Tenant extends BaseTenant
 
         return [
             'name'             => $this->name,
-            'short_name'       => $this->slug,
-            'description'      => 'Portal do ' . $this->description,
+            'short_name'       => $this->name,
+            'description'      => $this->description,
             'start_url'        => '/',
             'display'          => 'standalone',
-            'background_color' => $this->primary_color,
-            'theme_color'      => $this->primary_color,
+            'background_color' => $this->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
+            'theme_color'      => $this->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
             'icons' => [
                 [
                     'src'   => $this->icon_192_url, // Full URL to the public asset

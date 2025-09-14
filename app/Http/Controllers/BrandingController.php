@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,14 +42,16 @@ class BrandingController extends Controller
     }
 
     protected function _buildLandlordManifest(): array {
+        $landlord = Landlord::singleton();
+
         return [
-            'name'             => 'Portal',
-            'short_name'       => 'Portal',
+            'name'             => $landlord->name,
+            'short_name'       => $landlord->name,
             'start_url'        => '/',
             'display'          => 'standalone',
-            'background_color' => '#ffffff',
-            'theme_color'      => '#ffffff',
-            'description'      => 'Portal do Portal',
+            'background_color' => $landlord->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
+            'theme_color'      => $landlord->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
+            'description'      => $landlord->description,
             'icons' => []
         ];
     }
