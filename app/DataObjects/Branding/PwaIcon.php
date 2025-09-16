@@ -2,32 +2,34 @@
 
 namespace App\DataObjects\Branding;
 
-readonly class PwaIcon
+class PwaIcon
 {
     public function __construct(
-        public string $source_uri,
-        public string $icon_192_uri,
-        public string $icon_512_uri,
-        public string $icon_maskable_512_uri,
+        public string $sourceUri,
+        public string $icon192Uri,
+        public string $icon512Uri,
+        public string $iconMaskable512Uri,
     ) {}
 
-    public static function fromArray(array|string $data): self
+    public static function fromArray(array $data): self
     {
         return new self(
-            source_uri: $data['source_uri'] ?? '',
-            icon_192_uri: $data['icon_192_uri'] ?? '',
-            icon_512_uri: $data['icon_512_uri'] ?? '',
-            icon_maskable_512_uri: $data['icon_maskable_512_uri'] ?? '',
+            sourceUri: $data['source_uri'] ?? '',
+            icon192Uri: $data['icon192_uri'] ?? '',
+            icon512Uri: $data['icon512_uri'] ?? '',
+            iconMaskable512Uri: $data['icon_maskable512_uri'] ?? ''
         );
     }
 
     public function toArray(): array
     {
         return [
-            'source_uri' => $this->source_uri,
-            'icon_192_uri' => $this->icon_192_uri,
-            'icon_512_uri' => $this->icon_512_uri,
-            'icon_maskable_512_uri' => $this->icon_maskable_512_uri,
+            'pwa_icon' => [
+                'source_uri' => $this->sourceUri,
+                'icon192_uri' => $this->icon192Uri,
+                'icon512_uri' => $this->icon512Uri,
+                'icon_maskable512_uri' => $this->iconMaskable512Uri,
+            ]
         ];
     }
 }

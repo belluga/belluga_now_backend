@@ -97,7 +97,7 @@ class TenantBrandingController extends Controller
                     ? 'ico'
                     : ($file->getClientOriginalExtension() ?: 'png');
 
-                $directory = "tenants/{$tenant->slug}/logos";
+                $directory = "storage/tenants/{$tenant->slug}/logos";
                 $fileName = "{$baseName}.{$extension}";
                 $path = "{$directory}/{$fileName}";
 
@@ -112,7 +112,7 @@ class TenantBrandingController extends Controller
                 if ($key === 'pwa_icon') {
                     $variants = $this->generatePwaIconVariants(
                         sourcePath: $file->getRealPath(),
-                        baseDir: "tenants/{$tenant->slug}/pwa"
+                        baseDir: "storage/tenants/{$tenant->slug}/pwa"
                     );
                     $urls['__pwa_variants'] = $variants;
                 }

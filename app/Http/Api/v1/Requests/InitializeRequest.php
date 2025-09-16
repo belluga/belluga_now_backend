@@ -57,7 +57,8 @@ class InitializeRequest extends FormRequest
             'branding_data.logo_settings.dark_logo_uri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
             'branding_data.logo_settings.light_icon_uri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
             'branding_data.logo_settings.dark_icon_uri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'branding_data.logo_settings.pwa_icon'  => ['required', 'image', 'mimes:png', 'max:5120'],
+
+            'branding_data.pwa_icon'  => ['required', 'image', 'mimes:png', 'max:5120'],
         ];
     }
 

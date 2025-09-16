@@ -2,44 +2,43 @@
 
 namespace App\DataObjects\Branding;
 
-readonly class LogoSettings
+class LogoSettings
 {
     public function __construct(
-        public string $favicon_uri,
-        public string $light_logo_uri,
-        public string $dark_logo_uri,
-        public string $light_icon_uri,
-        public string $dark_icon_uri,
-        public PwaIcon $pwa_icon,
+        public string $faviconUri,
+        public string $lightLogoUri,
+        public string $darkLogoUri,
+        public string $lightIconUri,
+        public string $darkIconUri,
     ) {}
 
     /**
-     * Creates a LogoSettings object from an array.
+     * Cria uma instância da classe a partir de um array.
      */
     public static function fromArray(array $data): self
     {
         return new self(
-            favicon_uri: $data['favicon_uri'] ?? '',
-            light_logo_uri: $data['light_logo_uri'] ?? '',
-            dark_logo_uri: $data['dark_logo_uri'] ?? '',
-            light_icon_uri: $data['light_icon_uri'] ?? '',
-            dark_icon_uri: $data['dark_icon_uri'] ?? '',
-            pwa_icon: PwaIcon::fromArray($data['pwa_icon'] ?? []),
+            faviconUri: $data['favicon_uri'],
+            lightLogoUri: $data['light_logo_uri'],
+            darkLogoUri: $data['dark_logo_uri'],
+            lightIconUri: $data['light_icon_uri'],
+            darkIconUri: $data['dark_icon_uri']
         );
     }
 
     /**
-     * Converts the LogoSettings object to an array.
+     * Converte o objeto de volta para um array.
      */
     public function toArray(): array
     {
         return [
-            'favicon_uri' => $this->favicon_uri,
-            'light_logo_uri' => $this->light_logo_uri,
-            'dark_logo_uri' => $this->dark_logo_uri,
-            'light_icon_uri' => $this->light_icon_uri,
-            'dark_icon_uri' => $this->dark_icon_uri,
-            'pwa_icon' => $this->pwa_icon->toArray(),
+            'logo_settings' => [
+                'favicon_uri' => $this->faviconUri,
+                'light_logo_uri' => $this->lightLogoUri,
+                'dark_logo_uri' => $this->darkLogoUri,
+                'light_icon_uri' => $this->lightIconUri,
+                'dark_icon_uri' => $this->darkIconUri,
+            ]
         ];
     }
 }

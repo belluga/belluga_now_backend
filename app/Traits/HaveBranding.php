@@ -3,11 +3,41 @@
 namespace App\Traits;
 
 use App\Casts\BrandingDataCast;
+use App\DataObjects\Branding\BrandingData;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 
 trait HaveBranding
 {
     protected string $fieldName = 'branding_data';
+
+    protected function brandingData(): Attribute
+    {
+        return Attribute::make(
+        /**
+         * GET: Executado quando você lê $model->brandingData
+         */
+            get: function ($value) {
+                if (is_null($value)) {
+                    return null;
+                }
+
+                // O $value pode ser uma string JSON (de dados antigos) ou um array (do driver do Mongo)
+                $data = is_string($value) ? json_decode($value, true) : (array) $value;
+
+                // Cria o DTO a partir do dado snake_case completo.
+                return BrandingData::from($data);
+            },
+            /**
+             * SET: Executado quando você salva $model->brandingData = $dto
+             */
+            set: function (BrandingData $value) {
+                // CORREÇÃO: Retorne o array diretamente.
+                // O driver do MongoDB irá convertê-lo para um objeto BSON nativo.
+                return $value->toArray();
+            }
+        );
+    }
+
     /**
      * Override this in your model if you use a different column name.
      */

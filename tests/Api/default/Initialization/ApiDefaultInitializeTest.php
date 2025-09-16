@@ -46,12 +46,16 @@ class ApiDefaultInitializeTest extends TestCase {
                     "branding_data" => [
                         "theme_data_settings"=> [
                             "dark_scheme_data" => [
-                                "primary_seed_color",
-                                "secondary_seed_color"
+                                'color_scheme_data' => [
+                                    'primary_seed_color',
+                                    'secondary_seed_color',
+                                ]
                             ],
                             "light_scheme_data"=> [
-                                "primary_seed_color",
-                                "secondary_seed_color"
+                                'color_scheme_data' => [
+                                    'primary_seed_color',
+                                    'secondary_seed_color',
+                                ]
                             ]
                         ],
                         "logo_settings" => [
@@ -141,14 +145,13 @@ class ApiDefaultInitializeTest extends TestCase {
                     ]
                 ],
                 'logo_settings' => [
-                    // Images as real uploaded files
-                    'light_icon_uri' => UploadedFile::fake()->image('light-icon.png', 192, 192),
+                    'light_icon_uri' => UploadedFile::fake()->image('light-icon.png', 512, 512),
                     'dark_icon_uri' => UploadedFile::fake()->image('dark-icon.png', 192, 192),
-                    'light_logo_uri' => UploadedFile::fake()->image('light-logo.png', 512, 256),
-                    'dark_logo_uri' => UploadedFile::fake()->image('dark-logo.png', 512, 256),
-                    // Real ICO file upload (1 KB, mime type image/x-icon)
+                    'light_logo_uri' => UploadedFile::fake()->image('light-logo.png', 512, 512),
+                    'dark_logo_uri' => UploadedFile::fake()->image('dark-logo.png', 512, 512),
                     'favicon_uri' => UploadedFile::fake()->create('favicon.ico', 1, 'image/x-icon'),
-                ]
+                ],
+                'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
             ]
         ];
     }

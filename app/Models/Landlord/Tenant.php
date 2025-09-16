@@ -13,6 +13,7 @@ use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\HasMany;
+use MongoDB\Laravel\Relations\EmbedsOne;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
 use Spatie\Sluggable\HasSlug;
@@ -20,7 +21,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class Tenant extends BaseTenant
 {
-    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles, HaveBranding;
+    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
 
     protected $fillable = [
         'name',
@@ -34,6 +35,15 @@ class Tenant extends BaseTenant
 
     public function roleTemplates(): HasMany {
         return $this->hasMany(TenantRoleTemplate::class);
+    }
+
+    /**
+     * Define a relação EmbedsOne com o nosso novo model BrandingData.
+     * O nome do método (brandingData) será como você acessa o objeto: $landlord->brandingData
+     */
+    public function brandingData(): EmbedsOne
+    {
+        return $this->embedsOne(BrandingData::class, 'branding_data');
     }
 
     public function domains(): HasMany
@@ -82,16 +92,22 @@ class Tenant extends BaseTenant
             'theme_color'      => $this->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
             'icons' => [
                 [
-                    'src'   => $this->icon_192_url, // Full URL to the public asset
-                    'sizes' => '192x192',
-                    'type'  => 'image/png',
+                    "src" => $this->branding_data->pwa_icon->icon_192_uri,
+                    "sizes" => "192x192",
+                    "type" => "image/png"
                 ],
                 [
-                    'src'   => $this->icon_512_url,
-                    'sizes' => '512x512',
-                    'type'  => 'image/png',
+                    "src" => $this->branding_data->pwa_icon->icon_512_uri,
+                    "sizes"=> "512x512",
+                    "type" => "image/png"
                 ],
-            ],
+                [
+                    "src" => $this->branding_data->pwa_icon->icon_maskable_512_uri,
+                    "sizes" => "512x512",
+                    "type" => "image/png",
+                    "purpose" => "maskable"
+                ]
+            ]
         ];
     }
 

@@ -14,7 +14,7 @@ use Illuminate\Support\Arr;
 class LandlordBrandingController extends Controller
 {
 
-    protected array $logoKeys = ['light_logo_uri', 'dark_logo_uri', 'light_icon_uri', 'dark_icon_uri', 'favicon_uri', 'pwa_icon'];
+    protected array $logoKeys = ['light_logo_uri', 'dark_logo_uri', 'light_icon_uri', 'dark_icon_uri', 'favicon_uri'];
 
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
@@ -91,7 +91,7 @@ class LandlordBrandingController extends Controller
                     ? 'ico'
                     : ($file->getClientOriginalExtension() ?: 'png');
 
-                $directory = "landlord/logos";
+                $directory = "storage/landlord/logos";
                 $fileName = "{$baseName}.{$extension}";
                 $path = "{$directory}/{$fileName}";
 
@@ -106,7 +106,7 @@ class LandlordBrandingController extends Controller
 
                     $pwa_variants = $this->generatePwaIconVariants(
                         sourcePath: $file->getRealPath(),
-                        baseDir: 'landlord/branding/pwa'
+                        baseDir: 'storage/landlord/pwa'
                     );
 
                     $urls['pwa_icon'] = [
