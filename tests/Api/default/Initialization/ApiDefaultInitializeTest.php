@@ -46,16 +46,12 @@ class ApiDefaultInitializeTest extends TestCase {
                     "branding_data" => [
                         "theme_data_settings"=> [
                             "dark_scheme_data" => [
-                                'color_scheme_data' => [
-                                    'primary_seed_color',
-                                    'secondary_seed_color',
-                                ]
+                                'primary_seed_color',
+                                'secondary_seed_color',
                             ],
                             "light_scheme_data"=> [
-                                'color_scheme_data' => [
-                                    'primary_seed_color',
-                                    'secondary_seed_color',
-                                ]
+                                'primary_seed_color',
+                                'secondary_seed_color',
                             ]
                         ],
                         "logo_settings" => [

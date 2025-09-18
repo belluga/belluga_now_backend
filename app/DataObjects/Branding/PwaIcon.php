@@ -24,12 +24,10 @@ class PwaIcon
     public function toArray(): array
     {
         return [
-            'pwa_icon' => [
-                'source_uri' => $this->sourceUri,
-                'icon192_uri' => $this->icon192Uri,
-                'icon512_uri' => $this->icon512Uri,
-                'icon_maskable512_uri' => $this->iconMaskable512Uri,
-            ]
+            'source_uri' => $this->sourceUri ?? "",
+            'icon192_uri' => $this->icon192Uri ?? "",
+            'icon512_uri' => $this->icon512Uri ?? "",
+            'icon_maskable512_uri' => $this->iconMaskable512Uri ?? "",
         ];
     }
 }

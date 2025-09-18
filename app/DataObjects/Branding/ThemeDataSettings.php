@@ -20,10 +20,8 @@ class ThemeDataSettings
     public function toArray(): array
     {
         return [
-            'theme_data_settings' => [
-                'dark_scheme_data' => $this->darkSchemeData->toArray(),
-                'light_scheme_data' => $this->lightSchemeData->toArray(),
-            ]
+            'dark_scheme_data' => $this->darkSchemeData->toArray(),
+            'light_scheme_data' => $this->lightSchemeData->toArray() ,
         ];
     }
 }

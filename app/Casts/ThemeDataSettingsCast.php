@@ -14,19 +14,22 @@ class ThemeDataSettingsCast implements CastsAttributes
             return null;
         }
 
-        return ThemeDataSettings::fromArray((array) $value);
+        $data = (array) $value;
+        return ThemeDataSettings::fromArray($data);
     }
 
     public function set($model, string $key, $value, array $attributes): array
     {
-        if ($value instanceof ThemeDataSettings) {
-            return $value->toArray();
+
+        if(is_array($value)) {
+            return ["theme_data_settings" => $value];
         }
 
-        if (is_array($value)) {
-            return $value;
+        if($value instanceof ThemeDataSettings){
+            return ["theme_data_settings" => $value->toArray()];
         }
 
         throw new InvalidArgumentException('The given value must be a ThemeDataSettings instance or an array.');
+
     }
 }

@@ -20,10 +20,8 @@ class ColorSchemeData
     public function toArray(): array
     {
         return [
-            'color_scheme_data' => [
-                'primary_seed_color' => $this->primarySeedColor,
-                'secondary_seed_color' => $this->secondarySeedColor,
-            ]
+            'primary_seed_color' => $this->primarySeedColor ?? "",
+            'secondary_seed_color' => $this->secondarySeedColor ?? "",
         ];
     }
 }

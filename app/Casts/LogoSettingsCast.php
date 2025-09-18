@@ -15,19 +15,18 @@ class LogoSettingsCast implements CastsAttributes
             return null;
         }
 
-        // The $value is already an array, but it's missing pwa_icon.
-        // We pass it directly to the Data Object.
-        return LogoSettings::fromArray((array) $value);
+        $data = (array) $value;
+        return LogoSettings::fromArray($data);
     }
 
     public function set($model, string $key, $value, array $attributes): array
     {
-        if ($value instanceof LogoSettings) {
-            return $value->toArray();
+        if(is_array($value)) {
+            return ["logo_settings" => $value];
         }
 
-        if (is_array($value)) {
-            return $value;
+        if($value instanceof LogoSettings){
+            return ["logo_settings" => $value->toArray()];
         }
 
         throw new InvalidArgumentException('The given value must be a LogoSettings instance or an array.');

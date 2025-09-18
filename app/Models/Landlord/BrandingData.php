@@ -14,13 +14,9 @@ use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 class BrandingData extends Model
 {
     use UsesLandlordConnection;
-    // Informa que este model é embutido e pode ser preenchido em massa.
+
     protected static $unguarded = true;
 
-    /**
-     * Usamos casts para transformar os sub-objetos em DTOs automaticamente.
-     * Isso organiza o código e garante a estrutura dos dados.
-     */
     protected $casts = [
         'theme_data_settings' => ThemeDataSettingsCast::class,
         'logo_settings' => LogoSettingsCast::class,
@@ -30,9 +26,9 @@ class BrandingData extends Model
     public function toArray(): array
     {
         return [
-            ...$this->theme_data_settings->toArray(),
-            ...$this->logo_settings->toArray(),
-            ...$this->pwa_icon->toArray(),
+            "theme_data_settings" => $this->theme_data_settings->toArray(),
+            "logo_settings" => $this->logo_settings->toArray(),
+            "pwa_icon" => $this->pwa_icon->toArray(),
         ];
     }
 }

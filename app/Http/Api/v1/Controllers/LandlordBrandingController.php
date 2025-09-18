@@ -2,14 +2,13 @@
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\DataObjects\Branding\BrandingData;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\BrandingData;
 use App\Models\Landlord\Landlord;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Laravel\Facades\Image;
-use Illuminate\Support\Arr;
 
 class LandlordBrandingController extends Controller
 {
@@ -24,8 +23,6 @@ class LandlordBrandingController extends Controller
         // 1) Process logo uploads into URLs (no merging with landlord here)
         $uploadedLogoUrls = $this->processLogoUploads($request);
 
-
-
         // 2) Build a complete Tenant Branding array where all missing fields are empty strings
         $brandingArray = $newData;
         $brandingArray['logo_settings'] = $uploadedLogoUrls;
@@ -38,18 +35,21 @@ class LandlordBrandingController extends Controller
             unset($brandingArray['__pwa_variants']);
         }
 
-        $current_branding = $this->_filterEmptyBrandingValues($landlord->branding_data->toArray());
+//        $current_branding = $this->_filterEmptyBrandingValues($landlord->brandingData);
+//
+//        dd($current_branding);
 
-        $final_branding = array_replace_recursive($current_branding, $brandingArray);
+        $final_branding = array_replace_recursive($landlord->brandingData->toArray(), $brandingArray);
+
+        //TODO: Make update works
 
         // 3) Create a BrandingData DTO from the tenant-only array and save it
-        $newBrandingData = BrandingData::fromArray($final_branding);
-        $landlord->branding_data = $newBrandingData;
+        $landlord->brandingData->update($final_branding);
         $landlord->save();
 
         return response()->json([
             'message' => 'Branding data updated successfully.',
-            'branding_data' => $landlord->branding_data->toArray(),
+            'branding_data' => $landlord->brandingData,
         ]);
     }
 
@@ -59,7 +59,7 @@ class LandlordBrandingController extends Controller
     public function show(): JsonResponse
     {
         $landlord = Landlord::singleton();
-        return response()->json($landlord->branding_data->toArray());
+        return response()->json($landlord->brandingData);
     }
 
     protected function _filterEmptyBrandingValues(array $branding_array): array {
