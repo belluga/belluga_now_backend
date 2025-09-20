@@ -143,7 +143,7 @@ class InitializationController extends Controller
             if ($request->hasFile($fileKey)) {
                 $baseName = substr(Str::snake($key), 0, -4);
                 // The key for the final array is camelCase
-                $logoSettingsData[$key] = $this->storeFile($request->file($fileKey), 'storage/landlord/logos', $baseName);
+                $logoSettingsData[$key] = $this->storeFile($request->file($fileKey), 'landlord/logos', $baseName);
             }
         }
         return $logoSettingsData;
@@ -168,9 +168,9 @@ class InitializationController extends Controller
         }
 
         $file = $request->file('branding_data.pwa_icon');
-        $pwaData['source_uri'] = $this->storeFile($file, 'storage/landlord/logos', 'pwa_icon_source');
+        $pwaData['source_uri'] = $this->storeFile($file, 'landlord/logos', 'pwa_icon_source');
 
-        $baseDir = 'storage/landlord/pwa';
+        $baseDir = 'landlord/pwa';
         Storage::disk('public')->makeDirectory($baseDir);
         $sourcePath = $file->getRealPath();
 

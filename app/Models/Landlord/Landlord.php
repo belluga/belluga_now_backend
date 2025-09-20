@@ -43,26 +43,8 @@ class Landlord extends Model
             'description'      => $this->description,
             'start_url'        => '/',
             'display'          => 'standalone',
-            'background_color' => $this->brandingData->theme_data_settings->lightSchemeData->primarySeedColor,
-            'theme_color'      => $this->brandingData->theme_data_settings->lightSchemeData->primarySeedColor,
-            'icons' => [
-                [
-                    "src" => $this->brandingData->pwa_icon->icon192Uri,
-                    "sizes" => "192x192",
-                    "type" => "image/png"
-                ],
-                [
-                    "src" => $this->brandingData->pwa_icon->icon512Uri,
-                    "sizes"=> "512x512",
-                    "type" => "image/png"
-                ],
-                [
-                    "src" => $this->brandingData->pwa_icon->iconMaskable512Uri,
-                    "sizes" => "512x512",
-                    "type" => "image/png",
-                    "purpose" => "maskable"
-                ]
-            ]
+            'background_color' => $this->brandingData->toArray()["theme_data_settings"]['light_scheme_data']['primary_seed_color'],
+            'theme_color'      => $this->brandingData->toArray()["theme_data_settings"]['light_scheme_data']['primary_seed_color']
         ];
     }
 }

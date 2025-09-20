@@ -21,7 +21,7 @@ trait AccountAuthFunctions
 
         $response = $this->json(
             method: 'post',
-            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/auth/logout",
+            uri: "{$this->base_api_tenant}auth/logout",
             data: $payload,
             headers: [
                 'Authorization' => "Bearer {$user->token}",
@@ -35,9 +35,10 @@ trait AccountAuthFunctions
     }
 
     protected function accountLoginRaw(TenantLabels $tenant, UserLabels $user, string $device_name = "default"): TestResponse {
+        $force_base_api = "http://{$tenant->subdomain}.{$this->host}/api/";
         $response = $this->json(
             method: 'post',
-            uri: "http://{$tenant->subdomain}.".env('APP_HOST')."/api/auth/login",
+            uri: "{$force_base_api}auth/login",
             data: [
                 "email" => $user->email_1,
                 "password" => $user->password,
@@ -55,7 +56,7 @@ trait AccountAuthFunctions
     protected function accountLogin(UserLabels $user, string $device_name = "default"): TestResponse {
         $response = $this->json(
             method: 'post',
-            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/auth/login",
+            uri: "{$this->base_api_tenant}auth/login",
             data: [
                 "email" => $user->email_1,
                 "password" => $user->password,
@@ -73,7 +74,7 @@ trait AccountAuthFunctions
     protected function accountTokenValidate(string $token): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/auth/token_validate",
+            uri: "{$this->base_api_tenant}auth/token_validate",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json'

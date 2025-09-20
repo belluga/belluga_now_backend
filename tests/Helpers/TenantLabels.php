@@ -147,4 +147,20 @@ class TenantLabels extends Labels {
         }
     }
 
+    public function toArray(): array
+    {
+        return [
+            "id" => $this->id,
+            "name" => $this->name,
+            "subdomain" => $this->subdomain,
+            "slug" => $this->slug,
+            "base_api_url" => $this->base_api_url,
+            "users" => [
+                "admin" => $this->user_admin->toArray(),
+                "roles_manager" => $this->user_roles_manager->toArray(),
+                "users_manager" => $this->user_users_manager->toArray(),
+            ]
+        ];
+    }
+
 }

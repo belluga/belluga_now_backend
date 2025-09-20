@@ -35,15 +35,8 @@ class LandlordBrandingController extends Controller
             unset($brandingArray['__pwa_variants']);
         }
 
-//        $current_branding = $this->_filterEmptyBrandingValues($landlord->brandingData);
-//
-//        dd($current_branding);
-
         $final_branding = array_replace_recursive($landlord->brandingData->toArray(), $brandingArray);
 
-        //TODO: Make update works
-
-        // 3) Create a BrandingData DTO from the tenant-only array and save it
         $landlord->brandingData->update($final_branding);
         $landlord->save();
 
@@ -91,7 +84,7 @@ class LandlordBrandingController extends Controller
                     ? 'ico'
                     : ($file->getClientOriginalExtension() ?: 'png');
 
-                $directory = "storage/landlord/logos";
+                $directory = "landlord/logos";
                 $fileName = "{$baseName}.{$extension}";
                 $path = "{$directory}/{$fileName}";
 
@@ -106,7 +99,7 @@ class LandlordBrandingController extends Controller
 
                     $pwa_variants = $this->generatePwaIconVariants(
                         sourcePath: $file->getRealPath(),
-                        baseDir: 'storage/landlord/pwa'
+                        baseDir: 'landlord/pwa'
                     );
 
                     $urls['pwa_icon'] = [

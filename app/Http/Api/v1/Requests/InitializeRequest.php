@@ -53,10 +53,10 @@ class InitializeRequest extends FormRequest
             'branding_data.logo_settings' => ['required', 'array'],
             'branding_data.logo_settings.favicon_uri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'
 , 'max:2048'],
-            'branding_data.logo_settings.light_logo_uri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'branding_data.logo_settings.dark_logo_uri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'branding_data.logo_settings.light_icon_uri' => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'branding_data.logo_settings.dark_icon_uri'  => ['required', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'branding_data.logo_settings.light_logo_uri' => ['required', 'image', 'mimes:png', 'max:2048'],
+            'branding_data.logo_settings.dark_logo_uri'  => ['required', 'image', 'mimes:png', 'max:2048'],
+            'branding_data.logo_settings.light_icon_uri' => ['required', 'image', 'mimes:png', 'max:2048'],
+            'branding_data.logo_settings.dark_icon_uri'  => ['required', 'image', 'mimes:png', 'max:2048'],
 
             'branding_data.pwa_icon'  => ['required', 'image', 'mimes:png', 'max:5120'],
         ];

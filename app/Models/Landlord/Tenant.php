@@ -88,26 +88,8 @@ class Tenant extends BaseTenant
             'description'      => $this->description,
             'start_url'        => '/',
             'display'          => 'standalone',
-            'background_color' => $this->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
-            'theme_color'      => $this->branding_data->theme_data_settings->light_scheme_data->primary_seed_color,
-            'icons' => [
-                [
-                    "src" => $this->branding_data->pwa_icon->icon_192_uri,
-                    "sizes" => "192x192",
-                    "type" => "image/png"
-                ],
-                [
-                    "src" => $this->branding_data->pwa_icon->icon_512_uri,
-                    "sizes"=> "512x512",
-                    "type" => "image/png"
-                ],
-                [
-                    "src" => $this->branding_data->pwa_icon->icon_maskable_512_uri,
-                    "sizes" => "512x512",
-                    "type" => "image/png",
-                    "purpose" => "maskable"
-                ]
-            ]
+            'background_color' => $this->brandingData->toArray()["theme_data_settings"]['light_scheme_data']['primary_seed_color'],
+            'theme_color'      => $this->brandingData->toArray()["theme_data_settings"]['light_scheme_data']['primary_seed_color']
         ];
     }
 

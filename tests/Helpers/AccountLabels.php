@@ -116,4 +116,17 @@ class AccountLabels extends Labels {
         }
     }
 
+    public function toArray(): array {
+        return [
+            "id" => $this->id,
+            "name" => $this->name,
+            "document" => $this->document,
+            "slug" => $this->slug,
+            "users" => [
+                "admin" => $this->user_admin->toArray(),
+                "users_manager" => $this->user_users_manager->toArray(),
+                "visitor" => $this->user_visitor->toArray(),
+            ]
+        ];
+    }
 }

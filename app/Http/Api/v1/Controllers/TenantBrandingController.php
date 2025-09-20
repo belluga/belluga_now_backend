@@ -97,7 +97,7 @@ class TenantBrandingController extends Controller
                     ? 'ico'
                     : ($file->getClientOriginalExtension() ?: 'png');
 
-                $directory = "storage/tenants/{$tenant->slug}/logos";
+                $directory = "tenants/{$tenant->slug}/logos";
                 $fileName = "{$baseName}.{$extension}";
                 $path = "{$directory}/{$fileName}";
 

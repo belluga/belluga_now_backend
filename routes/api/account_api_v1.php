@@ -11,56 +11,44 @@ Route::middleware('auth:sanctum')
             ->group(function () {
 
                 Route::get('/', [AccountUserController::class, 'index'])
-                    ->middleware('account', "abilities:account-users:view")
-                    ->name('tenant.users.index');
+                    ->middleware('account', "abilities:account-users:view");
 
                 Route::post('/', [AccountUserController::class, 'store'])
-                    ->middleware('account', "abilities:account-users:create")
-                    ->name('tenant.users.store');
+                    ->middleware('account', "abilities:account-users:create");
 
                 Route::get('/{user_id}', [AccountUserController::class, 'show'])
-                    ->middleware('account', "abilities:account-users:view")
-                    ->name('tenant.users.show');
+                    ->middleware('account', "abilities:account-users:view");
 
                 Route::patch('/{user_id}', [AccountUserController::class, 'update'])
-                    ->middleware('account', "abilities:account-users:update")
-                    ->name('tenant.users.update');
+                    ->middleware('account', "abilities:account-users:update");
 
                 Route::delete('/{user_id}', [AccountUserController::class, 'destroy'])
-                    ->middleware('account', "abilities:account-users:delete")
-                    ->name('tenant.users.destroy');
+                    ->middleware('account', "abilities:account-users:delete");
             });
 
         Route::prefix("roles")
             ->group(function () {
 
                 Route::get('/', [AccountRolesTemplatesController::class, 'index'])
-                    ->middleware('account', "abilities:account-roles:view")
-                    ->name('tenant.accounts.roles.list');
+                    ->middleware('account', "abilities:account-roles:view");
 
                 Route::post('/', [AccountRolesTemplatesController::class, 'store'])
-                    ->middleware('account', "abilities:account-roles:create")
-                    ->name('tenant.accounts.roles.create');
+                    ->middleware('account', "abilities:account-roles:create");
 
                 Route::get('/{role_id}', [AccountRolesTemplatesController::class, 'show'])
-                    ->middleware('account', "abilities:account-roles:view")
-                    ->name('tenant.accounts.roles.show');
+                    ->middleware('account', "abilities:account-roles:view");
 
                 Route::patch('/{role_id}', [AccountRolesTemplatesController::class, 'update'])
-                    ->middleware('account', "abilities:account-roles:update")
-                    ->name('tenant.accounts.roles.update');
+                    ->middleware('account', "abilities:account-roles:update");
 
                 Route::delete('/{role_id}', [AccountRolesTemplatesController::class, 'destroy'])
-                    ->middleware('account', "abilities:account-roles:delete")
-                    ->name('tenant.accounts.roles.destroy');
+                    ->middleware('account', "abilities:account-roles:delete");
 
                 Route::post('/{role_id}/restore', [AccountRolesTemplatesController::class, 'restore'])
-                    ->middleware('account', "abilities:account-roles:create,account-roles:update")
-                    ->name('tenant.accounts.roles.restore');
+                    ->middleware('account', "abilities:account-roles:create,account-roles:update");
 
                 Route::delete('/{role_id}/force_delete', [AccountRolesTemplatesController::class, 'forceDestroy'])
-                    ->middleware('account', "abilities:account-roles:delete")
-                    ->name('tenant.accounts.roles.force_destroy');
+                    ->middleware('account', "abilities:account-roles:delete");
             });
     });
 

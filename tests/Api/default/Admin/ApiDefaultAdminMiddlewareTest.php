@@ -13,8 +13,6 @@ class ApiDefaultAdminMiddlewareTest extends TestCase
 {
     use AdminRoleFunctions, AdminAuthFunctions, AccountAuthFunctions;
 
-    protected TenantLabels $tenant;
-
     public function testLoginAllAdminUsers(): void {
         $response = $this->adminLogin($this->landlord->user_superadmin);
         $response->assertStatus(200);
@@ -27,8 +25,7 @@ class ApiDefaultAdminMiddlewareTest extends TestCase
     }
 
     public function testLoginAccountUsers():void {
-        $this->tenant = $this->landlord->tenant_primary;
-        $response = $this->accountLogin($this->landlord->tenant_primary->account_primary->user_admin);
+        $response = $this->accountLoginRaw($this->landlord->tenant_primary, $this->landlord->tenant_primary->account_primary->user_admin);
         $response->assertStatus(200);
     }
 

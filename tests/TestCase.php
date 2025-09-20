@@ -3,13 +3,24 @@
 namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Tests\Api\Traits\ClearConfigCacheOnce;
+use Tests\Api\Traits\MigrateFreshSeedOnce;
 use Tests\Helpers\Landlord;
 
 abstract class TestCase extends BaseTestCase {
 
-    use MigrateFreshSeedOnce;
+    use MigrateFreshSeedOnce, ClearConfigCacheOnce;
 
     protected string $prefix = "default";
+
+    protected string $host = "nginx";
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->clearConfigCacheOnce();
+        $this->migrateOnce();
+    }
 
     protected string $api_url_admin {
         get {

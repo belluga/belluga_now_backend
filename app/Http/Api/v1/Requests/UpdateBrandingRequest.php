@@ -31,10 +31,10 @@ class UpdateBrandingRequest extends FormRequest
             'theme_data_settings.light_scheme_data.secondary_seed_color' => ['sometimes', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
             'logo_settings' => ['sometimes', 'array'],
-            'logo_settings.light_logo_uri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logo_settings.dark_logo_uri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logo_settings.light_icon_uri' => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
-            'logo_settings.dark_icon_uri'  => ['sometimes', 'image', 'mimes:png,svg,jpg', 'max:2048'],
+            'logo_settings.light_logo_uri' => ['sometimes', 'image', 'mimes:png', 'max:2048'],
+            'logo_settings.dark_logo_uri'  => ['sometimes', 'image', 'mimes:png', 'max:2048'],
+            'logo_settings.light_icon_uri' => ['sometimes', 'image', 'mimes:png', 'max:2048'],
+            'logo_settings.dark_icon_uri'  => ['sometimes', 'image', 'mimes:png', 'max:2048'],
             'logo_settings.favicon_uri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'
                 , 'max:2048'],
 

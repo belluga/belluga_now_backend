@@ -26,4 +26,6 @@ abstract class Labels {
         $params[$key] = $value;
     }
 
+    abstract public function toArray(): array;
+
 }

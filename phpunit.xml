@@ -16,6 +16,7 @@
             <file>tests/Api/default/Admin/ApiDefaultAdminAuthTest.php</file>
             <file>tests/Api/default/Admin/ApiDefaultAdminProfileTest.php</file>
             <file>tests/Api/default/Admin/ApiDefaultAdminTenantTest.php</file>
+            <file>tests/Api/default/Admin/ApiDefaultBrandingAdminTest.php</file>
         </testsuite>
         <testsuite name="Api-Default-Tenant">
             <directory>tests/Api/default/Tenants/Roles</directory>
@@ -34,21 +35,6 @@
             <directory>tests/Api/default/Tenants/Middleware</directory>
             <directory>tests/Api/default/Accounts/Middleware</directory>
         </testsuite>
-
-
-<!--        <testsuite name="Api-V1">-->
-<!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->
-<!--            <file>tests/Api/v1/ApiV1PaymentSettingsIuguTest.php</file>-->
-<!--            <file>tests/Api/v1/ApiV1OrdersCreationTest.php</file>-->
-<!--            <file>tests/Api/v1/ApiV1WebhookTest.php</file>-->
-<!--        </testsuite>-->
-<!--        <testsuite name="Api-V2">-->
-<!--            <file>tests/Api/v2/ApiV2TokenGenerateTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2PaymentSettingsIuguTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2OrdersValidationTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2OrdersCreationTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2WebhookTest.php</file>-->
-<!--        </testsuite>-->
     </testsuites>
     <source>
         <include>
@@ -57,6 +43,7 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_URL" value="http://nginx" />
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
@@ -65,5 +52,8 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="DB_DATABASE" value="landlord_test" />
+        <env name="DB_DATABASE_LANDLORD" value="landlord_test" />
+        <env name="DB_DATABASE_TENANTS" value="tenants_test" />
     </php>
 </phpunit>

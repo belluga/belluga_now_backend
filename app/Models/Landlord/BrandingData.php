@@ -5,6 +5,7 @@ namespace App\Models\Landlord;
 use App\Casts\LogoSettingsCast;
 use App\Casts\PwaIconCast;
 use App\Casts\ThemeDataSettingsCast;
+use App\Support\Helpers\ArrayReplaceIfEmpty;
 use MongoDB\Laravel\Eloquent\Model;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
@@ -30,5 +31,20 @@ class BrandingData extends Model
             "logo_settings" => $this->logo_settings->toArray(),
             "pwa_icon" => $this->pwa_icon->toArray(),
         ];
+    }
+
+    static public function getCurrentData(): array {
+        $tenant = Tenant::current();
+        $landlord = Landlord::singleton();
+
+        if(!$tenant){
+            return $landlord->brandingData->toArray();
+        }
+
+        $branding_tenant = $tenant->brandingData;
+        $branding_landlord = $landlord->brandingData;
+
+        return ArrayReplaceIfEmpty::mergeIfEmptyRecursive($branding_landlord->toArray(), $branding_tenant->toArray());
+
     }
 }

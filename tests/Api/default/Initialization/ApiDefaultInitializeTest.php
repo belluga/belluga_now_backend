@@ -95,7 +95,11 @@ class ApiDefaultInitializeTest extends TestCase {
     protected function initiate(): TestResponse {
         return $this->post(
             'initialize',
-            $this->payloadInitiate()
+            $this->payloadInitiate(),
+            [
+                'Content-Type' => 'multipart/form-data'
+            ],
+
         );
     }
 
@@ -107,6 +111,13 @@ class ApiDefaultInitializeTest extends TestCase {
     }
 
     protected function payloadInitiate(): array {
+
+        $landlord_favicon = UploadedFile::fake()->create('favicon.ico', 60, 'image/vnd.microsoft.icon');
+        $light_icon_uri = UploadedFile::fake()->image('light-icon.png', 50, 512);
+        $dark_icon_uri = UploadedFile::fake()->image('dark-icon.png', 300, 192);
+        $light_logo_uri = UploadedFile::fake()->image('light-logo.png', 350, 512);
+        $dark_logo_uri = UploadedFile::fake()->image('dark-logo.png', 400, 512);
+
         return [
             "landlord" => [
                 "name" => fake()->company()
@@ -141,11 +152,11 @@ class ApiDefaultInitializeTest extends TestCase {
                     ]
                 ],
                 'logo_settings' => [
-                    'light_icon_uri' => UploadedFile::fake()->image('light-icon.png', 512, 512),
-                    'dark_icon_uri' => UploadedFile::fake()->image('dark-icon.png', 192, 192),
-                    'light_logo_uri' => UploadedFile::fake()->image('light-logo.png', 512, 512),
-                    'dark_logo_uri' => UploadedFile::fake()->image('dark-logo.png', 512, 512),
-                    'favicon_uri' => UploadedFile::fake()->create('favicon.ico', 1, 'image/x-icon'),
+                    'light_icon_uri' => $light_icon_uri,
+                    'dark_icon_uri' => $dark_icon_uri,
+                    'light_logo_uri' => $light_logo_uri,
+                    'dark_logo_uri' => $dark_logo_uri,
+                    'favicon_uri' => $landlord_favicon,
                 ],
                 'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
             ]

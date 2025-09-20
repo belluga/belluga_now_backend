@@ -3,11 +3,12 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\BrandingData;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Request;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -18,13 +19,13 @@ class BrandingController extends Controller
      */
     public function getManifest(Request $request): JsonResponse
     {
-        $manifest_data = $this->_buildManifest();
+        $manifest_data = $this->_buildManifest($request);
 
         return response()->json($manifest_data)
             ->header('Content-Type', 'application/manifest+json');
     }
 
-    protected function _buildManifest(): array {
+    protected function _buildManifest(Request $request): array {
         $tenant = Tenant::current();
 
         if ($tenant) {
@@ -32,6 +33,25 @@ class BrandingController extends Controller
         }else{
             $manifest_content = $this->_buildLandlordManifest();
         }
+
+        $manifest_content['icons'] = [
+            [
+                "src" =>  $request->root()."/icon/icon-192x192.png",
+                "sizes" => "192x192",
+                "type" => "image/png"
+            ],
+            [
+                "src" => $request->root()."/icon/icon-512x512.png",
+                "sizes"=> "512x512",
+                "type" => "image/png"
+            ],
+            [
+                "src" => $request->root()."/icon/icon-maskable-512x512.png",
+                "sizes" => "512x512",
+                "type" => "image/png",
+                "purpose" => "maskable"
+            ]
+        ];
 
         return $manifest_content;
     }
@@ -49,33 +69,48 @@ class BrandingController extends Controller
 
     public function getFavicon(): Response|BinaryFileResponse
     {
-        $landlord = Landlord::singleton();
-        $iconPath = $landlord->brandingData->icon_settings->faviconUrl;
+        $branding_data = BrandingData::getCurrentData();
+        $iconPath = $branding_data['logo_settings']['favicon_uri'];
+
+        return $this->serveFileFromStorage($iconPath);
+    }
+
+    public function getLogoLight(): Response|BinaryFileResponse
+    {
+        $branding_data = BrandingData::getCurrentData();
+        $iconPath = $branding_data['logo_settings']['light_logo_uri'];
+
+        return $this->serveFileFromStorage($iconPath);
+    }
+
+    public function getLogoDark(): Response|BinaryFileResponse
+    {
+        $branding_data = BrandingData::getCurrentData();
+        $iconPath = $branding_data['logo_settings']['dark_logo_uri'];;
 
         return $this->serveFileFromStorage($iconPath);
     }
 
     public function getMaskableIcon(): Response|BinaryFileResponse
     {
-        $landlord = Landlord::singleton();
-        $iconPath = $landlord->brandingData->pwa_icon->icon_maskable512Uri;
+        $branding_data = BrandingData::getCurrentData();
+        $iconPath = $branding_data['pwa_icon']['icon_maskable512_uri'];
 
         return $this->serveFileFromStorage($iconPath);
     }
 
     public function getIcon192(): Response|BinaryFileResponse
     {
-        $landlord = Landlord::singleton();
-
-        $iconPath = $landlord->brandingData->pwa_icon->icon192Uri;
+        $branding_data = BrandingData::getCurrentData();
+        $iconPath = $branding_data['pwa_icon']['icon192_uri'];
 
         return $this->serveFileFromStorage($iconPath);
     }
 
     public function getIcon512(): Response|BinaryFileResponse
     {
-        $landlord = Landlord::singleton();
-        $iconPath = $landlord->brandingData->pwa_icon->icon512Uri;
+        $branding_data = BrandingData::getCurrentData();
+        $iconPath = $branding_data['pwa_icon']['icon512_uri'];
 
         return $this->serveFileFromStorage($iconPath);
     }

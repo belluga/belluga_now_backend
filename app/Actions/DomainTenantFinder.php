@@ -10,6 +10,8 @@ use Spatie\Multitenancy\TenantFinder\TenantFinder;
 
 class DomainTenantFinder extends TenantFinder
 {
+    private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
+
     public function findForRequest(Request $request): ?IsTenant
     {
         if($this->isRequestFromSubdomain()){
@@ -56,6 +58,14 @@ class DomainTenantFinder extends TenantFinder
             return $parts_request[1] === $parts_config[1];
         }
 
+        if($this->isLocalEnvironment()){
+            return in_array($parts_request[0], $this->local_environment_alternatives);
+        }
+
         return false;
+    }
+
+    private function isLocalEnvironment(): bool {
+        return in_array(request()->getHost(), $this->local_environment_alternatives);
     }
 }
