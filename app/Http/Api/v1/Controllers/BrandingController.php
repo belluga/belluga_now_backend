@@ -17,6 +17,12 @@ class BrandingController extends Controller
 {
     public function showBrandingData(Request $request): JsonResponse
     {
+        //name
+        //subdomain
+        //theme_data_settings
+        //domains
+        //app_domains
+
         $tenant = Tenant::current();
         $landlord = Landlord::singleton();
 
@@ -30,6 +36,9 @@ class BrandingController extends Controller
         }
 
         $export_data = [
+            "name" => $tenant?->name ?? $landlord->name,
+            "subdomain" => $tenant?->subdomain,
+            "domains" => $tenant?->domains()?->get()?->all(),
             "theme_data_settings" => $final_branding_data['theme_data_settings'],
             "logo_settings" => [
                 "light_logo_uri" => $request->root()."/logo-light.png",

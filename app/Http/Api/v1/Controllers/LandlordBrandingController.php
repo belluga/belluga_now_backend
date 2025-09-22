@@ -25,7 +25,7 @@ class LandlordBrandingController
 
         if ($request->hasFile("logo_settings.pwa_icon")) {
             $brandingArray['pwa_icon'] = $this->generatePwaIconVariants(
-                sourcePath: $request->file("logo_settings.pwa_icon")->getRealPath(),
+                sourceFile: $request->file("logo_settings.pwa_icon"),
             );
         }
 

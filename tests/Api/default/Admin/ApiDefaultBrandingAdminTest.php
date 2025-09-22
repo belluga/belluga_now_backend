@@ -10,6 +10,35 @@ use function PHPUnit\Framework\assertEquals;
 
 class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
 
+    public function testBranding() {
+        $response = $this->_getBranding();
+        $response->assertStatus(200);
+
+        $resultData = [
+            "dark_scheme_data" => [
+                "primary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['primary_seed_color'],
+                "secondary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['secondary_seed_color'],
+            ],
+            "light_scheme_data" => [
+                "primary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['primary_seed_color'],
+                "secondary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['secondary_seed_color'],
+            ]
+        ];
+
+        $check_values = [
+            "dark_scheme_data" => [
+                "primary_seed_color" => "#000000",
+                "secondary_seed_color" => "#DDDDDD",
+            ],
+            "light_scheme_data" => [
+                "primary_seed_color" => "#FFFFFF",
+                "secondary_seed_color" => "#999999",
+            ],
+        ];
+
+        AssertEquals($resultData, $check_values);
+    }
+
     public function testUpdate() {
         $respoonse = $this->_updateBranding();
         $respoonse->assertStatus(200);
@@ -100,8 +129,8 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
 
     protected function _updateBranding(): TestResponse {
         return $this->json(
-            method: 'put',
-            uri: "admin/api/branding",
+            method: 'post',
+            uri: "admin/api/branding/update",
             data: $this->_payloadBrandingUpdate(),
             headers: $this->getHeaders(),
         );
@@ -109,6 +138,13 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
 
     protected function _getFavicon(): TestResponse {
         return $this->get("favicon.ico");
+    }
+
+    protected function _getBranding(): TestResponse {
+        return $this->json(
+            method: 'get',
+            uri: "branding"
+        );
     }
 
     protected function _getIcon(String $iconType): TestResponse {

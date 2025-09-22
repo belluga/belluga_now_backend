@@ -24,11 +24,14 @@ class TenantBrandingController
 
         if ($request->hasFile("logo_settings.pwa_icon")) {
             $brandingArray['pwa_icon'] = $this->generatePwaIconVariants(
-                sourcePath: $request->file("logo_settings.pwa_icon")->getRealPath(),
+                sourceFile: $request->file("logo_settings.pwa_icon"),
             );
         }
 
-        $tenantBrandingArray = $this->buildTenantBrandingArrayWithEmpties($newData, $uploadedLogoUrls);
+        $tenantBrandingArray = $this->buildTenantBrandingArrayWithEmpties(
+            $brandingArray,
+            $uploadedLogoUrls
+        );
 
         if($tenant->branding_data){
             $tenant->branding_data = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(

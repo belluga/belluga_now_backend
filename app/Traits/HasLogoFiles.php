@@ -65,9 +65,10 @@ trait HasLogoFiles
         return $this->_saveContentToPublicDisk($fileContent, $path);
     }
 
-    protected function generatePwaIconVariants(string $sourcePath): array
+    protected function generatePwaIconVariants(UploadedFile $sourceFile): array
     {
-        // Uses the dynamic path
+        $sourceUri = $this->storeFile($sourceFile, 'pwa_icon_source');
+        $sourcePath = $sourceFile->getRealPath();
         $baseDir = "{$this->getScopedPathProperty()}/pwa";
         Storage::disk('public')->makeDirectory($baseDir);
 
@@ -77,19 +78,17 @@ trait HasLogoFiles
             'maskable512' => "{$baseDir}/icon-maskable-512x512.png",
         ];
 
-        // Create 192px variant
         $canvas192 = Image::create(192, 192)->place(Image::read($sourcePath)->contain(192, 192), 'center');
         $icon192Path = $this->_saveContentToPublicDisk($canvas192->toPng()->toString(), $paths['icon192']);
 
-        // Create 512px variant
         $canvas512 = Image::create(512, 512)->place(Image::read($sourcePath)->contain(512, 512), 'center');
         $icon512Path = $this->_saveContentToPublicDisk($canvas512->toPng()->toString(), $paths['icon512']);
 
-        // Create maskable 512px variant
         $canvasMaskable = Image::create(512, 512)->place(Image::read($sourcePath)->contain(410, 410), 'center');
         $icon512MaskablePath = $this->_saveContentToPublicDisk($canvasMaskable->toPng()->toString(), $paths['maskable512']);
 
         return [
+            'source_uri'             => $sourceUri,
             'icon192_uri'            => $icon192Path,
             'icon512_uri'            => $icon512Path,
             'icon_maskable512_uri' => $icon512MaskablePath,

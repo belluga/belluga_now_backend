@@ -57,8 +57,7 @@ class InitializationController extends Controller
             $logoSettingsPayload = $this->processLogoUploads($request);
 
             $pwaIconPayload = $this->generatePwaIconVariants(
-                sourcePath: $request->file("branding_data.pwa_icon")->getRealPath(),
-                baseDir: 'landlord/pwa'
+                sourceFile: $request->file("branding_data.pwa_icon"),
             );
 
             $themeDataPayload = $validated['branding_data']['theme_data_settings'];

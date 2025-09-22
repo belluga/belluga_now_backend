@@ -38,6 +38,7 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
 
         AssertEquals($resultData, $check_values);
     }
+
     public function testUpdate() {
         $response = $this->_updateBranding();
         $response->assertStatus(200);
@@ -155,8 +156,8 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
 
     protected function _updateBranding(): TestResponse {
         return $this->json(
-            method: 'put',
-            uri: "{$this->base_api_tenant}branding",
+            method: 'post',
+            uri: "{$this->base_api_tenant}branding/update",
             data: $this->_payloadBrandingUpdate(),
             headers: $this->getHeaders(),
         );
@@ -181,7 +182,7 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
     protected function _getBranding(): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "{$this->base_api_tenant}branding"
+            uri: "{$this->base_tenant_url}branding"
         );
     }
 
