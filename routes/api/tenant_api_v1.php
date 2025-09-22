@@ -137,9 +137,7 @@ Route::prefix('roles')->group(function () {
 
 Route::prefix('branding')->group(function () {
 
-    Route::get('/', [BrandingController::class, 'showBrandingData']);
-
-    Route::put('/', [TenantBrandingController::class, 'update'])
+    Route::post('/update', [TenantBrandingController::class, 'update'])
         ->middleware('auth:sanctum', 'abilities:tenant-branding:update');
 
 });

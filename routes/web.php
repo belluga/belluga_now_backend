@@ -14,6 +14,7 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('tenant-maybe')->group(function () {
+    Route::get('/branding', [BrandingController::class, 'showBrandingData']);
     Route::get('/manifest.json', [BrandingController::class, 'getManifest']);
     Route::get('/favicon.ico', [BrandingController::class, 'getFavicon']);
     Route::get('/icon/icon-maskable-512x512.png', [BrandingController::class, 'getMaskableIcon']);

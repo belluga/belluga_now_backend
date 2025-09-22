@@ -22,10 +22,9 @@ class TenantBrandingController
         $brandingArray = $newData;
         $brandingArray['logo_settings'] = $uploadedLogoUrls;
 
-        if ($request->hasFile("pwa_icon")) {
+        if ($request->hasFile("logo_settings.pwa_icon")) {
             $brandingArray['pwa_icon'] = $this->generatePwaIconVariants(
-                sourcePath: $request->file("pwa_icon")->getRealPath(),
-                baseDir: "tenants/{$tenant->slug}/pwa"
+                sourcePath: $request->file("logo_settings.pwa_icon")->getRealPath(),
             );
         }
 
