@@ -2,6 +2,7 @@
 
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
+use App\Http\Api\v1\Controllers\BrandingController;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
@@ -136,9 +137,9 @@ Route::prefix('roles')->group(function () {
 
 Route::prefix('branding')->group(function () {
 
-    Route::get('/', [TenantBrandingController::class, 'show']);
+    Route::get('/', [BrandingController::class, 'showBrandingData']);
 
-    Route::post('/', [TenantBrandingController::class, 'update'])
+    Route::put('/', [TenantBrandingController::class, 'update'])
         ->middleware('auth:sanctum', 'abilities:tenant-branding:update');
 
 });

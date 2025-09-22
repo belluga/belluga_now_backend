@@ -112,7 +112,15 @@ class ApiDefaultInitializeTest extends TestCase {
 
     protected function payloadInitiate(): array {
 
-        $landlord_favicon = UploadedFile::fake()->create('favicon.ico', 60, 'image/vnd.microsoft.icon');
+        $favicon_fixture_path = base_path('tests/Assets/landlord.ico');
+        $favicon_for_upload = new UploadedFile(
+            path: $favicon_fixture_path,
+            originalName: 'favicon.ico',
+            mimeType: 'image/vnd.microsoft.icon',
+            error: null,
+            test: true
+        );
+
         $light_icon_uri = UploadedFile::fake()->image('light-icon.png', 50, 512);
         $dark_icon_uri = UploadedFile::fake()->image('dark-icon.png', 300, 192);
         $light_logo_uri = UploadedFile::fake()->image('light-logo.png', 350, 512);
@@ -144,11 +152,11 @@ class ApiDefaultInitializeTest extends TestCase {
                 "theme_data_settings" => [
                     "dark_scheme_data" => [
                         'primary_seed_color' => '#000000',
-                        'secondary_seed_color' => '#CCCCCC',
+                        'secondary_seed_color' => '#DDDDDD',
                     ],
                     "light_scheme_data" => [
                         'primary_seed_color' => '#FFFFFF',
-                        'secondary_seed_color' => '#CCCCCC',
+                        'secondary_seed_color' => '#999999',
                     ]
                 ],
                 'logo_settings' => [
@@ -156,7 +164,7 @@ class ApiDefaultInitializeTest extends TestCase {
                     'dark_icon_uri' => $dark_icon_uri,
                     'light_logo_uri' => $light_logo_uri,
                     'dark_logo_uri' => $dark_logo_uri,
-                    'favicon_uri' => $landlord_favicon,
+                    'favicon_uri' => $favicon_for_upload,
                 ],
                 'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
             ]

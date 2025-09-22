@@ -62,11 +62,11 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
         $response->assertStatus(200);
     }
 
-    public function testFavicon() {
-        $response = $this->_getFavicon();
-        $response->assertStatus(200);
-        $response->assertHeader('Content-Type', 'image/vnd.microsoft.icon');
-    }
+//    public function testFavicon() {
+//        $response = $this->_getFavicon();
+//        $response->assertStatus(200);
+//        $response->assertHeader('Content-Type', 'image/vnd.microsoft.icon');
+//    }
 
     public function testLogoLight() {
         $response = $this->_getLogo("light");

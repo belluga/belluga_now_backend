@@ -2,10 +2,7 @@
 
 namespace App\Models\Landlord;
 
-use App\Casts\LogoSettingsCast;
-use App\Casts\PwaIconCast;
-use App\Casts\ThemeDataSettingsCast;
-use App\Support\Helpers\ArrayReplaceIfEmpty;
+use App\Support\Helpers\ArrayReplaceEmptyAware;
 use MongoDB\Laravel\Eloquent\Model;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
@@ -16,20 +13,26 @@ class BrandingData extends Model
 {
     use UsesLandlordConnection;
 
-    protected static $unguarded = true;
+    protected $fillable = [
+        'theme_data_settings',
+        'logo_settings',
+        'pwa_icon',
+    ];
+
+//    protected static $unguarded = true;
 
     protected $casts = [
-        'theme_data_settings' => ThemeDataSettingsCast::class,
-        'logo_settings' => LogoSettingsCast::class,
-        'pwa_icon' => PwaIconCast::class,
+//        'theme_data_settings' => 'array',
+//        'logo_settings' => 'array',
+//        'pwa_icon' => 'array',
     ];
 
     public function toArray(): array
     {
         return [
-            "theme_data_settings" => $this->theme_data_settings->toArray(),
-            "logo_settings" => $this->logo_settings->toArray(),
-            "pwa_icon" => $this->pwa_icon->toArray(),
+            "theme_data_settings" => $this->theme_data_settings,
+            "logo_settings" => $this->logo_settings,
+            "pwa_icon" => $this->pwa_icon,
         ];
     }
 
@@ -44,7 +47,7 @@ class BrandingData extends Model
         $branding_tenant = $tenant->brandingData;
         $branding_landlord = $landlord->brandingData;
 
-        return ArrayReplaceIfEmpty::mergeIfEmptyRecursive($branding_landlord->toArray(), $branding_tenant->toArray());
+        return ArrayReplaceEmptyAware::mergeIfEmptyRecursive($branding_landlord->toArray(), $branding_tenant->toArray());
 
     }
 }

@@ -9,6 +9,12 @@ abstract class TestCaseTenant extends TestCaseAuthenticated {
         get;
     }
 
+    protected string $base_tenant_url {
+        get {
+            return "http://{$this->tenant->subdomain}.{$this->host}/";
+        }
+    }
+
     protected string $base_api_tenant {
         get {
             return "http://{$this->tenant->subdomain}.{$this->host}/api/";

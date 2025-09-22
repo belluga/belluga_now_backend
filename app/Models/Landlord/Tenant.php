@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Models\Landlord;
 
 use App\Traits\HasOwner;
-use App\Traits\HaveBranding;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -13,12 +12,20 @@ use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\HasMany;
-use MongoDB\Laravel\Relations\EmbedsOne;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 use Spatie\Multitenancy\Models\Tenant as BaseTenant;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
+/**
+ * @property string $name
+ * @property ?string $short_name
+ * @property string $slug
+ * @property string $subdomain
+ * @property string $database
+ * @property ?string $description
+ * @property array $branding_data
+ */
 class Tenant extends BaseTenant
 {
     use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
@@ -35,15 +42,6 @@ class Tenant extends BaseTenant
 
     public function roleTemplates(): HasMany {
         return $this->hasMany(TenantRoleTemplate::class);
-    }
-
-    /**
-     * Define a relação EmbedsOne com o nosso novo model BrandingData.
-     * O nome do método (brandingData) será como você acessa o objeto: $landlord->brandingData
-     */
-    public function brandingData(): EmbedsOne
-    {
-        return $this->embedsOne(BrandingData::class, 'branding_data');
     }
 
     public function domains(): HasMany
@@ -82,14 +80,18 @@ class Tenant extends BaseTenant
 
     public function getManifestData(): array {
 
+        $landlord = Landlord::singleton();
+        $main_color = $this->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'] ?? $landlord->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'];
+
+
         return [
             'name'             => $this->name,
-            'short_name'       => $this->name,
+            'short_name'       => $this->short_name ?? $this->name,
             'description'      => $this->description,
             'start_url'        => '/',
             'display'          => 'standalone',
-            'background_color' => $this->brandingData->toArray()["theme_data_settings"]['light_scheme_data']['primary_seed_color'],
-            'theme_color'      => $this->brandingData->toArray()["theme_data_settings"]['light_scheme_data']['primary_seed_color']
+            'background_color' => $main_color,
+            'theme_color'      => $main_color
         ];
     }
 

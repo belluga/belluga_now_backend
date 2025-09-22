@@ -4,24 +4,21 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\DataObjects\Branding\LogoSettings;
-use App\DataObjects\Branding\PwaIcon;
-use App\DataObjects\Branding\ThemeDataSettings;
 use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
+use App\Traits\HasLogoFiles;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Intervention\Image\Laravel\Facades\Image;
 
 class InitializationController extends Controller
 {
+
+    use HasLogoFiles;
+
     private bool $_isInitialized {
         get {
             return LandlordUser::query()->exists()
@@ -57,17 +54,22 @@ class InitializationController extends Controller
         try {
             $landlord = Landlord::create(['name' => $validated['landlord']['name']]);
 
-            // Monta os 3 payloads aninhados
-            $logoSettingsPayload = $this->handleLogoUploads($request, $validated['branding_data']['logo_settings']);
-            $pwaIconPayload = $this->handlePwaIconUploads($request);
+            $logoSettingsPayload = $this->processLogoUploads($request);
+
+            $pwaIconPayload = $this->generatePwaIconVariants(
+                sourcePath: $request->file("branding_data.pwa_icon")->getRealPath(),
+                baseDir: 'landlord/pwa'
+            );
+
             $themeDataPayload = $validated['branding_data']['theme_data_settings'];
 
-            // Cria o documento embutido com a estrutura aninhada correta
-            $landlord->brandingData()->create([
-                'theme_data_settings' => ThemeDataSettings::fromArray($themeDataPayload)->toArray(),
-                'logo_settings'       => LogoSettings::fromArray($logoSettingsPayload)->toArray(),
-                'pwa_icon'            => PwaIcon::fromArray($pwaIconPayload)->toArray(),
-            ]);
+            $landlord->branding_data = [
+                'theme_data_settings' => $themeDataPayload,
+                'logo_settings'       => $logoSettingsPayload,
+                'pwa_icon'            => $pwaIconPayload,
+            ];
+
+            $landlord->save();
 
             $new_tenant = Tenant::create([
                 "name" => $validated['tenant']["name"],
@@ -128,83 +130,5 @@ class InitializationController extends Controller
                 "landlord" => $landlord->toArray(),
             ]
         ], 201);
-    }
-
-    /**
-     * Handles standard logo file uploads.
-     */
-    private function handleLogoUploads(InitializeRequest $request, array $logoSettingsData): array
-    {
-        $logoKeys = ['light_logo_uri', 'dark_logo_uri', 'light_icon_uri', 'dark_icon_uri', 'favicon_uri'];
-
-        foreach ($logoKeys as $key) {
-            // Use Str::snake to check the original snake_case name in the multipart form data
-            $fileKey = 'branding_data.logo_settings.' . Str::snake($key);
-            if ($request->hasFile($fileKey)) {
-                $baseName = substr(Str::snake($key), 0, -4);
-                // The key for the final array is camelCase
-                $logoSettingsData[$key] = $this->storeFile($request->file($fileKey), 'landlord/logos', $baseName);
-            }
-        }
-        return $logoSettingsData;
-    }
-
-    /**
-     * Handles the single PWA source icon upload and generates the variants array.
-     */
-    private function handlePwaIconUploads(InitializeRequest $request): array
-    {
-        // Define the default empty structure
-        $pwaData = [
-            'source_uri' => '',
-            'icon192_uri' => '',
-            'icon512_uri' => '',
-            'icon_maskable512_uri' => '',
-        ];
-
-        // Check for the single file at branding_data.pwa_icon
-        if (!$request->hasFile('branding_data.pwa_icon')) {
-            return $pwaData;
-        }
-
-        $file = $request->file('branding_data.pwa_icon');
-        $pwaData['source_uri'] = $this->storeFile($file, 'landlord/logos', 'pwa_icon_source');
-
-        $baseDir = 'landlord/pwa';
-        Storage::disk('public')->makeDirectory($baseDir);
-        $sourcePath = $file->getRealPath();
-
-        $pwaData['icon192_uri'] = $this->generatePwaVariant($sourcePath, "{$baseDir}/icon-192x192.png", 192);
-        $pwaData['icon512_uri'] = $this->generatePwaVariant($sourcePath, "{$baseDir}/icon-512x192.png", 512);
-        $pwaData['icon_maskable512_uri'] = $this->generatePwaVariant($sourcePath, "{$baseDir}/icon-maskable-512x512.png", 512, 410);
-
-        return $pwaData;
-    }
-
-    /**
-     * Stores a file and returns its public URL.
-     */
-    private function storeFile(UploadedFile $file, string $directory, string $baseName): string
-    {
-        $extension = $baseName === 'favicon' ? 'ico' : $file->getClientOriginalExtension();
-        $fileName = "{$baseName}.{$extension}";
-        $path = $file->storeAs($directory, $fileName, 'public');
-        return Storage::disk('public')->url($path);
-    }
-
-    /**
-     * Generates a PWA icon variant with a transparent canvas.
-     */
-    private function generatePwaVariant(string $sourcePath, string $targetPath, int $canvasSize, ?int $contentSize = null): string
-    {
-        $contentSize = $contentSize ?? $canvasSize;
-
-        $canvas = Image::create($canvasSize, $canvasSize);
-        $content = Image::read($sourcePath)->contain($contentSize, $contentSize);
-        $canvas->place($content, 'center');
-
-        $canvas->save(Storage::disk('public')->path($targetPath));
-
-        return Storage::disk('public')->url($targetPath);
     }
 }

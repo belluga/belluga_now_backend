@@ -22,6 +22,7 @@
             <directory>tests/Api/default/Tenants/Roles</directory>
             <directory>tests/Api/default/Tenants/Users</directory>
             <directory>tests/Api/default/Tenants/Account</directory>
+            <directory>tests/Api/default/Tenants/Branding</directory>
         </testsuite>
         <testsuite name="Api-Default-Account">
             <directory>tests/Api/default/Accounts/Roles</directory>

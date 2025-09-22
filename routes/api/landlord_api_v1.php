@@ -2,6 +2,7 @@
 
 use App\Http\Api\v1\Controllers\TenantController;
 use App\Http\Api\v1\Controllers\LandlordBrandingController;
+use App\Http\Api\v1\Controllers\BrandingController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
@@ -117,7 +118,7 @@ Route::prefix('roles')->group(function () {
 
 Route::prefix('branding')->group(function () {
 
-    Route::get('/', [LandlordBrandingController::class, 'show'])
+    Route::get('/', [BrandingController::class, 'showBrandingData'])
         ->withoutMiddleware(['auth:sanctum', 'landlord']);
 
     Route::put('/', [LandlordBrandingController::class, 'update'])
