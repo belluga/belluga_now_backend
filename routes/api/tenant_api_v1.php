@@ -2,7 +2,7 @@
 
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
-use App\Http\Api\v1\Controllers\BrandingController;
+use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
@@ -55,6 +55,13 @@ Route::prefix('domains')
 
         Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy']);
 });
+
+Route::prefix('appdomains')
+    ->group(function (){
+        Route::get('/', [TenantAppDomainController::class, 'index']);
+        Route::post('/', [TenantAppDomainController::class, 'store']);
+        Route::delete('/', [TenantAppDomainController::class, 'destroy']);
+    });
 
 // Rotas protegidas para o tenant
 Route::get('/check', function () {

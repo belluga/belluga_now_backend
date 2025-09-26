@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\BrandingController;
+use App\Http\Api\v1\Controllers\EnvironmentController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth'])->group(function () {
@@ -14,7 +15,7 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('tenant-maybe')->group(function () {
-    Route::get('/branding', [BrandingController::class, 'showBrandingData']);
+    Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
     Route::get('/manifest.json', [BrandingController::class, 'getManifest']);
     Route::get('/favicon.ico', [BrandingController::class, 'getFavicon']);
     Route::get('/icon/icon-maskable-512x512.png', [BrandingController::class, 'getMaskableIcon']);

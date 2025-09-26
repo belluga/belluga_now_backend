@@ -8,31 +8,33 @@ use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Support\Facades\DB;
 
-class UniqueArrayItemRule implements ValidationRule
+class InArrayItemRule implements ValidationRule
 {
     protected string $key;
     protected string $table;
     protected string $connection;
+    protected bool $shouldExist;
 
-    public function __construct(string $connection,string $table ,string $key)
+    public function __construct(string $connection,string $table ,string $key, $shouldExist = true)
     {
         $this->key = $key;
         $this->table = $table;
         $this->connection = $connection;
+        $this->shouldExist = $shouldExist;
     }
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
         $query = DB::connection($this->connection)
             ->table($this->table)
-            ->where(
-                $this->key, 'all', [$value]
-            );
+            ->where($this->key, $value);
 
         $exists = $query->exists();
 
-        if ($exists) {
-            $fail("$attribute já utilizado.");
+        if($this->shouldExist){
+            if (!$exists) {
+                $fail("The selected :attribute is not a valid option.");
+            }
         }
     }
 }

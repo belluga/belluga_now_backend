@@ -8,6 +8,7 @@ use App\Traits\HasOwner;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
@@ -25,6 +26,7 @@ use Spatie\Sluggable\SlugOptions;
  * @property string $database
  * @property ?string $description
  * @property array $branding_data
+ * @property array $app_domains
  */
 class Tenant extends BaseTenant
 {
@@ -42,6 +44,16 @@ class Tenant extends BaseTenant
 
     public function roleTemplates(): HasMany {
         return $this->hasMany(TenantRoleTemplate::class);
+    }
+
+    public function getMainDomain(): string {
+        $main_domain = $this?->domains()?->first()?->domain;
+
+        if($main_domain) {
+            return "https://".$main_domain;
+        }
+
+        return "https://".$this->subdomain.".".Str::replace("https://", "", config('app.url'));
     }
 
     public function domains(): HasMany

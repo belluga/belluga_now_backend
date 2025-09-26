@@ -15,51 +15,6 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class BrandingController extends Controller
 {
-    public function showBrandingData(Request $request): JsonResponse
-    {
-        //name
-        //subdomain
-        //theme_data_settings
-        //domains
-        //app_domains
-
-        $tenant = Tenant::current();
-        $landlord = Landlord::singleton();
-
-        if($tenant?->branding_data){
-            $final_branding_data = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
-                mainArray: $landlord->branding_data,
-                overrideArray: $tenant->branding_data
-            );
-        }else{
-            $final_branding_data = $landlord->branding_data;
-        }
-
-        $export_data = [
-            "name" => $tenant?->name ?? $landlord->name,
-            "subdomain" => $tenant?->subdomain,
-            "domains" => $tenant?->domains()?->get()?->all(),
-            "theme_data_settings" => $final_branding_data['theme_data_settings'],
-            "logo_settings" => [
-                "light_logo_uri" => $request->root()."/logo-light.png",
-                "dark_logo_uri" => $request->root()."/logo-dark.png",
-                "light_icon_uri" => $request->root()."/icon-light.png",
-                "dark_icon_uri" => $request->root()."/icon-dark.png",
-                "favicon_uri" => $request->root()."/favicon.ico",
-            ],
-            "pwa_icon" => [
-                "icon192_uri" => $request->root()."/icon/icon-192x192.png",
-                "icon512_uri" => $request->root()."/icon/icon-512x512.png",
-                "icon_maskable512_uri" => $request->root()."/icon/icon-maskable-512x512.png",
-            ]
-        ];
-
-        return response()->json($export_data);
-    }
-
-    /**
-     * Dynamically generates the manifest.json file for the current tenant.
-     */
     public function getManifest(Request $request): JsonResponse
     {
         $manifest_data = $this->_buildManifest($request);
@@ -79,17 +34,17 @@ class BrandingController extends Controller
 
         $manifest_content['icons'] = [
             [
-                "src" =>  $request->root()."/icon/icon-192x192.png",
+                "src" => "https://".$request->host()."/icon/icon-192x192.png",
                 "sizes" => "192x192",
                 "type" => "image/png"
             ],
             [
-                "src" => $request->root()."/icon/icon-512x512.png",
+                "src" => "https://".$request->host()."/icon/icon-512x512.png",
                 "sizes"=> "512x512",
                 "type" => "image/png"
             ],
             [
-                "src" => $request->root()."/icon/icon-maskable-512x512.png",
+                "src" => "https://".$request->host()."/icon/icon-maskable-512x512.png",
                 "sizes" => "512x512",
                 "type" => "image/png",
                 "purpose" => "maskable"
