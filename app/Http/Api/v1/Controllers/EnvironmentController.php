@@ -16,6 +16,7 @@ class EnvironmentController extends Controller
     {
         $tenant = Tenant::current();
 
+
         if(!$tenant){
             $tenant = $this->_findTenant($request);
         }
@@ -30,10 +31,11 @@ class EnvironmentController extends Controller
 
     private function _findTenant(EnvironmentRequest $request): ?Tenant {
         $app_domain_value = $request->validated()['app_domain'] ?? null;
+
         if(!$app_domain_value){
             return null;
         }
-        return Tenant::where('app_domain', $app_domain_value)->first();
+        return Tenant::where('app_domains', $app_domain_value)->first();
     }
 
     private function _tenantEnvironment(Request $request): JsonResponse {
