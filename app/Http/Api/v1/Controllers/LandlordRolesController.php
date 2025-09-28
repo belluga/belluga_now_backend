@@ -20,8 +20,6 @@ class LandlordRolesController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
         $roles = LandlordRole::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
             ->paginate(15);
 

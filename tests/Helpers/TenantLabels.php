@@ -51,6 +51,34 @@ class TenantLabels extends Labels {
         }
     }
 
+    public string $base_url {
+        get {
+            return "http://$this->subdomain.".env('APP_HOST')."/";
+        }
+    }
+
+    public string $dark_scheme_data_secondary {
+        get{
+            return $this->getGlobal($this->base_label. ".dark_scheme_data_secondary");
+        }
+
+        set(string $value) {
+            $this->setGlobal($this->base_label. ".dark_scheme_data_secondary", $value);
+            $this->dark_scheme_data_secondary = $value;
+        }
+    }
+
+    public string $light_scheme_data_primary {
+        get{
+            return $this->getGlobal($this->base_label. ".light_scheme_data_primary");
+        }
+
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".light_scheme_data_primary", $value);
+            $this->light_scheme_data_primary = $value;
+        }
+    }
+
     public UserLabels $user_admin {
         get {
             return new UserLabels(
@@ -145,6 +173,22 @@ class TenantLabels extends Labels {
                 $this->base_label.".accounts.disposable"
             );
         }
+    }
+
+    public function toArray(): array
+    {
+        return [
+            "id" => $this->id,
+            "name" => $this->name,
+            "subdomain" => $this->subdomain,
+            "slug" => $this->slug,
+            "base_api_url" => $this->base_api_url,
+            "users" => [
+                "admin" => $this->user_admin->toArray(),
+                "roles_manager" => $this->user_roles_manager->toArray(),
+                "users_manager" => $this->user_users_manager->toArray(),
+            ]
+        ];
     }
 
 }

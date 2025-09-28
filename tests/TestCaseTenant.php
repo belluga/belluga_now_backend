@@ -9,9 +9,21 @@ abstract class TestCaseTenant extends TestCaseAuthenticated {
         get;
     }
 
+    protected string $base_tenant_url {
+        get {
+            return "http://{$this->tenant->subdomain}.{$this->host}/";
+        }
+    }
+
     protected string $base_api_tenant {
         get {
-            return "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/";
+            return "http://{$this->tenant->subdomain}.{$this->host}/api/";
+        }
+    }
+
+    protected string $base_tenant_api_admin {
+        get {
+            return "http://{$this->tenant->subdomain}.{$this->host}/admin/api/";
         }
     }
 }

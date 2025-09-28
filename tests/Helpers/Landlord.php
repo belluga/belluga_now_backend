@@ -102,4 +102,21 @@ class Landlord extends Labels {
             );
         }
     }
+
+    public function toArray(): array {
+        return [
+            "user_superadmin" => $this->user_superadmin->toArray(),
+            "user_cross_tenant_admin" => $this->user_cross_tenant_admin->toArray(),
+            "user_cross_tenant_visitor" => $this->user_cross_tenant_visitor->toArray(),
+            "user_disposable" => $this->user_disposable->toArray(),
+            "role_superadmin" => $this->role_superadmin->toArray(),
+            "role_tenants_manager" => $this->role_tenants_manager->toArray(),
+            "role_users_manager" => $this->role_users_manager->toArray(),
+            "role_visitor" => $this->role_visitor->toArray(),
+            "role_disposable" => $this->role_disposable->toArray(),
+            "tenant_primary" => $this->tenant_primary->toArray(),
+            "tenant_secondary" => $this->tenant_secondary->toArray(),
+            "tenant_disposable" => $this->tenant_disposable->toArray(),
+        ];
+    }
 }

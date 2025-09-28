@@ -7,17 +7,11 @@ use Tests\Helpers\UserLabels;
 
 trait AccountProfileFunctions {
 
-    protected string $profile_api_base {
-        get {
-            return "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/";
-        }
-    }
-
     protected function generateToken(string $user_email): TestResponse {
 
         return $this->json(
             method: 'post',
-            uri: $this->profile_api_base."auth/password_token",
+            uri: "{$this->base_api_tenant}auth/password_token",
             data: [
                 "email" => $user_email
             ],
@@ -28,7 +22,7 @@ trait AccountProfileFunctions {
 
         return $this->json(
             method: 'post',
-            uri: $this->profile_api_base."auth/password_reset",
+            uri: "{$this->base_api_tenant}auth/password_reset",
             data: [
                 'email' => $email,
                 'password' => $password,
@@ -41,7 +35,7 @@ trait AccountProfileFunctions {
     protected function profileUpdate(UserLabels $user, array $data): TestResponse {
         return $this->json(
             method: 'patch',
-            uri: $this->profile_api_base."profile",
+            uri: "{$this->base_api_tenant}profile",
             data: $data,
             headers: [
                 'Authorization' => "Bearer $user->token",
@@ -54,7 +48,7 @@ trait AccountProfileFunctions {
 
         return $this->json(
             method: 'patch',
-            uri: $this->profile_api_base."profile/password",
+            uri: "{$this->base_api_tenant}profile/password",
             data: [
                 "password" => $password,
                 "password_confirmation" => $password_confirmation,
@@ -69,7 +63,7 @@ trait AccountProfileFunctions {
     protected function profileAddEmails(UserLabels $user, array $emails): TestResponse {
         return $this->json(
             method: 'patch',
-            uri: $this->profile_api_base."profile/emails",
+            uri: "{$this->base_api_tenant}profile/emails",
             data: [
                 "emails" => $emails,
             ],
@@ -83,7 +77,7 @@ trait AccountProfileFunctions {
     protected function profileRemoveEmail(UserLabels $user, string $email): TestResponse {
         return $this->json(
             method: 'delete',
-            uri: $this->profile_api_base."profile/emails",
+            uri: "{$this->base_api_tenant}profile/emails",
             data: [
                 "email" => $email,
             ],
@@ -97,7 +91,7 @@ trait AccountProfileFunctions {
     protected function profileAddPhones(UserLabels $user, array $phones): TestResponse {
         return $this->json(
             method: 'patch',
-            uri: $this->profile_api_base."profile/phones",
+            uri: "{$this->base_api_tenant}profile/phones",
             data: [
                 "phones" => $phones,
             ],
@@ -111,7 +105,7 @@ trait AccountProfileFunctions {
     protected function profileRemovePhone(UserLabels $user, string $phone): TestResponse {
         return $this->json(
             method: 'delete',
-            uri: $this->profile_api_base."profile/phones",
+            uri: "{$this->base_api_tenant}profile/phones",
             data: [
                 "phone" => $phone,
             ],

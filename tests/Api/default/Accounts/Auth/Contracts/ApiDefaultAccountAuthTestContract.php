@@ -96,7 +96,6 @@ abstract class ApiDefaultAccountAuthTestContract extends TestCaseAccount
         $responseUserAdmin->assertStatus(200);
         $this->account->user_admin->token = $responseUserAdmin->json()['data']['token'];
 
-
         $responseUserAdmin = $this->accountLogin($this->account->user_visitor);
 
         $responseUserAdmin->assertStatus(200);

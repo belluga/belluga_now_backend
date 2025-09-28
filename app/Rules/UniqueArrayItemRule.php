@@ -26,7 +26,7 @@ class UniqueArrayItemRule implements ValidationRule
         $query = DB::connection($this->connection)
             ->table($this->table)
             ->where(
-                $this->key, 'all', $value
+                $this->key, 'all', [$value]
             );
 
         $exists = $query->exists();

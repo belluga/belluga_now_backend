@@ -8,6 +8,7 @@ use App\Traits\HasOwner;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
@@ -17,6 +18,16 @@ use Spatie\Multitenancy\Models\Tenant as BaseTenant;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
+/**
+ * @property string $name
+ * @property ?string $short_name
+ * @property string $slug
+ * @property string $subdomain
+ * @property string $database
+ * @property ?string $description
+ * @property array $branding_data
+ * @property array $app_domains
+ */
 class Tenant extends BaseTenant
 {
     use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
@@ -24,6 +35,7 @@ class Tenant extends BaseTenant
     protected $fillable = [
         'name',
         'slug',
+        'description',
         'database',
         'subdomain',
         'app_domains',
@@ -32,6 +44,16 @@ class Tenant extends BaseTenant
 
     public function roleTemplates(): HasMany {
         return $this->hasMany(TenantRoleTemplate::class);
+    }
+
+    public function getMainDomain(): string {
+        $main_domain = $this?->domains()?->first()?->domain;
+
+        if($main_domain) {
+            return "https://".$main_domain;
+        }
+
+        return "https://".$this->subdomain.".".Str::replace("https://", "", config('app.url'));
     }
 
     public function domains(): HasMany
@@ -66,6 +88,23 @@ class Tenant extends BaseTenant
         }
 
         return null;
+    }
+
+    public function getManifestData(): array {
+
+        $landlord = Landlord::singleton();
+        $main_color = $this->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'] ?? $landlord->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'];
+
+
+        return [
+            'name'             => $this->name,
+            'short_name'       => $this->short_name ?? $this->name,
+            'description'      => $this->description,
+            'start_url'        => '/',
+            'display'          => 'standalone',
+            'background_color' => $main_color,
+            'theme_color'      => $main_color
+        ];
     }
 
     public function getSlugOptions(): SlugOptions
@@ -115,4 +154,6 @@ class Tenant extends BaseTenant
         ]);
 
     }
+
+    protected $casts = [];
 }
