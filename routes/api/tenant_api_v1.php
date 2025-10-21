@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
+use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\DomainController;
@@ -25,6 +26,11 @@ Route::prefix('profile')
         Route::patch('/phones', [ProfileControllerTenant::class, 'addPhones']);
 
         Route::delete('/phones', [ProfileControllerTenant::class, 'removePhone']);
+    });
+
+Route::prefix('anonymous')
+    ->group(function () {
+        Route::post('/identities', [AnonymousIdentityController::class, 'store']);
     });
 
 Route::prefix('auth')

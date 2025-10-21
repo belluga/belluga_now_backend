@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use MongoDB\BSON\ObjectId;
 use Illuminate\Validation\ValidationException;
 
@@ -151,8 +152,50 @@ class AccountUserController extends Controller
                 'emails' => ['$in' => $data['emails']]
             ])->first();
 
-        if(!$user){
-            $user = AccountUser::create($data);
+        if (! $user) {
+            $password = $data['password'] ?? null;
+
+            if ($password !== null) {
+                $passwordHash = Hash::make($password);
+                $data['password'] = $passwordHash;
+            }
+
+            $user = AccountUser::create(array_merge([
+                'identity_state' => 'anonymous',
+                'anonymous_fingerprint' => [],
+                'account_assignments' => [],
+                'credentials' => [],
+                'consents' => [],
+            ], $data));
+
+            if (! empty($data['emails'])) {
+                foreach ($data['emails'] as $email) {
+                    $user->ensureEmail($email);
+                    if (isset($passwordHash)) {
+                        $user->syncCredential('password', $email, $passwordHash);
+                    }
+                }
+            }
+
+            return $user;
+        }
+
+        if ($user->trashed()) {
+            $user->restore();
+        }
+
+        if (! empty($data['emails'])) {
+            foreach ($data['emails'] as $email) {
+                $user->ensureEmail($email);
+            }
+        }
+
+        if (! empty($data['password'])) {
+            $passwordHash = Hash::make($data['password']);
+            $user->password = $passwordHash;
+            foreach ($data['emails'] as $email) {
+                $user->syncCredential('password', $email, $passwordHash);
+            }
         }
 
         return $user;

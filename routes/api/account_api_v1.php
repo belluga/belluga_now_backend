@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Api\v1\Controllers\AccountUserCredentialController;
 use App\Http\Api\v1\Controllers\AccountRolesTemplatesController;
 use App\Http\Api\v1\Controllers\AccountUserController;
 
@@ -24,6 +25,12 @@ Route::middleware('auth:sanctum')
 
                 Route::delete('/{user_id}', [AccountUserController::class, 'destroy'])
                     ->middleware('account', "abilities:account-users:delete");
+          
+                Route::post('/{user_id}/credentials', [AccountUserCredentialController::class, 'store'])
+                    ->middleware('account', "abilities:account-users:update");
+
+                Route::delete('/{user_id}/credentials/{credential_id}', [AccountUserCredentialController::class, 'destroy'])
+                    ->middleware('account', "abilities:account-users:update");
             });
 
         Route::prefix("roles")

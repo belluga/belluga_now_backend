@@ -14,11 +14,30 @@ return new class extends Migration
         Schema::create('tenants', function (Blueprint $collection) {
             $collection->unique('slug');
             $collection->unique("subdomain");
-            $collection->unique("app_domains");
             $collection->index('user_ids');
             $collection->index(['created_at' => -1]);
             $collection->index([ "updated_at" => -1]);
             $collection->timestamps();
+
+            $collection->index(
+                ['app_domains' => 1],
+                options: [
+                    'unique' => true,
+                    'name' => 'unique_appdomains_if_present',
+                    'partialFilterExpression' => [
+                        'app_domains.0' => ['$exists' => true]
+                    ]
+                ]);
+
+            $collection->index(
+                ['domains' => 1],
+                options: [
+                    'unique' => true,
+                    'name' => 'unique_domains_if_present',
+                    'partialFilterExpression' => [
+                        'domains.0' => ['$exists' => true]
+                    ]
+                ]);
         });
     }
 

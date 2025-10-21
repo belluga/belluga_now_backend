@@ -32,7 +32,7 @@ class TenantController extends Controller
         $user = auth()->guard('sanctum')->user();
 
         try {
-//            DB::beginTransaction();
+        //    DB::beginTransaction();
             $tenant = Tenant::create($request->validated());
 
             $tenant_admin_role_template = $tenant->roleTemplates()->create([
@@ -45,9 +45,9 @@ class TenantController extends Controller
                 ...$tenant_admin_role_template->attributesToArray(),
                 "tenant_id" => $tenant->id,
             ]);
-//            DB::commit();
+        //    DB::commit();
         } catch (BulkWriteException $e) {
-//            DB::rollBack();
+        //    DB::rollBack();
             abort(422, "Something went wrong when trying to create the tenant.");
         }
 

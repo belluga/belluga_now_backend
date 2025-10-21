@@ -94,7 +94,7 @@ class ApiDefaultInitializeTest extends TestCase {
 
     protected function initiate(): TestResponse {
         return $this->post(
-            'initialize',
+            'api/v1/initialize',
             $this->payloadInitiate(),
             [
                 'Content-Type' => 'multipart/form-data'
@@ -106,7 +106,7 @@ class ApiDefaultInitializeTest extends TestCase {
     protected function initiateCheck(): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "initialize",
+            uri: "api/v1/initialize",
         );
     }
 

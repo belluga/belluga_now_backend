@@ -143,7 +143,8 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
     protected function _getBranding(): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "branding"
+            uri: "environment",
+            headers: $this->getHeaders(),
         );
     }
 

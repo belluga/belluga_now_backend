@@ -38,7 +38,7 @@ class ApiDefaultAdminValidationTest extends TestCaseAuthenticated {
     protected function initiate(): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "initialize"
+            uri: "api/v1/initialize"
         );
     }
 

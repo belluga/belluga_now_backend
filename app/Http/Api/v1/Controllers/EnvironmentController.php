@@ -43,6 +43,12 @@ class EnvironmentController extends Controller
         $landlord = Landlord::singleton();
         $tenant = Tenant::current();
 
+        print("landlord->branding_data:");
+        print_r($landlord->branding_data);
+
+        print("landlord->branding_data:");
+        print_r($tenant->branding_data);
+
         $export_data = [
             "name" => $tenant->name,
             "type" => "tenant",
@@ -52,7 +58,7 @@ class EnvironmentController extends Controller
             "app_domains" => $tenant?->app_domains,
             "theme_data_settings" => ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
                 mainArray: $landlord->branding_data['theme_data_settings'],
-                overrideArray: $tenant->branding_data['theme_data_settings']
+                overrideArray: $tenant->branding_data['theme_data_settings'] ?? []
             )
 
         ];

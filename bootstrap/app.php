@@ -17,7 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/healh',
         then: function () {
-            Route::prefix('initialize')
+            Route::prefix('api/v1/initialize')
                 ->middleware('guest')
                 ->group(base_path('routes/api/initialize.php'));
 
