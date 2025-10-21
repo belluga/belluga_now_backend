@@ -162,7 +162,7 @@ class AccountUserController extends Controller
 
             $user = AccountUser::create(array_merge([
                 'identity_state' => 'anonymous',
-                'anonymous_fingerprint' => [],
+                'fingerprints' => [],
                 'account_assignments' => [],
                 'credentials' => [],
                 'consents' => [],

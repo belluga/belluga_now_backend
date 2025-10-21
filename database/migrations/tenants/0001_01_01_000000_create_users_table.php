@@ -17,6 +17,16 @@ return new class extends Migration
             $collection->index(['created_at' => -1, "updated_at" => -1]);
 
             $collection->index(
+                ['fingerprints.hash' => 1],
+                options: [
+                    'unique' => true,
+                    'name' => 'unique_fingerprint_if_present',
+                    'partialFilterExpression' => [
+                        'fingerprints.0' => ['$exists' => true]
+                    ]
+                ]);
+
+            $collection->index(
                 ['emails' => 1],
                 options: [
                     'unique' => true,

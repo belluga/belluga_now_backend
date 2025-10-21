@@ -10,85 +10,91 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
+use MongoDB\BSON\ObjectId;
 
 class AnonymousIdentityController extends Controller
 {
-    public function store(AnonymousIdentityRequest ): JsonResponse
+    public function store(AnonymousIdentityRequest $request): JsonResponse
     {
-         = Tenant::current();
+        $tenant = Tenant::current();
 
-        if (! ) {
+        if (! $tenant) {
             abort(404, 'Tenant not resolved for anonymous identity issuance.');
         }
 
-         = ->validated();
-         = ['fingerprint'];
-         = ['hash'];
-         = Carbon::now();
+        $validated = $request->validated();
+        $fingerprint = $validated['fingerprint'];
+        $hash = $fingerprint['hash'];
+        $now = Carbon::now();
 
-         = AccountUser::where('anonymous_fingerprint.hash', )->first();
+        $user = AccountUser::where('fingerprints.hash', $hash)->first();
 
-        if (! ) {
-             = AccountUser::create([
+        if (! $user) {
+            $user = AccountUser::create([
                 'identity_state' => 'anonymous',
-                'anonymous_fingerprint' => [
-                    'hash' => ,
-                    'first_seen_at' => ,
-                    'last_seen_at' => ,
-                    'user_agent' => ['user_agent'] ?? ->userAgent(),
-                    'locale' => ['locale'] ?? null,
-                    'metadata' => ['metadata'] ?? [],
+                'fingerprints' => [
+                    [
+                        'hash' => $hash,
+                        'first_seen_at' => $now,
+                        'last_seen_at' => $now,
+                        'user_agent' => $fingerprint['user_agent'] ?? $request->userAgent(),
+                        'locale' => $fingerprint['locale'] ?? null,
+                        'metadata' => $validated['metadata'] ?? [],
+                    ]
                 ],
                 'account_assignments' => [],
                 'credentials' => [],
                 'consents' => [],
             ]);
         } else {
-             = ->anonymous_fingerprint ?? [];
-            ['last_seen_at'] = ;
-            ['user_agent'] = ['user_agent'] ?? ->userAgent();
+            $fingerprintData = $user->fingerprints ?? [];
+            $fingerprintData['last_seen_at'] = $now;
+            $fingerprintData['user_agent'] = $fingerprint['user_agent'] ?? $request->userAgent();
 
-            if (isset(['locale'])) {
-                ['locale'] = ['locale'];
+            if (isset($fingerprint['locale'])) {
+                $fingerprintData['locale'] = $fingerprint['locale'];
             }
 
-            if (isset(['metadata'])) {
-                ['metadata'] = ['metadata'];
+            if (isset($validated['metadata'])) {
+                $fingerprintData['metadata'] = $validated['metadata'];
             }
 
-            ['first_seen_at'] = ['first_seen_at'] ?? ;
-            ->anonymous_fingerprint = ;
-            ->save();
+            $fingerprintData['first_seen_at'] = $fingerprintData['first_seen_at'] ?? $now;
+            $fingerprints = $user->fingerprints ?? [];
+            $fingerprints[] = $fingerprintData;
+            $user->fingerprints = $fingerprints;
+
+            $user->save();
         }
 
-         = ->anonymous_access_policy ?? [];
-         = ['abilities'] ?? [];
+        $policy = $tenant->anonymous_access_policy ?? [];
+        $abilities = $policy['abilities'] ?? [];
 
-         = ->createToken('anonymous:' . ['device_name'], );
-         = ->plainTextToken;
+        $token = $user->createToken('anonymous:' . $validated['device_name'], $abilities);
+        $plainToken = $token->plainTextToken;
 
-         = null;
-        if (isset(['token_ttl_minutes'])) {
-             = (int) ['token_ttl_minutes'];
-             = ->accessToken;
-            ->expires_at = ->copy()->addMinutes();
-            ->save();
-             = ->expires_at?->toISOString();
+        $expiresAtIso = null;
+        if (isset($policy['token_ttl_minutes'])) {
+            $minutes = (int) $policy['token_ttl_minutes'];
+            $accessToken = $token->accessToken;
+            $accessToken->expires_at = $now->copy()->addMinutes($minutes);
+            $accessToken->save();
+            $expiresAtIso = $accessToken->expires_at?->toISOString();
         }
 
-         = [
+        $response = [
             'data' => [
-                'user_id' => (string) ->_id,
-                'identity_state' => ->identity_state,
-                'token' => ,
-                'abilities' => ,
+                'user_id' => (string) $user->_id,
+                'identity_state' => $user->identity_state,
+                'token' => $plainToken,
+                'abilities' => $abilities,
             ],
         ];
 
-        if () {
-            ['data']['expires_at'] = ;
+        if ($expiresAtIso) {
+            $response['data']['expires_at'] = $expiresAtIso;
         }
 
-        return response()->json(, 201);
+        return response()->json($response, 201);
     }
 }

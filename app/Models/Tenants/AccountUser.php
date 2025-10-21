@@ -31,7 +31,7 @@ class AccountUser extends Authenticatable
         'phones',
         'password',
         'identity_state',
-        'anonymous_fingerprint',
+        'fingerprints',
         'account_assignments',
         'credentials',
         'consents',
@@ -44,17 +44,14 @@ class AccountUser extends Authenticatable
 
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'password' => 'hashed',
-        'anonymous_fingerprint' => 'array',
-        'account_assignments' => 'array',
-        'consents' => 'array',
+        'password' => 'hashed'
     ];
 
     protected static function booted(): void
     {
         static::creating(function (AccountUser $user): void {
             $user->identity_state ??= 'anonymous';
-            $user->anonymous_fingerprint ??= [];
+            $user->fingerprints ??= [];
             $user->account_assignments ??= [];
             $user->credentials ??= [];
             $user->consents ??= [];
@@ -115,30 +112,6 @@ class AccountUser extends Authenticatable
         return in_array('*', $permissions, true)
             || in_array("$resource:*", $permissions, true)
             || in_array("$resource:$action", $permissions, true);
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    public function getCredentialsAttribute($credentials): array
-    {
-        if (is_array($credentials)) {
-            return $credentials;
-        }
-
-        if (is_string($credentials) && $credentials !== '') {
-            $decoded = json_decode($credentials, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                return $decoded;
-            }
-        }
-
-        return [];
-    }
-
-    public function setCredentialsAttribute($credentials): void
-    {
-        $this->attributes['credentials'] = $credentials;
     }
 
     public function syncCredential(string $provider, string $subject, ?string $secretHash = null, array $metadata = []): array
@@ -219,4 +192,5 @@ class AccountUser extends Authenticatable
             $this->save();
         }
     }
+
 }

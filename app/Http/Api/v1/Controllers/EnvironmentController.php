@@ -43,12 +43,6 @@ class EnvironmentController extends Controller
         $landlord = Landlord::singleton();
         $tenant = Tenant::current();
 
-        print("landlord->branding_data:");
-        print_r($landlord->branding_data);
-
-        print("landlord->branding_data:");
-        print_r($tenant->branding_data);
-
         $export_data = [
             "name" => $tenant->name,
             "type" => "tenant",
