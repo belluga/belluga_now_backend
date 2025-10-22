@@ -94,17 +94,32 @@ abstract class AuthControllerContract extends Controller
     public function register(RegisterUserRequest $request): JsonResponse
     {
         DB::beginTransaction();
+        try {
+            $emails = collect($request->emails)
+                ->map(static fn (string $email): string => strtolower($email))
+                ->values()
+                ->all();
 
-        $user = LandlordUser::create(
-            [
-                "name" => $request->name,
-                "email" => $request->email,
-                "password" => $request->password
+            $user = LandlordUser::create([
+                'name' => $request->name,
+                'emails' => $emails,
+                'password' => $request->password,
+                'identity_state' => 'registered',
+                'promotion_audit' => [],
             ]);
 
-        $token = $user->createToken($request->device_name)->plainTextToken;
+            foreach ($emails as $email) {
+                $user->ensureEmail($email);
+                $user->syncCredential('password', $email, $user->password);
+            }
 
-        DB::commit();
+            $token = $user->createToken($request->device_name)->plainTextToken;
+
+            DB::commit();
+        } catch (\Throwable $throwable) {
+            DB::rollBack();
+            throw $throwable;
+        }
 
         return response()->json([
             "data" => [

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsException;
+use App\Domain\FoundationControlPlane\Identity\PasswordIdentityRegistrar;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Resources\UserResource;
@@ -16,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Arr;
 use MongoDB\BSON\ObjectId;
 use Illuminate\Validation\ValidationException;
 
@@ -153,31 +156,13 @@ class AccountUserController extends Controller
             ])->first();
 
         if (! $user) {
-            $password = $data['password'] ?? null;
+            $registrar = app(PasswordIdentityRegistrar::class);
 
-            if ($password !== null) {
-                $passwordHash = Hash::make($password);
-                $data['password'] = $passwordHash;
+            try {
+                return $registrar->register(Arr::except($data, ['role_id']));
+            } catch (IdentityAlreadyExistsException $exception) {
+                abort(422, 'An identity with the provided contact points already exists.');
             }
-
-            $user = AccountUser::create(array_merge([
-                'identity_state' => 'anonymous',
-                'fingerprints' => [],
-                'account_assignments' => [],
-                'credentials' => [],
-                'consents' => [],
-            ], $data));
-
-            if (! empty($data['emails'])) {
-                foreach ($data['emails'] as $email) {
-                    $user->ensureEmail($email);
-                    if (isset($passwordHash)) {
-                        $user->syncCredential('password', $email, $passwordHash);
-                    }
-                }
-            }
-
-            return $user;
         }
 
         if ($user->trashed()) {

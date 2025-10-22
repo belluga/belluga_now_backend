@@ -12,6 +12,7 @@ use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Traits\HasLogoFiles;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class InitializationController extends Controller
@@ -91,11 +92,31 @@ class InitializationController extends Controller
                 ]
             );
 
+            $emails = collect($validated['user']['emails'])
+                ->map(static fn (string $email): string => strtolower($email))
+                ->values()
+                ->all();
+
             $new_user = LandlordUser::create([
-                "name" => $validated['user']['name'],
-                "emails" => $validated['user']['emails'],
-                "password" => $validated['user']['password']
+                'name' => $validated['user']['name'],
+                'emails' => $emails,
+                'password' => $validated['user']['password'],
+                'identity_state' => 'validated',
+                'verified_at' => Carbon::now(),
+                'promotion_audit' => [
+                    [
+                        'from_state' => 'registered',
+                        'to_state' => 'validated',
+                        'promoted_at' => Carbon::now(),
+                        'operator_id' => null,
+                    ],
+                ],
             ]);
+
+            foreach ($emails as $email) {
+                $new_user->ensureEmail($email);
+                $new_user->syncCredential('password', $email, $new_user->password);
+            }
 
             $admin_role->users()->save($new_user);
 

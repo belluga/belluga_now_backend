@@ -2,7 +2,9 @@
 
 namespace Tests\Api\default\Admin;
 
+use App\Models\Landlord\LandlordUser;
 use Illuminate\Testing\TestResponse;
+use MongoDB\BSON\ObjectId;
 use Tests\TestCaseAuthenticated;
 
 class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
@@ -37,7 +39,12 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         ]);
 
-        $this->landlord->user_cross_tenant_admin->user_id = $response->json()['data']["id"];
+        $userId = $response->json()['data']["id"];
+        $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
+        $this->assertEquals('registered', $createdUser->identity_state);
+        $this->assertNotEmpty($createdUser->credentials);
+
+        $this->landlord->user_cross_tenant_admin->user_id = $userId;
     }
 
     public function testUserCreateAgain(): void {
@@ -94,7 +101,11 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         ]);
 
-        $this->landlord->user_cross_tenant_visitor->user_id = $response->json()['data']["id"];
+        $userId = $response->json()['data']["id"];
+        $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
+        $this->assertEquals('registered', $createdUser->identity_state);
+
+        $this->landlord->user_cross_tenant_visitor->user_id = $userId;
     }
 
     public function testUserDisposableCreate(): void {
@@ -127,7 +138,11 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         ]);
 
-        $this->landlord->user_disposable->user_id = $response->json()['data']["id"];
+        $userId = $response->json()['data']["id"];
+        $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
+        $this->assertEquals('registered', $createdUser->identity_state);
+
+        $this->landlord->user_disposable->user_id = $userId;
     }
 
     public function testUserList(): void {

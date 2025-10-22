@@ -53,7 +53,26 @@ class LandlordUserController extends Controller
 
         try{
             DB::beginTransaction();
-            $user = LandlordUser::create($request->validated());
+            $payload = $request->validated();
+            $emails = collect($payload['emails'])
+                ->map(static fn (string $email): string => strtolower($email))
+                ->values()
+                ->all();
+
+            $user = LandlordUser::create([
+                'name' => $payload['name'],
+                'emails' => $emails,
+                'password' => $payload['password'],
+                'identity_state' => 'registered',
+                'credentials' => [],
+                'promotion_audit' => [],
+            ]);
+
+            foreach ($emails as $email) {
+                $user->ensureEmail($email);
+                $user->syncCredential('password', $email, $user->password);
+            }
+
             $role->users()->save($user);
             DB::commit();
         }catch (\Exception $e){

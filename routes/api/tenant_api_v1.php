@@ -7,6 +7,7 @@ use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
 use App\Http\Api\v1\Controllers\TenantBrandingController;
@@ -37,6 +38,8 @@ Route::prefix('auth')
     ->group(function () {
 
         Route::post('/login', [AuthControllerAccount::class, 'login']);
+
+        Route::post('/register/password', PasswordRegistrationController::class);
 
         Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken']);
 

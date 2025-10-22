@@ -149,6 +149,22 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         );
     }
 
+    public function testLandlordAnonymousIdentityEndpointNotAvailable(): void {
+        $response = $this->json(
+            method: 'post',
+            uri: 'admin/api/v1/anonymous/identities',
+            data: [
+                'device_name' => 'landlord-device',
+                'fingerprint' => [
+                    'hash' => hash('sha256', 'landlord-device'),
+                    'user_agent' => 'AdminTest/1.0',
+                ],
+            ]
+        );
+
+        $this->assertEquals(404, $response->status());
+    }
+
     protected function userLoginWrongPassword(): TestResponse {
         return $this->json(
             method: 'post',

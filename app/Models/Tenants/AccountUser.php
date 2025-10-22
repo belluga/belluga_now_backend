@@ -32,7 +32,6 @@ class AccountUser extends Authenticatable
         'password',
         'identity_state',
         'fingerprints',
-        'account_assignments',
         'credentials',
         'consents',
     ];
@@ -52,11 +51,11 @@ class AccountUser extends Authenticatable
         static::creating(function (AccountUser $user): void {
             $user->identity_state ??= 'anonymous';
             $user->fingerprints ??= [];
-            $user->account_assignments ??= [];
             $user->credentials ??= [];
             $user->consents ??= [];
             $user->emails ??= [];
             $user->phones ??= [];
+            $user->account_roles ??= [];
         });
     }
 

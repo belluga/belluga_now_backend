@@ -42,28 +42,42 @@ class AnonymousIdentityController extends Controller
                         'metadata' => $validated['metadata'] ?? [],
                     ]
                 ],
-                'account_assignments' => [],
                 'credentials' => [],
                 'consents' => [],
             ]);
         } else {
-            $fingerprintData = $user->fingerprints ?? [];
-            $fingerprintData['last_seen_at'] = $now;
-            $fingerprintData['user_agent'] = $fingerprint['user_agent'] ?? $request->userAgent();
-
-            if (isset($fingerprint['locale'])) {
-                $fingerprintData['locale'] = $fingerprint['locale'];
-            }
-
-            if (isset($validated['metadata'])) {
-                $fingerprintData['metadata'] = $validated['metadata'];
-            }
-
-            $fingerprintData['first_seen_at'] = $fingerprintData['first_seen_at'] ?? $now;
             $fingerprints = $user->fingerprints ?? [];
-            $fingerprints[] = $fingerprintData;
-            $user->fingerprints = $fingerprints;
 
+            $index = null;
+            foreach ($fingerprints as $i => $fp) {
+                if (($fp['hash'] ?? null) === $hash) {
+                    $index = $i;
+                    break;
+                }
+            }
+
+            $payload = [
+                'hash' => $hash,
+                'last_seen_at' => $now,
+                'user_agent' => $fingerprint['user_agent'] ?? $request->userAgent(),
+            ];
+            if (isset($fingerprint['locale'])) {
+                $payload['locale'] = $fingerprint['locale'];
+            }
+            if (isset($validated['metadata'])) {
+                $payload['metadata'] = $validated['metadata'];
+            }
+
+            if ($index !== null) {
+                $existing = $fingerprints[$index];
+                $payload['first_seen_at'] = $existing['first_seen_at'] ?? $now;
+                $fingerprints[$index] = array_replace($existing, $payload);
+            } else {
+                $payload['first_seen_at'] = $now;
+                $fingerprints[] = $payload;
+            }
+
+            $user->fingerprints = array_values($fingerprints);
             $user->save();
         }
 
@@ -98,3 +112,4 @@ class AnonymousIdentityController extends Controller
         return response()->json($response, 201);
     }
 }
+

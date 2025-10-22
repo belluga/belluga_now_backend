@@ -4,7 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Carbon;
 
 class LandlordUserSeeder extends Seeder
 {
@@ -13,22 +13,45 @@ class LandlordUserSeeder extends Seeder
      */
     public function run(): void
     {
-        // Criar o usuário administrador principal do sistema
-        LandlordUser::create([
-            'name' => 'Administrador do Sistema',
-            'email' => 'admin@system.com',
-            'password' => Hash::make('password'),
-            'is_admin' => true,
-            'is_active' => true,
-        ]);
+        $now = Carbon::now();
 
-        // Criar um segundo administrador para testes
-        LandlordUser::create([
-            'name' => 'Gerente de Contas',
-            'email' => 'manager@system.com',
-            'password' => Hash::make('password'),
-            'is_admin' => true,
-            'is_active' => true,
-        ]);
+        collect([
+            [
+                'name' => 'Administrador do Sistema',
+                'emails' => ['admin@system.com'],
+                'password' => 'password',
+            ],
+            [
+                'name' => 'Gerente de Contas',
+                'emails' => ['manager@system.com'],
+                'password' => 'password',
+            ],
+        ])->each(static function (array $data) use ($now): void {
+            $emails = collect($data['emails'])
+                ->map(static fn (string $email): string => strtolower($email))
+                ->values()
+                ->all();
+
+            $user = LandlordUser::create([
+                'name' => $data['name'],
+                'emails' => $emails,
+                'password' => $data['password'],
+                'identity_state' => 'validated',
+                'verified_at' => $now,
+                'promotion_audit' => [
+                    [
+                        'from_state' => 'registered',
+                        'to_state' => 'validated',
+                        'promoted_at' => $now,
+                        'operator_id' => null,
+                    ],
+                ],
+            ]);
+
+            foreach ($emails as $email) {
+                $user->ensureEmail($email);
+                $user->syncCredential('password', $email, $user->password);
+            }
+        });
     }
 }
