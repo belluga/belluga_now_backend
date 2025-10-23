@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AccountUpdateRequest extends FormRequest
@@ -24,10 +25,10 @@ class AccountUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'sometimes|string|max:255',
+            'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'document' => 'sometimes|array',
             'document.type' => 'required_with:document.number|string|in:cpf,cnpj',
-            'document.number' => 'required_with:document.type|string|max:255',
+            'document.number' => 'required_with:document.type|string|max:' . InputConstraints::NAME_MAX,
         ];
     }
 

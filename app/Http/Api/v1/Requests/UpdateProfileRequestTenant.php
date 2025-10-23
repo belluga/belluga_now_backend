@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use App\Support\Validation\InputConstraints;
 
 class UpdateProfileRequestTenant extends UpdateProfileRequestContract
 {
@@ -24,7 +25,7 @@ class UpdateProfileRequestTenant extends UpdateProfileRequestContract
      */
     public function rules(): array {
         return [
-            'name' => 'sometimes',
+            'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
         ];
     }
 

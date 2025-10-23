@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AccountRolesDeleteRequest extends FormRequest
@@ -22,7 +23,13 @@ class AccountRolesDeleteRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'background_role_id' => 'required|string|exists:tenant.account_role_templates,_id'
+            'background_role_id' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+                'exists:tenant.account_role_templates,_id',
+            ]
         ];
     }
 

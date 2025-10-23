@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class EmailsAddRequest extends FormRequest
@@ -27,8 +28,9 @@ class EmailsAddRequest extends FormRequest
             'emails' => [
                 'required',
                 'array',
+                'max:' . InputConstraints::EMAIL_ARRAY_MAX,
             ],
-            'emails.*' => 'required|email'
+            'emails.*' => 'required|email|max:' . InputConstraints::EMAIL_MAX
         ];
     }
 }

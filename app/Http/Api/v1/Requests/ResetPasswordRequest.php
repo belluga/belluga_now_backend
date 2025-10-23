@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -26,9 +27,15 @@ class ResetPasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => 'required|email',
-            'password' => 'required|string|min:8|confirmed',
-            'reset_token' => 'required|string',
+            'email' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
+            'password' => [
+                'required',
+                'string',
+                'min:' . InputConstraints::PASSWORD_MIN,
+                'max:' . InputConstraints::PASSWORD_MAX,
+                'confirmed',
+            ],
+            'reset_token' => 'required|string|max:255',
         ];
     }
 

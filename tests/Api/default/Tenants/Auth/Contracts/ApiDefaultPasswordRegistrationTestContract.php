@@ -71,4 +71,18 @@ abstract class ApiDefaultPasswordRegistrationTestContract extends TestCaseTenant
         $duplicate->assertStatus(422);
         $duplicate->assertJsonPath('errors.email.0', 'This email is already registered for the tenant.');
     }
+
+    public function testPasswordRegistrationRejectsPasswordExceedingMaxLength(): void
+    {
+        $payload = [
+            'name' => 'Oversized Password Identity',
+            'email' => 'oversized-password@example.org',
+            'password' => str_repeat('A', 33),
+        ];
+
+        $response = $this->registerPassword($payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
+    }
 }

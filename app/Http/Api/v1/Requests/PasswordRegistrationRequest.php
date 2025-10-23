@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class PasswordRegistrationRequest extends FormRequest
@@ -19,9 +20,14 @@ class PasswordRegistrationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string', 'min:8', 'max:32'],
+            'name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'email' => ['required', 'email', 'max:' . InputConstraints::EMAIL_MAX],
+            'password' => [
+                'required',
+                'string',
+                'min:' . InputConstraints::PASSWORD_MIN,
+                'max:' . InputConstraints::PASSWORD_MAX,
+            ],
         ];
     }
 }

@@ -126,6 +126,38 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         $response->assertStatus(401);
     }
 
+    public function testAdminLoginRejectsPasswordExceedingMaxLength(): void
+    {
+        $response = $this->json(
+            method: 'post',
+            uri: "admin/api/auth/login",
+            data: [
+                "email" => $this->landlord->user_cross_tenant_admin->email_1,
+                "password" => str_repeat('A', 33),
+                "device_name" => 'max-length-check',
+            ]
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
+    }
+
+    public function testAdminLoginRejectsDeviceNameExceedingMaxLength(): void
+    {
+        $response = $this->json(
+            method: 'post',
+            uri: "admin/api/auth/login",
+            data: [
+                "email" => $this->landlord->user_cross_tenant_admin->email_1,
+                "password" => $this->landlord->user_cross_tenant_admin->password,
+                "device_name" => str_repeat('d', 300),
+            ]
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.device_name.0', 'The device name field must not be greater than 255 characters.');
+    }
+
     protected function userLoginWithToken(string $token): TestResponse {
         return $this->json(
             method: 'get',
@@ -243,3 +275,4 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         ];
     }
 }
+

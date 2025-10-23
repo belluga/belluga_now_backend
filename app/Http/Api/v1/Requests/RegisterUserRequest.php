@@ -8,6 +8,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rules\Password;
+use App\Support\Validation\InputConstraints;
 
 class RegisterUserRequest extends FormRequest
 {
@@ -27,11 +28,15 @@ class RegisterUserRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:255',
-            'emails' => 'required|array',
-            'emails.*' => 'required|string|email|max:255|unique:landlord_users',
-            'password' => ['required', 'confirmed', Password::defaults()],
-            'device_name' => 'required',
+            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'emails' => 'required|array|max:' . InputConstraints::EMAIL_ARRAY_MAX,
+            'emails.*' => 'required|string|email|max:' . InputConstraints::EMAIL_MAX . '|unique:landlord_users',
+            'password' => [
+                'required',
+                'confirmed',
+                Password::defaults()->max(InputConstraints::PASSWORD_MAX),
+            ],
+            'device_name' => 'required|string|max:' . InputConstraints::NAME_MAX,
         ];
     }
 

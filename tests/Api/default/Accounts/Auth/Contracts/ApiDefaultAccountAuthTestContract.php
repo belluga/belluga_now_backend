@@ -126,4 +126,26 @@ abstract class ApiDefaultAccountAuthTestContract extends TestCaseAccount
         $response = $this->accountTokenValidate("123");
         $response->assertStatus(401);
     }
+
+    public function testUserLoginRejectsPasswordExceedingMaxLength(): void
+    {
+        $user = new UserLabels('login_max_password');
+        $user->email_1 = $this->account->user_admin->email_1;
+        $user->password = str_repeat('A', 33);
+
+        $response = $this->accountLogin($user);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
+    }
+
+    public function testUserLoginRejectsDeviceNameExceedingMaxLength(): void
+    {
+        $deviceName = str_repeat('d', 300);
+
+        $response = $this->accountLogin($this->account->user_admin, $deviceName);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.device_name.0', 'The device name field must not be greater than 255 characters.');
+    }
 }

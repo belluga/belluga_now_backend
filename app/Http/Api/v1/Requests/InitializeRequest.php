@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use App\Support\Validation\InputConstraints;
 
 class InitializeRequest extends FormRequest
 {
@@ -26,20 +27,20 @@ class InitializeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'landlord.name' => ['required', 'string'],
-            'landlord.description' => ['sometimes', 'string'],
+            'landlord.name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'landlord.description' => ['sometimes', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
 
-            'tenant.name' => 'required|string',
-            'tenant.subdomain' => 'required|string',
+            'tenant.name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'tenant.subdomain' => 'required|string|regex:/^[a-z][a-z0-9-]*[a-z0-9]$/|max:63',
             'tenant.domains' => ['nullable', 'array'],
-            'user.name' => 'string',
-            'user.emails' => 'required|array',
-            'user.emails.*' => 'email',
-            'user.password' => 'required|string',
-            'role.name' => ['required', 'string', 'max:255'],
-            'role.description' => ['nullable', 'string', 'max:1000'],
-            'role.permissions' => ['required', 'array'],
-            'role.permissions.*' => ['required', 'string', 'regex:/^[a-z0-9_\.\*]+$/'],
+            'user.name' => 'string|max:' . InputConstraints::NAME_MAX,
+            'user.emails' => 'required|array|max:' . InputConstraints::EMAIL_ARRAY_MAX,
+            'user.emails.*' => 'email|max:' . InputConstraints::EMAIL_MAX,
+            'user.password' => 'required|string|min:' . InputConstraints::PASSWORD_MIN . '|max:' . InputConstraints::PASSWORD_MAX,
+            'role.name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'role.description' => ['nullable', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
+            'role.permissions' => ['required', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX],
+            'role.permissions.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^[a-z0-9_\.\*]+$/'],
             'role.is_default' => ['boolean'],
 
             'branding_data' => ['required', 'array'],

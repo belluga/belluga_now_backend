@@ -5,7 +5,9 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 class CredentialLinkRequest extends FormRequest
 {
@@ -21,16 +23,25 @@ class CredentialLinkRequest extends FormRequest
     {
         return [
             'provider' => ['required', 'string', 'max:50'],
-            'subject' => ['required', 'string', 'max:255'],
-            'secret' => ['nullable', 'string', 'min:8'],
-            'metadata' => ['nullable', 'array'],
+            'subject' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'secret' => [
+                'nullable',
+                'string',
+                'min:' . InputConstraints::PASSWORD_MIN,
+                'max:' . InputConstraints::PASSWORD_MAX,
+            ],
+            'metadata' => ['nullable', 'array', 'max:' . InputConstraints::METADATA_MAX_ITEMS],
         ];
     }
 
-    public function withValidator(): void
+    public function withValidator(Validator $validator): void
     {
-        ->sometimes('subject', 'email', function () {
-            return ->provider === 'password';
-        });
+        $validator->sometimes(
+            'subject',
+            'email|max:' . InputConstraints::EMAIL_MAX,
+            static function ($input): bool {
+                return ($input->provider ?? null) === 'password';
+            }
+        );
     }
 }

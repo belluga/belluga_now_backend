@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Rules\UniqueArrayItemRule;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class LandlordUserCreateRequest extends FormRequest
@@ -25,13 +26,27 @@ class LandlordUserCreateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:255',
+            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
             'emails' => [
                 'required',
+                'array',
+                'max:' . InputConstraints::EMAIL_ARRAY_MAX,
                 new UniqueArrayItemRule('landlord', 'landlord_users', 'emails', )
             ],
-            'password' => 'required|string|min:8',
-            'role_id' => 'required|string|exists:landlord.landlord_roles,_id'
+            'emails.*' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
+            'password' => [
+                'required',
+                'string',
+                'min:' . InputConstraints::PASSWORD_MIN,
+                'max:' . InputConstraints::PASSWORD_MAX,
+            ],
+            'role_id' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+                'exists:landlord.landlord_roles,_id',
+            ],
         ];
     }
 }

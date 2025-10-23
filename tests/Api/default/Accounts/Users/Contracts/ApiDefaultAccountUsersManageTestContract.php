@@ -77,6 +77,38 @@ abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
         $responseShow->assertStatus(200);
     }
 
+    public function testAccountUserCreationRejectsPasswordExceedingMaxLength(): void
+    {
+        $response = $this->accountUserCreate([
+            "name" => $this->account->user_disposable->name,
+            "emails" => [
+                $this->account->user_disposable->email_1,
+            ],
+            "password" => str_repeat('A', 33),
+            "password_confirmation" => str_repeat('A', 33),
+            "role_id" => $this->account->role_visitor->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
+    }
+
+    public function testAccountUserCreationRejectsEmailCollectionExceedingMaxItems(): void
+    {
+        $emails = collect(range(1, 11))->map(fn (int $index): string => "user{$index}@example.org")->all();
+
+        $response = $this->accountUserCreate([
+            "name" => $this->account->user_disposable->name,
+            "emails" => $emails,
+            "password" => $this->account->user_disposable->password,
+            "password_confirmation" => $this->account->user_disposable->password,
+            "role_id" => $this->account->role_visitor->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.emails.0', 'The emails field must not have more than 10 items.');
+    }
+
     public function testAccountUsersList(): void {
 
         $accountUserList = $this->accountUsersList();
