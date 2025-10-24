@@ -8,6 +8,7 @@ use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsE
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -43,10 +44,23 @@ class PasswordIdentityRegistrar
         $payload = array_merge([
             'identity_state' => 'registered',
             'emails' => $emails->all(),
+            'first_seen_at' => Carbon::now(),
+            'registered_at' => Carbon::now(),
             'password' => $passwordHash,
             'fingerprints' => [],
             'credentials' => [],
             'consents' => [],
+            'merged_source_ids' => [],
+            'promotion_audit' => array_merge([
+                [
+                    'from_state' => null,
+                    'to_state' => 'registered',
+                    'promoted_at' => Carbon::now(),
+                    'operator_id' => null,
+                    'source_user_id' => null,
+                    'reason' => null,
+                ],
+            ], $attributes['promotion_audit'] ?? []),
         ], Arr::except($attributes, ['password', 'emails']));
 
         $user = AccountUser::create($payload);

@@ -28,6 +28,18 @@ class PasswordRegistrationRequest extends FormRequest
                 'min:' . InputConstraints::PASSWORD_MIN,
                 'max:' . InputConstraints::PASSWORD_MAX,
             ],
+            'anonymous_user_ids' => [
+                'sometimes',
+                'array',
+                'min:1',
+                'max:' . InputConstraints::EMAIL_ARRAY_MAX,
+            ],
+            'anonymous_user_ids.*' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+            ],
         ];
     }
 }

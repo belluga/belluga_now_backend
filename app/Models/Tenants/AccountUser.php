@@ -29,11 +29,15 @@ class AccountUser extends Authenticatable
         'name',
         'emails',
         'phones',
+        'first_seen_at',
+        'registered_at',
         'password',
         'identity_state',
         'fingerprints',
         'credentials',
         'consents',
+        'promotion_audit',
+        'merged_source_ids',
     ];
 
     protected $hidden = [
@@ -43,12 +47,15 @@ class AccountUser extends Authenticatable
 
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'first_seen_at' => 'datetime',
+        'registered_at' => 'datetime',
         'password' => 'hashed'
     ];
 
     protected static function booted(): void
     {
         static::creating(function (AccountUser $user): void {
+            $now = Carbon::now();
             $user->identity_state ??= 'anonymous';
             $user->fingerprints ??= [];
             $user->credentials ??= [];
@@ -56,6 +63,19 @@ class AccountUser extends Authenticatable
             $user->emails ??= [];
             $user->phones ??= [];
             $user->account_roles ??= [];
+            $user->merged_source_ids ??= [];
+            $user->promotion_audit ??= [];
+            $user->first_seen_at ??= $now;
+
+            if ($user->isRegisteredState() && $user->registered_at === null) {
+                $user->registered_at = $now;
+            }
+        });
+
+        static::updating(function (AccountUser $user): void {
+            if ($user->isRegisteredState() && $user->registered_at === null) {
+                $user->registered_at = Carbon::now();
+            }
         });
     }
 
@@ -190,6 +210,11 @@ class AccountUser extends Authenticatable
             $this->emails = array_values($emails);
             $this->save();
         }
+    }
+
+    private function isRegisteredState(): bool
+    {
+        return in_array($this->identity_state, ['registered', 'validated'], true);
     }
 
 }

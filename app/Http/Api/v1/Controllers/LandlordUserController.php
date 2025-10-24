@@ -14,6 +14,7 @@ use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\ObjectId;
@@ -59,13 +60,30 @@ class LandlordUserController extends Controller
                 ->values()
                 ->all();
 
+            $operatorId = Auth::id();
+            $operatorObjectId = null;
+            if (is_string($operatorId) && $operatorId !== '') {
+                try {
+                    $operatorObjectId = new ObjectId($operatorId);
+                } catch (\Throwable) {
+                    $operatorObjectId = null;
+                }
+            }
+
+            $promotionAuditEntry = [
+                'from_state' => 'anonymous',
+                'to_state' => 'registered',
+                'promoted_at' => Carbon::now(),
+                'operator_id' => $operatorObjectId,
+            ];
+
             $user = LandlordUser::create([
                 'name' => $payload['name'],
                 'emails' => $emails,
                 'password' => $payload['password'],
                 'identity_state' => 'registered',
                 'credentials' => [],
-                'promotion_audit' => [],
+                'promotion_audit' => [$promotionAuditEntry],
             ]);
 
             foreach ($emails as $email) {

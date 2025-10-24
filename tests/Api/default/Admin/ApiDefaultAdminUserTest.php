@@ -43,6 +43,15 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $createdUser->identity_state);
         $this->assertNotEmpty($createdUser->credentials);
+        $this->assertCount(2, $createdUser->credentials);
+        $this->assertCount(1, $createdUser->promotion_audit ?? []);
+        $promotionAudit = $createdUser->promotion_audit[0];
+        $this->assertEquals('anonymous', $promotionAudit['from_state']);
+        $this->assertEquals('registered', $promotionAudit['to_state']);
+        $this->assertEquals(
+            $this->landlord->user_superadmin->user_id,
+            (string) ($promotionAudit['operator_id'] ?? '')
+        );
 
         $this->landlord->user_cross_tenant_admin->user_id = $userId;
     }
@@ -104,6 +113,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         $userId = $response->json()['data']["id"];
         $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $createdUser->identity_state);
+        $this->assertCount(1, $createdUser->promotion_audit ?? []);
 
         $this->landlord->user_cross_tenant_visitor->user_id = $userId;
     }

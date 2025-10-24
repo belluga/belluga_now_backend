@@ -32,6 +32,7 @@ class AnonymousIdentityController extends Controller
         if (! $user) {
             $user = AccountUser::create([
                 'identity_state' => 'anonymous',
+                'first_seen_at' => $now,
                 'fingerprints' => [
                     [
                         'hash' => $hash,
@@ -78,6 +79,11 @@ class AnonymousIdentityController extends Controller
             }
 
             $user->fingerprints = array_values($fingerprints);
+            $user->save();
+        }
+
+        if ($user->first_seen_at === null || $now->lessThan($user->first_seen_at)) {
+            $user->first_seen_at = $now;
             $user->save();
         }
 

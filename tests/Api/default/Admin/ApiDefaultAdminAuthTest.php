@@ -5,8 +5,16 @@ namespace Tests\Api\default\Admin;
 use App\Models\Landlord\PersonalAccessToken;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCaseAuthenticated;
+use Tests\Api\Traits\AccountAuthFunctions;
 
 class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
+    use AccountAuthFunctions;
+
+    protected string $base_api_tenant {
+        get {
+            return "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/";
+        }
+    }
 
     public function testUserLoginWrongPassword(): void {
 
@@ -123,6 +131,46 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
 
     public function testLoginWithTokenError(): void {
         $response = $this->userLoginWithToken("123");
+        $response->assertStatus(401);
+    }
+
+    public function testAdminTokenValidateRejectsTenantToken(): void
+    {
+        $email = fake()->unique()->safeEmail();
+        $password = 'SecurePass!123';
+
+        $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}auth/register/password",
+            data: [
+                'name' => 'Tenant Token Check',
+                'email' => $email,
+                'password' => $password,
+            ]
+        )->assertStatus(201);
+
+        $login = $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}auth/login",
+            data: [
+                'email' => $email,
+                'password' => $password,
+                'device_name' => 'tenant-token-check',
+            ]
+        );
+
+        $login->assertStatus(200);
+        $tenantToken = $login->json('data.token');
+
+        $response = $this->json(
+            method: 'get',
+            uri: "admin/api/auth/token_validate",
+            headers: [
+                'Authorization' => "Bearer $tenantToken",
+                'Content-Type' => 'application/json'
+            ]
+        );
+
         $response->assertStatus(401);
     }
 
@@ -262,7 +310,7 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
     protected function payloadUserLoginWrongPassword(): array {
         return [
             "email" => $this->landlord->user_cross_tenant_admin->email_1,
-            "password" => fake()->password(),
+            "password" => fake()->password(8),
             "device_name" => "test"
         ];
     }
