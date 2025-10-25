@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Domain\FoundationControlPlane\Identity\Exceptions;
+namespace App\Exceptions\Identity;
 
 use RuntimeException;
 

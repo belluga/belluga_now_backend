@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsException;
-use App\Domain\FoundationControlPlane\Identity\PasswordIdentityRegistrar;
+use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Resources\UserResource;

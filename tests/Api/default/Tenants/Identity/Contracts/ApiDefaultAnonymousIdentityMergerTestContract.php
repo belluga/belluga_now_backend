@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Api\default\Tenants\Identity\Contracts;
 
-use App\Domain\FoundationControlPlane\Identity\AnonymousIdentityMerger;
+use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
@@ -168,6 +168,43 @@ abstract class ApiDefaultAnonymousIdentityMergerTestContract extends TestCaseTen
         $timelineFirst = $this->toCarbon($audit->timeline['first_seen_at'] ?? null);
         $this->assertInstanceOf(Carbon::class, $refreshedTarget->first_seen_at);
         $this->assertTrue($refreshedTarget->first_seen_at->equalTo($timelineFirst));
+    }
+
+    public function testMergeIncrementsVersionAndPersistsUpdatedState(): void
+    {
+        $existingFingerprintHash = hash('sha256', Str::uuid()->toString());
+        $target = $this->createCanonicalUser([
+            'fingerprints' => [[
+                'hash' => $existingFingerprintHash,
+                'first_seen_at' => Carbon::now()->subDays(5),
+                'last_seen_at' => Carbon::now()->subDays(1),
+            ]],
+        ]);
+
+        $source = $this->createAnonymousSource([
+            'fingerprints' => [[
+                'hash' => $existingFingerprintHash,
+                'first_seen_at' => Carbon::now()->subDays(10),
+                'last_seen_at' => Carbon::now(),
+            ]],
+        ]);
+
+        $initialVersion = $target->version ?? 1;
+
+        $this->merger()->merge($target, [$source]);
+
+        $refreshedTarget = $target->fresh();
+        $this->assertSame($initialVersion + 1, $refreshedTarget->version);
+
+        $fingerprint = Collection::make($refreshedTarget->fingerprints ?? [])
+            ->firstWhere('hash', $existingFingerprintHash);
+
+        $this->assertNotNull($fingerprint);
+        $this->assertTrue(
+            $this->toCarbon($fingerprint['first_seen_at'] ?? null)->lessThan(
+                $this->toCarbon($fingerprint['last_seen_at'] ?? null)
+            )
+        );
     }
 
     public function testMergeDoesNotEmitAuditWhenSourcesAreEmpty(): void

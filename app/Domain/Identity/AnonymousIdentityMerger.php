@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Domain\FoundationControlPlane\Identity;
+namespace App\Domain\Identity;
 
-use App\Domain\FoundationControlPlane\Exceptions\ConcurrencyConflictException;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
@@ -18,7 +18,7 @@ class AnonymousIdentityMerger
 {
     /**
      * @param iterable<AccountUser> $sources
-     * @throws ConcurrencyConflictException
+     * @throws ConcurrencyConflictException|\Throwable
      */
     public function merge(AccountUser $target, iterable $sources, ?string $operatorId = null, string $reason = 'merged'): void
     {

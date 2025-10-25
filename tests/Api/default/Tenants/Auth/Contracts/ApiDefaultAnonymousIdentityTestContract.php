@@ -2,12 +2,34 @@
 
 namespace Tests\Api\default\Tenants\Auth\Contracts;
 
+use App\Models\Landlord\Tenant;
 use Illuminate\Testing\TestResponse;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;
 
 abstract class ApiDefaultAnonymousIdentityTestContract extends TestCaseTenant
 {
+    private Tenant $tenantModel;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Tenant::forgetCurrent();
+        $this->tenantModel = Tenant::query()
+            ->where('slug', $this->tenant->slug)
+            ->firstOrFail();
+        $this->tenantModel->makeCurrent();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->tenantModel->makeCurrent();
+        Tenant::forgetCurrent();
+
+        parent::tearDown();
+    }
+
     protected function anonymousIdentityLabel(): UserLabels
     {
         return new UserLabels("{$this->tenant->subdomain}.anonymous.identity");
@@ -114,7 +136,7 @@ abstract class ApiDefaultAnonymousIdentityTestContract extends TestCaseTenant
         $this->assertNotEmpty($userId);
 
         // Load the user and assert only one fingerprint entry exists
-        \App\Models\Landlord\Tenant::current()?->makeCurrent();
+        $this->tenantModel->makeCurrent();
         $user = \App\Models\Tenants\AccountUser::query()->where('_id', new \MongoDB\BSON\ObjectId($userId))->firstOrFail();
         $this->assertIsArray($user->fingerprints ?? []);
         $this->assertCount(1, $user->fingerprints, 'Reissue should update existing entry, not append');

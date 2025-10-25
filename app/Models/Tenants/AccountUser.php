@@ -38,6 +38,7 @@ class AccountUser extends Authenticatable
         'consents',
         'promotion_audit',
         'merged_source_ids',
+        'version',
     ];
 
     protected $hidden = [
@@ -66,6 +67,7 @@ class AccountUser extends Authenticatable
             $user->merged_source_ids ??= [];
             $user->promotion_audit ??= [];
             $user->first_seen_at ??= $now;
+            $user->version ??= 1;
 
             if ($user->isRegisteredState() && $user->registered_at === null) {
                 $user->registered_at = $now;

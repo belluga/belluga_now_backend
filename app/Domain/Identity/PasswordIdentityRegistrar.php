@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Domain\FoundationControlPlane\Identity;
+namespace App\Domain\Identity;
 
-use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsException;
+use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;

@@ -2,18 +2,46 @@
 
 namespace Tests\Api\default\Tenants\Auth\Contracts;
 
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
 use App\Models\Tenants\MergedAccountSnapshot;
 use Illuminate\Support\Carbon;
 use Illuminate\Testing\TestResponse;
+use Mockery;
 use MongoDB\BSON\ObjectId;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;
 
 abstract class ApiDefaultPasswordRegistrationTestContract extends TestCaseTenant
 {
+    private Tenant $tenantModel;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Tenant::forgetCurrent();
+        $this->tenantModel = Tenant::query()
+            ->where('slug', $this->tenant->slug)
+            ->firstOrFail();
+        $this->tenantModel->makeCurrent();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->tenantModel->makeCurrent();
+
+        IdentityMergeAudit::query()->delete();
+        MergedAccountSnapshot::query()->delete();
+
+        Tenant::forgetCurrent();
+
+        parent::tearDown();
+    }
+
     protected function registrationEndpoint(): string
     {
         return sprintf('%sv1/auth/register/password', $this->base_api_tenant);
@@ -54,7 +82,7 @@ abstract class ApiDefaultPasswordRegistrationTestContract extends TestCaseTenant
         $label->user_id = $userId;
         $label->token = $response->json('data.token');
 
-        Tenant::current()?->makeCurrent();
+        $this->tenantModel->makeCurrent();
         $user = AccountUser::query()->where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $user->identity_state);
         $this->assertContains($payload['email'], $user->emails);
@@ -119,7 +147,7 @@ abstract class ApiDefaultPasswordRegistrationTestContract extends TestCaseTenant
         $response = $this->registerPassword($payload);
         $response->assertStatus(201);
 
-        Tenant::current()?->makeCurrent();
+        $this->tenantModel->makeCurrent();
 
         $canonicalId = $response->json('data.user_id');
         $canonicalUser = AccountUser::query()
@@ -193,6 +221,81 @@ abstract class ApiDefaultPasswordRegistrationTestContract extends TestCaseTenant
             ]
         );
         $invalidTokenCheck->assertStatus(401);
+    }
+
+    public function testPasswordRegistrationRejectsUnknownAnonymousIdentity(): void
+    {
+        $payload = [
+            'name' => 'Merge Candidate',
+            'email' => 'merge-candidate@example.org',
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [
+                (string) new ObjectId(),
+            ],
+        ];
+
+        $response = $this->registerPassword($payload);
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.anonymous_user_ids.0', 'One or more anonymous identities could not be found.');
+    }
+
+    public function testPasswordRegistrationRejectsRegisteredIdentityDuringMerge(): void
+    {
+        $label = new UserLabels("{$this->tenant->subdomain}.password.registration");
+
+        $this->assertNotEmpty($label->user_id, 'Expected an existing registered identity seeded earlier in the suite.');
+
+        $this->tenantModel->makeCurrent();
+        /** @var AccountUser $registeredIdentity */
+        $registeredIdentity = AccountUser::query()
+            ->where('_id', new ObjectId((string) $label->user_id))
+            ->firstOrFail();
+        Tenant::forgetCurrent();
+
+        $payload = [
+            'name' => 'Merge Candidate',
+            'email' => 'merge-candidate-registered@example.org',
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [
+                (string) $registeredIdentity->_id,
+            ],
+        ];
+
+        $response = $this->registerPassword($payload);
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.anonymous_user_ids.0', 'Only anonymous identities can be merged during registration.');
+
+        $this->tenantModel->makeCurrent();
+        AccountUser::query()
+            ->where('_id', $registeredIdentity->_id)
+            ->forceDelete();
+        Tenant::forgetCurrent();
+    }
+
+    public function testPasswordRegistrationReturnsConflictWhenMergeKeepsFailing(): void
+    {
+        $hash = hash('sha256', 'merge-device-conflict');
+        $anonymousIdentity = $this->issueAnonymousIdentityForMerge($hash, 'merge-conflict');
+
+        $mock = Mockery::mock(AnonymousIdentityMerger::class);
+        $mock->shouldReceive('merge')
+            ->times(3)
+            ->andThrow(new ConcurrencyConflictException('Conflict'));
+
+        $this->app->instance(AnonymousIdentityMerger::class, $mock);
+
+        $payload = [
+            'name' => 'Merge Conflict Candidate',
+            'email' => 'merge-conflict@example.org',
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [
+                $anonymousIdentity['id'],
+            ],
+        ];
+
+        $response = $this->registerPassword($payload);
+        $response->assertStatus(409);
+        $response->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
     }
 
     protected function issueAnonymousIdentityForMerge(string $hash, string $deviceName): array

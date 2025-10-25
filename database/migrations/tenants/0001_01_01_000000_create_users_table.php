@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::create('account_users', function (Blueprint $collection) {
             $collection->index('tenant_roles.slug');
             $collection->index('tenant_roles.account_id');
+            $collection->integer('version')->default(1);
             $collection->index(['created_at' => -1, "updated_at" => -1]);
 
             $collection->index(

@@ -11,7 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('identity_merge_audits', function (Blueprint $collection): void {
+        Schema::create('identity_merge_audits', function (Blueprint $collection) {
+            $collection->options(['capped' => true, 'size' => 16777216]);
             $collection->index(
                 ['tenant_id' => 1, 'canonical_user_id' => 1, 'consolidated_at' => -1],
                 options: ['name' => 'canonical_identity_merge_audits']
