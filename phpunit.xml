@@ -6,6 +6,9 @@
          colors="true"
 >
     <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
         <testsuite name="Initialization">
             <file>tests/Api/default/Initialization/ApiDefaultInitializeTest.php</file>
         </testsuite>
