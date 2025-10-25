@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\FoundationControlPlane\Identity;
 
+use App\Domain\FoundationControlPlane\Exceptions\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
@@ -17,6 +18,7 @@ class AnonymousIdentityMerger
 {
     /**
      * @param iterable<AccountUser> $sources
+     * @throws ConcurrencyConflictException
      */
     public function merge(AccountUser $target, iterable $sources, ?string $operatorId = null, string $reason = 'merged'): void
     {
@@ -30,6 +32,7 @@ class AnonymousIdentityMerger
 
         DB::connection('tenant')->transaction(function () use ($target, $sourceCollection, $operatorId, $reason): void {
             $target->refresh();
+            $currentVersion = $target->version ?? 1;
 
             $now = Carbon::now();
             $tenantId = Tenant::current()?->id;
@@ -126,10 +129,13 @@ class AnonymousIdentityMerger
                 })
                 ->values();
 
-            $target->fingerprints = $fingerprints->values()->all();
-            $target->consents = $consents;
-            $target->merged_source_ids = $mergedSourceIds->unique()->values()->all();
-            $target->promotion_audit = $promotionAudit->values()->all();
+            $updatePayload = [
+                'fingerprints' => $fingerprints->values()->all(),
+                'consents' => $consents,
+                'merged_source_ids' => $mergedSourceIds->unique()->values()->all(),
+                'promotion_audit' => $promotionAudit->values()->all(),
+                'version' => $currentVersion + 1,
+            ];
 
             $aggregateFirst = null;
             $aggregateLast = null;
@@ -156,7 +162,7 @@ class AnonymousIdentityMerger
                 ->first();
 
             if ($finalFirstSeen !== null) {
-                $target->first_seen_at = $finalFirstSeen;
+                $updatePayload['first_seen_at'] = $finalFirstSeen;
             }
 
             if (in_array($target->identity_state, ['registered', 'validated'], true)) {
@@ -164,11 +170,20 @@ class AnonymousIdentityMerger
                 $resolvedRegisteredAt = $this->resolveRegisteredAt($target->promotion_audit ?? [], $currentRegisteredAt);
 
                 if ($resolvedRegisteredAt !== null) {
-                    $target->registered_at = $resolvedRegisteredAt;
+                    $updatePayload['registered_at'] = $resolvedRegisteredAt;
                 }
             }
 
-            $target->save();
+            $affectedRows = AccountUser::query()
+                ->where('_id', $target->_id)
+                ->where('version', $currentVersion)
+                ->update($updatePayload);
+
+            if ($affectedRows === 0) {
+                throw new ConcurrencyConflictException('Failed to merge identities due to a concurrency conflict.');
+            }
+
+            $target->refresh();
 
             if ($mergeAuditSources->isNotEmpty()) {
                 $targetFingerprintLastSeen = Collection::make($target->fingerprints ?? [])
