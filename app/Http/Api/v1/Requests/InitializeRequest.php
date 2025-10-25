@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Models\Landlord\LandlordUser;
+use App\Rules\EmailAvailableRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -34,8 +36,7 @@ class InitializeRequest extends FormRequest
             'tenant.subdomain' => 'required|string|regex:/^[a-z][a-z0-9-]*[a-z0-9]$/|max:63',
             'tenant.domains' => ['nullable', 'array'],
             'user.name' => 'string|max:' . InputConstraints::NAME_MAX,
-            'user.emails' => 'required|array|max:' . InputConstraints::EMAIL_ARRAY_MAX,
-            'user.emails.*' => 'email|max:' . InputConstraints::EMAIL_MAX,
+            'user.email' => $this->emailRules(),
             'user.password' => 'required|string|min:' . InputConstraints::PASSWORD_MIN . '|max:' . InputConstraints::PASSWORD_MAX,
             'role.name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
             'role.description' => ['nullable', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
@@ -61,6 +62,26 @@ class InitializeRequest extends FormRequest
 
             'branding_data.pwa_icon'  => ['required', 'image', 'mimes:png', 'max:5120'],
         ];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    protected function emailRules(): array
+    {
+        $rules = [
+            'required',
+            'email',
+            'max:' . InputConstraints::EMAIL_MAX,
+        ];
+
+        $alreadyInitialized = LandlordUser::query()->exists();
+
+        if (! $alreadyInitialized) {
+            $rules[] = new EmailAvailableRule('landlord', 'landlord_users');
+        }
+
+        return $rules;
     }
 
     public function failedValidation(Validator $validator)

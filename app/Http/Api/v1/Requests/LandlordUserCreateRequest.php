@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use App\Rules\UniqueArrayItemRule;
+use App\Rules\EmailAvailableRule;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -27,13 +27,13 @@ class LandlordUserCreateRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
-            'emails' => [
+            'email' => [
                 'required',
-                'array',
-                'max:' . InputConstraints::EMAIL_ARRAY_MAX,
-                new UniqueArrayItemRule('landlord', 'landlord_users', 'emails', )
+                'string',
+                'email',
+                'max:' . InputConstraints::EMAIL_MAX,
+                new EmailAvailableRule('landlord', 'landlord_users'),
             ],
-            'emails.*' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
             'password' => [
                 'required',
                 'string',

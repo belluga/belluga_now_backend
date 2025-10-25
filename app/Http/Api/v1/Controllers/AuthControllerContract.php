@@ -95,23 +95,18 @@ abstract class AuthControllerContract extends Controller
     {
         DB::beginTransaction();
         try {
-            $emails = collect($request->emails)
-                ->map(static fn (string $email): string => strtolower($email))
-                ->values()
-                ->all();
+            $email = strtolower($request->validated('email'));
 
             $user = LandlordUser::create([
                 'name' => $request->name,
-                'emails' => $emails,
+                'emails' => [$email],
                 'password' => $request->password,
                 'identity_state' => 'registered',
                 'promotion_audit' => [],
             ]);
 
-            foreach ($emails as $email) {
-                $user->ensureEmail($email);
-                $user->syncCredential('password', $email, $user->password);
-            }
+            $user->ensureEmail($email);
+            $user->syncCredential('password', $email, $user->password);
 
             $token = $user->createToken($request->device_name)->plainTextToken;
 

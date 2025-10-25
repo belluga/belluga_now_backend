@@ -112,22 +112,28 @@ abstract class ProfileControllerContract extends Controller
     public function addEmails(EmailsAddRequest $request): JsonResponse
     {
         $user = auth()->guard('sanctum')->user();
-        $new_emails = $request->input('emails');
+        $email = strtolower($request->validated()['email']);
+
+        if (in_array($email, $user->emails ?? [], true)) {
+            throw ValidationException::withMessages([
+                'email' => ['This email is already associated with your profile.'],
+            ]);
+        }
 
         try{
-            $user->push('emails', $new_emails);
+            $user->push('emails', $email);
         }catch (\Exception $e){
             if (str_contains($e->getMessage(), 'E11000')) {
                 return response()->json([
                     'message' => 'An email already exists.',
-                    'errors' => ['emails' => ["One of the emails given already exists.."]]
+                    'errors' => ['email' => ["The provided email already exists."]]
                 ], 422);
             }
 
             return response()->json([
                 "message" => "Erro ao adicionar emails. Tente novamente mais tarde.",
                 'errors' => [
-                    'emails' => [
+                    'email' => [
                         "Erro ao adicionar emails. Tente novamente mais tarde"
                     ]
                 ]

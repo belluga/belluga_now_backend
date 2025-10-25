@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Rules\EmailAvailableRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -29,8 +30,13 @@ class RegisterUserRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
-            'emails' => 'required|array|max:' . InputConstraints::EMAIL_ARRAY_MAX,
-            'emails.*' => 'required|string|email|max:' . InputConstraints::EMAIL_MAX . '|unique:landlord_users',
+            'email' => [
+                'required',
+                'string',
+                'email',
+                'max:' . InputConstraints::EMAIL_MAX,
+                new EmailAvailableRule('landlord', 'landlord_users'),
+            ],
             'password' => [
                 'required',
                 'confirmed',

@@ -54,7 +54,12 @@ class AccountUserController extends Controller
     {
         DB::beginTransaction();
         try {
-            $user = $this->findOrCreateUser($request->validated());
+            $payload = $request->validated();
+            $email = strtolower($payload['email']);
+            $payload['emails'] = [$email];
+            unset($payload['email']);
+
+            $user = $this->findOrCreateUser($payload);
 
             if(!$user->isActive()){
                 $user->restore();

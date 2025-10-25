@@ -115,10 +115,7 @@ abstract class ApiDefaultTenantApiTenantUsersTestContract extends TestCaseTenant
 
         $response = $this->_userCreate([
             "name" => $user->name,
-            "emails" => [
-                $user->email_1,
-                $user->email_2,
-            ],
+            "email" => $user->email_1,
             "password" => $user->password,
             "password_confirmation" => $user->password,
             "device_name" => "test",

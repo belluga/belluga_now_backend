@@ -55,10 +55,7 @@ class LandlordUserController extends Controller
         try{
             DB::beginTransaction();
             $payload = $request->validated();
-            $emails = collect($payload['emails'])
-                ->map(static fn (string $email): string => strtolower($email))
-                ->values()
-                ->all();
+            $email = strtolower($payload['email']);
 
             $operatorId = Auth::id();
             $operatorObjectId = null;
@@ -79,17 +76,15 @@ class LandlordUserController extends Controller
 
             $user = LandlordUser::create([
                 'name' => $payload['name'],
-                'emails' => $emails,
+                'emails' => [$email],
                 'password' => $payload['password'],
                 'identity_state' => 'registered',
                 'credentials' => [],
                 'promotion_audit' => [$promotionAuditEntry],
             ]);
 
-            foreach ($emails as $email) {
-                $user->ensureEmail($email);
-                $user->syncCredential('password', $email, $user->password);
-            }
+            $user->ensureEmail($email);
+            $user->syncCredential('password', $email, $user->password);
 
             $role->users()->save($user);
             DB::commit();

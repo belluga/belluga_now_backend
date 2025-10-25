@@ -18,10 +18,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => $this->landlord->user_cross_tenant_admin->name,
-            "emails" => [
-                $this->landlord->user_cross_tenant_admin->email_1,
-                $this->landlord->user_cross_tenant_admin->email_2,
-            ],
+            "email" => $this->landlord->user_cross_tenant_admin->email_1,
             "password" => $this->landlord->user_cross_tenant_admin->password,
             "password_confirmation" => $this->landlord->user_cross_tenant_admin->password,
             "device_name" => "test",
@@ -43,7 +40,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $createdUser->identity_state);
         $this->assertNotEmpty($createdUser->credentials);
-        $this->assertCount(2, $createdUser->credentials);
+        $this->assertCount(1, $createdUser->credentials);
         $this->assertCount(1, $createdUser->promotion_audit ?? []);
         $promotionAudit = $createdUser->promotion_audit[0];
         $this->assertEquals('anonymous', $promotionAudit['from_state']);
@@ -60,10 +57,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => fake()->name,
-            "emails" => [
-                $this->landlord->user_cross_tenant_admin->email_1,
-                $this->landlord->user_cross_tenant_admin->email_2,
-            ],
+            "email" => $this->landlord->user_cross_tenant_admin->email_1,
             "password" => $this->landlord->user_cross_tenant_admin->password,
             "password_confirmation" => $this->landlord->user_cross_tenant_admin->password,
             "device_name" => "test",
@@ -75,7 +69,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         $response->assertJsonStructure([
             "message",
             "errors" => [
-                "emails"
+                "email"
             ],
         ]);
     }
@@ -89,10 +83,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => $this->landlord->user_cross_tenant_visitor->name,
-            "emails" => [
-                $this->landlord->user_cross_tenant_visitor->email_1,
-                $this->landlord->user_cross_tenant_visitor->email_2,
-            ],
+            "email" => $this->landlord->user_cross_tenant_visitor->email_1,
             "password" => $this->landlord->user_cross_tenant_visitor->password,
             "password_confirmation" => $this->landlord->user_cross_tenant_visitor->password,
             "device_name" => "test",
@@ -127,10 +118,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => $this->landlord->user_disposable->name,
-            "emails" => [
-                $this->landlord->user_disposable->email_1,
-                $this->landlord->user_disposable->email_2,
-            ],
+            "email" => $this->landlord->user_disposable->email_1,
             "password" => $this->landlord->user_disposable->password,
             "password_confirmation" => $this->landlord->user_disposable->password,
             "device_name" => "test",

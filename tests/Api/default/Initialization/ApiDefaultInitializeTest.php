@@ -132,10 +132,7 @@ class ApiDefaultInitializeTest extends TestCase {
             ],
             "user" => [
                 "name" => $this->landlord->user_superadmin->name,
-                "emails" => [
-                    $this->landlord->user_superadmin->email_1,
-                    $this->landlord->user_superadmin->email_2,
-                ],
+                "email" => $this->landlord->user_superadmin->email_1,
                 "password" => $this->landlord->user_superadmin->password
             ],
             "tenant" => [

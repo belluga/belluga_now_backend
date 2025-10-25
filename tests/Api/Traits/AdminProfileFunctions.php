@@ -66,12 +66,12 @@ trait AdminProfileFunctions {
         );
     }
 
-    protected function profileAddEmails(UserLabels $user, array $emails): TestResponse {
+    protected function profileAddEmails(UserLabels $user, string $email): TestResponse {
         return $this->json(
             method: 'patch',
             uri: $this->profile_api_base."profile/emails",
             data: [
-                "emails" => $emails,
+                "email" => $email,
             ],
             headers: [
                 'Authorization' => "Bearer $user->token",

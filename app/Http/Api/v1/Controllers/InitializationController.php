@@ -92,14 +92,11 @@ class InitializationController extends Controller
                 ]
             );
 
-            $emails = collect($validated['user']['emails'])
-                ->map(static fn (string $email): string => strtolower($email))
-                ->values()
-                ->all();
+            $primaryEmail = strtolower($validated['user']['email']);
 
             $new_user = LandlordUser::create([
                 'name' => $validated['user']['name'],
-                'emails' => $emails,
+                'emails' => [$primaryEmail],
                 'password' => $validated['user']['password'],
                 'identity_state' => 'validated',
                 'verified_at' => Carbon::now(),
@@ -113,10 +110,8 @@ class InitializationController extends Controller
                 ],
             ]);
 
-            foreach ($emails as $email) {
-                $new_user->ensureEmail($email);
-                $new_user->syncCredential('password', $email, $new_user->password);
-            }
+            $new_user->ensureEmail($primaryEmail);
+            $new_user->syncCredential('password', $primaryEmail, $new_user->password);
 
             $admin_role->users()->save($new_user);
 

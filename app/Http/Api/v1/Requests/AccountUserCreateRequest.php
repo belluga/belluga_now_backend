@@ -26,12 +26,11 @@ class AccountUserCreateRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
-            'emails' => [
+            'email' => [
                 'required',
-                'array',
-                'max:' . InputConstraints::EMAIL_ARRAY_MAX,
+                'email',
+                'max:' . InputConstraints::EMAIL_MAX,
             ],
-            'emails.*' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
             'password' => [
                 'required',
                 'string',

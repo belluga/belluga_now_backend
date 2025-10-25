@@ -60,12 +60,12 @@ trait AccountProfileFunctions {
         );
     }
 
-    protected function profileAddEmails(UserLabels $user, array $emails): TestResponse {
+    protected function profileAddEmails(UserLabels $user, string $email): TestResponse {
         return $this->json(
             method: 'patch',
             uri: "{$this->base_api_tenant}profile/emails",
             data: [
-                "emails" => $emails,
+                "email" => $email,
             ],
             headers: [
                 'Authorization' => "Bearer $user->token",

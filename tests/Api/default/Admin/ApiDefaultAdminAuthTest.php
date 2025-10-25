@@ -68,6 +68,8 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
 
     public function testUserLoginLogoutSuccessEmail2(): void {
 
+        $this->ensureSecondaryEmailRegistered();
+
         $response = $this->userLoginSuccessEmail2("device1");
 
         $response->assertStatus(200);
@@ -305,6 +307,40 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
             "password" => $this->landlord->user_cross_tenant_admin->password,
             "device_name" => $device
         ];
+    }
+
+    protected function ensureSecondaryEmailRegistered(): void {
+        if (empty($this->landlord->user_cross_tenant_admin->email_2)) {
+            $this->landlord->user_cross_tenant_admin->email_2 = fake()->unique()->safeEmail();
+        }
+
+        $deviceName = 'email2-setup';
+
+        $login = $this->userLoginSuccessEmail1($deviceName);
+        $login->assertStatus(200);
+
+        $this->landlord->user_cross_tenant_admin->token = $login->json('data.token');
+        $currentEmails = array_map('strtolower', $login->json('data.user.emails') ?? []);
+        $desiredEmail = strtolower($this->landlord->user_cross_tenant_admin->email_2);
+
+        if (!in_array($desiredEmail, $currentEmails, true)) {
+            $response = $this->json(
+                method: 'patch',
+                uri: "admin/api/profile/emails",
+                data: [
+                    'email' => $this->landlord->user_cross_tenant_admin->email_2,
+                ],
+                headers: [
+                    'Authorization' => "Bearer {$this->landlord->user_cross_tenant_admin->token}",
+                    'Content-Type' => 'application/json'
+                ]
+            );
+
+            $response->assertStatus(200);
+        }
+
+        $this->userLogout($deviceName)->assertStatus(200);
+        $this->landlord->user_cross_tenant_admin->token = "";
     }
 
     protected function payloadUserLoginWrongPassword(): array {

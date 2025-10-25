@@ -5,6 +5,7 @@ namespace Tests\Api\default\Accounts\Profile\Contracts;
 use App\Support\Helpers\PhoneNumberParser;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AccountProfileFunctions;
+use Tests\Helpers\UserLabels;
 use Tests\TestCaseAccount;
 
 abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
@@ -44,18 +45,21 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
     public function testAccountUserAddEmail(): void {
 
-        $roleUpdate = $this->profileAddEmails(
+        $firstUpdate = $this->profileAddEmails(
             $this->account->user_visitor,
-            [
-                $this->temporary_email_1,
-                $this->temporary_email_2,
-            ]
+            $this->temporary_email_1,
         );
 
-        $roleUpdate->assertStatus(200);
+        $firstUpdate->assertStatus(200);
+        $this->assertContains($this->temporary_email_1, $firstUpdate->json()['data']['emails']);
 
-        $this->assertContains($this->temporary_email_1, $roleUpdate->json()['data']['emails']);
-        $this->assertContains($this->temporary_email_2, $roleUpdate->json()['data']['emails']);
+        $secondUpdate = $this->profileAddEmails(
+            $this->account->user_visitor,
+            $this->temporary_email_2,
+        );
+
+        $secondUpdate->assertStatus(200);
+        $this->assertContains($this->temporary_email_2, $secondUpdate->json()['data']['emails']);
     }
 
     public function testAccountUserAddEmailRepeated(): void {
@@ -64,23 +68,31 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
         $userUpdate = $this->profileAddEmails(
             $this->account->user_users_manager,
-            [
-                $this->temporary_email_1,
-            ]
+            $this->temporary_email_1,
         );
 
         $userUpdate->assertStatus(422);
 
         $userUpdate ->assertJsonStructure([
             "errors" => [
-                "emails"
+                "email"
             ]
         ]);
     }
 
     public function testAccountUserRemoveEmail(): void
     {
+        $this->accountLogin($this->account->user_visitor);
 
+        $this->ensureEmailPresent($this->account->user_visitor, $this->temporary_email_1);
+        $this->ensureEmailPresent($this->account->user_visitor, $this->temporary_email_2);
+
+        $secondaryEmail = $this->account->user_visitor->email_2;
+        if (empty($secondaryEmail)) {
+            $secondaryEmail = fake()->unique()->safeEmail();
+            $this->account->user_visitor->email_2 = $secondaryEmail;
+        }
+        $this->ensureEmailPresent($this->account->user_visitor, $secondaryEmail);
         $addEmailsResponse = $this->profileRemoveEmail(
             $this->account->user_visitor,
             $this->temporary_email_1
@@ -97,12 +109,12 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
         $addEmailsResponse = $this->profileRemoveEmail(
             $this->account->user_visitor,
-            $this->account->user_visitor->email_2
+            $secondaryEmail
         );
 
         $addEmailsResponse->assertStatus(200);
 
-        $this->assertNotContains($this->account->user_visitor->email_2, $addEmailsResponse->json()['data']['emails']);
+        $this->assertNotContains($secondaryEmail, $addEmailsResponse->json()['data']['emails']);
         $this->assertContains($this->account->user_visitor->email_1, $addEmailsResponse->json()['data']['emails']);
 
         $addEmailsResponse = $this->profileRemoveEmail(
@@ -192,5 +204,20 @@ abstract class ApiDefaultAccountUserProfile extends TestCaseAccount{
 
         $response->assertStatus(200);
         $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_2), $response->json()['data']['phones']);
+    }
+
+    protected function ensureEmailPresent(UserLabels $user, string $email): void
+    {
+        $response = $this->profileAddEmails($user, $email);
+
+        if ($response->status() === 200) {
+            $this->assertContains(
+                strtolower($email),
+                array_map('strtolower', $response->json('data.emails') ?? [])
+            );
+            return;
+        }
+
+        $response->assertStatus(422);
     }
 }
