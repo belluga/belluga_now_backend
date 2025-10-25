@@ -6,6 +6,9 @@
          colors="true"
 >
     <testsuites>
+        <testsuite name="Feature-Initialization">
+            <directory>tests/Feature/Initialization</directory>
+        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
