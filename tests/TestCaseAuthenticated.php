@@ -2,8 +2,17 @@
 
 namespace Tests;
 
+use Tests\Traits\EnsuresSystemInitialization;
+
 abstract class TestCaseAuthenticated extends TestCase
 {
+    use EnsuresSystemInitialization;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureSystemInitialized();
+    }
 
     protected string $base_api_url {
         get {

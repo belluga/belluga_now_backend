@@ -6,8 +6,17 @@ use App\Models\Landlord\LandlordUser;
 use Illuminate\Testing\TestResponse;
 use MongoDB\BSON\ObjectId;
 use Tests\TestCaseAuthenticated;
+use Tests\Traits\SeedsLandlordSupportRoles;
 
 class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
+
+    use SeedsLandlordSupportRoles;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureSupportRoles();
+    }
 
     public function testUserTenantsManagerCreate(): void {
 

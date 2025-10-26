@@ -6,10 +6,10 @@ use Illuminate\Http\UploadedFile;
 
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
-
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
 class ApiDefaultInitializeTest extends TestCase {
+
     use RefreshLandlordAndTenantDatabases;
 
     protected function setUp(): void
@@ -17,12 +17,6 @@ class ApiDefaultInitializeTest extends TestCase {
         parent::setUp();
         $this->refreshLandlordAndTenantDatabases();
     }
-
-    // protected function tearDown(): void
-    // {
-    //     $this->refreshLandlordAndTenantDatabases();
-    //     parent::tearDown();
-    // }
 
     public function testInitiate(): void {
 

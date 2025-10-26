@@ -4,24 +4,29 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\LandlordUsers\LandlordUserCreator;
+use App\Application\LandlordUsers\TenantUserRoleManager;
 use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\ObjectId;
 
 class LandlordUserController extends Controller
 {
     protected ?LandlordUser $user;
+
+    public function __construct(
+        private readonly LandlordUserCreator $landlordUserCreator,
+        private readonly TenantUserRoleManager $tenantUserRoleManager
+    ) {
+    }
 
     /**
      * Lista todos os usuários do landlord
@@ -50,46 +55,15 @@ class LandlordUserController extends Controller
      */
     public function store(LandlordUserCreateRequest $request): JsonResponse
     {
-        $role = LandlordRole::where("_id", $request->validated()['role_id'])->firstOrFail();;
+        $payload = $request->validated();
 
-        try{
-            DB::beginTransaction();
-            $payload = $request->validated();
-            $email = strtolower($payload['email']);
-
-            $operatorId = Auth::id();
-            $operatorObjectId = null;
-            if (is_string($operatorId) && $operatorId !== '') {
-                try {
-                    $operatorObjectId = new ObjectId($operatorId);
-                } catch (\Throwable) {
-                    $operatorObjectId = null;
-                }
-            }
-
-            $promotionAuditEntry = [
-                'from_state' => 'anonymous',
-                'to_state' => 'registered',
-                'promoted_at' => Carbon::now(),
-                'operator_id' => $operatorObjectId,
-            ];
-
-            $user = LandlordUser::create([
-                'name' => $payload['name'],
-                'emails' => [$email],
-                'password' => $payload['password'],
-                'identity_state' => 'registered',
-                'credentials' => [],
-                'promotion_audit' => [$promotionAuditEntry],
-            ]);
-
-            $user->ensureEmail($email);
-            $user->syncCredential('password', $email, $user->password);
-
-            $role->users()->save($user);
-            DB::commit();
-        }catch (\Exception $e){
-            DB::rollBack();
+        try {
+            $user = $this->landlordUserCreator->create(
+                payload: $payload,
+                roleId: $payload['role_id'],
+                operatorId: Auth::id()
+            );
+        } catch (\Throwable $e) {
             abort(422, "An error occurred while trying to create the user.");
         }
 
@@ -163,36 +137,21 @@ class LandlordUserController extends Controller
     public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
 
         $tenant = Tenant::current();
-
-        $user = LandlordUser::where('_id', new ObjectId(request()->user_id))->firstOrFail();
-
-        $role = $tenant->roleTemplates()->where('_id', new ObjectId(request()->role_id))->firstOrFail();
-
-        $method = strtolower($request->method());
+        if (! $tenant) {
+            abort(422, 'Tenant context not available.');
+        }
+        $data = $request->validated();
 
         try {
-            switch( $method){
-                case 'post':
-                    $user->tenantRoles()->create([
-                        ...$role->attributesToArray(),
-                        "tenant_id" => $tenant->id
-                    ]);
-                    break;
-                case 'delete':
-                    $role_to_delete = $user->tenantRoles()
-                        ->where('slug', $role->slug)
-                        ->where('tenant_id', $tenant->id)
-                        ->first();
-
-                    if ($role_to_delete) {
-                        $role_to_delete->delete();
-                        $user->save();
-                    }
-                    break;
-                default:
-                    abort(422, "Not found an action for this method.");
+            $method = strtolower($request->method());
+            if ($method === 'post') {
+                $this->tenantUserRoleManager->assign($data['user_id'], $data['role_id'], $tenant);
+            } elseif ($method === 'delete') {
+                $this->tenantUserRoleManager->revoke($data['user_id'], $data['role_id'], $tenant);
+            } else {
+                abort(422, "Not found an action for this method.");
             }
-        }catch (\Exception $e){
+        } catch (\Throwable $e) {
             abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
         }
 

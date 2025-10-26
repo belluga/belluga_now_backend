@@ -3,6 +3,7 @@
 namespace Tests\Api\default\Admin;
 
 use App\Models\Landlord\PersonalAccessToken;
+use App\Models\Landlord\Tenant;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCaseAuthenticated;
 use Tests\Api\Traits\AccountAuthFunctions;
@@ -141,23 +142,33 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         $email = fake()->unique()->safeEmail();
         $password = 'SecurePass!123';
 
+        $tenantBase = "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/";
+        $tenantDomain = 'tenant.belluga.test';
+        Tenant::query()->first()?->makeCurrent();
+
         $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}auth/register/password",
+            uri: "{$tenantBase}auth/register/password",
             data: [
                 'name' => 'Tenant Token Check',
                 'email' => $email,
                 'password' => $password,
+            ],
+            headers: [
+                'X-App-Domain' => $tenantDomain,
             ]
         )->assertStatus(201);
 
         $login = $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}auth/login",
+            uri: "{$tenantBase}auth/login",
             data: [
                 'email' => $email,
                 'password' => $password,
                 'device_name' => 'tenant-token-check',
+            ],
+            headers: [
+                'X-App-Domain' => $tenantDomain,
             ]
         );
 
