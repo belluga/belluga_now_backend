@@ -12,6 +12,9 @@
         <testsuite name="Feature-Landlord">
             <directory>tests/Feature/Landlord</directory>
         </testsuite>
+        <testsuite name="Feature-Accounts">
+            <directory>tests/Feature/Accounts</directory>
+        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
