@@ -125,6 +125,10 @@ Route::prefix('accounts')
                 Route::post('/restore', [AccountController::class, 'restore']);
 
                 Route::post('/force_delete', [AccountController::class, 'forceDestroy']);
+
+                Route::post('/users/{user_id}/roles/{role_id}', [AccountController::class, 'accountUserManage']);
+
+                Route::delete('/users/{user_id}/roles/{role_id}', [AccountController::class, 'accountUserManage']);
             });
     });
 

@@ -17,6 +17,14 @@ class AccountUserAttachRequest extends FormRequest
         return true;
     }
 
+    public function validationData(): array
+    {
+        return array_merge($this->all(), [
+            'user_id' => $this->route('user_id'),
+            'role_id' => $this->route('role_id'),
+        ]);
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *
@@ -37,7 +45,7 @@ class AccountUserAttachRequest extends FormRequest
                 'string',
                 'size:' . InputConstraints::OBJECT_ID_LENGTH,
                 'regex:/^[a-fA-F0-9]{24}$/',
-                'exists:tenant.account_users,_id',
+                'exists:tenant.account_role_templates,_id',
             ],
         ];
     }
