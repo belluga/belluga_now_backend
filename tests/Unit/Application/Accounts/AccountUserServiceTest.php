@@ -64,17 +64,24 @@ class AccountUserServiceTest extends TestCase
         $this->assertSame('Tenant Operator', $user->name);
         $this->assertSame('operator@example.org', $user->emails[0]);
         $this->assertTrue($user->haveAccessTo($this->account));
-        $this->assertCount(1, $user->account_roles);
+        $this->assertTrue(
+            collect($user->account_roles)->contains(function (array $role): bool {
+                return ($role['account_id'] ?? null) === $this->account->id;
+            })
+        );
     }
 
     public function testCreateRestoresSoftDeletedUserAndReusesIdentity(): void
     {
-        $existing = AccountUser::create([
-            'name' => 'Archived User',
-            'emails' => ['archived@example.org'],
-            'password' => 'Secret!234',
-            'identity_state' => 'registered',
-        ]);
+        $existing = $this->service->create(
+            $this->account,
+            [
+                'name' => 'Archived User',
+                'email' => 'archived@example.org',
+                'password' => 'Secret!234',
+            ],
+            (string) $this->roleTemplate->_id
+        );
 
         $existing->delete();
 

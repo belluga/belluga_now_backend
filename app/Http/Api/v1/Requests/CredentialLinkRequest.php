@@ -1,4 +1,3 @@
-
 <?php
 
 declare(strict_types=1);
@@ -45,3 +44,4 @@ class CredentialLinkRequest extends FormRequest
         );
     }
 }
+
