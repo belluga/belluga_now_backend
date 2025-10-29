@@ -131,6 +131,7 @@ class AccountManagementService
     private function paginateAccounts(MongoBuilder $query, bool $includeArchived, int $perPage): LengthAwarePaginator
     {
         return $query
+            ->orderByDesc('created_at')
             ->when($includeArchived, static fn (MongoBuilder $builder) => $builder->withTrashed())
             ->paginate($perPage)
             ->through(static fn (Account $account): array => [
