@@ -1,0 +1,177 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Application\Tenants;
+
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
+use App\Application\Tenants\TenantBrandingManagementService;
+use App\Models\Landlord\Tenant;
+use Tests\TestCase;
+use Tests\Traits\RefreshLandlordAndTenantDatabases;
+
+class TenantBrandingManagementServiceTest extends TestCase
+{
+    use RefreshLandlordAndTenantDatabases;
+
+    private static bool $bootstrapped = false;
+
+    private Tenant $tenant;
+
+    private TenantBrandingManagementService $service;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if (! self::$bootstrapped) {
+            $this->refreshLandlordAndTenantDatabases();
+            $this->initializeSystem();
+            self::$bootstrapped = true;
+        }
+
+        $this->tenant = Tenant::query()->firstOrFail();
+        $this->tenant->makeCurrent();
+
+        $this->service = $this->app->make(TenantBrandingManagementService::class);
+    }
+
+    public function testUpdateCreatesBrandingDataWhenEmpty(): void
+    {
+        $payload = [
+            'logo_settings' => [
+                'light_logo_uri' => 'https://cdn.example/light.svg',
+                'dark_logo_uri' => 'https://cdn.example/dark.svg',
+            ],
+            'theme_data_settings' => [
+                'light_scheme_data' => [
+                    'primary_seed_color' => '#ffffff',
+                    'secondary_seed_color' => '#dddddd',
+                ],
+                'dark_scheme_data' => [
+                    'primary_seed_color' => '#111111',
+                    'secondary_seed_color' => '#333333',
+                ],
+            ],
+        ];
+
+        $branding = $this->service->update($this->tenant, $payload);
+
+        $this->assertSame(
+            'https://cdn.example/light.svg',
+            $branding['logo_settings']['light_logo_uri']
+        );
+        $this->assertSame('#111111', $branding['theme_data_settings']['dark_scheme_data']['primary_seed_color']);
+    }
+
+    public function testUpdateDoesNotOverwriteWithEmptyValues(): void
+    {
+        $this->tenant->branding_data = [
+            'logo_settings' => [
+                'light_logo_uri' => 'https://existing/light.svg',
+                'dark_logo_uri' => 'https://existing/dark.svg',
+            ],
+            'theme_data_settings' => [
+                'light_scheme_data' => [
+                    'primary_seed_color' => '#abcdef',
+                    'secondary_seed_color' => '#fedcba',
+                ],
+                'dark_scheme_data' => [
+                    'primary_seed_color' => '#123456',
+                    'secondary_seed_color' => '#654321',
+                ],
+            ],
+            'pwa_icon' => [
+                'source_uri' => 'https://existing/pwa.png',
+                'icon192_uri' => 'https://existing/icon-192.png',
+                'icon512_uri' => 'https://existing/icon-512.png',
+                'icon_maskable512_uri' => 'https://existing/icon-maskable.png',
+            ],
+        ];
+        $this->tenant->save();
+
+        $payload = [
+            'logo_settings' => [
+                'light_logo_uri' => '',
+                'dark_logo_uri' => 'https://cdn.example/new-dark.svg',
+            ],
+            'theme_data_settings' => [
+                'light_scheme_data' => [
+                    'primary_seed_color' => '',
+                ],
+                'dark_scheme_data' => [
+                    'secondary_seed_color' => '#000000',
+                ],
+            ],
+        ];
+
+        $branding = $this->service->update($this->tenant->fresh(), $payload);
+
+        $this->assertSame(
+            'https://existing/light.svg',
+            $branding['logo_settings']['light_logo_uri']
+        );
+        $this->assertSame(
+            'https://cdn.example/new-dark.svg',
+            $branding['logo_settings']['dark_logo_uri']
+        );
+        $this->assertSame(
+            '#000000',
+            $branding['theme_data_settings']['dark_scheme_data']['secondary_seed_color']
+        );
+    }
+
+    public function testUpdateAppliesUploadedLogoUrls(): void
+    {
+        $branding = $this->service->update(
+            $this->tenant,
+            ['logo_settings' => []],
+            ['dark_icon_uri' => 'https://cdn.example/dark-icon.png']
+        );
+
+        $this->assertSame(
+            'https://cdn.example/dark-icon.png',
+            $branding['logo_settings']['dark_icon_uri']
+        );
+    }
+
+    public function testUpdateIncludesPwaVariants(): void
+    {
+        $variants = [
+            'source_uri' => 'https://cdn.example/pwa.png',
+            'icon192_uri' => 'https://cdn.example/pwa-192.png',
+        ];
+
+        $branding = $this->service->update(
+            $this->tenant,
+            ['logo_settings' => []],
+            [],
+            $variants
+        );
+
+        $this->assertSame('https://cdn.example/pwa.png', $branding['pwa_icon']['source_uri']);
+        $this->assertSame('https://cdn.example/pwa-192.png', $branding['pwa_icon']['icon192_uri']);
+    }
+
+    private function initializeSystem(): void
+    {
+        $service = $this->app->make(SystemInitializationService::class);
+
+        $payload = new InitializationPayload(
+            landlord: ['name' => 'Landlord HQ'],
+            tenant: ['name' => 'Tenant Lambda', 'subdomain' => 'tenant-lambda'],
+            role: ['name' => 'Root', 'permissions' => ['*']],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            themeDataSettings: [
+                'light_scheme_data' => ['primary_seed_color' => '#fff', 'secondary_seed_color' => '#000'],
+                'dark_scheme_data' => ['primary_seed_color' => '#000', 'secondary_seed_color' => '#fff'],
+            ],
+            logoSettings: ['light_logo_uri' => '/logos/light.png'],
+            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
+            tenantDomains: ['tenant-lambda.test']
+        );
+
+        $service->initialize($payload);
+    }
+}
