@@ -13,23 +13,26 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Laravel\Eloquent\Builder as MongoBuilder;
 
 class AccountManagementService
 {
     public function paginateForUser(AccountUser|LandlordUser $user, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         if ($user instanceof LandlordUser) {
-            return Account::query()
-                ->when($includeArchived, static fn ($query) => $query->onlyTrashed())
-                ->paginate($perPage);
+            return $this->paginateAccounts(Account::query(), $includeArchived, $perPage);
         }
 
-        $objectIds = array_map(static fn (string $id): ObjectId => new ObjectId($id), $user->getAccessToIds());
+        $accessIds = array_map(
+            static fn ($id): ObjectId => new ObjectId((string) $id),
+            $user->getAccessToIds()
+        );
 
-        return Account::query()
-            ->whereRaw(['_id' => ['$in' => $objectIds]])
-            ->when($includeArchived, static fn ($query) => $query->onlyTrashed())
-            ->paginate($perPage);
+        return $this->paginateAccounts(
+            Account::query()->whereRaw(['_id' => ['$in' => $accessIds]]),
+            $includeArchived,
+            $perPage
+        );
     }
 
     /**
@@ -123,5 +126,21 @@ class AccountManagementService
                 $user->save();
             }
         });
+    }
+
+    private function paginateAccounts(MongoBuilder $query, bool $includeArchived, int $perPage): LengthAwarePaginator
+    {
+        return $query
+            ->when($includeArchived, static fn (MongoBuilder $builder) => $builder->withTrashed())
+            ->paginate($perPage)
+            ->through(static fn (Account $account): array => [
+                'id' => (string) $account->_id,
+                'name' => $account->name,
+                'slug' => $account->slug,
+                'document' => $account->document,
+                'created_at' => $account->created_at?->toJSON(),
+                'updated_at' => $account->updated_at?->toJSON(),
+                'deleted_at' => $account->deleted_at?->toJSON(),
+            ]);
     }
 }

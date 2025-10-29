@@ -289,7 +289,7 @@ abstract class ApiDefaultTenantRolesTestContract extends TestCaseTenant
             method: 'delete',
             uri: "{$this->base_api_tenant}roles/$roleId",
             data: [
-                "background_role_id" => $this->landlord->tenant_primary->role_visitor->id,
+                "background_role_id" => $this->tenant->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );
