@@ -5,34 +5,31 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
-use App\Domain\Identity\PasswordIdentityRegistrar;
-use App\Domain\Identity\AnonymousIdentityMerger;
+use App\Application\Identity\TenantPasswordRegistrationResult;
+use App\Application\Identity\TenantPasswordRegistrationService;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
+use App\Models\Landlord\Tenant;
 use App\Http\Api\v1\Requests\PasswordRegistrationRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Tenant;
-use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Collection;
-use Illuminate\Validation\ValidationException;
-use MongoDB\BSON\ObjectId;
 
 class PasswordRegistrationController extends Controller
 {
+    public function __construct(
+        private readonly TenantPasswordRegistrationService $registrationService
+    ) {
+    }
+
     public function __invoke(
         PasswordRegistrationRequest $request,
-        PasswordIdentityRegistrar $registrar,
-        AnonymousIdentityMerger $identityMerger
     ): JsonResponse {
+        $validated = $request->validated();
         $tenant = Tenant::resolve();
 
-        $validated = $request->validated();
-
         try {
-            $user = $registrar->register([
-                'name' => $validated['name'],
-                'emails' => [$validated['email']],
-                'password' => $validated['password'],
+            $result = $this->registrationService->register($tenant, [
+                ...$validated,
+                'anonymous_user_ids' => $validated['anonymous_user_ids'] ?? [],
             ]);
         } catch (IdentityAlreadyExistsException $exception) {
             return response()->json([
@@ -41,66 +38,29 @@ class PasswordRegistrationController extends Controller
                     'email' => ['This email is already registered for the tenant.'],
                 ],
             ], 422);
+        } catch (ConcurrencyConflictException) {
+            return response()->json([
+                'message' => 'A concurrency conflict occurred. Please try again.',
+            ], 409);
         }
 
-        $anonymousUserIds = Collection::make($validated['anonymous_user_ids'] ?? [])
-            ->unique()
-            ->values();
+        return $this->respondWithRegistrationResult($result);
+    }
 
-        if ($anonymousUserIds->isNotEmpty()) {
-            $tenant->makeCurrent();
-
-            $anonymousUsers = $anonymousUserIds
-                ->map(function (string $id): AccountUser {
-                    if (! preg_match('/^[a-f0-9]{24}$/i', $id)) {
-                        throw ValidationException::withMessages([
-                            'anonymous_user_ids' => ['One or more anonymous identities was not a valid ObjectId String.'],
-                        ]);
-                    }
-
-                    /** @var AccountUser|null $anonymousUser */
-                    $anonymousUser = AccountUser::query()->find($id);
-
-                    if ($anonymousUser === null) {
-                        throw ValidationException::withMessages([
-                            'anonymous_user_ids' => ['One or more anonymous identities could not be found.'],
-                        ]);
-                    }
-
-                    if ($anonymousUser->identity_state !== 'anonymous') {
-                        throw ValidationException::withMessages([
-                            'anonymous_user_ids' => ['Only anonymous identities can be merged during registration.'],
-                        ]);
-                    }
-
-                    return $anonymousUser;
-                })
-                ->values();
-
-            $maxAttempts = 3;
-            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-                try {
-                    $identityMerger->merge($user, $anonymousUsers, (string) $user->_id);
-                    break;
-                } catch (ConcurrencyConflictException $e) {
-                    if ($attempt === $maxAttempts) {
-                        return response()->json([
-                            'message' => 'A concurrency conflict occurred. Please try again.',
-                        ], 409);
-                    }
-                    usleep(100000);
-                }
-            }
-        }
-
-        $token = $user->createToken('auth:password-register');
-
-        return response()->json([
+    private function respondWithRegistrationResult(TenantPasswordRegistrationResult $result): JsonResponse
+    {
+        $payload = [
             'data' => [
-                'user_id' => (string) $user->_id,
-                'identity_state' => $user->identity_state,
-                'token' => $token->plainTextToken,
+                'user_id' => (string) $result->user->_id,
+                'identity_state' => $result->user->identity_state,
+                'token' => $result->plainTextToken,
             ],
-        ], 201);
+        ];
+
+        if ($result->expiresAt !== null) {
+            $payload['data']['expires_at'] = $result->expiresAt->toISOString();
+        }
+
+        return response()->json($payload, 201);
     }
 }

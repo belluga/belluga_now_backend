@@ -1,0 +1,77 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Tenants;
+
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+use Tests\Traits\RefreshLandlordAndTenantDatabases;
+
+class PasswordRegistrationControllerTest extends TestCase
+{
+    use RefreshLandlordAndTenantDatabases;
+
+    private static bool $bootstrapped = false;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if (! self::$bootstrapped) {
+            $this->refreshLandlordAndTenantDatabases();
+            $this->initializeSystem();
+            self::$bootstrapped = true;
+        }
+
+        Tenant::query()->firstOrFail()->makeCurrent();
+    }
+
+    public function testRegistersNewIdentity(): void
+    {
+        $email = sprintf(
+            'feature-registered-%s@example.org',
+            (string) Str::uuid()
+        );
+
+        $response = $this->withHeaders(['X-App-Domain' => 'tenant-nu.test'])
+            ->postJson('api/v1/auth/register/password', [
+            'name' => 'Feature Registered User',
+            'email' => $email,
+            'password' => 'Secret!234',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.identity_state', 'registered');
+
+        $userId = $response->json('data.user_id');
+        $user = \App\Models\Tenants\AccountUser::query()->findOrFail($userId);
+        $this->assertSame('registered', $user->identity_state);
+        $this->assertTrue(Hash::check('Secret!234', (string) $user->password));
+    }
+
+    private function initializeSystem(): void
+    {
+        $service = $this->app->make(SystemInitializationService::class);
+
+        $payload = new InitializationPayload(
+            landlord: ['name' => 'Landlord HQ'],
+            tenant: ['name' => 'Tenant Nu', 'subdomain' => 'tenant-nu'],
+            role: ['name' => 'Root', 'permissions' => ['*']],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            themeDataSettings: [
+                'light_scheme_data' => ['primary_seed_color' => '#fff', 'secondary_seed_color' => '#000'],
+                'dark_scheme_data' => ['primary_seed_color' => '#000', 'secondary_seed_color' => '#fff'],
+            ],
+            logoSettings: ['light_logo_uri' => '/logos/light.png'],
+            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
+            tenantDomains: ['tenant-nu.test']
+        );
+
+        $service->initialize($payload);
+    }
+}
