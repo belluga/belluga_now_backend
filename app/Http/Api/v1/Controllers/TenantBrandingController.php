@@ -19,7 +19,7 @@ class TenantBrandingController
 
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $validated = $request->validated();
         $uploadedLogos = $this->processLogoUploads($request);
 
@@ -43,14 +43,4 @@ class TenantBrandingController
         ]);
     }
 
-    private function resolveTenant(): Tenant
-    {
-        $tenant = Tenant::current();
-
-        if (! $tenant) {
-            abort(422, 'Tenant context not available.');
-        }
-
-        return $tenant;
-    }
 }

@@ -16,11 +16,7 @@ class AnonymousIdentityController extends Controller
 {
     public function store(AnonymousIdentityRequest $request): JsonResponse
     {
-        $tenant = Tenant::current();
-
-        if (! $tenant) {
-            abort(404, 'Tenant not resolved for anonymous identity issuance.');
-        }
+        $tenant = Tenant::resolve();
 
         $validated = $request->validated();
         $fingerprint = $validated['fingerprint'];

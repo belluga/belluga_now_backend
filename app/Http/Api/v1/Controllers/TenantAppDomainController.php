@@ -17,7 +17,7 @@ class TenantAppDomainController extends Controller
 
     public function index(): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
 
         return response()->json([
             'app_domains' => $this->appDomainService->list($tenant),
@@ -26,7 +26,7 @@ class TenantAppDomainController extends Controller
 
     public function store(TenantAppDomainRequest $request): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $domains = $this->appDomainService->add($tenant, $request->validated()['app_domain']);
 
         return response()->json([
@@ -37,23 +37,12 @@ class TenantAppDomainController extends Controller
 
     public function destroy(TenantAppDomainRequest $request): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $domains = $this->appDomainService->remove($tenant, $request->validated()['app_domain']);
 
         return response()->json([
             'message' => 'App domains deleted successfully.',
             'app_domains' => $domains,
         ]);
-    }
-
-    private function resolveTenant(): Tenant
-    {
-        $tenant = Tenant::current();
-
-        if (! $tenant) {
-            abort(422, 'Tenant context not available.');
-        }
-
-        return $tenant;
     }
 }

@@ -24,11 +24,7 @@ class PasswordRegistrationController extends Controller
         PasswordIdentityRegistrar $registrar,
         AnonymousIdentityMerger $identityMerger
     ): JsonResponse {
-        $tenant = Tenant::current();
-
-        if (! $tenant) {
-            abort(404, 'Tenant not resolved for password registration.');
-        }
+        $tenant = Tenant::resolve();
 
         $validated = $request->validated();
 
@@ -52,7 +48,7 @@ class PasswordRegistrationController extends Controller
             ->values();
 
         if ($anonymousUserIds->isNotEmpty()) {
-            Tenant::current()?->makeCurrent();
+            $tenant->makeCurrent();
 
             $anonymousUsers = $anonymousUserIds
                 ->map(function (string $id): AccountUser {

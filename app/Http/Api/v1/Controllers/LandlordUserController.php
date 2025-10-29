@@ -136,10 +136,7 @@ class LandlordUserController extends Controller
 
     public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
 
-        $tenant = Tenant::current();
-        if (! $tenant) {
-            abort(422, 'Tenant context not available.');
-        }
+        $tenant = Tenant::resolve();
         $data = $request->validated();
 
         try {

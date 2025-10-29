@@ -20,7 +20,7 @@ class DomainController extends Controller
 
     public function store(DomainStoreRequest $request): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $domain = $this->domainService->create($tenant, $request->validated());
 
         return response()->json([
@@ -30,7 +30,7 @@ class DomainController extends Controller
 
     public function restore(string $domain_id): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $domain = $this->domainService->restore($tenant, $domain_id);
 
         return response()->json([
@@ -40,7 +40,7 @@ class DomainController extends Controller
 
     public function destroy(string $domain_id): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $this->domainService->delete($tenant, $domain_id);
 
         return response()->json();
@@ -48,20 +48,10 @@ class DomainController extends Controller
 
     public function forceDestroy(string $domain_id): JsonResponse
     {
-        $tenant = $this->resolveTenant();
+        $tenant = Tenant::resolve();
         $this->domainService->forceDelete($tenant, $domain_id);
 
         return response()->json();
-    }
-
-    private function resolveTenant(): Tenant
-    {
-        $tenant = Tenant::current();
-        if (! $tenant) {
-            abort(422, 'Tenant context not available.');
-        }
-
-        return $tenant;
     }
 
     /**

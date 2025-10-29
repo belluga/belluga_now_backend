@@ -20,8 +20,9 @@ class TenantRolesController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $tenant = Tenant::resolve();
         $roles = $this->tenantRoleService->paginate(
-            Tenant::current(),
+            $tenant,
             $request->boolean('archived')
         );
 
@@ -30,7 +31,8 @@ class TenantRolesController extends Controller
 
     public function store(TenantRoleStoreRequest $request): JsonResponse
     {
-        $role = $this->tenantRoleService->create(Tenant::current(), $request->validated());
+        $tenant = Tenant::resolve();
+        $role = $this->tenantRoleService->create($tenant, $request->validated());
 
         return response()->json([
             'data' => $role,
@@ -39,7 +41,8 @@ class TenantRolesController extends Controller
 
     public function show(string $role_id): JsonResponse
     {
-        $role = $this->tenantRoleService->find(Tenant::current(), $role_id);
+        $tenant = Tenant::resolve();
+        $role = $this->tenantRoleService->find($tenant, $role_id);
 
         return response()->json([
             'data' => $role,
@@ -48,8 +51,9 @@ class TenantRolesController extends Controller
 
     public function update(TenantRoleUpdateRequest $request, string $role_id): JsonResponse
     {
+        $tenant = Tenant::resolve();
         $updated = $this->tenantRoleService->update(
-            Tenant::current(),
+            $tenant,
             $role_id,
             $request->validated()
         );
@@ -61,8 +65,9 @@ class TenantRolesController extends Controller
 
     public function destroy(TenantRoleDestroyRequest $request, string $role_id): JsonResponse
     {
+        $tenant = Tenant::resolve();
         $this->tenantRoleService->delete(
-            Tenant::current(),
+            $tenant,
             $role_id,
             $request->validated()['background_role_id']
         );
@@ -72,14 +77,16 @@ class TenantRolesController extends Controller
 
     public function forceDestroy(string $role_id): JsonResponse
     {
-        $this->tenantRoleService->forceDelete(Tenant::current(), $role_id);
+        $tenant = Tenant::resolve();
+        $this->tenantRoleService->forceDelete($tenant, $role_id);
 
         return response()->json();
     }
 
     public function restore(string $role_id): JsonResponse
     {
-        $role = $this->tenantRoleService->restore(Tenant::current(), $role_id);
+        $tenant = Tenant::resolve();
+        $role = $this->tenantRoleService->restore($tenant, $role_id);
 
         return response()->json([
             'data' => $role,
