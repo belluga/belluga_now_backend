@@ -5,11 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Contracts\Validation\Validator;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use App\Support\Validation\InputConstraints;
 
-class ResetPasswordRequestTenant extends FormRequest implements ResetPasswordRequestContract {
+class ResetPasswordRequestTenant extends ResetPasswordRequestContract {
     public function authorize(): bool
     {
         return true;

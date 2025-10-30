@@ -6,6 +6,7 @@ use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
 
 trait EnsuresSystemInitialization
 {
@@ -43,6 +44,8 @@ trait EnsuresSystemInitialization
         $this->landlord->tenant_primary->id = $data['tenant']['id'];
         $this->landlord->tenant_primary->role_admin->id = $data['tenant']['role_admin_id'];
 
+        $this->ensureCrossTenantUsers();
+
         $this->makeTenantCurrent();
 
         static::$systemInitialized = true;
@@ -60,6 +63,8 @@ trait EnsuresSystemInitialization
             $this->landlord->user_superadmin->email_1 = $user->emails[0] ?? $user->email ?? '';
             $this->landlord->user_superadmin->user_id = (string) $user->_id;
             $this->landlord->user_superadmin->token = $token;
+
+            $this->ensureCrossTenantUsers();
         }
 
         if ($role) {
@@ -136,6 +141,54 @@ trait EnsuresSystemInitialization
                 'pwa_icon' => UploadedFile::fake()->image('pwa-icon.png', 1024, 1024),
             ],
         ];
+    }
+
+    protected function ensureCrossTenantUsers(): void
+    {
+        $adminEmail = 'cross-admin@belluga.test';
+        $visitorEmail = 'cross-visitor@belluga.test';
+
+        $crossAdmin = LandlordUser::query()
+            ->where('emails', 'all', [$adminEmail])
+            ->first();
+
+        if (! $crossAdmin) {
+            $crossAdmin = LandlordUser::create([
+                'name' => 'Cross Tenant Admin',
+                'emails' => [$adminEmail],
+                'password' => Hash::make('Secret!234'),
+                'identity_state' => 'registered',
+            ]);
+        }
+
+        $adminToken = $crossAdmin->createToken('Test Token')->plainTextToken;
+
+        $this->landlord->user_cross_tenant_admin->name = $crossAdmin->name;
+        $this->landlord->user_cross_tenant_admin->email_1 = $crossAdmin->emails[0] ?? $adminEmail;
+        $this->landlord->user_cross_tenant_admin->user_id = (string) $crossAdmin->_id;
+        $this->landlord->user_cross_tenant_admin->password = 'Secret!234';
+        $this->landlord->user_cross_tenant_admin->token = $adminToken;
+
+        $crossVisitor = LandlordUser::query()
+            ->where('emails', 'all', [$visitorEmail])
+            ->first();
+
+        if (! $crossVisitor) {
+            $crossVisitor = LandlordUser::create([
+                'name' => 'Cross Tenant Visitor',
+                'emails' => [$visitorEmail],
+                'password' => Hash::make('Secret!234'),
+                'identity_state' => 'registered',
+            ]);
+        }
+
+        $visitorToken = $crossVisitor->createToken('Test Token')->plainTextToken;
+
+        $this->landlord->user_cross_tenant_visitor->name = $crossVisitor->name;
+        $this->landlord->user_cross_tenant_visitor->email_1 = $crossVisitor->emails[0] ?? $visitorEmail;
+        $this->landlord->user_cross_tenant_visitor->user_id = (string) $crossVisitor->_id;
+        $this->landlord->user_cross_tenant_visitor->password = 'Secret!234';
+        $this->landlord->user_cross_tenant_visitor->token = $visitorToken;
     }
 
 }
