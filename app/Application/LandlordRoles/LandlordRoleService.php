@@ -6,11 +6,31 @@ namespace App\Application\LandlordRoles;
 
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\ObjectId;
 
 class LandlordRoleService
 {
+    public function paginate(bool $includeArchived, int $perPage): LengthAwarePaginator
+    {
+        return LandlordRole::query()
+            ->orderByDesc('created_at')
+            ->when($includeArchived, static fn ($query) => $query->onlyTrashed())
+            ->paginate($perPage);
+    }
+
+    public function findById(string $roleId, bool $withTrashed = false): LandlordRole
+    {
+        $query = LandlordRole::query()->where('_id', new ObjectId($roleId));
+
+        if ($withTrashed) {
+            $query->withTrashed();
+        }
+
+        return $query->firstOrFail();
+    }
+
     /**
      * @param array<string, mixed> $data
      */
@@ -46,11 +66,56 @@ class LandlordRoleService
         });
     }
 
+    public function deleteById(string $roleId, string $fallbackRoleId): void
+    {
+        $role = $this->findById($roleId);
+        $this->deleteWithReassignment($role, $fallbackRoleId);
+    }
+
     public function forceDelete(LandlordRole $role): void
     {
         DB::connection('landlord')->transaction(
             fn () => $role->forceDelete()
         );
+    }
+
+    public function forceDeleteById(string $roleId): void
+    {
+        $role = LandlordRole::onlyTrashed()
+            ->where('_id', new ObjectId($roleId))
+            ->firstOrFail();
+
+        $this->forceDelete($role);
+    }
+
+    public function restoreById(string $roleId): LandlordRole
+    {
+        $role = LandlordRole::onlyTrashed()
+            ->where('_id', new ObjectId($roleId))
+            ->firstOrFail();
+
+        $role->restore();
+
+        return $role->fresh();
+    }
+
+    public function assignRoleToUser(string $roleId, string $userId): void
+    {
+        $role = $this->findById($roleId);
+        $user = LandlordUser::findOrFail($userId);
+
+        $user->role_id = (string) $role->_id;
+        $user->save();
+    }
+
+    public function removeRoleFromUser(string $roleId, string $userId): void
+    {
+        $user = LandlordUser::findOrFail($userId);
+
+        if ((string) $user->role_id === (string) $roleId) {
+            $user->role_id = null;
+            $user->save();
+        }
     }
 
     /**
