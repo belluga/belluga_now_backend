@@ -12,6 +12,11 @@ use MongoDB\BSON\ObjectId;
 
 class LandlordUserCreator
 {
+    public function __construct(
+        private readonly LandlordUserAccessService $accessService
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
@@ -38,8 +43,8 @@ class LandlordUserCreator
                 'promotion_audit' => [$promotionAuditEntry],
             ]);
 
-            $user->ensureEmail($email);
-            $user->syncCredential('password', $email, $user->password);
+            $this->accessService->ensureEmail($user, $email);
+            $this->accessService->syncCredential($user, 'password', $email, $user->password);
 
             $role->users()->save($user);
 

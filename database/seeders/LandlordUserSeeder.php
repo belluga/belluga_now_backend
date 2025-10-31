@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
@@ -14,6 +15,8 @@ class LandlordUserSeeder extends Seeder
     public function run(): void
     {
         $now = Carbon::now();
+
+        $accessService = app(LandlordUserAccessService::class);
 
         collect([
             [
@@ -49,8 +52,8 @@ class LandlordUserSeeder extends Seeder
             ]);
 
             foreach ($emails as $email) {
-                $user->ensureEmail($email);
-                $user->syncCredential('password', $email, $user->password);
+                $accessService->ensureEmail($user, $email);
+                $accessService->syncCredential($user, 'password', $email, $user->password);
             }
         });
     }

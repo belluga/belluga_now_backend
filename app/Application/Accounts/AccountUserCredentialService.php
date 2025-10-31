@@ -13,6 +13,11 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class AccountUserCredentialService
 {
+    public function __construct(
+        private readonly AccountUserAccessService $accessService
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
@@ -51,10 +56,16 @@ class AccountUserCredentialService
                 ]);
             }
 
-            $user->ensureEmail($subject);
+            $this->accessService->ensureEmail($user, $subject);
         }
 
-        $credential = $user->syncCredential($provider, $subject, $secretHash, is_array($metadata) ? $metadata : []);
+        $credential = $this->accessService->syncCredential(
+            $user,
+            $provider,
+            $subject,
+            $secretHash,
+            is_array($metadata) ? $metadata : []
+        );
 
         return [
             'user' => $user->fresh(),
@@ -89,7 +100,7 @@ class AccountUserCredentialService
             }
         }
 
-        $removed = $user->removeCredentialById($credentialId);
+        $removed = $this->accessService->removeCredential($user, $credentialId);
 
         if (! $removed) {
             throw new NotFoundHttpException('Credential not found.');
@@ -98,4 +109,3 @@ class AccountUserCredentialService
         return $user->fresh();
     }
 }
-

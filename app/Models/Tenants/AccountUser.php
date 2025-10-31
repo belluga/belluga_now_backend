@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\Accounts\AccountUserAccessService;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -98,120 +99,42 @@ class AccountUser extends Authenticatable
 
     public function getAccessToIds(): array
     {
-        return collect($this->account_roles)
-            ->pluck('account_id')
-            ->toArray() ?? [];
+        return $this->accessService()->accountAccessIds($this);
     }
 
     public function getPermissions(?Account $account = null): array
     {
-        $account = $account ?? Account::current();
-
-        if (! $account) {
-            throw new AuthenticationException();
-        }
-
-        return collect($this->account_roles)
-            ->where('account_id', '==', $account->id)
-            ->pluck('permissions')
-            ->flatten()
-            ->unique()
-            ->toArray();
+        return $this->accessService()->permissions($this, $account);
     }
 
     public function tokenCan(string $ability): bool
     {
-        $permissions = $this->getPermissions();
-
-        $parts = explode(':', $ability, 2);
-        if (count($parts) !== 2) {
-            return false;
-        }
-
-        [$resource, $action] = $parts;
-
-        return in_array('*', $permissions, true)
-            || in_array("$resource:*", $permissions, true)
-            || in_array("$resource:$action", $permissions, true);
+        return $this->accessService()->tokenAllows($this, $ability);
     }
 
     public function syncCredential(string $provider, string $subject, ?string $secretHash = null, array $metadata = []): array
     {
-        $credentials = collect($this->credentials);
-
-        $index = $credentials->search(static function (array $credential) use ($provider, $subject): bool {
-            return ($credential['provider'] ?? null) === $provider
-                && ($credential['subject'] ?? null) === $subject;
-        });
-
-        if ($index !== false) {
-            $credential = $credentials->get($index);
-            if ($secretHash !== null) {
-                $credential['secret_hash'] = $secretHash;
-            }
-            if (! empty($metadata)) {
-                $credential['metadata'] = $metadata;
-            }
-            $credentials->put($index, $credential);
-            $this->credentials = $credentials->values()->all();
-            $this->save();
-
-            return $this->credentials[$index];
-        }
-
-        $credential = [
-            '_id' => (string) new ObjectId(),
-            'provider' => $provider,
-            'subject' => $subject,
-            'secret_hash' => $secretHash,
-            'metadata' => $metadata,
-            'linked_at' => Carbon::now(),
-            'last_used_at' => null,
-        ];
-
-        $credentials->push($credential);
-        $this->credentials = $credentials->values()->all();
-        $this->save();
-
-        return $credential;
+        return $this->accessService()->syncCredential($this, $provider, $subject, $secretHash, $metadata);
     }
 
     public function removeCredentialById(string $credentialId): bool
     {
-        $credentials = collect($this->credentials);
-
-        $filtered = $credentials->reject(static function (array $credential) use ($credentialId): bool {
-            $currentId = $credential['_id'] ?? $credential['id'] ?? null;
-            return $currentId === $credentialId;
-        })->values();
-
-        if ($filtered->count() === $credentials->count()) {
-            return false;
-        }
-
-        $this->credentials = $filtered->all();
-        $this->save();
-
-        return true;
+        return $this->accessService()->removeCredential($this, $credentialId);
     }
 
     public function hasCredential(string $provider, string $subject): bool
     {
-        return collect($this->credentials)->contains(static function (array $credential) use ($provider, $subject): bool {
-            return ($credential['provider'] ?? null) === $provider
-                && ($credential['subject'] ?? null) === $subject;
-        });
+        return $this->accessService()->hasCredential($this, $provider, $subject);
     }
 
     public function ensureEmail(string $email): void
     {
-        $emails = $this->emails ?? [];
+        $this->accessService()->ensureEmail($this, $email);
+    }
 
-        if (! in_array($email, $emails, true)) {
-            $emails[] = $email;
-            $this->emails = array_values($emails);
-            $this->save();
-        }
+    private function accessService(): AccountUserAccessService
+    {
+        return app(AccountUserAccessService::class);
     }
 
     private function isRegisteredState(): bool

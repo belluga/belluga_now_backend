@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Identity;
 
+use App\Application\Accounts\AccountUserAccessService;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Arr;
@@ -14,6 +15,11 @@ use Illuminate\Support\Str;
 
 class PasswordIdentityRegistrar
 {
+    public function __construct(
+        private readonly AccountUserAccessService $accessService
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $attributes
      *
@@ -65,9 +71,11 @@ class PasswordIdentityRegistrar
 
         $user = AccountUser::create($payload);
 
-        $emails->each(function (string $email) use ($user, $passwordHash): void {
-            $user->ensureEmail($email);
-            $user->syncCredential('password', $email, $passwordHash);
+        $service = $this->accessService;
+
+        $emails->each(function (string $email) use ($user, $passwordHash, $service): void {
+            $service->ensureEmail($user, $email);
+            $service->syncCredential($user, 'password', $email, $passwordHash);
         });
 
         return $user;

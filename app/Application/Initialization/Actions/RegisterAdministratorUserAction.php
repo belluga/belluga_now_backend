@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Initialization\Actions;
 
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\TenantRoleTemplate;
@@ -11,6 +12,11 @@ use Illuminate\Support\Carbon;
 
 class RegisterAdministratorUserAction
 {
+    public function __construct(
+        private readonly LandlordUserAccessService $accessService
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $userData
      */
@@ -34,8 +40,8 @@ class RegisterAdministratorUserAction
             ],
         ]);
 
-        $user->ensureEmail($primaryEmail);
-        $user->syncCredential('password', $primaryEmail, $user->password);
+        $this->accessService->ensureEmail($user, $primaryEmail);
+        $this->accessService->syncCredential($user, 'password', $primaryEmail, $user->password);
 
         $role->users()->save($user);
 

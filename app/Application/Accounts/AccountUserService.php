@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
+use App\Application\Accounts\AccountUserAccessService;
 use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsException;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Models\Tenants\Account;
@@ -17,7 +18,8 @@ use MongoDB\BSON\ObjectId;
 class AccountUserService
 {
     public function __construct(
-        private readonly PasswordIdentityRegistrar $passwordIdentityRegistrar
+        private readonly PasswordIdentityRegistrar $passwordIdentityRegistrar,
+        private readonly AccountUserAccessService $accessService
     ) {
     }
 
@@ -62,7 +64,7 @@ class AccountUserService
             $user->password = $passwordHash;
 
             foreach ($user->emails ?? [] as $email) {
-                $user->syncCredential('password', $email, $passwordHash);
+                $this->accessService->syncCredential($user, 'password', $email, $passwordHash);
             }
         }
 
@@ -129,7 +131,7 @@ class AccountUserService
 
         if (! empty($payload['emails'])) {
             foreach ($payload['emails'] as $email) {
-                $user->ensureEmail($email);
+                $this->accessService->ensureEmail($user, $email);
             }
         }
 
@@ -138,7 +140,7 @@ class AccountUserService
             $user->password = $passwordHash;
 
             foreach ($payload['emails'] as $email) {
-                $user->syncCredential('password', $email, $passwordHash);
+                $this->accessService->syncCredential($user, 'password', $email, $passwordHash);
             }
         }
 

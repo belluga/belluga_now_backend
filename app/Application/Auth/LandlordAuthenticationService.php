@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Auth;
 
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,11 @@ use Illuminate\Support\Facades\Hash;
 
 class LandlordAuthenticationService
 {
+    public function __construct(
+        private readonly LandlordUserAccessService $accessService
+    ) {
+    }
+
     public function login(string $email, string $password, string $deviceName): AuthenticationResult
     {
         $user = $this->findUserByEmail($email);
@@ -53,8 +59,8 @@ class LandlordAuthenticationService
                 'promotion_audit' => [],
             ]);
 
-            $user->ensureEmail($email);
-            $user->syncCredential('password', $email, (string) $user->password);
+            $this->accessService->ensureEmail($user, $email);
+            $this->accessService->syncCredential($user, 'password', $email, (string) $user->password);
 
             $token = $user->createToken($payload['device_name'])->plainTextToken;
 
@@ -69,4 +75,3 @@ class LandlordAuthenticationService
             ->first();
     }
 }
-
