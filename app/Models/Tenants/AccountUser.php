@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace App\Models\Tenants;
 
 use App\Application\Accounts\AccountUserAccessService;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\HasApiTokens;
-use MongoDB\BSON\ObjectId;
 use MongoDB\Laravel\Eloquent\DocumentModel;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\EmbedsMany;

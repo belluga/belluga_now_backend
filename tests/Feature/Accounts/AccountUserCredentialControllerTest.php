@@ -89,13 +89,14 @@ class AccountUserCredentialControllerTest extends TestCase
 
     public function testStoreLinksCredential(): void
     {
-        $user = $this->createUser();
+        $email = 'user+' . uniqid('', true) . '@example.org';
+        $user = $this->createUser($email);
 
         $response = $this->postJson(
             sprintf('%s/%s/credentials', $this->baseUrl, $user->_id),
             [
                 'provider' => 'password',
-                'subject' => 'user@example.org',
+                'subject' => $email,
                 'secret' => 'Secret!234',
             ]
         );
@@ -106,14 +107,15 @@ class AccountUserCredentialControllerTest extends TestCase
 
     public function testStoreRejectsDuplicateCredential(): void
     {
-        $user = $this->createUser();
-        $anotherUser = $this->createUser('another@example.org');
+        $user = $this->createUser('primary+' . uniqid('', true) . '@example.org');
+        $duplicateSubject = 'duplicate+' . uniqid('', true) . '@example.org';
+        $anotherUser = $this->createUser('another+' . uniqid('', true) . '@example.org');
 
         $this->postJson(
             sprintf('%s/%s/credentials', $this->baseUrl, $user->_id),
             [
                 'provider' => 'password',
-                'subject' => 'duplicate@example.org',
+                'subject' => $duplicateSubject,
                 'secret' => 'Secret!234',
             ]
         )->assertCreated();
@@ -122,7 +124,7 @@ class AccountUserCredentialControllerTest extends TestCase
             sprintf('%s/%s/credentials', $this->baseUrl, $anotherUser->_id),
             [
                 'provider' => 'password',
-                'subject' => 'duplicate@example.org',
+                'subject' => $duplicateSubject,
                 'secret' => 'Secret!234',
             ]
         );
@@ -133,10 +135,11 @@ class AccountUserCredentialControllerTest extends TestCase
 
     public function testDestroyUnlinksCredential(): void
     {
-        $user = $this->createUser();
+        $email = 'unlink+' . uniqid('', true) . '@example.org';
+        $user = $this->createUser($email);
         $result = $this->credentialService->link($user, [
             'provider' => 'password',
-            'subject' => 'unlink@example.org',
+            'subject' => $email,
             'secret' => 'Secret!234',
         ]);
 
@@ -171,8 +174,10 @@ class AccountUserCredentialControllerTest extends TestCase
         $service->initialize($payload);
     }
 
-    private function createUser(string $email = 'user@example.org'): AccountUser
+    private function createUser(?string $email = null): AccountUser
     {
+        $email ??= 'user+' . uniqid('', true) . '@example.org';
+
         return $this->userService->create($this->account, [
             'name' => 'Sample User',
             'email' => $email,
@@ -180,4 +185,3 @@ class AccountUserCredentialControllerTest extends TestCase
         ], (string) $this->role->_id);
     }
 }
-
