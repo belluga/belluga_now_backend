@@ -4,61 +4,68 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Tenants\TenantDomainManagementService;
 use App\Http\Api\v1\Requests\DomainStoreRequest;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Pagination\LengthAwarePaginator;
 
 class DomainController extends Controller
 {
-
-    public function index(Request $request): LengthAwarePaginator
-    {
-
+    public function __construct(
+        private readonly TenantDomainManagementService $domainService
+    ) {
     }
 
     public function store(DomainStoreRequest $request): JsonResponse
     {
-        $domain = Tenant::current()->domains()->create($request->all());
+        $tenant = Tenant::resolve();
+        $domain = $this->domainService->create($tenant, $request->validated());
 
         return response()->json([
-            "data" => $domain
+            'data' => $this->transform($domain),
         ], 201);
-    }
-
-    public function show(string $tenant_slug): JsonResponse
-    {
-
-
     }
 
     public function restore(string $domain_id): JsonResponse
     {
-        $tenant = Tenant::current();
-        $domain = $tenant->domains()->onlyTrashed()->where('_id', $domain_id)->first();
-        $domain->restore();
+        $tenant = Tenant::resolve();
+        $domain = $this->domainService->restore($tenant, $domain_id);
 
-        return response()->json([]);
+        return response()->json([
+            'data' => $this->transform($domain),
+        ]);
     }
 
     public function destroy(string $domain_id): JsonResponse
     {
-        $tenant = Tenant::current();
-        $tenant = $tenant->domains()->where('_id', $domain_id)->first();
+        $tenant = Tenant::resolve();
+        $this->domainService->delete($tenant, $domain_id);
 
-        $tenant->delete();
-
-        return response()->json([]);
+        return response()->json();
     }
 
     public function forceDestroy(string $domain_id): JsonResponse
     {
-        $tenant = Tenant::current();
-        $domain = $tenant->domains()->onlyTrashed()->where("_id", $domain_id)->first();
-        $domain->forceDelete();
+        $tenant = Tenant::resolve();
+        $this->domainService->forceDelete($tenant, $domain_id);
 
         return response()->json();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transform(Domains $domain): array
+    {
+        return [
+            'id' => (string) $domain->_id,
+            'path' => $domain->path,
+            'type' => $domain->type,
+            'created_at' => $domain->created_at?->toJSON(),
+            'updated_at' => $domain->updated_at?->toJSON(),
+            'deleted_at' => $domain->deleted_at?->toJSON(),
+        ];
     }
 }

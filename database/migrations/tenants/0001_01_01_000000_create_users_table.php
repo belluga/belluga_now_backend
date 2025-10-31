@@ -14,7 +14,18 @@ return new class extends Migration
         Schema::create('account_users', function (Blueprint $collection) {
             $collection->index('tenant_roles.slug');
             $collection->index('tenant_roles.account_id');
+            $collection->integer('version')->default(1);
             $collection->index(['created_at' => -1, "updated_at" => -1]);
+
+            $collection->index(
+                ['fingerprints.hash' => 1],
+                options: [
+                    'unique' => true,
+                    'name' => 'unique_fingerprint_if_present',
+                    'partialFilterExpression' => [
+                        'fingerprints.0' => ['$exists' => true]
+                    ]
+                ]);
 
             $collection->index(
                 ['emails' => 1],

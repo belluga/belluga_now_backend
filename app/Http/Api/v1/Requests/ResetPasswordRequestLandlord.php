@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Requests;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use App\Support\Validation\InputConstraints;
 
 class ResetPasswordRequestLandlord extends ResetPasswordRequestContract {
 
@@ -18,9 +19,15 @@ class ResetPasswordRequestLandlord extends ResetPasswordRequestContract {
     public function rules(): array
     {
         return [
-            'email' => 'required|email',
-            'password' => 'required|string|min:8|confirmed',
-            'reset_token' => 'required|string',
+            'email' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
+            'password' => [
+                'required',
+                'string',
+                'min:' . InputConstraints::PASSWORD_MIN,
+                'max:' . InputConstraints::PASSWORD_MAX,
+                'confirmed',
+            ],
+            'reset_token' => 'required|string|max:255',
         ];
     }
 

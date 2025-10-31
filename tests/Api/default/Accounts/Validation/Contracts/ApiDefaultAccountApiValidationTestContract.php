@@ -72,7 +72,7 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
             "message",
             "errors" => [
                 "name",
-                "emails",
+                "email",
                 "password",
                 "role_id"
             ],
@@ -98,22 +98,21 @@ abstract class ApiDefaultAccountApiValidationTestContract extends TestCaseAccoun
 
         $response = $this->profileAddEmails(
             $this->account->user_visitor,
-            []);
+            ''
+        );
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
             "message",
             "errors" => [
-                "emails",
+                "email",
             ],
         ]);
 
         $response = $this->profileAddEmails(
             $this->account->user_visitor,
-            [
-                $this->account->user_visitor->email_1,
-                $this->account->user_visitor->email_2,
-            ]);
+            $this->account->user_visitor->email_2,
+        );
         $response->assertStatus(200);
     }
 

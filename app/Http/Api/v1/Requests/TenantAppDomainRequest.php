@@ -3,6 +3,7 @@
 namespace App\Http\Api\v1\Requests;
 
 use App\Rules\UniqueArrayItemRule;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class TenantAppDomainRequest extends FormRequest
@@ -22,6 +23,7 @@ class TenantAppDomainRequest extends FormRequest
                 'required',
                 'string',
                 'regex:/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/',
+                'max:' . InputConstraints::NAME_MAX,
                 new UniqueArrayItemRule(
                     connection: 'tenant',table: 'tenants', key: 'app_domains',
                 ),

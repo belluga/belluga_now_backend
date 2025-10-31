@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Landlord;
 
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -23,7 +24,11 @@ class LandlordUser extends Authenticatable {
         'name',
         'emails',
         'phones',
-        'password'
+        'password',
+        'identity_state',
+        'credentials',
+        'promotion_audit',
+        'verified_at',
     ];
 
     protected $hidden = [
@@ -34,7 +39,19 @@ class LandlordUser extends Authenticatable {
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'verified_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (LandlordUser $user): void {
+            $user->identity_state ??= 'registered';
+            $user->credentials ??= [];
+            $user->promotion_audit ??= [];
+            $user->emails ??= [];
+            $user->phones ??= [];
+        });
+    }
 
     public function landlordRole(): BelongsTo {
         return $this->belongsTo(LandlordRole::class);
@@ -44,55 +61,34 @@ class LandlordUser extends Authenticatable {
         return $this->embedsMany(TenantRole::class, 'tenant_roles');
     }
 
-    public function getAccessToIds(): array{
-
-        $tenant_roles_array = $this->tenant_roles ?? [];
-
-        return collect($tenant_roles_array)
-            ->pluck('tenant_id')
-            ->toArray();
+    public function getAccessToIds(): array
+    {
+        return $this->accessService()->tenantAccessIds($this);
     }
 
     public function getPermissions(?Tenant $tenant = null): array
     {
-        $tenant = $tenant ?? Tenant::current();
-
-        if($tenant){
-            return $this->getTenantPermissions();
-        }
-
-        return $this->landlordRole->permissions;
+        return $this->accessService()->permissions($this, $tenant);
     }
-
-    protected function getTenantPermissions(?Tenant $tenant = null): array
-    {
-        $tenant = $tenant ?? Tenant::current();
-
-        return collect($this->tenant_roles)
-            ->where('tenant_id', "==", $tenant->id)
-            ->pluck('permissions')
-            ->flatten()
-            ->unique()
-            ->toArray();
-
-    }
-
 
     public function tokenCan(string $ability): bool
     {
+        return $this->accessService()->tokenAllows($this, $ability);
+    }
 
-        $permissions = $this->getPermissions();
+    public function syncCredential(string $provider, string $subject, ?string $secretHash = null, array $metadata = []): array
+    {
+        return $this->accessService()->syncCredential($this, $provider, $subject, $secretHash, $metadata);
+    }
 
-        $parts = explode(':', $ability, 2);
+    public function ensureEmail(string $email): void
+    {
+        $this->accessService()->ensureEmail($this, $email);
+    }
 
-        if (count($parts) !== 2) {
-            return false;
-        }
-        [$resource, $action] = $parts;
-
-        return in_array("*", $permissions) ||
-            in_array("$resource:*", $permissions) ||
-            in_array("$resource:$action", $permissions);
+    private function accessService(): LandlordUserAccessService
+    {
+        return app(LandlordUserAccessService::class);
     }
 
 }

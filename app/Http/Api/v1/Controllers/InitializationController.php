@@ -4,32 +4,25 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
 use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Landlord;
-use App\Models\Landlord\LandlordRole;
-use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\Tenant;
-use App\Traits\HasLogoFiles;
+use App\Support\Branding\BrandingAssetManager;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
 
 class InitializationController extends Controller
 {
-
-    use HasLogoFiles;
-
-    private bool $_isInitialized {
-        get {
-            return LandlordUser::query()->exists()
-                || Tenant::query()->exists()
-                || Landlord::query()->exists();
-        }
+    public function __construct(
+        private readonly SystemInitializationService $initializationService,
+        private readonly BrandingAssetManager $brandingAssetManager
+    ) {
     }
 
     public function isInitialized(): JsonResponse {
 
-        if ($this->_isInitialized) {
+        if ($this->initializationService->isInitialized()) {
             return response()->json(
                 [
                     "message" => "Sistema já inicializado",
@@ -44,90 +37,28 @@ class InitializationController extends Controller
 
     public function initialize(InitializeRequest $request): JsonResponse
     {
-        if ($this->_isInitialized) {
+        if ($this->initializationService->isInitialized()) {
             return response()->json(["success" => false, "message" => "System already initialized."], 403);
         }
 
         $validated = $request->validated();
+        $brandingAssets = $this->brandingAssetManager->createBrandingPayload($request);
 
-        DB::connection('landlord')->beginTransaction();
-        try {
-            $landlord = Landlord::create(['name' => $validated['landlord']['name']]);
+        $payload = new InitializationPayload(
+            landlord: $validated['landlord'],
+            tenant: Arr::except($validated['tenant'], ['domains']),
+            role: $validated['role'],
+            user: $validated['user'],
+            themeDataSettings: $validated['branding_data']['theme_data_settings'],
+            logoSettings: $brandingAssets['logo_settings'],
+            pwaIcon: $brandingAssets['pwa_icon'],
+            tenantDomains: $validated['tenant']['domains'] ?? []
+        );
 
-            $logoSettingsPayload = $this->processLogoUploads($request);
-
-            $pwaIconPayload = $this->generatePwaIconVariants(
-                sourceFile: $request->file("branding_data.pwa_icon"),
-            );
-
-            $themeDataPayload = $validated['branding_data']['theme_data_settings'];
-
-            $landlord->branding_data = [
-                'theme_data_settings' => $themeDataPayload,
-                'logo_settings'       => $logoSettingsPayload,
-                'pwa_icon'            => $pwaIconPayload,
-            ];
-
-            $landlord->save();
-
-            $new_tenant = Tenant::create([
-                "name" => $validated['tenant']["name"],
-                "subdomain" => $validated['tenant']["subdomain"]
-            ]);
-
-            if (isset($validated['tenant']["domains"])) {
-                $new_tenant->addDomains($validated['tenant']["domains"]);
-            }
-
-            // O resto da sua lógica para criar roles e usuários continua a mesma
-            $new_tenant->makeCurrent();
-            $admin_role = LandlordRole::create([...$validated['role']]);
-
-            $admin_tenant_template = $new_tenant->roleTemplates()->create(
-                [
-                    "name" => "Admin",
-                    'description' => 'Administrador',
-                    "permissions" => ["*"]
-                ]
-            );
-
-            $new_user = LandlordUser::create([
-                "name" => $validated['user']['name'],
-                "emails" => $validated['user']['emails'],
-                "password" => $validated['user']['password']
-            ]);
-
-            $admin_role->users()->save($new_user);
-
-            $new_user->tenantRoles()->create([
-                ...$admin_tenant_template->attributesToArray(),
-                'tenant_id' => $new_tenant->id,
-            ]);
-
-            $token = $new_user->createToken("Initialization Token")->plainTextToken;
-
-            $new_tenant->forgetCurrent();
-            DB::connection('landlord')->commit();
-
-        } catch (\Throwable $e) {
-            print_r($e->getMessage());
-            DB::connection('landlord')->rollBack();
-            throw $e;
-        }
+        $result = $this->initializationService->initialize($payload);
 
         return response()->json([
-            "data" => [
-                "user" => [
-                    "token" => $token,
-                    ...$new_user->toArray()
-                ],
-                "tenant" => [
-                    ...$new_tenant->attributesToArray(),
-                    "role_admin_id" => $admin_tenant_template->id,
-                ],
-                "role" => $admin_role->toArray(),
-                "landlord" => $landlord->toArray(),
-            ]
+            'data' => $result->toResponsePayload(),
         ], 201);
     }
 }

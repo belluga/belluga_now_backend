@@ -2,188 +2,94 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Tenants\TenantRoleManagementService;
 use App\Http\Api\v1\Requests\TenantRoleDestroyRequest;
 use App\Http\Api\v1\Requests\TenantRoleStoreRequest;
 use App\Http\Api\v1\Requests\TenantRoleUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use App\Models\Landlord\TenantRoleTemplate;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
-use MongoDB\BSON\ObjectId;
-use MongoDB\Driver\Exception\BulkWriteException;
 use Illuminate\Http\Request;
 
 class TenantRolesController extends Controller
 {
+    public function __construct(
+        private readonly TenantRoleManagementService $tenantRoleService
+    ) {
+    }
 
-    /**
-     * Display a listing of the tenant roles.
-     */
     public function index(Request $request): JsonResponse
     {
-        $roles = TenantRoleTemplate::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->where("tenant_id", Tenant::current()->id)
-            ->paginate(15);
+        $tenant = Tenant::resolve();
+        $roles = $this->tenantRoleService->paginate(
+            $tenant,
+            $request->boolean('archived')
+        );
 
         return response()->json($roles);
     }
 
-    /**
-     * Store a newly created tenant role.
-     */
     public function store(TenantRoleStoreRequest $request): JsonResponse
     {
-        try {
-            $role = TenantRoleTemplate::create([
-                ...$request->validated(),
-                'tenant_id' => Tenant::current()->id,
-            ]);
+        $tenant = Tenant::resolve();
+        $role = $this->tenantRoleService->create($tenant, $request->validated());
 
-            return response()->json([
-                'data' => $role
-            ], 201);
-
-        } catch (BulkWriteException $e) {
-
-            if (str_contains($e->getMessage(), 'E11000')) {
-                abort(422, 'Role already exists.');
-            }
-
-            abort(422, 'Something went wrong when trying to create the role.');
-        }
+        return response()->json([
+            'data' => $role,
+        ], 201);
     }
 
-    /**
-     * Display the specified role.
-     */
     public function show(string $role_id): JsonResponse
     {
-        $role = TenantRoleTemplate::where("_id", new ObjectId($role_id))
-            ->where("tenant_id", Tenant::current()->id)
-            ->firstOrFail();
+        $tenant = Tenant::resolve();
+        $role = $this->tenantRoleService->find($tenant, $role_id);
 
         return response()->json([
-            'data' => $role
+            'data' => $role,
         ]);
     }
 
-    /**
-     * Update the specified role in storage.
-     */
     public function update(TenantRoleUpdateRequest $request, string $role_id): JsonResponse
     {
-
-        $role = TenantRoleTemplate::where("_id", new ObjectId($role_id))
-            ->where("tenant_id", Tenant::current()->id)
-            ->firstOrFail();
-
-        $validated = $request->validated();
-
-        if (isset($validated['permissions'])) {
-            $permissions = $validated['permissions'];
-
-            if (isset($permissions['set'])) {
-                // The 'set' operation overwrites everything.
-                // Using array_values and array_unique for data consistency.
-                $role->permissions = array_values(array_unique($permissions['set']));
-            } else {
-                // Start with the role's current permissions.
-                $currentPermissions = $role->permissions ?? [];
-
-                // 1. First, process additions.
-                if (isset($permissions['add'])) {
-                    $currentPermissions = array_merge($currentPermissions, $permissions['add']);
-                }
-
-                // 2. Then, process removals on the updated list.
-                if (isset($permissions['remove'])) {
-                    $currentPermissions = array_diff($currentPermissions, $permissions['remove']);
-                }
-
-                // 3. Finally, ensure uniqueness and re-index the keys for MongoDB.
-                $role->permissions = array_values(array_unique($currentPermissions));
-            }
-
-            unset($validated['permissions']);
-        }
-
-        $role->update($validated);
+        $tenant = Tenant::resolve();
+        $updated = $this->tenantRoleService->update(
+            $tenant,
+            $role_id,
+            $request->validated()
+        );
 
         return response()->json([
-            'data' => $role
+            'data' => $updated,
         ]);
     }
 
-    /**
-     * Remove the specified role from storage.
-     */
     public function destroy(TenantRoleDestroyRequest $request, string $role_id): JsonResponse
     {
-
-        $role = TenantRoleTemplate::where("_id", new ObjectId($role_id))
-            ->where("tenant_id", Tenant::current()->id)
-            ->firstOrFail();
-
-        DB::beginTransaction();
-        try {
-            LandlordUser::where("role_id", $role->id)
-                ->update(['role_id' => $request->validated()['background_role_id']]);;
-
-            $role->delete();
-            DB::commit();
-        }catch (\Exception $e){
-            DB::rollBack();
-            abort(422, "Erro ao excluir role. Tente novamente mais tarde.");
-        }
-
-        return response()->json([], 200);
-    }
-
-    public function forceDestroy(string $role_id): JsonResponse {
-
-
-        $role = TenantRoleTemplate::onlyTrashed()
-            ->where("_id", new ObjectId($role_id))
-            ->where("tenant_id", Tenant::current()->id)
-            ->firstOrFail();
-
-        DB::beginTransaction();
-        try{
-            $role->forceDelete();
-        }catch (\Exception $e){
-            DB::rollBack();
-            return response()->json(["errors" => ["role" => ["Error deleting relationships."]]]);
-        }
-        DB::commit();
-
+        $tenant = Tenant::resolve();
+        $this->tenantRoleService->delete(
+            $tenant,
+            $role_id,
+            $request->validated()['background_role_id']
+        );
 
         return response()->json();
     }
 
-    /**
-     * Restore a soft-deleted role.
-     */
+    public function forceDestroy(string $role_id): JsonResponse
+    {
+        $tenant = Tenant::resolve();
+        $this->tenantRoleService->forceDelete($tenant, $role_id);
+
+        return response()->json();
+    }
+
     public function restore(string $role_id): JsonResponse
     {
+        $tenant = Tenant::resolve();
+        $role = $this->tenantRoleService->restore($tenant, $role_id);
 
-        $role = TenantRoleTemplate::onlyTrashed()
-            ->where("_id", new ObjectId($role_id))
-            ->where("tenant_id", Tenant::current()->id)
-            ->firstOrFail();
-
-        $role->restore();
-
-        return response()->json([], 200);
-    }
-
-    private function getAccessIds(): array {
-        $user = auth()->guard('sanctum')->user();
-        return $user->getAccessToIds();
-    }
-
-    private function getAccessObjectIds(): array {
-        return array_map(fn($id) => new \MongoDB\BSON\ObjectId($id), $this->getAccessIds());
+        return response()->json([
+            'data' => $role,
+        ]);
     }
 }

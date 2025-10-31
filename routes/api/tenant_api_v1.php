@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
+use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
 use App\Http\Api\v1\Controllers\TenantBrandingController;
@@ -27,10 +29,17 @@ Route::prefix('profile')
         Route::delete('/phones', [ProfileControllerTenant::class, 'removePhone']);
     });
 
+Route::prefix('anonymous')
+    ->group(function () {
+        Route::post('/identities', [AnonymousIdentityController::class, 'store']);
+    });
+
 Route::prefix('auth')
     ->group(function () {
 
         Route::post('/login', [AuthControllerAccount::class, 'login']);
+
+        Route::post('/register/password', PasswordRegistrationController::class);
 
         Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken']);
 
@@ -116,6 +125,10 @@ Route::prefix('accounts')
                 Route::post('/restore', [AccountController::class, 'restore']);
 
                 Route::post('/force_delete', [AccountController::class, 'forceDestroy']);
+
+                Route::post('/users/{user_id}/roles/{role_id}', [AccountController::class, 'accountUserManage']);
+
+                Route::delete('/users/{user_id}/roles/{role_id}', [AccountController::class, 'accountUserManage']);
             });
     });
 

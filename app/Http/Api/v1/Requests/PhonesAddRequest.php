@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class PhonesAddRequest extends FormRequest
@@ -27,8 +28,9 @@ class PhonesAddRequest extends FormRequest
             'phones' => [
                 'required',
                 'array',
+                'max:' . InputConstraints::PHONE_ARRAY_MAX,
             ],
-            'phones.*' => 'required|phone:INTERNATIONAL,BR'
+            'phones.*' => 'required|string|max:' . InputConstraints::PHONE_MAX . '|phone:INTERNATIONAL,BR'
         ];
     }
 }

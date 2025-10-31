@@ -180,10 +180,7 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
     }
 
     protected function _getBranding(): TestResponse {
-        return $this->json(
-            method: 'get',
-            uri: "{$this->base_tenant_url}branding"
-        );
+        return $this->get("{$this->base_tenant_url}environment");
     }
 
     protected function _payloadBrandingUpdate(): array {

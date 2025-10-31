@@ -37,10 +37,10 @@ Route::prefix('auth')->group(function () {
             Route::post('/password_token', [ProfileControllerLandlord::class, 'generateToken']);
 
             Route::post('/password_reset', [ProfileControllerLandlord::class, 'resetPassword']);
-
-            Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
-                ->middleware(['auth:sanctum']);
         });
+
+    Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
+        ->middleware(['auth:sanctum']);
 });
 
 Route::prefix('tenants')->group(function () {

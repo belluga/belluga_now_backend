@@ -6,6 +6,21 @@
          colors="true"
 >
     <testsuites>
+        <testsuite name="Feature-Initialization">
+            <directory>tests/Feature/Initialization</directory>
+        </testsuite>
+        <testsuite name="Feature-Landlord">
+            <directory>tests/Feature/Landlord</directory>
+        </testsuite>
+        <testsuite name="Feature-Accounts">
+            <directory>tests/Feature/Accounts</directory>
+        </testsuite>
+        <testsuite name="Feature-Tenants">
+            <directory>tests/Feature/Tenants</directory>
+        </testsuite>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
         <testsuite name="Initialization">
             <file>tests/Api/default/Initialization/ApiDefaultInitializeTest.php</file>
         </testsuite>
@@ -23,6 +38,7 @@
             <directory>tests/Api/default/Tenants/Users</directory>
             <directory>tests/Api/default/Tenants/Account</directory>
             <directory>tests/Api/default/Tenants/Branding</directory>
+            <directory>tests/Api/default/Tenants/Auth</directory>
         </testsuite>
         <testsuite name="Api-Default-Account">
             <directory>tests/Api/default/Accounts/Roles</directory>

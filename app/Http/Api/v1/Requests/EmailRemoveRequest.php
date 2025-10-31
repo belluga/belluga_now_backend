@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class EmailRemoveRequest extends FormRequest
@@ -26,7 +27,8 @@ class EmailRemoveRequest extends FormRequest
         return [
             'email' => [
                 'required',
-                'email'
+                'email',
+                'max:' . InputConstraints::EMAIL_MAX,
             ],
         ];
     }

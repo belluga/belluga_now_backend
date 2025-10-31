@@ -116,34 +116,35 @@ class ApiDefaultAdminProfileTest extends TestCaseAuthenticated {
 
     public function testAddEmails(): void {
 
-        $userUpdate = $this->profileAddEmails(
+        $firstResponse = $this->profileAddEmails(
             $this->landlord->user_cross_tenant_admin,
-            [
-                $this->temporary_email_1,
-                $this->temporary_email_2,
-            ]
+            $this->temporary_email_1,
         );
 
-        $userUpdate->assertStatus(200);
+        $firstResponse->assertStatus(200);
+        $this->assertContains($this->temporary_email_1, $firstResponse->json()['data']['emails']);
 
-        $this->assertContains($this->temporary_email_1, $userUpdate->json()['data']['emails']);
-        $this->assertContains($this->temporary_email_2, $userUpdate->json()['data']['emails']);
+        $secondResponse = $this->profileAddEmails(
+            $this->landlord->user_cross_tenant_admin,
+            $this->temporary_email_2,
+        );
+
+        $secondResponse->assertStatus(200);
+        $this->assertContains($this->temporary_email_2, $secondResponse->json()['data']['emails']);
     }
 
     public function testAddEmailsRepeated(): void {
 
         $userUpdate = $this->profileAddEmails(
             $this->landlord->user_cross_tenant_visitor,
-            [
-                $this->temporary_email_1,
-            ]
+            $this->temporary_email_1,
         );
 
         $userUpdate->assertStatus(422);
 
         $userUpdate ->assertJsonStructure([
             "errors" => [
-                "emails"
+                "email"
             ]
         ]);
     }

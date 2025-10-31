@@ -3,10 +3,19 @@
 namespace Tests\Api\default\Admin;
 
 use App\Models\Landlord\PersonalAccessToken;
+use App\Models\Landlord\Tenant;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCaseAuthenticated;
+use Tests\Api\Traits\AccountAuthFunctions;
 
 class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
+    use AccountAuthFunctions;
+
+    protected string $base_api_tenant {
+        get {
+            return "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/";
+        }
+    }
 
     public function testUserLoginWrongPassword(): void {
 
@@ -59,6 +68,8 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
     }
 
     public function testUserLoginLogoutSuccessEmail2(): void {
+
+        $this->ensureSecondaryEmailRegistered();
 
         $response = $this->userLoginSuccessEmail2("device1");
 
@@ -126,6 +137,88 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         $response->assertStatus(401);
     }
 
+    public function testAdminTokenValidateRejectsTenantToken(): void
+    {
+        $email = fake()->unique()->safeEmail();
+        $password = 'SecurePass!123';
+
+        $tenantBase = "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/";
+        $tenantDomain = 'tenant.belluga.test';
+        Tenant::query()->first()?->makeCurrent();
+
+        $this->json(
+            method: 'post',
+            uri: "{$tenantBase}auth/register/password",
+            data: [
+                'name' => 'Tenant Token Check',
+                'email' => $email,
+                'password' => $password,
+            ],
+            headers: [
+                'X-App-Domain' => $tenantDomain,
+            ]
+        )->assertStatus(201);
+
+        $login = $this->json(
+            method: 'post',
+            uri: "{$tenantBase}auth/login",
+            data: [
+                'email' => $email,
+                'password' => $password,
+                'device_name' => 'tenant-token-check',
+            ],
+            headers: [
+                'X-App-Domain' => $tenantDomain,
+            ]
+        );
+
+        $login->assertStatus(200);
+        $tenantToken = $login->json('data.token');
+
+        $response = $this->json(
+            method: 'get',
+            uri: "admin/api/auth/token_validate",
+            headers: [
+                'Authorization' => "Bearer $tenantToken",
+                'Content-Type' => 'application/json'
+            ]
+        );
+
+        $response->assertStatus(401);
+    }
+
+    public function testAdminLoginRejectsPasswordExceedingMaxLength(): void
+    {
+        $response = $this->json(
+            method: 'post',
+            uri: "admin/api/auth/login",
+            data: [
+                "email" => $this->landlord->user_cross_tenant_admin->email_1,
+                "password" => str_repeat('A', 33),
+                "device_name" => 'max-length-check',
+            ]
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
+    }
+
+    public function testAdminLoginRejectsDeviceNameExceedingMaxLength(): void
+    {
+        $response = $this->json(
+            method: 'post',
+            uri: "admin/api/auth/login",
+            data: [
+                "email" => $this->landlord->user_cross_tenant_admin->email_1,
+                "password" => $this->landlord->user_cross_tenant_admin->password,
+                "device_name" => str_repeat('d', 300),
+            ]
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.device_name.0', 'The device name field must not be greater than 255 characters.');
+    }
+
     protected function userLoginWithToken(string $token): TestResponse {
         return $this->json(
             method: 'get',
@@ -147,6 +240,22 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
                 'Content-Type' => 'application/json'
             ]
         );
+    }
+
+    public function testLandlordAnonymousIdentityEndpointNotAvailable(): void {
+        $response = $this->json(
+            method: 'post',
+            uri: 'admin/api/v1/anonymous/identities',
+            data: [
+                'device_name' => 'landlord-device',
+                'fingerprint' => [
+                    'hash' => hash('sha256', 'landlord-device'),
+                    'user_agent' => 'AdminTest/1.0',
+                ],
+            ]
+        );
+
+        $this->assertEquals(404, $response->status());
     }
 
     protected function userLoginWrongPassword(): TestResponse {
@@ -211,10 +320,44 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         ];
     }
 
+    protected function ensureSecondaryEmailRegistered(): void {
+        if (empty($this->landlord->user_cross_tenant_admin->email_2)) {
+            $this->landlord->user_cross_tenant_admin->email_2 = fake()->unique()->safeEmail();
+        }
+
+        $deviceName = 'email2-setup';
+
+        $login = $this->userLoginSuccessEmail1($deviceName);
+        $login->assertStatus(200);
+
+        $this->landlord->user_cross_tenant_admin->token = $login->json('data.token');
+        $currentEmails = array_map('strtolower', $login->json('data.user.emails') ?? []);
+        $desiredEmail = strtolower($this->landlord->user_cross_tenant_admin->email_2);
+
+        if (!in_array($desiredEmail, $currentEmails, true)) {
+            $response = $this->json(
+                method: 'patch',
+                uri: "admin/api/profile/emails",
+                data: [
+                    'email' => $this->landlord->user_cross_tenant_admin->email_2,
+                ],
+                headers: [
+                    'Authorization' => "Bearer {$this->landlord->user_cross_tenant_admin->token}",
+                    'Content-Type' => 'application/json'
+                ]
+            );
+
+            $response->assertStatus(200);
+        }
+
+        $this->userLogout($deviceName)->assertStatus(200);
+        $this->landlord->user_cross_tenant_admin->token = "";
+    }
+
     protected function payloadUserLoginWrongPassword(): array {
         return [
             "email" => $this->landlord->user_cross_tenant_admin->email_1,
-            "password" => fake()->password(),
+            "password" => fake()->password(8),
             "device_name" => "test"
         ];
     }
@@ -227,3 +370,4 @@ class ApiDefaultAdminAuthTest extends TestCaseAuthenticated {
         ];
     }
 }
+

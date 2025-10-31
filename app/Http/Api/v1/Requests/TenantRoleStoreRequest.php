@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class TenantRoleStoreRequest extends FormRequest
@@ -22,10 +23,15 @@ class TenantRoleStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:1000'],
-            'permissions' => ['required', 'array'],
-            'permissions.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'description' => ['nullable', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
+            'permissions' => ['required', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX],
+            'permissions.*' => [
+                'required',
+                'string',
+                'max:' . InputConstraints::PERMISSION_MAX,
+                'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/',
+            ],
         ];
     }
 }

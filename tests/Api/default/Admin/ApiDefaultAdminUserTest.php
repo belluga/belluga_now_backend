@@ -2,10 +2,21 @@
 
 namespace Tests\Api\default\Admin;
 
+use App\Models\Landlord\LandlordUser;
 use Illuminate\Testing\TestResponse;
+use MongoDB\BSON\ObjectId;
 use Tests\TestCaseAuthenticated;
+use Tests\Traits\SeedsLandlordSupportRoles;
 
 class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
+
+    use SeedsLandlordSupportRoles;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureSupportRoles();
+    }
 
     public function testUserTenantsManagerCreate(): void {
 
@@ -16,10 +27,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => $this->landlord->user_cross_tenant_admin->name,
-            "emails" => [
-                $this->landlord->user_cross_tenant_admin->email_1,
-                $this->landlord->user_cross_tenant_admin->email_2,
-            ],
+            "email" => $this->landlord->user_cross_tenant_admin->email_1,
             "password" => $this->landlord->user_cross_tenant_admin->password,
             "password_confirmation" => $this->landlord->user_cross_tenant_admin->password,
             "device_name" => "test",
@@ -37,17 +45,28 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         ]);
 
-        $this->landlord->user_cross_tenant_admin->user_id = $response->json()['data']["id"];
+        $userId = $response->json()['data']["id"];
+        $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
+        $this->assertEquals('registered', $createdUser->identity_state);
+        $this->assertNotEmpty($createdUser->credentials);
+        $this->assertCount(1, $createdUser->credentials);
+        $this->assertCount(1, $createdUser->promotion_audit ?? []);
+        $promotionAudit = $createdUser->promotion_audit[0];
+        $this->assertEquals('anonymous', $promotionAudit['from_state']);
+        $this->assertEquals('registered', $promotionAudit['to_state']);
+        $this->assertEquals(
+            $this->landlord->user_superadmin->user_id,
+            (string) ($promotionAudit['operator_id'] ?? '')
+        );
+
+        $this->landlord->user_cross_tenant_admin->user_id = $userId;
     }
 
     public function testUserCreateAgain(): void {
 
         $response = $this->userCreate([
             "name" => fake()->name,
-            "emails" => [
-                $this->landlord->user_cross_tenant_admin->email_1,
-                $this->landlord->user_cross_tenant_admin->email_2,
-            ],
+            "email" => $this->landlord->user_cross_tenant_admin->email_1,
             "password" => $this->landlord->user_cross_tenant_admin->password,
             "password_confirmation" => $this->landlord->user_cross_tenant_admin->password,
             "device_name" => "test",
@@ -59,7 +78,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
         $response->assertJsonStructure([
             "message",
             "errors" => [
-                "emails"
+                "email"
             ],
         ]);
     }
@@ -73,10 +92,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => $this->landlord->user_cross_tenant_visitor->name,
-            "emails" => [
-                $this->landlord->user_cross_tenant_visitor->email_1,
-                $this->landlord->user_cross_tenant_visitor->email_2,
-            ],
+            "email" => $this->landlord->user_cross_tenant_visitor->email_1,
             "password" => $this->landlord->user_cross_tenant_visitor->password,
             "password_confirmation" => $this->landlord->user_cross_tenant_visitor->password,
             "device_name" => "test",
@@ -94,7 +110,12 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         ]);
 
-        $this->landlord->user_cross_tenant_visitor->user_id = $response->json()['data']["id"];
+        $userId = $response->json()['data']["id"];
+        $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
+        $this->assertEquals('registered', $createdUser->identity_state);
+        $this->assertCount(1, $createdUser->promotion_audit ?? []);
+
+        $this->landlord->user_cross_tenant_visitor->user_id = $userId;
     }
 
     public function testUserDisposableCreate(): void {
@@ -106,10 +127,7 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         $response = $this->userCreate([
             "name" => $this->landlord->user_disposable->name,
-            "emails" => [
-                $this->landlord->user_disposable->email_1,
-                $this->landlord->user_disposable->email_2,
-            ],
+            "email" => $this->landlord->user_disposable->email_1,
             "password" => $this->landlord->user_disposable->password,
             "password_confirmation" => $this->landlord->user_disposable->password,
             "device_name" => "test",
@@ -127,7 +145,11 @@ class ApiDefaultAdminUserTest extends TestCaseAuthenticated {
 
         ]);
 
-        $this->landlord->user_disposable->user_id = $response->json()['data']["id"];
+        $userId = $response->json()['data']["id"];
+        $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
+        $this->assertEquals('registered', $createdUser->identity_state);
+
+        $this->landlord->user_disposable->user_id = $userId;
     }
 
     public function testUserList(): void {

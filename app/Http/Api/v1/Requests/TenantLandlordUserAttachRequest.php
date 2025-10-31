@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class TenantLandlordUserAttachRequest extends FormRequest
@@ -24,8 +25,20 @@ class TenantLandlordUserAttachRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'user_id' => 'required|string|max:255|exists:landlord.landlord_users,_id',
-            'role_id' => 'required|string|exists:landlord.tenant_role_templates,_id'
+            'user_id' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+                'exists:landlord.landlord_users,_id',
+            ],
+            'role_id' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+                'exists:landlord.tenant_role_templates,_id',
+            ],
         ];
     }
 }

@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use App\Rules\UniqueSubdomainRule;
+use App\Support\Validation\InputConstraints;
 
 class TenantStoreRequest extends FormRequest
 {
@@ -25,7 +26,7 @@ class TenantStoreRequest extends FormRequest
     public function rules(): array
     {
         $rules = [
-            'name' => 'required|string|max:255',
+            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
         ];
 
         if ($this->isUpdateRequest()) {

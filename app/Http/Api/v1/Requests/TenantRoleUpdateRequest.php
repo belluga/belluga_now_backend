@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class TenantRoleUpdateRequest extends FormRequest
@@ -22,15 +23,15 @@ class TenantRoleUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['sometimes', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:1000'],
-            'permissions' => ['required', 'array', 'min:1'],
-            'permissions.add' => ['sometimes', 'array', 'prohibits:permissions.set'],
-            'permissions.remove' => ['sometimes', 'array', 'prohibits:permissions.set'],
-            'permissions.set' => ['sometimes', 'array', 'prohibits:permissions.add,permissions.remove'],
-            'permissions.add.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
-            'permissions.remove.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
-            'permissions.set.*' => ['required', 'string', 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'name' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'description' => ['nullable', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
+            'permissions' => ['required', 'array', 'min:1', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX],
+            'permissions.add' => ['sometimes', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.set'],
+            'permissions.remove' => ['sometimes', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.set'],
+            'permissions.set' => ['sometimes', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.add,permissions.remove'],
+            'permissions.add.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'permissions.remove.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'permissions.set.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
             'is_default' => ['boolean'],
         ];
     }

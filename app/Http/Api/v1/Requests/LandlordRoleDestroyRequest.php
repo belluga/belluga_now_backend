@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class LandlordRoleDestroyRequest extends FormRequest
@@ -22,7 +23,13 @@ class LandlordRoleDestroyRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'background_role_id' => 'required|string|exists:landlord.landlord_roles,_id'
+            'background_role_id' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+                'exists:landlord.landlord_roles,_id',
+            ]
         ];
     }
 }

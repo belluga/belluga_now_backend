@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AccountUserCreateRequest extends FormRequest
@@ -24,13 +25,25 @@ class AccountUserCreateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:255',
-            'emails' => [
+            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'email' => [
                 'required',
-                'array',
+                'email',
+                'max:' . InputConstraints::EMAIL_MAX,
             ],
-            'password' => 'required|string|min:8',
-            'role_id' => 'required|string|exists:tenant.account_role_templates,_id'
+            'password' => [
+                'required',
+                'string',
+                'min:' . InputConstraints::PASSWORD_MIN,
+                'max:' . InputConstraints::PASSWORD_MAX,
+            ],
+            'role_id' => [
+                'required',
+                'string',
+                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'regex:/^[a-fA-F0-9]{24}$/',
+                'exists:tenant.account_role_templates,_id',
+            ],
         ];
     }
 }

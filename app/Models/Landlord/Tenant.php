@@ -61,6 +61,17 @@ class Tenant extends BaseTenant
         return $this->hasMany(Domains::class);
     }
 
+    public static function resolve(): static
+    {
+        $tenant = static::current();
+
+        if ($tenant === null) {
+            abort(422, 'Tenant context not available.');
+        }
+
+        return $tenant;
+    }
+
     /**
      * Add multiple domains to the tenant
      *

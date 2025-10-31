@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class DomainStoreRequest extends FormRequest
@@ -26,6 +27,8 @@ class DomainStoreRequest extends FormRequest
         return [
             'path' => [
                 'required',
+                'string',
+                'max:' . InputConstraints::NAME_MAX,
                 'regex:/^(?:localhost|(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$))/'
             ],
         ];

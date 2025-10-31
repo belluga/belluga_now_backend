@@ -62,9 +62,7 @@ abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
 
         $response = $this->accountUserCreate([
             "name" => $this->account->user_disposable->name,
-            "emails" => [
-                $this->account->user_disposable->email_1,
-            ],
+            "email" => $this->account->user_disposable->email_1,
             "password" => $this->account->user_disposable->password,
             "password_confirmation" => $this->account->user_disposable->password,
             "role_id" => $this->account->role_visitor->id,
@@ -75,6 +73,36 @@ abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
         $responseShow = $this->accountUserShow($this->account->user_disposable->user_id);
 
         $responseShow->assertStatus(200);
+    }
+
+    public function testAccountUserCreationRejectsPasswordExceedingMaxLength(): void
+    {
+        $response = $this->accountUserCreate([
+            "name" => $this->account->user_disposable->name,
+            "email" => $this->account->user_disposable->email_1,
+            "password" => str_repeat('A', 33),
+            "password_confirmation" => str_repeat('A', 33),
+            "role_id" => $this->account->role_visitor->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
+    }
+
+    public function testAccountUserCreationRejectsEmailExceedingMaxLength(): void
+    {
+        $email = str_repeat('a', 246) . '@example.org';
+
+        $response = $this->accountUserCreate([
+            "name" => $this->account->user_disposable->name,
+            "email" => $email,
+            "password" => $this->account->user_disposable->password,
+            "password_confirmation" => $this->account->user_disposable->password,
+            "role_id" => $this->account->role_visitor->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.email.0', 'The email field must not be greater than 255 characters.');
     }
 
     public function testAccountUsersList(): void {
@@ -124,10 +152,7 @@ abstract class ApiDefaultAccountUsersManageTestContract extends TestCaseAccount
 
         $response = $this->accountUserCreate([
             "name" => $user->name,
-            "emails" => [
-                $user->email_1,
-                $user->email_2,
-            ],
+            "email" => $user->email_1,
             "password" => $user->password,
             "password_confirmation" => $user->password,
             "role_id" => $role->id,
