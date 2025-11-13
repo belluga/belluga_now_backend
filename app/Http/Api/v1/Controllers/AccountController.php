@@ -25,9 +25,13 @@ class AccountController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $perPage = (int) $request->get('per_page', 15) ?: 15;
+
         $paginator = $this->accountService->paginateForUser(
             auth()->guard('sanctum')->user(),
-            $request->boolean('archived')
+            $request->boolean('archived'),
+            $perPage,
+            $request->query()
         );
 
         return response()->json($paginator->toArray());

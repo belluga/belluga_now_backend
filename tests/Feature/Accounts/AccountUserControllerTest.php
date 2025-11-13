@@ -125,6 +125,26 @@ class AccountUserControllerTest extends TestCase
         $this->assertSame('Filtered User', $data[0]['name']);
     }
 
+    public function testIndexSortsByNameDescending(): void
+    {
+        $alpha = $this->createAccountUser();
+        $alpha->name = 'Alpha User';
+        $alpha->save();
+
+        $zulu = $this->createAccountUser();
+        $zulu->name = 'Zulu User';
+        $zulu->save();
+
+        $response = $this->getJson($this->baseUrl . '?sort=-name');
+
+        $response->assertOk();
+        $names = array_column($response->json('data'), 'name');
+
+        $this->assertContains('Alpha User', $names);
+        $this->assertContains('Zulu User', $names);
+        $this->assertSame('Zulu User', $names[0]);
+    }
+
     private function createAccountUser(): AccountUser
     {
         $role = $this->account->roleTemplates()->create([

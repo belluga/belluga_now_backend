@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Accounts\TenantUserManagementService;
+use App\Application\Accounts\TenantUserQueryService;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
@@ -14,13 +15,15 @@ use Illuminate\Pagination\LengthAwarePaginator;
 class TenantUsersController extends Controller
 {
     public function __construct(
-        private readonly TenantUserManagementService $tenantUserService
+        private readonly TenantUserManagementService $tenantUserService,
+        private readonly TenantUserQueryService $tenantUserQueryService
     ) {
     }
 
     public function index(Request $request): LengthAwarePaginator
     {
-        return $this->tenantUserService->paginate(
+        return $this->tenantUserQueryService->paginate(
+            $request->query(),
             $request->boolean('archived'),
             (int) $request->get('per_page', 15)
         );

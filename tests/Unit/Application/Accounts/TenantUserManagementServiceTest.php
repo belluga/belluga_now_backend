@@ -48,27 +48,6 @@ class TenantUserManagementServiceTest extends TestCase
         $this->userService = $this->app->make(AccountUserService::class);
     }
 
-    public function testPaginateIncludesArchivedUsers(): void
-    {
-        $initialActive = $this->service->paginate(false)->total();
-        $initialWithArchived = $this->service->paginate(true)->total();
-        $initialArchivedDelta = $initialWithArchived - $initialActive;
-
-        $active = $this->createUser('active@example.org');
-        $archived = $this->createUser('archived@example.org');
-        $archived->delete();
-
-        $activePaginator = $this->service->paginate(false);
-        $archivedPaginator = $this->service->paginate(true);
-
-        $this->assertTrue($activePaginator->total() >= 1);
-        $this->assertTrue($archivedPaginator->total() >= $activePaginator->total());
-        $this->assertSame(
-            $initialArchivedDelta + 1,
-            $archivedPaginator->total() - $activePaginator->total()
-        );
-    }
-
     public function testFindReturnsExistingUser(): void
     {
         $user = $this->createUser('show@example.org');

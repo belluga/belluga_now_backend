@@ -14,16 +14,24 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class LandlordUserManagementService
 {
     public function __construct(
-        private readonly LandlordUserCreator $creator
+        private readonly LandlordUserCreator $creator,
+        private readonly LandlordUserQueryService $queryService
     ) {
     }
 
-    public function paginate(bool $includeArchived, int $perPage): LengthAwarePaginator
-    {
-        return LandlordUser::query()
-            ->orderByDesc('created_at')
-            ->when($includeArchived, static fn ($query) => $query->onlyTrashed())
-            ->paginate($perPage);
+    /**
+     * @param array<string, mixed> $queryParams
+     */
+    public function paginate(
+        bool $includeArchived,
+        int $perPage = 15,
+        array $queryParams = []
+    ): LengthAwarePaginator {
+        return $this->queryService->paginate(
+            $queryParams,
+            $includeArchived,
+            $perPage
+        );
     }
 
     public function find(string $userId): LandlordUser
