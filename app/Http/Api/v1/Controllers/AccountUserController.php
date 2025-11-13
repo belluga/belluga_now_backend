@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Accounts\AccountUserQueryService;
 use App\Application\Accounts\AccountUserService;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
@@ -19,7 +20,8 @@ use Illuminate\Validation\ValidationException;
 class AccountUserController extends Controller
 {
     public function __construct(
-        private readonly AccountUserService $accountUserService
+        private readonly AccountUserService $accountUserService,
+        private readonly AccountUserQueryService $accountUserQueryService
     ) {
     }
 
@@ -28,12 +30,22 @@ class AccountUserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $users = AccountUser::
-            when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->where('account_roles.account_id', Account::current()->id)
-            ->paginate();
+        $account = Account::current();
 
-        return response()->json($users);
+        if (! $account) {
+            abort(401, 'Account context not available.');
+        }
+
+        $perPage = (int) $request->get('per_page', 15);
+
+        $paginator = $this->accountUserQueryService->paginate(
+            $account,
+            $request->query(),
+            $request->boolean('archived'),
+            $perPage > 0 ? $perPage : 15
+        );
+
+        return response()->json($paginator);
     }
 
     /**

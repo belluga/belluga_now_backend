@@ -107,10 +107,28 @@ class AccountUserControllerTest extends TestCase
         $this->assertSoftDeleted('account_users', ['_id' => $user->_id], 'tenant');
     }
 
+    public function testIndexFiltersByName(): void
+    {
+        $target = $this->createAccountUser();
+        $target->name = 'Filtered User';
+        $target->save();
+
+        $this->createAccountUser();
+
+        $response = $this->getJson($this->baseUrl . '?filter[name]=Filtered User');
+
+        $response->assertOk();
+        $data = $response->json('data');
+
+        $this->assertIsArray($data);
+        $this->assertNotEmpty($data);
+        $this->assertSame('Filtered User', $data[0]['name']);
+    }
+
     private function createAccountUser(): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
-            'name' => 'Account Visitor',
+            'name' => 'Account Visitor ' . uniqid(),
             'permissions' => ['account-users:view'],
         ]);
 

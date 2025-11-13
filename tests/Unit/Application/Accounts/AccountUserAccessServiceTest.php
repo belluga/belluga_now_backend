@@ -84,10 +84,11 @@ class AccountUserAccessServiceTest extends TestCase
 
     public function testEnsureEmailPersistsNewEntry(): void
     {
-        $this->service->ensureEmail($this->user, 'additional@example.org');
+        $email = 'additional+' . uniqid('', true) . '@example.org';
+        $this->service->ensureEmail($this->user, $email);
 
         $this->user->refresh();
-        $this->assertContains('additional@example.org', $this->user->emails ?? []);
+        $this->assertContains($email, $this->user->emails ?? []);
     }
 
     private function initializeSystem(): void
