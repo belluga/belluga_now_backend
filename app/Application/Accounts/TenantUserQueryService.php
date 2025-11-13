@@ -5,20 +5,18 @@ declare(strict_types=1);
 namespace App\Application\Accounts;
 
 use App\Application\Shared\Query\AbstractQueryService;
-use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Pagination\LengthAwarePaginator;
 
-class AccountUserQueryService extends AbstractQueryService
+class TenantUserQueryService extends AbstractQueryService
 {
     public function paginate(
-        Account $account,
         array $queryParams,
         bool $includeArchived,
         int $perPage = 15
     ): LengthAwarePaginator {
         return $this->buildPaginator(
-            AccountUser::query()->where('account_roles.account_id', $account->id),
+            AccountUser::query(),
             $queryParams,
             $includeArchived,
             $perPage

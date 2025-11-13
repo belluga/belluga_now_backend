@@ -2,23 +2,21 @@
 
 declare(strict_types=1);
 
-namespace App\Application\Accounts;
+namespace App\Application\LandlordUsers;
 
 use App\Application\Shared\Query\AbstractQueryService;
-use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
+use App\Models\Landlord\LandlordUser;
 use Illuminate\Pagination\LengthAwarePaginator;
 
-class AccountUserQueryService extends AbstractQueryService
+class LandlordUserQueryService extends AbstractQueryService
 {
     public function paginate(
-        Account $account,
         array $queryParams,
         bool $includeArchived,
         int $perPage = 15
     ): LengthAwarePaginator {
         return $this->buildPaginator(
-            AccountUser::query()->where('account_roles.account_id', $account->id),
+            LandlordUser::query(),
             $queryParams,
             $includeArchived,
             $perPage
@@ -28,15 +26,8 @@ class AccountUserQueryService extends AbstractQueryService
     protected function baseSearchableFields(): array
     {
         return array_diff(
-            (new AccountUser())->getFillable(),
-            [
-                'password',
-                'credentials',
-                'consents',
-                'promotion_audit',
-                'merged_source_ids',
-                'fingerprints',
-            ]
+            (new LandlordUser())->getFillable(),
+            ['password', 'credentials', 'promotion_audit']
         );
     }
 
@@ -52,6 +43,6 @@ class AccountUserQueryService extends AbstractQueryService
 
     protected function dateFields(): array
     {
-        return ['first_seen_at', 'registered_at', 'created_at', 'updated_at', 'deleted_at'];
+        return ['verified_at', 'created_at', 'updated_at', 'deleted_at'];
     }
 }

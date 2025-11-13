@@ -81,6 +81,51 @@ class TenantUsersControllerTest extends TestCase
         $response->assertJsonStructure(['data', 'total', 'per_page', 'current_page']);
     }
 
+    public function testIndexFiltersByEmail(): void
+    {
+        $target = $this->createUser('filter@example.org');
+        $target->name = 'Filter Match';
+        $target->save();
+
+        $this->createUser('another@example.org');
+
+        $response = $this->getJson($this->baseUrl . '?filter[emails]=' . urlencode('filter@example.org'));
+
+        $response->assertOk();
+        $this->assertSame('Filter Match', $response->json('data.0.name'));
+    }
+
+    public function testIndexSortsByNameDescending(): void
+    {
+        $alpha = $this->createUser('alpha@example.org');
+        $alpha->name = 'Alpha User';
+        $alpha->save();
+
+        $zulu = $this->createUser('zulu@example.org');
+        $zulu->name = 'Zulu User';
+        $zulu->save();
+
+        $response = $this->getJson($this->baseUrl . '?sort=-name');
+
+        $response->assertOk();
+        $names = array_column($response->json('data'), 'name');
+        $this->assertContains('Alpha User', $names);
+        $this->assertContains('Zulu User', $names);
+        $this->assertSame('Zulu User', $names[0]);
+    }
+
+    public function testIndexIgnoresUnsupportedSortAndUsesDefault(): void
+    {
+        $baseline = $this->getJson($this->baseUrl);
+        $fallback = $this->getJson($this->baseUrl . '?sort=-unsupported');
+
+        $this->assertNotNull($baseline->json('data.0.id'));
+        $this->assertSame(
+            $baseline->json('data.0.id'),
+            $fallback->json('data.0.id')
+        );
+    }
+
     public function testShowReturnsSingleUser(): void
     {
         $user = $this->createUser('show@example.org');

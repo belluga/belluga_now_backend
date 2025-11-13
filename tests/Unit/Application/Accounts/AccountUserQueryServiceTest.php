@@ -28,6 +28,8 @@ class AccountUserQueryServiceTest extends TestCase
 
     private string $filterEmail;
 
+    private AccountUser $phoneFixture;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -85,7 +87,7 @@ class AccountUserQueryServiceTest extends TestCase
     public function testSearchByPhoneNumber(): void
     {
         $phone = '+551199999' . random_int(1000, 9999);
-        $this->attachPhoneToFixture($phone);
+        $this->attachPhoneToFixture($this->phoneFixture, $phone);
 
         $paginator = $this->service->paginate(
             $this->account,
@@ -131,84 +133,63 @@ class AccountUserQueryServiceTest extends TestCase
      */
     private function seedUsers(AccountRoleTemplate $role): void
     {
-        $userA = AccountUser::create([
+        $this->createUserWithRole($role, [
             'name' => 'Searchable User',
-            'emails' => ['searchable+' . uniqid() . '@example.org'],
-            'password' => Hash::make('Secret!234'),
-            'identity_state' => 'registered',
+            'emails' => ['searchable+' . uniqid('', true) . '@example.org'],
             'registered_at' => Carbon::now()->subHours(4),
         ]);
 
-        $userA->accountRoles()->create([
-            'account_id' => (string) $this->account->_id,
-            'permissions' => ['account-users:*'],
-            'slug' => $role->slug,
-            'name' => $role->name,
-        ]);
-
-        $this->filterEmail = 'filter+' . uniqid() . '@example.org';
-
-        $userB = AccountUser::create([
+        $this->filterEmail = 'filter+' . uniqid('', true) . '@example.org';
+        $this->createUserWithRole($role, [
             'name' => 'Email Filter',
             'emails' => [$this->filterEmail],
-            'password' => Hash::make('Secret!234'),
-            'identity_state' => 'registered',
             'registered_at' => Carbon::now()->subHours(2),
         ]);
 
-        $userB->accountRoles()->create([
-            'account_id' => (string) $this->account->_id,
-            'permissions' => ['account-users:*'],
-            'slug' => $role->slug,
-            'name' => $role->name,
-        ]);
-
-        $userC = AccountUser::create([
+        $this->phoneFixture = $this->createUserWithRole($role, [
             'name' => 'Phone Filter',
-            'emails' => ['phone+' . uniqid() . '@example.org'],
-            'phones' => [],
-            'password' => Hash::make('Secret!234'),
-            'identity_state' => 'registered',
+            'emails' => ['phone+' . uniqid('', true) . '@example.org'],
             'registered_at' => Carbon::now()->subHour(),
         ]);
 
-        $userC->accountRoles()->create([
-            'account_id' => (string) $this->account->_id,
-            'permissions' => ['account-users:*'],
-            'slug' => $role->slug,
-            'name' => $role->name,
-        ]);
+        $this->attachPhoneToFixture($this->phoneFixture, '+55119123' . random_int(1000, 9999));
 
-        $validated = AccountUser::create([
+        $this->createUserWithRole($role, [
             'name' => 'Validated User',
-            'emails' => ['validated+' . uniqid() . '@example.org'],
-            'password' => Hash::make('Secret!234'),
+            'emails' => ['validated+' . uniqid('', true) . '@example.org'],
             'identity_state' => 'validated',
             'registered_at' => Carbon::now()->subMinutes(5),
         ]);
+    }
 
-        $validated->accountRoles()->create([
+    private function attachPhoneToFixture(AccountUser $user, string $phone): void
+    {
+        $user->phones = [$phone];
+        $user->save();
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     */
+    private function createUserWithRole(AccountRoleTemplate $role, array $overrides): AccountUser
+    {
+        $payload = array_merge([
+            'emails' => ['user+' . uniqid('', true) . '@example.org'],
+            'password' => Hash::make('Secret!234'),
+            'identity_state' => 'registered',
+            'registered_at' => Carbon::now(),
+        ], $overrides);
+
+        $user = AccountUser::create($payload);
+
+        $user->accountRoles()->create([
             'account_id' => (string) $this->account->_id,
             'permissions' => ['account-users:*'],
             'slug' => $role->slug,
             'name' => $role->name,
         ]);
 
-    }
-
-    private function attachPhoneToFixture(string $phone): void
-    {
-        $user = AccountUser::query()
-            ->where('name', 'Phone Filter')
-            ->orderByDesc('created_at')
-            ->first();
-
-        if (! $user) {
-            return;
-        }
-
-        $user->phones = [$phone];
-        $user->save();
+        return $user;
     }
 
     private function initializeSystem(): void

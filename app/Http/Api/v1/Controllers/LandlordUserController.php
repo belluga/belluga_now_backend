@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\LandlordUsers\LandlordUserManagementService;
+use App\Application\LandlordUsers\LandlordUserQueryService;
 use App\Application\LandlordUsers\TenantUserRoleManager;
 use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
@@ -21,6 +22,7 @@ class LandlordUserController extends Controller
 {
     public function __construct(
         private readonly LandlordUserManagementService $landlordUserService,
+        private readonly LandlordUserQueryService $landlordUserQueryService,
         private readonly TenantUserRoleManager $tenantUserRoleManager
     ) {
     }
@@ -30,7 +32,8 @@ class LandlordUserController extends Controller
      */
     public function index(Request $request): LengthAwarePaginator
     {
-        return $this->landlordUserService->paginate(
+        return $this->landlordUserQueryService->paginate(
+            $request->query(),
             $request->boolean('archived'),
             (int) $request->get('per_page', 15)
         );
