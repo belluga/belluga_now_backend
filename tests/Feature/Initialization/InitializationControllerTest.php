@@ -70,14 +70,9 @@ class InitializationControllerTest extends TestCase
             ],
             'branding_data' => [
                 'theme_data_settings' => [
-                    'light_scheme_data' => [
-                        'primary_seed_color' => '#FFFFFF',
-                        'secondary_seed_color' => '#111111',
-                    ],
-                    'dark_scheme_data' => [
-                        'primary_seed_color' => '#000000',
-                        'secondary_seed_color' => '#EEEEEE',
-                    ],
+                    'brightness_default' => 'light',
+                    'primary_seed_color' => '#FFFFFF',
+                    'secondary_seed_color' => '#111111',
                 ],
                 'logo_settings' => [
                     'light_logo_uri' => UploadedFile::fake()->image('light-logo.png'),

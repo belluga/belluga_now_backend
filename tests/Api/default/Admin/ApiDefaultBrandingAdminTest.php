@@ -15,25 +15,15 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
         $response->assertStatus(200);
 
         $resultData = [
-            "dark_scheme_data" => [
-                "primary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['primary_seed_color'],
-                "secondary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['secondary_seed_color'],
-            ],
-            "light_scheme_data" => [
-                "primary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['primary_seed_color'],
-                "secondary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['secondary_seed_color'],
-            ]
+            "brightness_default" => $response->json()['theme_data_settings']['brightness_default'],
+            "primary_seed_color" => $response->json()['theme_data_settings']['primary_seed_color'],
+            "secondary_seed_color" => $response->json()['theme_data_settings']['secondary_seed_color'],
         ];
 
         $check_values = [
-            "dark_scheme_data" => [
-                "primary_seed_color" => "#000000",
-                "secondary_seed_color" => "#DDDDDD",
-            ],
-            "light_scheme_data" => [
-                "primary_seed_color" => "#FFFFFF",
-                "secondary_seed_color" => "#999999",
-            ],
+            "brightness_default" => "light",
+            "primary_seed_color" => "#FFFFFF",
+            "secondary_seed_color" => "#999999",
         ];
 
         AssertEquals($resultData, $check_values);
@@ -46,14 +36,9 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
         $respoonse->assertJsonStructure([
             "branding_data" => [
                 "theme_data_settings"=> [
-                    "dark_scheme_data" => [
-                        'primary_seed_color',
-                        'secondary_seed_color',
-                    ],
-                    "light_scheme_data"=> [
-                        'primary_seed_color',
-                        'secondary_seed_color',
-                    ]
+                    'brightness_default',
+                    'primary_seed_color',
+                    'secondary_seed_color',
                 ],
                 "logo_settings" => [
                     "favicon_uri",
@@ -65,7 +50,7 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
             ]
         ]);
 
-        $colorUpdate = $respoonse->json()['branding_data']['theme_data_settings']['dark_scheme_data']['primary_seed_color'];
+        $colorUpdate = $respoonse->json()['branding_data']['theme_data_settings']['primary_seed_color'];
         AssertEquals($colorUpdate, '#CCCCCC');
     }
 
@@ -168,9 +153,9 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
 
         return [
             "theme_data_settings" => [
-                "dark_scheme_data" => [
-                    'primary_seed_color' => '#CCCCCC',
-                ],
+                'brightness_default' => 'dark',
+                'primary_seed_color' => '#CCCCCC',
+                'secondary_seed_color' => '#000000',
             ],
             'logo_settings' => [
                 'light_logo_uri' => $light_logo_uri,

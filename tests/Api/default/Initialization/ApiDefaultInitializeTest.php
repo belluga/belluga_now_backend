@@ -54,14 +54,9 @@ class ApiDefaultInitializeTest extends TestCase {
                     "name",
                     "branding_data" => [
                         "theme_data_settings"=> [
-                            "dark_scheme_data" => [
-                                'primary_seed_color',
-                                'secondary_seed_color',
-                            ],
-                            "light_scheme_data"=> [
-                                'primary_seed_color',
-                                'secondary_seed_color',
-                            ]
+                            'brightness_default',
+                            'primary_seed_color',
+                            'secondary_seed_color',
                         ],
                         "logo_settings" => [
                             "favicon_uri",
@@ -156,14 +151,9 @@ class ApiDefaultInitializeTest extends TestCase {
             ],
             "branding_data" => [
                 "theme_data_settings" => [
-                    "dark_scheme_data" => [
-                        'primary_seed_color' => '#000000',
-                        'secondary_seed_color' => '#DDDDDD',
-                    ],
-                    "light_scheme_data" => [
-                        'primary_seed_color' => '#FFFFFF',
-                        'secondary_seed_color' => '#999999',
-                    ]
+                    'brightness_default' => 'light',
+                    'primary_seed_color' => '#FFFFFF',
+                    'secondary_seed_color' => '#999999',
                 ],
                 'logo_settings' => [
                     'light_icon_uri' => $light_icon_uri,

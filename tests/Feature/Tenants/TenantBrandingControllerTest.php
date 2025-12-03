@@ -63,10 +63,9 @@ class TenantBrandingControllerTest extends TestCase
     {
         $payload = [
             'theme_data_settings' => [
-                'light_scheme_data' => [
-                    'primary_seed_color' => '#ffffff',
-                    'secondary_seed_color' => '#eeeeee',
-                ],
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#ffffff',
+                'secondary_seed_color' => '#eeeeee',
             ],
         ];
 
@@ -77,7 +76,7 @@ class TenantBrandingControllerTest extends TestCase
         $tenant = Tenant::query()->first()->fresh();
         $this->assertSame(
             '#ffffff',
-            $tenant->branding_data['theme_data_settings']['light_scheme_data']['primary_seed_color']
+            $tenant->branding_data['theme_data_settings']['primary_seed_color']
         );
     }
 
@@ -108,8 +107,9 @@ class TenantBrandingControllerTest extends TestCase
             role: ['name' => 'Root', 'permissions' => ['*']],
             user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
             themeDataSettings: [
-                'light_scheme_data' => ['primary_seed_color' => '#fff', 'secondary_seed_color' => '#000'],
-                'dark_scheme_data' => ['primary_seed_color' => '#000', 'secondary_seed_color' => '#fff'],
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#fff',
+                'secondary_seed_color' => '#000',
             ],
             logoSettings: ['light_logo_uri' => '/logos/light.png'],
             pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],

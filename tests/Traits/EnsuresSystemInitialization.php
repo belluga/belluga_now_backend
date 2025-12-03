@@ -122,14 +122,9 @@ trait EnsuresSystemInitialization
             ],
             'branding_data' => [
                 'theme_data_settings' => [
-                    'dark_scheme_data' => [
-                        'primary_seed_color' => '#000000',
-                        'secondary_seed_color' => '#DDDDDD',
-                    ],
-                    'light_scheme_data' => [
-                        'primary_seed_color' => '#FFFFFF',
-                        'secondary_seed_color' => '#999999',
-                    ],
+                    'brightness_default' => 'light',
+                    'primary_seed_color' => '#FFFFFF',
+                    'secondary_seed_color' => '#999999',
                 ],
                 'logo_settings' => [
                     'light_logo_uri' => UploadedFile::fake()->image('light-logo.png', 350, 512),

@@ -5,23 +5,26 @@ namespace App\DataObjects\Branding;
 class ThemeDataSettings
 {
     public function __construct(
-        public ColorSchemeData $darkSchemeData,
-        public ColorSchemeData $lightSchemeData,
+        public string $brightnessDefault,
+        public string $primarySeedColor,
+        public string $secondarySeedColor,
     ) {}
 
     public static function fromArray(array $data): self
     {
         return new self(
-            darkSchemeData: ColorSchemeData::fromArray($data['dark_scheme_data'] ?? []),
-            lightSchemeData: ColorSchemeData::fromArray($data['light_scheme_data'] ?? [])
+            brightnessDefault: $data['brightness_default'] ?? '',
+            primarySeedColor: $data['primary_seed_color'] ?? '',
+            secondarySeedColor: $data['secondary_seed_color'] ?? ''
         );
     }
 
     public function toArray(): array
     {
         return [
-            'dark_scheme_data' => $this->darkSchemeData->toArray(),
-            'light_scheme_data' => $this->lightSchemeData->toArray() ,
+            'brightness_default' => $this->brightnessDefault ?? '',
+            'primary_seed_color' => $this->primarySeedColor ?? '',
+            'secondary_seed_color' => $this->secondarySeedColor ?? '',
         ];
     }
 }

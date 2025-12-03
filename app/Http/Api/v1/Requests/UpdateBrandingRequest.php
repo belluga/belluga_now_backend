@@ -25,11 +25,9 @@ class UpdateBrandingRequest extends FormRequest
     {
         return [
             'theme_data_settings' => ['sometimes', 'array'],
-            'theme_data_settings.dark_scheme_data.primary_seed_color' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'theme_data_settings.dark_scheme_data.secondary_seed_color' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-
-            'theme_data_settings.light_scheme_data.primary_seed_color' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'theme_data_settings.light_scheme_data.secondary_seed_color' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'theme_data_settings.brightness_default' => ['sometimes', 'string', 'in:light,dark'],
+            'theme_data_settings.primary_seed_color' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'theme_data_settings.secondary_seed_color' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
             'logo_settings' => ['sometimes', 'array'],
             'logo_settings.light_logo_uri' => ['sometimes', 'image', 'mimes:png', 'max:2048'],

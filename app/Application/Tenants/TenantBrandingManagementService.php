@@ -83,33 +83,27 @@ class TenantBrandingManagementService
             $pwaIcon['source_uri'] = $uploadedLogos['pwa_icon'];
         }
 
-        $darkScheme = [
-            'primary_seed_color' => (string) $this->stringValue(
-                $payload,
-                'theme_data_settings.dark_scheme_data.primary_seed_color'
-            ),
-            'secondary_seed_color' => (string) $this->stringValue(
-                $payload,
-                'theme_data_settings.dark_scheme_data.secondary_seed_color'
-            ),
-        ];
+        $brightnessDefault = (string) $this->stringValue(
+            $payload,
+            'theme_data_settings.brightness_default'
+        );
 
-        $lightScheme = [
-            'primary_seed_color' => (string) $this->stringValue(
-                $payload,
-                'theme_data_settings.light_scheme_data.primary_seed_color'
-            ),
-            'secondary_seed_color' => (string) $this->stringValue(
-                $payload,
-                'theme_data_settings.light_scheme_data.secondary_seed_color'
-            ),
-        ];
+        $primarySeedColor = (string) $this->stringValue(
+            $payload,
+            'theme_data_settings.primary_seed_color'
+        );
+
+        $secondarySeedColor = (string) $this->stringValue(
+            $payload,
+            'theme_data_settings.secondary_seed_color'
+        );
 
         return [
             'logo_settings' => $logoSettings,
             'theme_data_settings' => [
-                'dark_scheme_data' => $darkScheme,
-                'light_scheme_data' => $lightScheme,
+                'brightness_default' => $brightnessDefault,
+                'primary_seed_color' => $primarySeedColor,
+                'secondary_seed_color' => $secondarySeedColor,
             ],
             'pwa_icon' => $pwaIcon,
         ];
@@ -134,4 +128,3 @@ class TenantBrandingManagementService
         return is_scalar($value) ? (string) $value : null;
     }
 }
-

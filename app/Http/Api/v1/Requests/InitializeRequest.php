@@ -46,11 +46,9 @@ class InitializeRequest extends FormRequest
 
             'branding_data' => ['required', 'array'],
             'branding_data.theme_data_settings' => ['required', 'array'],
-            'branding_data.theme_data_settings.dark_scheme_data.primary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'branding_data.theme_data_settings.dark_scheme_data.secondary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-
-            'branding_data.theme_data_settings.light_scheme_data.primary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
-            'branding_data.theme_data_settings.light_scheme_data.secondary_seed_color' => ['required', 'string', 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'branding_data.theme_data_settings.brightness_default' => ['required', 'string', 'in:light,dark'],
+            'branding_data.theme_data_settings.primary_seed_color' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
+            'branding_data.theme_data_settings.secondary_seed_color' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],
 
             'branding_data.logo_settings' => ['required', 'array'],
             'branding_data.logo_settings.favicon_uri' => ['required', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon'

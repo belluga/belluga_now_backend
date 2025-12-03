@@ -104,7 +104,9 @@ class Tenant extends BaseTenant
     public function getManifestData(): array {
 
         $landlord = Landlord::singleton();
-        $main_color = $this->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'] ?? $landlord->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'];
+        $main_color = $this->branding_data["theme_data_settings"]['primary_seed_color']
+            ?? $landlord->branding_data["theme_data_settings"]['primary_seed_color']
+            ?? '';
 
 
         return [

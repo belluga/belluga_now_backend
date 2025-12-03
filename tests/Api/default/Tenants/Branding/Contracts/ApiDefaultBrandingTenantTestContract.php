@@ -15,25 +15,15 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
         $response->assertStatus(200);
 
         $resultData = [
-            "dark_scheme_data" => [
-                "primary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['primary_seed_color'],
-                "secondary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['secondary_seed_color'],
-            ],
-            "light_scheme_data" => [
-                "primary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['primary_seed_color'],
-                "secondary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['secondary_seed_color'],
-            ]
+            "brightness_default" => $response->json()['theme_data_settings']['brightness_default'],
+            "primary_seed_color" => $response->json()['theme_data_settings']['primary_seed_color'],
+            "secondary_seed_color" => $response->json()['theme_data_settings']['secondary_seed_color'],
         ];
 
         $check_values = [
-            "dark_scheme_data" => [
-                "primary_seed_color" => "#CCCCCC",
-                "secondary_seed_color" => "#DDDDDD",
-            ],
-            "light_scheme_data" => [
-                "primary_seed_color" => "#FFFFFF",
-                "secondary_seed_color" => "#999999",
-            ],
+            "brightness_default" => "light",
+            "primary_seed_color" => "#FFFFFF",
+            "secondary_seed_color" => "#999999",
         ];
 
         AssertEquals($resultData, $check_values);
@@ -46,14 +36,9 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
         $response->assertJsonStructure([
             "branding_data" => [
                 "theme_data_settings"=> [
-                    "dark_scheme_data" => [
-                        'primary_seed_color',
-                        'secondary_seed_color',
-                    ],
-                    "light_scheme_data"=> [
-                        'primary_seed_color',
-                        'secondary_seed_color',
-                    ]
+                    'brightness_default',
+                    'primary_seed_color',
+                    'secondary_seed_color',
                 ],
                 "logo_settings" => [
                     "favicon_uri",
@@ -69,25 +54,15 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
         $response->assertStatus(200);
 
         $resultData = [
-            "dark_scheme_data" => [
-                "primary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['primary_seed_color'],
-                "secondary_seed_color" => $response->json()['theme_data_settings']['dark_scheme_data']['secondary_seed_color'],
-            ],
-            "light_scheme_data" => [
-                "primary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['primary_seed_color'],
-                "secondary_seed_color" => $response->json()['theme_data_settings']['light_scheme_data']['secondary_seed_color'],
-            ]
+            "brightness_default" => $response->json()['theme_data_settings']['brightness_default'],
+            "primary_seed_color" => $response->json()['theme_data_settings']['primary_seed_color'],
+            "secondary_seed_color" => $response->json()['theme_data_settings']['secondary_seed_color'],
         ];
 
         $check_values = [
-            "dark_scheme_data" => [
-                "primary_seed_color" => "#CCCCCC",
-                "secondary_seed_color" => $this->tenant->dark_scheme_data_secondary,
-            ],
-            "light_scheme_data" => [
-                "primary_seed_color" => $this->tenant->light_scheme_data_primary,
-                "secondary_seed_color" => "#999999",
-            ],
+            "brightness_default" => "dark",
+            "primary_seed_color" => $this->tenant->theme_primary_seed_color,
+            "secondary_seed_color" => $this->tenant->theme_secondary_seed_color,
         ];
 
         AssertEquals($resultData, $check_values);
@@ -107,8 +82,8 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
             "icons"
         ]);
 
-        assertEquals($this->tenant->light_scheme_data_primary, $response->json()['theme_color']);
-        assertEquals($this->tenant->light_scheme_data_primary, $response->json()['background_color']);
+        assertEquals('#FFFFFF', $response->json()['theme_color']);
+        assertEquals('#FFFFFF', $response->json()['background_color']);
         ;
         assertcount(3, $response->json()['icons']);
         assertEquals(['src', 'sizes', 'type'], array_keys($response->json()['icons'][0]));
@@ -189,17 +164,14 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
         $light_logo_uri = UploadedFile::fake()->image('light-logo.png', 100, 400);
         $dark_logo_uri = UploadedFile::fake()->image('dark-logo.png', 200, 200);
 
-        $this->tenant->dark_scheme_data_secondary = fake()->hexColor();
-        $this->tenant->light_scheme_data_primary = fake()->hexColor();
+        $this->tenant->theme_secondary_seed_color = fake()->hexColor();
+        $this->tenant->theme_primary_seed_color = fake()->hexColor();
 
         return [
             "theme_data_settings" => [
-                "dark_scheme_data" => [
-                    'secondary_seed_color' => $this->tenant->dark_scheme_data_secondary,
-                ],
-                "light_scheme_data" => [
-                    'primary_seed_color' => $this->tenant->light_scheme_data_primary,
-                ],
+                'brightness_default' => 'dark',
+                'primary_seed_color' => $this->tenant->theme_primary_seed_color,
+                'secondary_seed_color' => $this->tenant->theme_secondary_seed_color,
             ],
             'logo_settings' => [
                 'light_logo_uri' => $light_logo_uri,

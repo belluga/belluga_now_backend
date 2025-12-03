@@ -45,14 +45,9 @@ class TenantBrandingManagementServiceTest extends TestCase
                 'dark_logo_uri' => 'https://cdn.example/dark.svg',
             ],
             'theme_data_settings' => [
-                'light_scheme_data' => [
-                    'primary_seed_color' => '#ffffff',
-                    'secondary_seed_color' => '#dddddd',
-                ],
-                'dark_scheme_data' => [
-                    'primary_seed_color' => '#111111',
-                    'secondary_seed_color' => '#333333',
-                ],
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#ffffff',
+                'secondary_seed_color' => '#dddddd',
             ],
         ];
 
@@ -62,7 +57,7 @@ class TenantBrandingManagementServiceTest extends TestCase
             'https://cdn.example/light.svg',
             $branding['logo_settings']['light_logo_uri']
         );
-        $this->assertSame('#111111', $branding['theme_data_settings']['dark_scheme_data']['primary_seed_color']);
+        $this->assertSame('#ffffff', $branding['theme_data_settings']['primary_seed_color']);
     }
 
     public function testUpdateDoesNotOverwriteWithEmptyValues(): void
@@ -73,14 +68,9 @@ class TenantBrandingManagementServiceTest extends TestCase
                 'dark_logo_uri' => 'https://existing/dark.svg',
             ],
             'theme_data_settings' => [
-                'light_scheme_data' => [
-                    'primary_seed_color' => '#abcdef',
-                    'secondary_seed_color' => '#fedcba',
-                ],
-                'dark_scheme_data' => [
-                    'primary_seed_color' => '#123456',
-                    'secondary_seed_color' => '#654321',
-                ],
+                'brightness_default' => 'dark',
+                'primary_seed_color' => '#abcdef',
+                'secondary_seed_color' => '#654321',
             ],
             'pwa_icon' => [
                 'source_uri' => 'https://existing/pwa.png',
@@ -97,12 +87,8 @@ class TenantBrandingManagementServiceTest extends TestCase
                 'dark_logo_uri' => 'https://cdn.example/new-dark.svg',
             ],
             'theme_data_settings' => [
-                'light_scheme_data' => [
-                    'primary_seed_color' => '',
-                ],
-                'dark_scheme_data' => [
-                    'secondary_seed_color' => '#000000',
-                ],
+                'primary_seed_color' => '',
+                'secondary_seed_color' => '#000000',
             ],
         ];
 
@@ -118,7 +104,7 @@ class TenantBrandingManagementServiceTest extends TestCase
         );
         $this->assertSame(
             '#000000',
-            $branding['theme_data_settings']['dark_scheme_data']['secondary_seed_color']
+            $branding['theme_data_settings']['secondary_seed_color']
         );
     }
 
@@ -164,8 +150,9 @@ class TenantBrandingManagementServiceTest extends TestCase
             role: ['name' => 'Root', 'permissions' => ['*']],
             user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
             themeDataSettings: [
-                'light_scheme_data' => ['primary_seed_color' => '#fff', 'secondary_seed_color' => '#000'],
-                'dark_scheme_data' => ['primary_seed_color' => '#000', 'secondary_seed_color' => '#fff'],
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#fff',
+                'secondary_seed_color' => '#000',
             ],
             logoSettings: ['light_logo_uri' => '/logos/light.png'],
             pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],

@@ -57,25 +57,36 @@ class TenantLabels extends Labels {
         }
     }
 
-    public string $dark_scheme_data_secondary {
+    public string $theme_brightness_default {
         get{
-            return $this->getGlobal($this->base_label. ".dark_scheme_data_secondary");
+            return $this->getGlobal($this->base_label. ".theme_brightness_default");
         }
 
         set(string $value) {
-            $this->setGlobal($this->base_label. ".dark_scheme_data_secondary", $value);
-            $this->dark_scheme_data_secondary = $value;
+            $this->setGlobal($this->base_label. ".theme_brightness_default", $value);
+            $this->theme_brightness_default = $value;
         }
     }
 
-    public string $light_scheme_data_primary {
+    public string $theme_primary_seed_color {
         get{
-            return $this->getGlobal($this->base_label. ".light_scheme_data_primary");
+            return $this->getGlobal($this->base_label. ".theme_primary_seed_color");
         }
 
         set(string $value) {
-            $this->setGlobal($this->base_label . ".light_scheme_data_primary", $value);
-            $this->light_scheme_data_primary = $value;
+            $this->setGlobal($this->base_label . ".theme_primary_seed_color", $value);
+            $this->theme_primary_seed_color = $value;
+        }
+    }
+
+    public string $theme_secondary_seed_color {
+        get{
+            return $this->getGlobal($this->base_label. ".theme_secondary_seed_color");
+        }
+
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".theme_secondary_seed_color", $value);
+            $this->theme_secondary_seed_color = $value;
         }
     }
 

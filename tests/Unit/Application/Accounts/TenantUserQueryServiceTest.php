@@ -184,8 +184,9 @@ class TenantUserQueryServiceTest extends TestCase
             role: ['name' => 'Root', 'permissions' => ['*']],
             user: ['name' => 'Root User', 'email' => 'root.tenant@example.org', 'password' => 'Secret!234'],
             themeDataSettings: [
-                'light_scheme_data' => ['primary_seed_color' => '#fff', 'secondary_seed_color' => '#000'],
-                'dark_scheme_data' => ['primary_seed_color' => '#000', 'secondary_seed_color' => '#fff'],
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#fff',
+                'secondary_seed_color' => '#000',
             ],
             logoSettings: ['light_logo_uri' => '/logos/light.png'],
             pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],

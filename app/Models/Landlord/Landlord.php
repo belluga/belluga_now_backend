@@ -44,8 +44,8 @@ class Landlord extends Model
             'description'      => $this->description,
             'start_url'        => '/',
             'display'          => 'standalone',
-            'background_color' => $this->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color'],
-            'theme_color'      => $this->branding_data["theme_data_settings"]['light_scheme_data']['primary_seed_color']
+            'background_color' => $this->branding_data["theme_data_settings"]['primary_seed_color'] ?? '',
+            'theme_color'      => $this->branding_data["theme_data_settings"]['primary_seed_color'] ?? ''
         ];
     }
 }
