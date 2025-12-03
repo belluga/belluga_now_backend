@@ -6,6 +6,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -96,5 +97,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->renderable(function (NotFoundHttpException $e) {
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
+        });
+        $exceptions->renderable(function (NoCurrentTenant $e) {
+            return response()->json(['message' => 'Tenant not found for this host.'], 400);
         });
     })->create();
