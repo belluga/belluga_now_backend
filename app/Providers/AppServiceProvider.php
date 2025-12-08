@@ -15,6 +15,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
+use App\Application\Tenants\TenantDomainResolverService;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -23,6 +24,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->singleton(TenantDomainResolverService::class, function ($app) {
+            return new TenantDomainResolverService();
+        });
+
         $this->app->bind(
             ResetPasswordRequestContract::class,
             ResetPasswordRequestLandlord::class

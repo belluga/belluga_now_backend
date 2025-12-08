@@ -41,6 +41,7 @@ trait EnsuresSystemInitialization
         $this->landlord->role_superadmin->name = $data['role']['name'] ?? 'Super Admin';
         $this->landlord->role_superadmin->id = $data['role']['id'];
         $this->landlord->tenant_primary->slug = $data['tenant']['slug'];
+        $this->landlord->tenant_primary->subdomain = $data['tenant']['subdomain'] ?? $this->landlord->tenant_primary->subdomain;
         $this->landlord->tenant_primary->id = $data['tenant']['id'];
         $this->landlord->tenant_primary->role_admin->id = $data['tenant']['role_admin_id'];
 
@@ -74,6 +75,7 @@ trait EnsuresSystemInitialization
 
         if ($tenant) {
             $this->landlord->tenant_primary->slug = $tenant->slug;
+            $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
             $this->landlord->tenant_primary->id = (string) $tenant->_id;
             $this->landlord->tenant_primary->role_admin->id = $tenant->roleTemplates()->first()?->_id ?? '';
             $tenant->makeCurrent();

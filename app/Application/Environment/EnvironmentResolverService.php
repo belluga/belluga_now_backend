@@ -22,7 +22,11 @@ class EnvironmentResolverService
         if ($tenant) {
             $tenant->makeCurrent();
 
-            return $this->tenantEnvironment($tenant);
+            return $this->tenantEnvironment(
+                tenant: $tenant,
+                requestRoot: $input['request_root'] ?? null,
+                requestHost: $input['request_host'] ?? null
+            );
         }
 
         return $this->landlordEnvironment($input['request_root'] ?? null);
@@ -40,19 +44,25 @@ class EnvironmentResolverService
     /**
      * @return array<string, mixed>
      */
-    private function tenantEnvironment(Tenant $tenant): array
+    private function tenantEnvironment(Tenant $tenant, ?string $requestRoot, ?string $requestHost): array
     {
         $landlord = Landlord::singleton();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
         );
+        $mainDomain = $tenant->getMainDomain();
+        if ($requestRoot) {
+            $mainDomain = $this->forceHttps($requestRoot);
+        } elseif ($requestHost) {
+            $mainDomain = $this->forceHttps($requestHost);
+        }
 
         return [
             'name' => $tenant->name,
             'type' => 'tenant',
             'subdomain' => $tenant->subdomain,
-            'main_domain' => $tenant->getMainDomain(),
+            'main_domain' => $mainDomain,
             'domains' => $tenant->domains()->get()->all(),
             'app_domains' => $tenant->app_domains,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
@@ -71,7 +81,8 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $branding = $landlord->branding_data ?? [];
 
-        $mainDomain = $requestRoot ? Str::replace('http://', 'https://', $requestRoot) : config('app.url');
+        $domainSource = $requestRoot ?? (string) config('app.url');
+        $mainDomain = $this->forceHttps($domainSource);
 
         return [
             'name' => $landlord->name,
@@ -105,5 +116,17 @@ class EnvironmentResolverService
         }
 
         return $branding['pwa_icon']['icon512_uri'] ?? null;
+    }
+
+    private function forceHttps(?string $domain): ?string
+    {
+        if (! $domain) {
+            return null;
+        }
+
+        $normalized = Str::replace(['http://', 'https://'], '', $domain);
+        $normalized = trim($normalized, '/');
+
+        return $normalized === '' ? null : 'https://' . $normalized;
     }
 }

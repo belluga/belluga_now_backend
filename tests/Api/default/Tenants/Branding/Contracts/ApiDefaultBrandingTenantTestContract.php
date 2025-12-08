@@ -10,6 +10,18 @@ use function PHPUnit\Framework\assertEquals;
 
 abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
 
+    private bool $tenantBrandingMutated = false;
+
+    protected function tearDown(): void
+    {
+        if ($this->tenantBrandingMutated) {
+            $this->resetTenantBrandingToDefaults();
+            $this->tenantBrandingMutated = false;
+        }
+
+        parent::tearDown();
+    }
+
     public function testDefaultBranding() {
         $response = $this->_getBranding();
         $response->assertStatus(200);
@@ -130,12 +142,16 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
     }
 
     protected function _updateBranding(): TestResponse {
-        return $this->json(
+        $response = $this->json(
             method: 'post',
             uri: "{$this->base_api_tenant}branding/update",
             data: $this->_payloadBrandingUpdate(),
             headers: $this->getHeaders(),
         );
+
+        $this->tenantBrandingMutated = true;
+
+        return $response;
     }
 
     protected function _getFavicon(): TestResponse {
@@ -179,6 +195,34 @@ abstract class ApiDefaultBrandingTenantTestContract extends TestCaseTenant {
                 'favicon_uri' => $landlord_favicon,
             ],
             'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
+        ];
+    }
+    private function resetTenantBrandingToDefaults(): void
+    {
+        $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}branding/update",
+            data: $this->defaultBrandingPayload(),
+            headers: $this->getHeaders(),
+        );
+    }
+
+    private function defaultBrandingPayload(): array
+    {
+        $favicon = UploadedFile::fake()->create('reset-favicon.ico', 10, 'image/vnd.microsoft.icon');
+
+        return [
+            'theme_data_settings' => [
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#FFFFFF',
+                'secondary_seed_color' => '#999999',
+            ],
+            'logo_settings' => [
+                'light_logo_uri' => UploadedFile::fake()->image('reset-light-logo.png', 350, 512),
+                'dark_logo_uri' => UploadedFile::fake()->image('reset-dark-logo.png', 350, 512),
+                'favicon_uri' => $favicon,
+            ],
+            'pwa_icon' => UploadedFile::fake()->image('reset-pwa-icon.png', 512, 512),
         ];
     }
 }
