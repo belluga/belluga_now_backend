@@ -2,16 +2,19 @@
 
 namespace App\Http\Middleware;
 
+use App\Actions\DomainTenantFinder;
 use Closure;
 
 class InitializeTenancy
 {
+    public function __construct(private readonly DomainTenantFinder $tenantFinder)
+    {
+    }
+
     public function handle($request, Closure $next)
     {
 
-        $tenant_find_class = config('multitenancy.tenant_finder');
-
-        $tenant = new $tenant_find_class()->findForRequest($request);
+        $tenant = $this->tenantFinder->findForRequest($request);
 
         if($tenant){
             $tenant->makeCurrent();

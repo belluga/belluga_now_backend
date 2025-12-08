@@ -10,6 +10,18 @@ use function PHPUnit\Framework\assertEquals;
 
 class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
 
+    private bool $brandingMutated = false;
+
+    protected function tearDown(): void
+    {
+        if ($this->brandingMutated) {
+            $this->resetBrandingToDefaults();
+            $this->brandingMutated = false;
+        }
+
+        parent::tearDown();
+    }
+
     public function testBranding() {
         $response = $this->_getBranding();
         $response->assertStatus(200);
@@ -113,12 +125,16 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
     }
 
     protected function _updateBranding(): TestResponse {
-        return $this->json(
+        $response = $this->json(
             method: 'post',
             uri: "admin/api/branding/update",
             data: $this->_payloadBrandingUpdate(),
             headers: $this->getHeaders(),
         );
+
+        $this->brandingMutated = true;
+
+        return $response;
     }
 
     protected function _getFavicon(): TestResponse {
@@ -163,6 +179,33 @@ class ApiDefaultBrandingAdminTest extends TestCaseAuthenticated {
                 'favicon_uri' => $landlord_favicon,
             ],
             'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
+        ];
+    }
+
+    private function resetBrandingToDefaults(): void
+    {
+        $this->json(
+            method: 'post',
+            uri: 'admin/api/branding/update',
+            data: $this->defaultBrandingPayload(),
+            headers: $this->getHeaders(),
+        );
+    }
+
+    private function defaultBrandingPayload(): array
+    {
+        return [
+            'theme_data_settings' => [
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#FFFFFF',
+                'secondary_seed_color' => '#999999',
+            ],
+            'logo_settings' => [
+                'light_logo_uri' => UploadedFile::fake()->image('default-light-logo.png', 350, 512),
+                'dark_logo_uri' => UploadedFile::fake()->image('default-dark-logo.png', 400, 512),
+                'favicon_uri' => UploadedFile::fake()->create('default-favicon.ico', 24, 'image/vnd.microsoft.icon'),
+            ],
+            'pwa_icon' => UploadedFile::fake()->image('default-pwa-icon.png', 1024, 1024),
         ];
     }
 }

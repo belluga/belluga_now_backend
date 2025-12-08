@@ -30,7 +30,17 @@ class TenantLabels extends Labels {
     }
 
     public string $subdomain {
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".subdomain", $value);
+            $this->subdomain = $value;
+        }
         get {
+            $persistedSubdomain = $this->getGlobal($this->base_label . ".subdomain");
+
+            if ($persistedSubdomain) {
+                return $persistedSubdomain;
+            }
+
             return Str::slug($this->name);
         }
     }

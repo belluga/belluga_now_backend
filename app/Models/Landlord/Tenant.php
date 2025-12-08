@@ -46,14 +46,18 @@ class Tenant extends BaseTenant
         return $this->hasMany(TenantRoleTemplate::class);
     }
 
-    public function getMainDomain(): string {
-        $main_domain = $this?->domains()?->first()?->domain;
+    public function getMainDomain(): string
+    {
+        $primaryDomain = $this->primaryDomainFromRelation()
+            ?? $this->primaryDomainFromEmbeddedArray();
 
-        if($main_domain) {
-            return "https://".$main_domain;
+        if ($primaryDomain) {
+            return $this->formatAsHttpsDomain($primaryDomain);
         }
 
-        return "https://".$this->subdomain.".".Str::replace("https://", "", config('app.url'));
+        $landlordHost = Str::replace(['https://', 'http://'], '', (string) config('app.url'));
+
+        return $this->formatAsHttpsDomain($this->subdomain . '.' . $landlordHost);
     }
 
     public function domains(): HasMany
@@ -166,6 +170,72 @@ class Tenant extends BaseTenant
             '--force' => true
         ]);
 
+    }
+
+    private function primaryDomainFromRelation(): ?string
+    {
+        $mainDomain = $this->domains()
+            ->where('main', true)
+            ->orderBy('created_at')
+            ->first();
+
+        if ($mainDomain?->path) {
+            return $mainDomain->path;
+        }
+
+        $firstDomain = $this->domains()
+            ->orderBy('created_at')
+            ->first();
+
+        return $firstDomain?->path;
+    }
+
+    private function primaryDomainFromEmbeddedArray(): ?string
+    {
+        $domains = $this->getAttribute('domains') ?? [];
+
+        if (! is_array($domains) || $domains === []) {
+            return null;
+        }
+
+        foreach ($domains as $domain) {
+            if (is_array($domain) && ($domain['main'] ?? false)) {
+                return $domain['path'] ?? $domain['domain'] ?? null;
+            }
+        }
+
+        $first = $domains[0];
+
+        if (is_array($first)) {
+            return $first['path'] ?? $first['domain'] ?? null;
+        }
+
+        return is_string($first) ? $first : null;
+    }
+
+    private function formatAsHttpsDomain(string $domain): string
+    {
+        $normalized = Str::replace(['https://', 'http://'], '', $domain);
+        $normalized = trim($normalized, '/');
+
+        return 'https://' . $normalized;
+    }
+
+    public function setDomainsAttribute(?array $domains): void
+    {
+        if ($domains === null) {
+            $this->attributes['domains'] = null;
+
+            return;
+        }
+
+        $this->attributes['domains'] = array_map(static function ($domain) {
+            if (is_string($domain)) {
+                return Str::lower(trim($domain));
+            }
+
+            return $domain;
+        }, $domains);
     }
 
     protected $casts = [];

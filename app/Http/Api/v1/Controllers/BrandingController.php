@@ -61,4 +61,14 @@ class BrandingController extends Controller
     {
         return $this->brandingService->assetResponse($this->getPwaIconParameter('icon512_uri'));
     }
+
+    public function getIconLight(): Response|BinaryFileResponse
+    {
+        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('light_icon_uri'));
+    }
+
+    public function getIconDark(): Response|BinaryFileResponse
+    {
+        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('dark_icon_uri'));
+    }
 }

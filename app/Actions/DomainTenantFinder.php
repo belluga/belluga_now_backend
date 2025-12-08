@@ -7,10 +7,15 @@ namespace App\Actions;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
 use Spatie\Multitenancy\TenantFinder\TenantFinder;
+use App\Application\Tenants\TenantDomainResolverService;
 
 class DomainTenantFinder extends TenantFinder
 {
     private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
+
+    public function __construct(private readonly TenantDomainResolverService $domainResolver)
+    {
+    }
 
     public function findForRequest(Request $request): ?IsTenant
     {
@@ -34,7 +39,8 @@ class DomainTenantFinder extends TenantFinder
     protected function findTenantByWebDomain(): ?IsTenant
     {
         $domain = request()->getHost();
-        return app(IsTenant::class)::where('domains', 'all', [$domain])->first();
+
+        return $this->domainResolver->findTenantByDomain($domain);
     }
 
     protected function findTenantBySubdomain(): ?IsTenant
