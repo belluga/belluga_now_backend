@@ -71,7 +71,10 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $branding = $landlord->branding_data ?? [];
 
-        $mainDomain = $requestRoot ? Str::replace('http://', 'https://', $requestRoot) : config('app.url');
+        // Prefer the actual request root when provided (e.g., for local dev, reverse proxies, and tests),
+        // and fall back to configured app URL when request context is unavailable.
+        $primaryDomain = $requestRoot ?: config('app.url');
+        $mainDomain = $primaryDomain ? $this->forceHttps($primaryDomain) : null;
 
         return [
             'name' => $landlord->name,
@@ -105,5 +108,13 @@ class EnvironmentResolverService
         }
 
         return $branding['pwa_icon']['icon512_uri'] ?? null;
+    }
+
+    private function forceHttps(string $domain): string
+    {
+        $normalized = Str::replace(['http://', 'https://'], '', $domain);
+        $normalized = trim($normalized, '/');
+
+        return 'https://' . $normalized;
     }
 }

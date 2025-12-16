@@ -7,6 +7,7 @@ namespace App\Actions;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
 use Spatie\Multitenancy\TenantFinder\TenantFinder;
+use App\Models\Landlord\Domains;
 
 class DomainTenantFinder extends TenantFinder
 {
@@ -14,14 +15,18 @@ class DomainTenantFinder extends TenantFinder
 
     public function findForRequest(Request $request): ?IsTenant
     {
+        info('[DomainTenantFinder] host='.$request->getHost().' headers='.json_encode($request->headers->all()));
         if($this->isRequestFromSubdomain()){
+            info('[DomainTenantFinder] resolving by subdomain');
             return $this->findTenantBySubdomain();
         }
 
         if($this->isRequestFromApp()){
+            info('[DomainTenantFinder] resolving by app domain');
             return $this->findTenantByAppDomain();
         }
 
+        info('[DomainTenantFinder] resolving by web domain');
         return $this->findTenantByWebDomain();
     }
 
@@ -34,7 +39,22 @@ class DomainTenantFinder extends TenantFinder
     protected function findTenantByWebDomain(): ?IsTenant
     {
         $domain = request()->getHost();
-        return app(IsTenant::class)::where('domains', 'all', [$domain])->first();
+        // First check inline domains array
+        $tenant = app(IsTenant::class)::where('domains', 'all', [$domain])->first();
+
+        if ($tenant !== null) {
+          info('[DomainTenantFinder] found tenant via domains array: '.$tenant->id);
+          return $tenant;
+        }
+
+        // Fallback: check domains collection (landlord connection)
+        $domainEntry = Domains::where('path', $domain)->first();
+        if ($domainEntry) {
+          info('[DomainTenantFinder] found tenant via domains collection: '.$domainEntry->tenant_id);
+        } else {
+          info('[DomainTenantFinder] no tenant found for domain '.$domain);
+        }
+        return $domainEntry?->tenant;
     }
 
     protected function findTenantBySubdomain(): ?IsTenant

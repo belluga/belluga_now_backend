@@ -19,6 +19,7 @@ class EnvironmentController extends Controller
         $resolved = $this->environmentService->resolve([
             ...$request->validated(),
             'request_root' => $request->root(),
+            'request_host' => $request->getHost(),
         ]);
 
         return response()->json($resolved);
