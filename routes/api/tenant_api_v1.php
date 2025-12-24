@@ -1,13 +1,15 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
+use App\Http\Api\v1\Controllers\MeController;
+use App\Http\Api\v1\Controllers\PushDeviceController;
+use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
 use App\Http\Api\v1\Controllers\TenantBrandingController;
@@ -33,6 +35,12 @@ Route::prefix('anonymous')
     ->group(function () {
         Route::post('/identities', [AnonymousIdentityController::class, 'store']);
     });
+
+Route::get('/me', [MeController::class, 'tenant'])
+    ->middleware('auth:sanctum');
+
+Route::post('/push/register', [PushDeviceController::class, 'register'])
+    ->middleware('auth:sanctum');
 
 Route::prefix('auth')
     ->group(function () {

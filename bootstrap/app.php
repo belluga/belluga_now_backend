@@ -4,6 +4,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
@@ -18,6 +19,21 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/healh',
         then: function () {
+            $registerProjectRoutes = static function (string $prefix, array|string $middleware, string $path, string $label): void {
+                if (file_exists($path)) {
+                    Route::prefix($prefix)
+                        ->middleware($middleware)
+                        ->group($path);
+
+                    return;
+                }
+
+                Log::warning('Project route file missing; routes not registered.', [
+                    'label' => $label,
+                    'path' => $path,
+                ]);
+            };
+
             Route::prefix('api/v1/initialize')
                 ->middleware('guest')
                 ->group(base_path('routes/api/initialize.php'));
@@ -30,6 +46,10 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->middleware('tenant')
                 ->group(base_path('routes/api/tenant_api_v1.php'));
 
+            Route::prefix('api/v1')
+                ->middleware('tenant-maybe')
+                ->group(base_path('routes/api/public_tenant_maybe_api_v1.php'));
+
             Route::prefix('api/v1/accounts/{account_slug}')
                 ->middleware(['tenant'])
                 ->group(base_path('routes/api/account_api_v1.php'));
@@ -38,17 +58,40 @@ return Application::configure(basePath: dirname(__DIR__))
 //                ->middleware('api')
                 ->group(base_path('routes/api/api_v2.php'));
 
-            Route::prefix('admin/api')
-                ->middleware('landlord')
-                ->group(base_path('routes/api/landlord_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
+            $registerProjectRoutes(
+                'api/v1/initialize',
+                'guest',
+                base_path('routes/api/project_initialize.php'),
+                'project_initialize'
+            );
 
-            Route::prefix('api')
-                ->middleware('tenant')
-                ->group(base_path('routes/api/tenant_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
+            $registerProjectRoutes(
+                'api/v1',
+                'tenant-maybe',
+                base_path('routes/api/project_public_api_v1.php'),
+                'project_public_api_v1'
+            );
 
-            Route::prefix('api/accounts/{account_slug}')
-                ->middleware(['tenant'])
-                ->group(base_path('routes/api/account_api_'. env('API_DEFAULT_VERSION', 'v1').'.php'));
+            $registerProjectRoutes(
+                'admin/api/v1',
+                'landlord',
+                base_path('routes/api/project_landlord_api_v1.php'),
+                'project_landlord_api_v1'
+            );
+
+            $registerProjectRoutes(
+                'api/v1',
+                'tenant',
+                base_path('routes/api/project_tenant_api_v1.php'),
+                'project_tenant_api_v1'
+            );
+
+            $registerProjectRoutes(
+                'api/v1/accounts/{account_slug}',
+                ['tenant'],
+                base_path('routes/api/project_account_api_v1.php'),
+                'project_account_api_v1'
+            );
         }
     )
     ->withMiddleware(function (Middleware $middleware) {

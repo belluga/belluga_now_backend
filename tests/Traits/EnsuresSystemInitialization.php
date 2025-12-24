@@ -59,7 +59,10 @@ trait EnsuresSystemInitialization
         $role = LandlordRole::query()->first();
 
         if ($user) {
-            $token = $user->createToken('Test Token')->plainTextToken;
+            $token = $user->createToken(
+                'Test Token',
+                $this->sanitizeAbilities($user->getPermissions())
+            )->plainTextToken;
             $this->landlord->user_superadmin->name = $user->name;
             $this->landlord->user_superadmin->email_1 = $user->emails[0] ?? $user->email ?? '';
             $this->landlord->user_superadmin->user_id = (string) $user->_id;
@@ -158,7 +161,10 @@ trait EnsuresSystemInitialization
             ]);
         }
 
-        $adminToken = $crossAdmin->createToken('Test Token')->plainTextToken;
+        $adminToken = $crossAdmin->createToken(
+            'Test Token',
+            $this->sanitizeAbilities($crossAdmin->getPermissions())
+        )->plainTextToken;
 
         $this->landlord->user_cross_tenant_admin->name = $crossAdmin->name;
         $this->landlord->user_cross_tenant_admin->email_1 = $crossAdmin->emails[0] ?? $adminEmail;
@@ -179,13 +185,29 @@ trait EnsuresSystemInitialization
             ]);
         }
 
-        $visitorToken = $crossVisitor->createToken('Test Token')->plainTextToken;
+        $visitorToken = $crossVisitor->createToken(
+            'Test Token',
+            $this->sanitizeAbilities($crossVisitor->getPermissions())
+        )->plainTextToken;
 
         $this->landlord->user_cross_tenant_visitor->name = $crossVisitor->name;
         $this->landlord->user_cross_tenant_visitor->email_1 = $crossVisitor->emails[0] ?? $visitorEmail;
         $this->landlord->user_cross_tenant_visitor->user_id = (string) $crossVisitor->_id;
         $this->landlord->user_cross_tenant_visitor->password = 'Secret!234';
         $this->landlord->user_cross_tenant_visitor->token = $visitorToken;
+    }
+
+    /**
+     * @param array<int, string> $abilities
+     * @return array<int, string>
+     */
+    private function sanitizeAbilities(array $abilities): array
+    {
+        if (in_array('*', $abilities, true)) {
+            return \App\Support\Auth\AbilityCatalog::all();
+        }
+
+        return $abilities;
     }
 
 }

@@ -35,7 +35,7 @@ trait AccountAuthFunctions
     }
 
     protected function accountLoginRaw(TenantLabels $tenant, UserLabels $user, string $device_name = "default"): TestResponse {
-        $force_base_api = "http://{$tenant->subdomain}.{$this->host}/api/";
+        $force_base_api = "http://{$tenant->subdomain}.{$this->host}/api/v1/";
         $response = $this->json(
             method: 'post',
             uri: "{$force_base_api}auth/login",

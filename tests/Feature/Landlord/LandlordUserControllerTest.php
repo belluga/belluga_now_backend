@@ -28,7 +28,7 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
             'role_id' => $this->landlord->role_users_manager->id,
         ];
 
-        $response = $this->json('post', 'admin/api/users', $payload, $this->getHeaders());
+        $response = $this->json('post', 'admin/api/v1/users', $payload, $this->getHeaders());
 
         $response->assertStatus(201)
             ->assertJsonPath('data.name', 'Support Staff');
@@ -41,7 +41,7 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
 
         $response = $this->json(
             'get',
-            'admin/api/users?filter[name]=Filter Target',
+            'admin/api/v1/users?filter[name]=Filter Target',
             [],
             $this->getHeaders()
         );
@@ -55,10 +55,10 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
         $this->createLandlordUser('Alpha Staff', 'alpha.staff@example.org');
         $this->createLandlordUser('Zulu Staff', 'zulu.staff@example.org');
 
-        $baseline = $this->json('get', 'admin/api/users', [], $this->getHeaders());
+        $baseline = $this->json('get', 'admin/api/v1/users', [], $this->getHeaders());
         $fallback = $this->json(
             'get',
-            'admin/api/users?sort=-unsupported',
+            'admin/api/v1/users?sort=-unsupported',
             [],
             $this->getHeaders()
         );
@@ -81,6 +81,6 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
             'role_id' => $this->landlord->role_users_manager->id,
         ];
 
-        $this->json('post', 'admin/api/users', $payload, $this->getHeaders())->assertStatus(201);
+        $this->json('post', 'admin/api/v1/users', $payload, $this->getHeaders())->assertStatus(201);
     }
 }

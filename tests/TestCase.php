@@ -24,7 +24,7 @@ abstract class TestCase extends BaseTestCase {
 
     protected string $api_url_admin {
         get {
-            return "admin/api";
+            return "admin/api/v1";
         }
     }
 

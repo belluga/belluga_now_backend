@@ -59,6 +59,7 @@ class EnvironmentResolverService
         }
 
         return [
+            'tenant_id' => (string) $tenant->_id,
             'name' => $tenant->name,
             'type' => 'tenant',
             'subdomain' => $tenant->subdomain,

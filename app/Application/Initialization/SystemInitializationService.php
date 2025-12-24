@@ -12,7 +12,9 @@ use App\Application\Initialization\Actions\RegisterAdministratorUserAction;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
+use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SystemInitializationService
 {
@@ -48,6 +50,7 @@ class SystemInitializationService
             );
 
             $adminRole = $this->createAdminRole->execute($payload->role);
+            $this->warnOnWildcardRolePermissions($adminRole->permissions ?? []);
 
             $tenantTemplate = $this->createTenantTemplate->execute($tenant);
 
@@ -57,7 +60,10 @@ class SystemInitializationService
                 $tenantTemplate
             );
 
-            $token = $user->createToken('Initialization Token')->plainTextToken;
+            $token = $user->createToken(
+                'Initialization Token',
+                $this->sanitizeAbilities($user->getPermissions())
+            )->plainTextToken;
 
             return new InitializationResult(
                 $landlord,
@@ -68,5 +74,30 @@ class SystemInitializationService
                 $token
             );
         });
+    }
+
+    /**
+     * @param array<int, string> $abilities
+     * @return array<int, string>
+     */
+    private function sanitizeAbilities(array $abilities): array
+    {
+        if (in_array('*', $abilities, true)) {
+            return AbilityCatalog::all();
+        }
+
+        return $abilities;
+    }
+
+    /**
+     * @param array<int, string> $permissions
+     */
+    private function warnOnWildcardRolePermissions(array $permissions): void
+    {
+        if (in_array('*', $permissions, true)) {
+            Log::warning('Wildcard permission detected in initialization role payload.', [
+                'permissions' => $permissions,
+            ]);
+        }
     }
 }

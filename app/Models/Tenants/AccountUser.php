@@ -37,6 +37,7 @@ class AccountUser extends Authenticatable
         'consents',
         'promotion_audit',
         'merged_source_ids',
+        'devices',
         'version',
     ];
 
@@ -65,6 +66,7 @@ class AccountUser extends Authenticatable
             $user->account_roles ??= [];
             $user->merged_source_ids ??= [];
             $user->promotion_audit ??= [];
+            $user->devices ??= [];
             $user->first_seen_at ??= $now;
             $user->version ??= 1;
 

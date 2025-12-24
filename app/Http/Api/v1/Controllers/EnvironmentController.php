@@ -22,6 +22,29 @@ class EnvironmentController extends Controller
             'request_host' => $request->getHost(),
         ]);
 
-        return response()->json($resolved);
+        $domains = $resolved['domains'] ?? [];
+        if (is_array($domains)) {
+            $domains = array_map(static function ($domain): string {
+                if (is_string($domain)) {
+                    return $domain;
+                }
+
+                return (string) ($domain['path'] ?? $domain->path ?? '');
+            }, $domains);
+            $domains = array_values(array_filter($domains, static fn (string $domain): bool => $domain !== ''));
+        }
+
+        $payload = [
+            'type' => $resolved['type'] ?? null,
+            'tenant_id' => $resolved['tenant_id'] ?? null,
+            'name' => $resolved['name'] ?? null,
+            'subdomain' => $resolved['subdomain'] ?? null,
+            'main_domain' => $resolved['main_domain'] ?? null,
+            'domains' => $domains,
+            'app_domains' => $resolved['app_domains'] ?? [],
+            'theme_data_settings' => $resolved['theme_data_settings'] ?? [],
+        ];
+
+        return response()->json($payload);
     }
 }

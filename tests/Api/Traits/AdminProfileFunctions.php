@@ -9,7 +9,7 @@ trait AdminProfileFunctions {
 
     protected string $profile_api_base {
         get {
-            return "admin/api/";
+            return "admin/api/v1/";
         }
     }
 

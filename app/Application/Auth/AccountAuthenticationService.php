@@ -6,7 +6,9 @@ namespace App\Application\Auth;
 
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Tenants\AccountUser;
+use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AccountAuthenticationService
 {
@@ -18,7 +20,10 @@ class AccountAuthenticationService
             throw new InvalidCredentialsException();
         }
 
-        $token = $user->createToken($deviceName)->plainTextToken;
+        $token = $user->createToken(
+            $deviceName,
+            $this->sanitizeAbilities($user, $user->getPermissions())
+        )->plainTextToken;
 
         return new AuthenticationResult($user, $token);
     }
@@ -42,5 +47,21 @@ class AccountAuthenticationService
             ->where('emails', 'all', [strtolower($email)])
             ->first();
     }
-}
 
+    /**
+     * @param array<int, string> $abilities
+     * @return array<int, string>
+     */
+    private function sanitizeAbilities(AccountUser $user, array $abilities): array
+    {
+        if (in_array('*', $abilities, true)) {
+            Log::warning('Wildcard abilities expanded to explicit list for tenant token.', [
+                'user_id' => (string) $user->_id,
+            ]);
+
+            return AbilityCatalog::all();
+        }
+
+        return $abilities;
+    }
+}

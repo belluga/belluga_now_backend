@@ -56,8 +56,7 @@ class AccountUserAccessService
 
         [$resource, $action] = $parts;
 
-        return in_array('*', $permissions, true)
-            || in_array("$resource:*", $permissions, true)
+        return in_array("$resource:*", $permissions, true)
             || in_array("$resource:$action", $permissions, true);
     }
 

@@ -16,7 +16,7 @@ abstract class TestCaseAuthenticated extends TestCase
 
     protected string $base_api_url {
         get {
-            return "admin/api/";
+            return "admin/api/v1/";
         }
     }
 
