@@ -7,6 +7,7 @@ namespace App\Application\Identity;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class AnonymousIdentityService
 {
@@ -42,6 +43,14 @@ class AnonymousIdentityService
 
         $policy = $tenant->anonymous_access_policy ?? [];
         $abilities = $policy['abilities'] ?? [];
+
+        if (in_array('*', $abilities, true)) {
+            Log::warning('Wildcard abilities rejected for anonymous identity token.', [
+                'abilities' => $abilities,
+                'tenant_id' => (string) $tenant->_id,
+            ]);
+            $abilities = array_values(array_filter($abilities, static fn (string $ability): bool => $ability !== '*'));
+        }
 
         $token = $user->createToken('anonymous:' . $payload['device_name'], $abilities);
         $plainToken = $token->plainTextToken;

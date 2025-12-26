@@ -7,8 +7,10 @@ namespace App\Application\Auth;
 use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Landlord\LandlordUser;
+use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class LandlordAuthenticationService
 {
@@ -25,7 +27,17 @@ class LandlordAuthenticationService
             throw new InvalidCredentialsException();
         }
 
-        $token = $user->createToken($deviceName)->plainTextToken;
+        $abilities = $user->getPermissions();
+        $tenantPermissions = collect($user->tenant_roles ?? [])
+            ->pluck('permissions')
+            ->flatten()
+            ->all();
+        $abilities = array_values(array_unique([...$abilities, ...$tenantPermissions]));
+
+        $token = $user->createToken(
+            $deviceName,
+            $this->sanitizeAbilities($user, $abilities)
+        )->plainTextToken;
 
         return new AuthenticationResult($user, $token);
     }
@@ -62,7 +74,17 @@ class LandlordAuthenticationService
             $this->accessService->ensureEmail($user, $email);
             $this->accessService->syncCredential($user, 'password', $email, (string) $user->password);
 
-            $token = $user->createToken($payload['device_name'])->plainTextToken;
+            $abilities = $user->getPermissions();
+            $tenantPermissions = collect($user->tenant_roles ?? [])
+                ->pluck('permissions')
+                ->flatten()
+                ->all();
+            $abilities = array_values(array_unique([...$abilities, ...$tenantPermissions]));
+
+            $token = $user->createToken(
+                $payload['device_name'],
+                $this->sanitizeAbilities($user, $abilities)
+            )->plainTextToken;
 
             return new AuthenticationResult($user->fresh(), $token);
         });
@@ -73,5 +95,22 @@ class LandlordAuthenticationService
         return LandlordUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->first();
+    }
+
+    /**
+     * @param array<int, string> $abilities
+     * @return array<int, string>
+     */
+    private function sanitizeAbilities(LandlordUser $user, array $abilities): array
+    {
+        if (in_array('*', $abilities, true)) {
+            Log::warning('Wildcard abilities expanded to explicit list for landlord token.', [
+                'user_id' => (string) $user->_id,
+            ]);
+
+            return AbilityCatalog::all();
+        }
+
+        return $abilities;
     }
 }

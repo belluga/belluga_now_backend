@@ -32,6 +32,8 @@ trait SeedsLandlordSupportRoles
                 ['name' => $definition['name']],
                 ['permissions' => $definition['permissions']]
             );
+            $role->permissions = $definition['permissions'];
+            $role->save();
 
             $this->landlord->{$property}->name = $role->name;
             $this->landlord->{$property}->id = (string) $role->_id;

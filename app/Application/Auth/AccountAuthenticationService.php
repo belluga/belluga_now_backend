@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Application\Auth;
 
 use App\Exceptions\Auth\InvalidCredentialsException;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
+use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AccountAuthenticationService
 {
@@ -18,7 +21,22 @@ class AccountAuthenticationService
             throw new InvalidCredentialsException();
         }
 
-        $token = $user->createToken($deviceName)->plainTextToken;
+        $account = Account::current();
+        if (! $account) {
+            $accessIds = $user->getAccessToIds();
+            if ($accessIds !== []) {
+                $account = Account::query()
+                    ->whereIn('_id', $accessIds)
+                    ->first();
+            }
+        }
+
+        $abilities = $account ? $user->getPermissions($account) : [];
+
+        $token = $user->createToken(
+            $deviceName,
+            $this->sanitizeAbilities($user, $abilities)
+        )->plainTextToken;
 
         return new AuthenticationResult($user, $token);
     }
@@ -42,5 +60,26 @@ class AccountAuthenticationService
             ->where('emails', 'all', [strtolower($email)])
             ->first();
     }
-}
 
+    /**
+     * @param array<int, string> $abilities
+     * @return array<int, string>
+     */
+    private function sanitizeAbilities(AccountUser $user, array $abilities): array
+    {
+        if (in_array('*', $abilities, true)) {
+            Log::warning('Wildcard abilities expanded to explicit list for tenant token.', [
+                'user_id' => (string) $user->_id,
+            ]);
+
+            $catalog = AbilityCatalog::all();
+
+            return array_values(array_filter(
+                $catalog,
+                static fn (string $ability): bool => str_starts_with($ability, 'account-')
+            ));
+        }
+
+        return $abilities;
+    }
+}

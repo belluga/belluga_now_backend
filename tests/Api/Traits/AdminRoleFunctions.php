@@ -10,7 +10,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/roles",
+            uri: "admin/api/v1/roles",
             headers: $this->getHeaders(),
         );
     }
@@ -19,7 +19,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/roles?archived=true",
+            uri: "admin/api/v1/roles?archived=true",
             headers: $this->getHeaders(),
         );
     }
@@ -28,7 +28,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/roles/$roleId",
+            uri: "admin/api/v1/roles/$roleId",
             headers: $this->getHeaders(),
         );
     }
@@ -37,7 +37,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'post',
-            uri: "admin/api/roles",
+            uri: "admin/api/v1/roles",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -47,7 +47,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'patch',
-            uri: "admin/api/roles/$roleId",
+            uri: "admin/api/v1/roles/$roleId",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -57,7 +57,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'delete',
-            uri: "admin/api/roles/$roleId",
+            uri: "admin/api/v1/roles/$roleId",
             data: [
                 "role_id" => $this->landlord->role_visitor->id,
             ],
@@ -69,7 +69,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'delete',
-            uri: "admin/api/roles/$roleId/force_delete",
+            uri: "admin/api/v1/roles/$roleId/force_delete",
             headers: $this->getHeaders(),
         );
     }
@@ -78,7 +78,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'post',
-            uri: "admin/api/roles/$roleId/restore",
+            uri: "admin/api/v1/roles/$roleId/restore",
             headers: $this->getHeaders(),
         );
     }

@@ -9,7 +9,9 @@ use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Landlord\Tenant;
+use App\Support\Auth\AbilityCatalog;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
@@ -70,7 +72,17 @@ class TenantPasswordRegistrationService
             $this->mergeAnonymousUsers($user, $anonymousUsers);
         }
 
-        $token = $user->createToken('auth:password-register');
+        $abilities = [];
+        try {
+            $abilities = $user->getPermissions();
+        } catch (AuthenticationException) {
+            $abilities = [];
+        }
+
+        $token = $user->createToken(
+            'auth:password-register',
+            $this->sanitizeAbilities($abilities)
+        );
         $plainToken = $token->plainTextToken;
         $expiresAt = null;
 
@@ -106,5 +118,18 @@ class TenantPasswordRegistrationService
                 usleep(100_000);
             }
         }
+    }
+
+    /**
+     * @param array<int, string> $abilities
+     * @return array<int, string>
+     */
+    private function sanitizeAbilities(array $abilities): array
+    {
+        if (in_array('*', $abilities, true)) {
+            return AbilityCatalog::all();
+        }
+
+        return $abilities;
     }
 }

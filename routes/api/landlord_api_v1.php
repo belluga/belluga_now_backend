@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
 use App\Http\Api\v1\Controllers\LandlordRolesController;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+use App\Http\Api\v1\Controllers\MeController;
 
 Route::prefix('profile')
     ->middleware(['auth:sanctum'])
@@ -24,6 +25,9 @@ Route::prefix('profile')
 
         Route::delete('/phones', [ProfileControllerLandlord::class, 'removePhone']);
 });
+
+Route::get('/me', [MeController::class, 'landlord'])
+    ->middleware('auth:sanctum');
 
 Route::prefix('auth')->group(function () {
 

@@ -22,35 +22,35 @@
             <directory>tests/Unit</directory>
         </testsuite>
         <testsuite name="Initialization">
-            <file>tests/Api/default/Initialization/ApiDefaultInitializeTest.php</file>
+            <file>tests/Api/v1/Initialization/ApiV1InitializeTest.php</file>
         </testsuite>
-        <testsuite name="Api-Default-Admin">
-            <file>tests/Api/default/Admin/ApiDefaultAdminValidationTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminRolesTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminUserTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminAuthTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminProfileTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminTenantTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultBrandingAdminTest.php</file>
+        <testsuite name="Api-v1-Admin">
+            <file>tests/Api/v1/Admin/ApiV1AdminValidationTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminRolesTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminUserTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminAuthTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminProfileTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminTenantTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1BrandingAdminTest.php</file>
         </testsuite>
-        <testsuite name="Api-Default-Tenant">
-            <directory>tests/Api/default/Tenants/Roles</directory>
-            <directory>tests/Api/default/Tenants/Users</directory>
-            <directory>tests/Api/default/Tenants/Account</directory>
-            <directory>tests/Api/default/Tenants/Branding</directory>
-            <directory>tests/Api/default/Tenants/Auth</directory>
+        <testsuite name="Api-v1-Tenant">
+            <directory>tests/Api/v1/Tenants/Roles</directory>
+            <directory>tests/Api/v1/Tenants/Users</directory>
+            <directory>tests/Api/v1/Tenants/Account</directory>
+            <directory>tests/Api/v1/Tenants/Branding</directory>
+            <directory>tests/Api/v1/Tenants/Auth</directory>
         </testsuite>
-        <testsuite name="Api-Default-Account">
-            <directory>tests/Api/default/Accounts/Roles</directory>
-            <directory>tests/Api/default/Accounts/Users</directory>
-            <directory>tests/Api/default/Accounts/Auth</directory>
-            <directory>tests/Api/default/Accounts/Profile</directory>
-            <directory>tests/Api/default/Accounts/Validation</directory>
+        <testsuite name="Api-v1-Account">
+            <directory>tests/Api/v1/Accounts/Roles</directory>
+            <directory>tests/Api/v1/Accounts/Users</directory>
+            <directory>tests/Api/v1/Accounts/Auth</directory>
+            <directory>tests/Api/v1/Accounts/Profile</directory>
+            <directory>tests/Api/v1/Accounts/Validation</directory>
         </testsuite>
-        <testsuite name="Api-Default-Middleware">
-            <file>tests/Api/default/Admin/ApiDefaultAdminMiddlewareTest.php</file>
-            <directory>tests/Api/default/Tenants/Middleware</directory>
-            <directory>tests/Api/default/Accounts/Middleware</directory>
+        <testsuite name="Api-v1-Middleware">
+            <file>tests/Api/v1/Admin/ApiV1AdminMiddlewareTest.php</file>
+            <directory>tests/Api/v1/Tenants/Middleware</directory>
+            <directory>tests/Api/v1/Accounts/Middleware</directory>
         </testsuite>
     </testsuites>
     <source>

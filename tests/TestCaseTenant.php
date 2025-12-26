@@ -17,13 +17,13 @@ abstract class TestCaseTenant extends TestCaseAuthenticated {
 
     protected string $base_api_tenant {
         get {
-            return "http://{$this->tenant->subdomain}.{$this->host}/api/";
+            return "http://{$this->tenant->subdomain}.{$this->host}/api/v1/";
         }
     }
 
     protected string $base_tenant_api_admin {
         get {
-            return "http://{$this->tenant->subdomain}.{$this->host}/admin/api/";
+            return "http://{$this->tenant->subdomain}.{$this->host}/admin/api/v1/";
         }
     }
 }

@@ -25,6 +25,9 @@ class PasswordRegistrationControllerTest extends TestCase
         if (! self::$bootstrapped) {
             $this->refreshLandlordAndTenantDatabases();
             $this->initializeSystem();
+            Tenant::query()->firstOrFail()->update([
+                'app_domains' => ['tenant-nu.test'],
+            ]);
             self::$bootstrapped = true;
         }
 
@@ -39,11 +42,11 @@ class PasswordRegistrationControllerTest extends TestCase
         );
 
         $response = $this->withHeaders(['X-App-Domain' => 'tenant-nu.test'])
-            ->postJson('api/v1/auth/register/password', [
-            'name' => 'Feature Registered User',
-            'email' => $email,
-            'password' => 'Secret!234',
-        ]);
+            ->postJson('/api/v1/auth/register/password', [
+                'name' => 'Feature Registered User',
+                'email' => $email,
+                'password' => 'Secret!234',
+            ]);
 
         $response->assertCreated();
         $response->assertJsonPath('data.identity_state', 'registered');
