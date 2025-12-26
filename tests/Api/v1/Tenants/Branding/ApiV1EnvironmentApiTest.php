@@ -3,12 +3,19 @@
 namespace Tests\Api\v1\Tenants\Branding;
 
 use Tests\TestCaseTenant;
+use Tests\Helpers\TenantLabels;
 
 class ApiV1EnvironmentApiTest extends TestCaseTenant
 {
+    protected TenantLabels $tenant {
+        get{
+            return $this->landlord->tenant_primary;
+        }
+    }
+
     public function testEnvironmentApiReturnsTenantPayload(): void
     {
-        $response = $this->get("{$this->base_api_tenant}v1/environment");
+        $response = $this->get("{$this->base_api_tenant}environment");
 
         $response->assertStatus(200);
         $response->assertJsonStructure([

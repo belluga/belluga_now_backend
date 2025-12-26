@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Auth;
 
 use App\Exceptions\Auth\InvalidCredentialsException;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Hash;
@@ -20,9 +21,21 @@ class AccountAuthenticationService
             throw new InvalidCredentialsException();
         }
 
+        $account = Account::current();
+        if (! $account) {
+            $accessIds = $user->getAccessToIds();
+            if ($accessIds !== []) {
+                $account = Account::query()
+                    ->whereIn('_id', $accessIds)
+                    ->first();
+            }
+        }
+
+        $abilities = $account ? $user->getPermissions($account) : [];
+
         $token = $user->createToken(
             $deviceName,
-            $this->sanitizeAbilities($user, $user->getPermissions())
+            $this->sanitizeAbilities($user, $abilities)
         )->plainTextToken;
 
         return new AuthenticationResult($user, $token);
@@ -59,7 +72,12 @@ class AccountAuthenticationService
                 'user_id' => (string) $user->_id,
             ]);
 
-            return AbilityCatalog::all();
+            $catalog = AbilityCatalog::all();
+
+            return array_values(array_filter(
+                $catalog,
+                static fn (string $ability): bool => str_starts_with($ability, 'account-')
+            ));
         }
 
         return $abilities;

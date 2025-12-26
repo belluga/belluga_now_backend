@@ -44,7 +44,7 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
 
     protected function registrationEndpoint(): string
     {
-        return sprintf('%sv1/auth/register/password', $this->base_api_tenant);
+        return sprintf('%sauth/register/password', $this->base_api_tenant);
     }
 
     protected function registerPassword(array $payload): TestResponse

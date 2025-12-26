@@ -42,4 +42,25 @@ class PushDeviceService
         $user->devices = $devices->values()->all();
         $user->save();
     }
+
+    /**
+     * @param Authenticatable $user
+     * @param array<string, mixed> $payload
+     */
+    public function unregister(Authenticatable $user, array $payload): void
+    {
+        if (! $user instanceof AccountUser) {
+            return;
+        }
+
+        $devices = collect($user->devices ?? []);
+        $deviceId = $payload['device_id'];
+
+        $devices = $devices->reject(
+            static fn (array $device): bool => ($device['device_id'] ?? null) === $deviceId
+        );
+
+        $user->devices = $devices->values()->all();
+        $user->save();
+    }
 }

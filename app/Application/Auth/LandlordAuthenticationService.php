@@ -27,9 +27,16 @@ class LandlordAuthenticationService
             throw new InvalidCredentialsException();
         }
 
+        $abilities = $user->getPermissions();
+        $tenantPermissions = collect($user->tenant_roles ?? [])
+            ->pluck('permissions')
+            ->flatten()
+            ->all();
+        $abilities = array_values(array_unique([...$abilities, ...$tenantPermissions]));
+
         $token = $user->createToken(
             $deviceName,
-            $this->sanitizeAbilities($user, $user->getPermissions())
+            $this->sanitizeAbilities($user, $abilities)
         )->plainTextToken;
 
         return new AuthenticationResult($user, $token);
@@ -67,9 +74,16 @@ class LandlordAuthenticationService
             $this->accessService->ensureEmail($user, $email);
             $this->accessService->syncCredential($user, 'password', $email, (string) $user->password);
 
+            $abilities = $user->getPermissions();
+            $tenantPermissions = collect($user->tenant_roles ?? [])
+                ->pluck('permissions')
+                ->flatten()
+                ->all();
+            $abilities = array_values(array_unique([...$abilities, ...$tenantPermissions]));
+
             $token = $user->createToken(
                 $payload['device_name'],
-                $this->sanitizeAbilities($user, $user->getPermissions())
+                $this->sanitizeAbilities($user, $abilities)
             )->plainTextToken;
 
             return new AuthenticationResult($user->fresh(), $token);

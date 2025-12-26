@@ -142,10 +142,10 @@ class ApiV1BrandingAdminTest extends TestCaseAuthenticated {
     }
 
     protected function _getBranding(): TestResponse {
+        $tenantBase = "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/";
         return $this->json(
             method: 'get',
-            uri: "environment",
-            headers: $this->getHeaders(),
+            uri: "{$tenantBase}api/v1/environment",
         );
     }
 

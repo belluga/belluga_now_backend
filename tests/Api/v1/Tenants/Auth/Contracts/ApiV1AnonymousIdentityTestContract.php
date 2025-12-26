@@ -37,7 +37,7 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
 
     protected function anonymousIdentityEndpoint(): string
     {
-        return sprintf('%sv1/anonymous/identities', $this->base_api_tenant);
+        return sprintf('%sanonymous/identities', $this->base_api_tenant);
     }
 
     protected function issueAnonymousIdentity(array $payload): TestResponse

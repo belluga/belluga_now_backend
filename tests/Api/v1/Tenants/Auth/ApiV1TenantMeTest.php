@@ -3,15 +3,51 @@
 namespace Tests\Api\v1\Tenants\Auth;
 
 use Tests\TestCaseTenant;
+use Tests\Helpers\TenantLabels;
 
 class ApiV1TenantMeTest extends TestCaseTenant
 {
+    protected TenantLabels $tenant {
+        get{
+            return $this->landlord->tenant_primary;
+        }
+    }
+
     public function testTenantMeReturnsProfilePayload(): void
     {
+        $email = fake()->unique()->safeEmail();
+        $password = 'Secret!234';
+
+        $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}auth/register/password",
+            data: [
+                'name' => 'Tenant Me User',
+                'email' => $email,
+                'password' => $password,
+            ]
+        )->assertStatus(201);
+
+        $login = $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}auth/login",
+            data: [
+                'email' => $email,
+                'password' => $password,
+                'device_name' => 'tenant-me-test',
+            ]
+        );
+
+        $login->assertStatus(200);
+        $token = $login->json('data.token');
+
         $response = $this->json(
             method: 'get',
-            uri: "{$this->base_api_tenant}v1/me",
-            headers: $this->getHeaders()
+            uri: "{$this->base_api_tenant}me",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json'
+            ]
         );
 
         $response->assertStatus(200);

@@ -11,6 +11,7 @@ use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Landlord\Tenant;
 use App\Support\Auth\AbilityCatalog;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
@@ -71,9 +72,16 @@ class TenantPasswordRegistrationService
             $this->mergeAnonymousUsers($user, $anonymousUsers);
         }
 
+        $abilities = [];
+        try {
+            $abilities = $user->getPermissions();
+        } catch (AuthenticationException) {
+            $abilities = [];
+        }
+
         $token = $user->createToken(
             'auth:password-register',
-            $this->sanitizeAbilities($user->getPermissions())
+            $this->sanitizeAbilities($abilities)
         );
         $plainToken = $token->plainTextToken;
         $expiresAt = null;

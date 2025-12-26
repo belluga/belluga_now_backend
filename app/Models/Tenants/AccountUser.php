@@ -109,6 +109,12 @@ class AccountUser extends Authenticatable
 
     public function tokenCan(string $ability): bool
     {
+        $token = $this->currentAccessToken();
+
+        if ($token) {
+            return $token->can($ability);
+        }
+
         return $this->accessService()->tokenAllows($this, $ability);
     }
 
