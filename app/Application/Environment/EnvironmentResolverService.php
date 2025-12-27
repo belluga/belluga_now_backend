@@ -52,10 +52,16 @@ class EnvironmentResolverService
             overrideArray: $tenant->branding_data ?? []
         );
         $mainDomain = $tenant->getMainDomain();
-        if ($requestRoot) {
-            $mainDomain = $this->forceHttps($requestRoot);
-        } elseif ($requestHost) {
-            $mainDomain = $this->forceHttps($requestHost);
+        $hasRelationDomains = $tenant->domains()->exists();
+        $embeddedDomains = $tenant->getAttribute('domains');
+        $hasEmbeddedDomains = is_array($embeddedDomains) && $embeddedDomains !== [];
+        if (! $hasRelationDomains && ! $hasEmbeddedDomains) {
+            $rootHost = $this->resolveRootHost($requestHost, $tenant->subdomain)
+                ?? $this->resolveRootHost($requestRoot, $tenant->subdomain)
+                ?? $this->resolveRootHost((string) config('app.url'), $tenant->subdomain);
+            if ($rootHost) {
+                $mainDomain = $this->forceHttps($tenant->subdomain . '.' . $rootHost);
+            }
         }
 
         return [
@@ -129,5 +135,29 @@ class EnvironmentResolverService
         $normalized = trim($normalized, '/');
 
         return $normalized === '' ? null : 'https://' . $normalized;
+    }
+
+    private function resolveRootHost(?string $domain, ?string $tenantSubdomain): ?string
+    {
+        if (! $domain) {
+            return null;
+        }
+
+        $normalized = Str::replace(['http://', 'https://'], '', $domain);
+        $normalized = trim($normalized, '/');
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        if ($tenantSubdomain) {
+            $prefix = Str::lower($tenantSubdomain) . '.';
+            $normalizedLower = Str::lower($normalized);
+            if (Str::startsWith($normalizedLower, $prefix)) {
+                $normalized = substr($normalized, strlen($prefix));
+            }
+        }
+
+        return $normalized === '' ? null : $normalized;
     }
 }
