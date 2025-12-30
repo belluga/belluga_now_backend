@@ -6,6 +6,7 @@ namespace App\Application\Environment;
 
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Illuminate\Support\Str;
 
@@ -47,6 +48,7 @@ class EnvironmentResolverService
     private function tenantEnvironment(Tenant $tenant, ?string $requestRoot, ?string $requestHost): array
     {
         $landlord = Landlord::singleton();
+        $pushSettings = TenantPushSettings::current();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
@@ -77,6 +79,9 @@ class EnvironmentResolverService
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
+            'telemetry' => $pushSettings?->getAttribute('telemetry') ?? [],
+            'firebase' => $pushSettings?->getAttribute('firebase') ?? [],
+            'push' => $pushSettings?->getAttribute('push') ?? [],
         ];
     }
 

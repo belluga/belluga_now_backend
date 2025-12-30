@@ -31,5 +31,11 @@ return [
         'account-roles:create',
         'account-roles:update',
         'account-roles:delete',
+        'push-messages:read',
+        'push-messages:create',
+        'push-messages:update',
+        'push-messages:delete',
+        'push-messages:send',
+        'push-settings:update',
     ],
 ];
