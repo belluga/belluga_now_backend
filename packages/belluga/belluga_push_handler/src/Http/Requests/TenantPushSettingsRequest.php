@@ -47,6 +47,7 @@ class TenantPushSettingsRequest extends FormRequest
             'firebase.projectId' => ['nullable', 'string'],
             'firebase.messagingSenderId' => ['nullable', 'string'],
             'firebase.storageBucket' => ['nullable', 'string'],
+            'firebase_credentials_id' => ['nullable', 'string'],
             'push' => ['nullable', 'array'],
             'push.enabled' => ['nullable', 'boolean'],
             'push.types' => ['nullable', 'array'],

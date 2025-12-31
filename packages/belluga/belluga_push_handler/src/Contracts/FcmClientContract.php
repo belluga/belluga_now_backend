@@ -9,7 +9,8 @@ use Belluga\PushHandler\Models\Tenants\PushMessage;
 interface FcmClientContract
 {
     /**
-     * @return array{accepted_count:int}
+     * @param array<int, string> $tokens
+     * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
-    public function send(PushMessage $message, int $audienceSize): array;
+    public function send(PushMessage $message, array $tokens): array;
 }

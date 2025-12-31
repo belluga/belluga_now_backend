@@ -2,9 +2,8 @@
 
 declare(strict_types=1);
 
-namespace Belluga\PushHandler\Http\Controllers\Account;
+namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Http\Requests\PushMessageActionRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
@@ -22,16 +21,10 @@ class PushMessageActionController
 
     public function store(PushMessageActionRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
-            abort(422, 'Account context not available.');
-        }
-
         $pushMessageId = (string) $request->route('push_message_id');
         $message = PushMessage::query()
-            ->where('scope', 'account')
+            ->where('scope', 'tenant')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
             ->firstOrFail();
 
         $user = $request->user();
@@ -40,8 +33,7 @@ class PushMessageActionController
         }
 
         if (! $this->audienceService->isEligible($user, $message, [
-            'scope' => 'account',
-            'account_id' => (string) $account->_id,
+            'scope' => 'tenant',
         ])) {
             return response()->json(['ok' => false, 'reason' => 'forbidden'], 403);
         }

@@ -7,9 +7,11 @@ namespace Tests\Unit\Application\Tenants;
 use App\Application\Tenants\TenantDomainResolverService;
 use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
+#[Group('atlas-critical')]
 class TenantDomainResolverServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

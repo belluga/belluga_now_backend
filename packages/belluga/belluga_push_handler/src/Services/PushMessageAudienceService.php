@@ -4,48 +4,31 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
-use Belluga\PushHandler\Contracts\EventAudienceResolverContract;
+use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 
 class PushMessageAudienceService
 {
     public function __construct(
-        private readonly EventAudienceResolverContract $eventAudienceResolver
+        private readonly PushAudienceEligibilityContract $eligibilityContract
     ) {
     }
 
-    public function userHasAccess(PushMessage $message, string $userId): bool
+    /**
+     * @param array<string, mixed> $context
+     */
+    public function isEligible(AccountUser $user, PushMessage $message, array $context = []): bool
     {
         $audience = $message->audience ?? [];
-        $type = $audience['type'] ?? 'all';
-
-        if ($type === 'all') {
-            return true;
-        }
-
-        if ($type === 'users') {
-            $userIds = $audience['user_ids'] ?? [];
-            return in_array($userId, $userIds, true);
-        }
-
-        if ($type === 'event') {
-            $eventId = (string) ($audience['event_id'] ?? '');
-            $qualifier = (string) ($audience['event_qualifier'] ?? '');
-            if ($eventId === '' || $qualifier === '') {
-                return false;
-            }
-            return $this->eventAudienceResolver->userHasAccess($userId, $eventId, $qualifier);
-        }
-
-        return false;
+        return $this->eligibilityContract->isEligible($user, $message, $audience, $context);
     }
 
     public function audienceSize(PushMessage $message): int
     {
         $audience = $message->audience ?? [];
-        $type = $audience['type'] ?? 'all';
 
-        if ($type === 'users') {
+        if (($audience['type'] ?? null) === 'users') {
             return count($audience['user_ids'] ?? []);
         }
 

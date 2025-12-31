@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Initialization;
 
 use Illuminate\Http\UploadedFile;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
+#[Group('atlas-critical')]
 class InitializationControllerTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

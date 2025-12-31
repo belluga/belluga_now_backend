@@ -2,6 +2,9 @@
 
 namespace Tests\Api\v1\Accounts\Auth\Contracts;
 
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
+use Illuminate\Support\Str;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseAccount;
@@ -10,6 +13,20 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
 {
 
     use AccountAuthFunctions;
+
+    protected static array $seededAccounts = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $key = $this->accountSeedKey();
+
+        if (! array_key_exists($key, static::$seededAccounts)) {
+            $this->seedAccountAuthFixtures();
+            static::$seededAccounts[$key] = true;
+        }
+    }
 
     public function testUserLoginWrongPassword(): void {
 
@@ -147,5 +164,83 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
 
         $response->assertStatus(422);
         $response->assertJsonPath('errors.device_name.0', 'The device name field must not be greater than 255 characters.');
+    }
+
+    private function seedAccountAuthFixtures(): void
+    {
+        $tenantLabel = $this->tenant;
+        $tenant = Tenant::query()
+            ->where('subdomain', $tenantLabel->subdomain)
+            ->firstOrFail();
+        $tenant->makeCurrent();
+
+        $tenantLabel->id = (string) $tenant->_id;
+        $tenantLabel->slug = $tenant->slug;
+
+        $accountName = 'Account Auth ' . Str::uuid()->toString();
+        $account = Account::create([
+            'name' => $accountName,
+            'document' => strtoupper(Str::random(14)),
+        ]);
+
+        $this->account->id = (string) $account->_id;
+        $this->account->name = $account->name;
+        $this->account->document = $account->document;
+        $this->account->slug = $account->slug;
+
+        $this->seedAccountUser(
+            $account,
+            $this->account->user_admin,
+            'Account Admin',
+            'admin+' . $account->slug . '@example.org',
+            'Secret!234',
+            ['*']
+        );
+
+        $this->seedAccountUser(
+            $account,
+            $this->account->user_visitor,
+            'Account Visitor',
+            'visitor+' . $account->slug . '@example.org',
+            'Secret!234',
+            []
+        );
+    }
+
+    private function accountSeedKey(): string
+    {
+        $label = $this->account;
+        $ref = new \ReflectionProperty($label, 'base_label');
+        $ref->setAccessible(true);
+
+        return (string) $ref->getValue($label);
+    }
+
+    private function seedAccountUser(
+        Account $account,
+        UserLabels $label,
+        string $name,
+        string $email,
+        string $password,
+        array $permissions
+    ): void {
+        $user = $account->users()->create([
+            'name' => $name,
+            'emails' => [$email],
+            'password' => $password,
+            'identity_state' => 'registered',
+        ]);
+
+        $user->account_roles = [[
+            'account_id' => (string) $account->_id,
+            'permissions' => $permissions,
+            'name' => 'Auth Seed',
+        ]];
+        $user->save();
+
+        $label->name = $name;
+        $label->email_1 = $email;
+        $label->password = $password;
+        $label->user_id = (string) $user->_id;
     }
 }

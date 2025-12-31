@@ -62,6 +62,15 @@ return [
     'tenant_database_connection_name' => env('DB_CONNECTION_TENANTS', 'tenants'),
 
     /*
+     * Migration paths to run for tenant databases.
+     * Paths are relative to the application base path.
+     */
+    'tenant_migration_paths' => [
+        'database/migrations/tenants',
+        'packages/belluga/belluga_push_handler/database/migrations',
+    ],
+
+    /*
      * The connection name to reach the landlord database.
      */
     'landlord_database_connection_name' => env('DB_CONNECTION_LANDLORD', 'landlord'),

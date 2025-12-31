@@ -37,5 +37,12 @@ return [
         'push-messages:delete',
         'push-messages:send',
         'push-settings:update',
+        'tenant-push-messages:read',
+        'tenant-push-messages:create',
+        'tenant-push-messages:update',
+        'tenant-push-messages:delete',
+        'tenant-push-messages:send',
+        'tenant-push-credentials:read',
+        'tenant-push-credentials:update',
     ],
 ];

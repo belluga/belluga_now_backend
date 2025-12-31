@@ -8,9 +8,11 @@ use App\Application\Auth\LandlordAuthenticationService;
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Support\Facades\Hash;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
+#[Group('atlas-critical')]
 class LandlordAuthenticationServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;
@@ -62,4 +64,3 @@ class LandlordAuthenticationServiceTest extends TestCase
         $this->assertTrue(Hash::check('Secret!234', (string) $result->user->password));
     }
 }
-

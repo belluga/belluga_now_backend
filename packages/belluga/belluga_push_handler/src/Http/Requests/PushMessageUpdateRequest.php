@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Requests;
 
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Services\FcmOptionsValidator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -27,16 +28,9 @@ class PushMessageUpdateRequest extends FormRequest
             'type' => ['sometimes', 'string'],
             'active' => ['sometimes', 'boolean'],
             'status' => ['sometimes', 'string'],
-            'audience.type' => ['sometimes', Rule::in(['all', 'users', 'event'])],
+            'audience.type' => ['sometimes', 'string', Rule::in(['all', 'users', 'event'])],
             'audience.user_ids' => ['required_if:audience.type,users', 'array'],
             'audience.user_ids.*' => ['string'],
-            'audience.event_id' => ['required_if:audience.type,event', 'string'],
-            'audience.event_qualifier' => ['required_if:audience.type,event', Rule::in([
-                'event.confirmed',
-                'event.invited',
-                'event.all',
-                'event.sent_invites',
-            ])],
             'delivery.expires_at' => ['sometimes', 'date'],
             'delivery.scheduled_at' => ['nullable', 'date'],
             'payload_template.layoutType' => ['sometimes', Rule::in([
@@ -71,7 +65,7 @@ class PushMessageUpdateRequest extends FormRequest
                 Rule::in($routeKeys),
             ],
             'payload_template.buttons.*.action.path_parameters' => [
-                'required_if:payload_template.buttons.*.action.type,route',
+                'present_if:payload_template.buttons.*.action.type,route',
                 'array',
             ],
             'payload_template.buttons.*.action.path_parameters.*' => ['filled'],
@@ -84,12 +78,18 @@ class PushMessageUpdateRequest extends FormRequest
             'payload_template.buttons.*.action.open_mode' => ['nullable', Rule::in(['in_app', 'external'])],
             'payload_template.buttons.*.color' => ['nullable', 'string'],
             'template_defaults' => ['nullable', 'array'],
+            'fcm_options' => ['nullable', 'array'],
         ];
     }
 
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            $fcmOptions = $this->input('fcm_options');
+            if (is_array($fcmOptions)) {
+                app(FcmOptionsValidator::class)->validate($fcmOptions, $validator);
+            }
+
             $buttons = $this->input('payload_template.buttons', []);
             if (! is_array($buttons)) {
                 return;

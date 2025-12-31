@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 trait RefreshLandlordAndTenantDatabases
 {
+    protected static bool $migrationsRan = false;
     protected function migrationCommand(): string
     {
         $landlordDsn = (string) env('DB_URI_LANDLORD', '');
@@ -32,13 +33,30 @@ trait RefreshLandlordAndTenantDatabases
             ->all();
 
         $landlordDatabase = DB::connection('landlord')->getDatabase();
-        foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
-            $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
+        $tenantDatabase = DB::connection('tenant')->getDatabase();
+
+        $landlordCollections = iterator_to_array($landlordDatabase->listCollectionNames());
+        $tenantCollections = iterator_to_array($tenantDatabase->listCollectionNames());
+
+        if (
+            static::$migrationsRan
+            && empty($landlordCollections)
+            && empty($tenantCollections)
+            && empty($tenantDatabaseNames)
+        ) {
+            return;
         }
 
-        $tenantDatabase = DB::connection('tenant')->getDatabase();
-        foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
-            $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
+        if (! empty($landlordCollections)) {
+            foreach ($landlordCollections as $collectionName) {
+                $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
+            }
+        }
+
+        if (! empty($tenantCollections)) {
+            foreach ($tenantCollections as $collectionName) {
+                $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
+            }
         }
 
         if (! empty($tenantDatabaseNames)) {
@@ -53,7 +71,12 @@ trait RefreshLandlordAndTenantDatabases
             }
         }
 
+        if (static::$migrationsRan) {
+            return;
+        }
+
         $command = $this->migrationCommand();
+        $tenantPaths = $this->tenantMigrationPathArgs();
 
         Artisan::call($command, [
             '--database' => 'landlord',
@@ -61,8 +84,21 @@ trait RefreshLandlordAndTenantDatabases
         ]);
 
         Artisan::call(sprintf(
-            'tenants:artisan "%s --database=tenant --path=database/migrations/tenants"',
-            $command
+            'tenants:artisan "%s --database=tenant %s"',
+            $command,
+            $tenantPaths
+        ));
+
+        static::$migrationsRan = true;
+    }
+
+    protected function tenantMigrationPathArgs(): string
+    {
+        $paths = (array) config('multitenancy.tenant_migration_paths', ['database/migrations/tenants']);
+
+        return implode(' ', array_map(
+            static fn (string $path): string => sprintf('--path=%s', $path),
+            $paths
         ));
     }
 }

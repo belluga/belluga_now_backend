@@ -14,7 +14,9 @@ use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('atlas-critical')]
 class AccountAuthenticationServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

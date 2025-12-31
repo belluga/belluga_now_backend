@@ -5,8 +5,15 @@ use App\Http\Middleware\InitializeAccount;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageActionController;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageController;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageDataController;
+use Belluga\PushHandler\Http\Controllers\Account\PushMessageSendController;
+use Belluga\PushHandler\Http\Controllers\Account\PushQuotaCheckController;
 use Belluga\PushHandler\Http\Controllers\Landlord\TenantPushSettingsAdminController;
+use Belluga\PushHandler\Http\Controllers\Tenant\PushCredentialController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushDeviceController;
+use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageActionController as TenantPushMessageActionController;
+use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageController as TenantPushMessageController;
+use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageDataController as TenantPushMessageDataController;
+use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageSendController as TenantPushMessageSendController;
 use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushSettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -32,6 +39,9 @@ Route::prefix($accountPrefix)
     ->group(function () use ($accountMessagesPrefix) {
         Route::middleware('auth:sanctum')
             ->group(function () use ($accountMessagesPrefix) {
+                Route::get('/push/quota-check', PushQuotaCheckController::class)
+                    ->middleware('account', 'abilities:push-messages:send');
+
                 Route::prefix($accountMessagesPrefix)
                     ->group(function () {
                         Route::get('/', [PushMessageController::class, 'index'])
@@ -49,6 +59,8 @@ Route::prefix($accountPrefix)
                             ->middleware(InitializeAccount::class);
                         Route::post('/{push_message_id}/actions', [PushMessageActionController::class, 'store'])
                             ->middleware(InitializeAccount::class);
+                        Route::post('/{push_message_id}/send', PushMessageSendController::class)
+                            ->middleware('account', 'abilities:push-messages:send');
                     });
             });
     });
@@ -66,11 +78,44 @@ Route::prefix($tenantPrefix)
         Route::delete('/' . ltrim($tenantUnregisterPath, '/'), [PushDeviceController::class, 'unregister'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class]);
 
+        Route::prefix('push/messages')
+            ->middleware(['auth:sanctum', CheckTenantAccess::class])
+            ->group(function () {
+                Route::get('/', [TenantPushMessageController::class, 'index'])
+                    ->middleware('abilities:tenant-push-messages:read');
+                Route::post('/', [TenantPushMessageController::class, 'store'])
+                    ->middleware('abilities:tenant-push-messages:create');
+                Route::get('/{push_message_id}', [TenantPushMessageController::class, 'show'])
+                    ->middleware('abilities:tenant-push-messages:read');
+                Route::patch('/{push_message_id}', [TenantPushMessageController::class, 'update'])
+                    ->middleware('abilities:tenant-push-messages:update');
+                Route::delete('/{push_message_id}', [TenantPushMessageController::class, 'destroy'])
+                    ->middleware('abilities:tenant-push-messages:delete');
+
+                Route::get('/{push_message_id}/data', [TenantPushMessageDataController::class, 'show']);
+                Route::post('/{push_message_id}/actions', [TenantPushMessageActionController::class, 'store']);
+                Route::post('/{push_message_id}/send', TenantPushMessageSendController::class)
+                    ->middleware('abilities:tenant-push-messages:send');
+            });
+
         Route::prefix($tenantSettingsPrefix)
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:push-settings:update'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class])
             ->group(function () use ($tenantSettingsPushPath) {
-                Route::get('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'show']);
-                Route::patch('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'update']);
+                Route::get('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'show'])
+                    ->middleware('abilities:push-settings:update');
+                Route::patch('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'update'])
+                    ->middleware('abilities:push-settings:update');
+
+                Route::prefix('push/credentials')->group(function () {
+                    Route::get('/', [PushCredentialController::class, 'index'])
+                        ->middleware('abilities:tenant-push-credentials:read');
+                    Route::post('/', [PushCredentialController::class, 'store'])
+                        ->middleware('abilities:tenant-push-credentials:update');
+                    Route::patch('/{credential_id}', [PushCredentialController::class, 'update'])
+                        ->middleware('abilities:tenant-push-credentials:update');
+                    Route::delete('/{credential_id}', [PushCredentialController::class, 'destroy'])
+                        ->middleware('abilities:tenant-push-credentials:update');
+                });
             });
     });
 

@@ -5,6 +5,7 @@ namespace Tests\Api\v1\Admin;
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
 use Illuminate\Testing\TestResponse;
+use MongoDB\BSON\ObjectId;
 use Tests\TestCaseAuthenticated;
 use Tests\Api\Traits\AccountAuthFunctions;
 
@@ -93,13 +94,22 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
 
     public function testUserLoginLogoutManyDevicesSuccess(): void {
 
+        $tokenableId = $this->landlord->user_cross_tenant_admin->user_id;
+        PersonalAccessToken::query()
+            ->where('tokenable_id', $tokenableId)
+            ->orWhere('tokenable_id', new ObjectId($tokenableId))
+            ->delete();
+
         $response = $this->userLoginSuccessEmail1("device1");
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
 
         $this->userLoginSuccessEmail1("device2");
 
-        $count = PersonalAccessToken::where('tokenable_id', $this->landlord->user_cross_tenant_admin->user_id)->count();
+        $count = PersonalAccessToken::query()
+            ->where('tokenable_id', $tokenableId)
+            ->orWhere('tokenable_id', new ObjectId($tokenableId))
+            ->count();
 
         assert($count === 2);
 
@@ -370,4 +380,3 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         ];
     }
 }
-

@@ -6,9 +6,11 @@ namespace Tests\Unit\Application\Initialization;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
+#[Group('atlas-critical')]
 class SystemInitializationServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

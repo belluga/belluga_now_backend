@@ -32,6 +32,7 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
 
         DB::purge($connectionName);
         DB::setDefaultConnection($connectionName);
+
     }
 
     public function forgetCurrent(): void
@@ -48,5 +49,6 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
 
         DB::purge($connectionName);
         DB::setDefaultConnection(config('database.default'));
+
     }
 }

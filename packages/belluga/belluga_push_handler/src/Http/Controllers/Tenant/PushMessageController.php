@@ -2,9 +2,8 @@
 
 declare(strict_types=1);
 
-namespace Belluga\PushHandler\Http\Controllers\Account;
+namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use App\Models\Tenants\Account;
 use Belluga\PushHandler\Http\Requests\PushMessageStoreRequest;
 use Belluga\PushHandler\Http\Requests\PushMessageUpdateRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
@@ -22,14 +21,7 @@ class PushMessageController
 
     public function index(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
-            abort(422, 'Account context not available.');
-        }
-
-        $query = PushMessage::query()
-            ->where('scope', 'account')
-            ->where('partner_id', (string) $account->_id);
+        $query = PushMessage::query()->where('scope', 'tenant');
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -46,16 +38,10 @@ class PushMessageController
 
     public function show(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
-            abort(422, 'Account context not available.');
-        }
-
         $pushMessageId = (string) $request->route('push_message_id');
         $message = PushMessage::query()
-            ->where('scope', 'account')
+            ->where('scope', 'tenant')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
             ->firstOrFail();
 
         return response()->json(['data' => $message]);
@@ -63,11 +49,6 @@ class PushMessageController
 
     public function store(PushMessageStoreRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
-            abort(422, 'Account context not available.');
-        }
-
         $payload = $request->validated();
 
         $expiresAt = $payload['delivery']['expires_at'] ?? null;
@@ -84,35 +65,28 @@ class PushMessageController
         }
 
         $exists = PushMessage::query()
-            ->where('scope', 'account')
-            ->where('partner_id', (string) $account->_id)
+            ->where('scope', 'tenant')
             ->where('internal_name', $payload['internal_name'])
             ->exists();
 
         if ($exists) {
             return response()->json([
-                'message' => 'internal_name already exists for this account.',
-                'errors' => ['internal_name' => 'Must be unique per account.'],
+                'message' => 'internal_name already exists for this tenant.',
+                'errors' => ['internal_name' => 'Must be unique per tenant.'],
             ], 422);
         }
 
-        $message = $this->service->create('account', (string) $account->_id, $payload);
+        $message = $this->service->create('tenant', null, $payload);
 
         return response()->json(['data' => $message], 201);
     }
 
     public function update(PushMessageUpdateRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
-            abort(422, 'Account context not available.');
-        }
-
         $pushMessageId = (string) $request->route('push_message_id');
         $message = PushMessage::query()
-            ->where('scope', 'account')
+            ->where('scope', 'tenant')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
             ->firstOrFail();
 
         $payload = $request->validated();
@@ -128,16 +102,15 @@ class PushMessageController
 
         if (isset($payload['internal_name'])) {
             $exists = PushMessage::query()
-                ->where('scope', 'account')
-                ->where('partner_id', (string) $account->_id)
+                ->where('scope', 'tenant')
                 ->where('internal_name', $payload['internal_name'])
                 ->where('_id', '!=', $pushMessageId)
                 ->exists();
 
             if ($exists) {
                 return response()->json([
-                    'message' => 'internal_name already exists for this account.',
-                    'errors' => ['internal_name' => 'Must be unique per account.'],
+                    'message' => 'internal_name already exists for this tenant.',
+                    'errors' => ['internal_name' => 'Must be unique per tenant.'],
                 ], 422);
             }
         }
@@ -150,16 +123,10 @@ class PushMessageController
 
     public function destroy(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
-            abort(422, 'Account context not available.');
-        }
-
         $pushMessageId = (string) $request->route('push_message_id');
         $message = PushMessage::query()
-            ->where('scope', 'account')
+            ->where('scope', 'tenant')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
             ->firstOrFail();
 
         $metrics = $message->metrics ?? [];

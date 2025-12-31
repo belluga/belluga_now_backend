@@ -10,11 +10,13 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
 
+#[Group('atlas-critical')]
 class AccountRoleTemplateServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

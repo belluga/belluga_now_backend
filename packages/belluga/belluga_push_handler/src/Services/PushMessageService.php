@@ -21,9 +21,15 @@ class PushMessageService
     /**
      * @param array<string, mixed> $payload
      */
-    public function create(string $accountId, array $payload): PushMessage
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function create(string $scope, ?string $accountId, array $payload): PushMessage
     {
-        $payload['partner_id'] = $accountId;
+        $payload['scope'] = $scope;
+        if ($scope === 'account') {
+            $payload['partner_id'] = $accountId;
+        }
         $payload['status'] = $payload['status'] ?? 'scheduled';
         $payload['active'] = $payload['active'] ?? true;
         $payload['delivery'] = $this->withTtlMinutes($payload['delivery'] ?? []);
@@ -43,7 +49,7 @@ class PushMessageService
 
         $message = PushMessage::create($payload);
 
-        $this->dispatchSend($message, $accountId);
+        $this->dispatchSend($message, $scope, $accountId);
 
         return $message;
     }
@@ -62,16 +68,18 @@ class PushMessageService
         return $delivery;
     }
 
-    public function dispatchSend(PushMessage $message, string $accountId): void
+    public function dispatchSend(PushMessage $message, string $scope, ?string $accountId): void
     {
         $scheduledAt = data_get($message->delivery, 'scheduled_at');
         $audienceSize = $this->audienceService->audienceSize($message);
 
-        if (! $this->planPolicy->canSend($accountId, $message, $audienceSize)) {
-            return;
+        if ($scope === 'account' && $accountId !== null) {
+            if (! $this->planPolicy->canSend($accountId, $message, $audienceSize)) {
+                return;
+            }
         }
 
-        $job = new SendPushMessageJob((string) $message->_id, $accountId);
+        $job = new SendPushMessageJob((string) $message->_id, $scope, $accountId);
 
         if ($scheduledAt) {
             Bus::dispatch($job->delay(Carbon::parse($scheduledAt)));

@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Belluga\PushHandler;
 
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
-use Belluga\PushHandler\Contracts\EventAudienceResolverContract;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Services\PushPlanPolicyAllowAll;
-use Belluga\PushHandler\Services\EventAudienceResolverAllowAll;
-use Belluga\PushHandler\Services\FcmClientStub;
+use Belluga\PushHandler\Services\PushAudienceEligibilityAllowAll;
+use Belluga\PushHandler\Services\FcmHttpV1Client;
 use Illuminate\Support\ServiceProvider;
 
 class PushHandlerServiceProvider extends ServiceProvider
@@ -28,12 +28,12 @@ class PushHandlerServiceProvider extends ServiceProvider
             $this->app->bind(PushPlanPolicyContract::class, PushPlanPolicyAllowAll::class);
         }
 
-        if (! $this->app->bound(EventAudienceResolverContract::class)) {
-            $this->app->bind(EventAudienceResolverContract::class, EventAudienceResolverAllowAll::class);
+        if (! $this->app->bound(PushAudienceEligibilityContract::class)) {
+            $this->app->bind(PushAudienceEligibilityContract::class, PushAudienceEligibilityAllowAll::class);
         }
 
         if (! $this->app->bound(FcmClientContract::class)) {
-            $this->app->bind(FcmClientContract::class, FcmClientStub::class);
+            $this->app->bind(FcmClientContract::class, FcmHttpV1Client::class);
         }
     }
 }

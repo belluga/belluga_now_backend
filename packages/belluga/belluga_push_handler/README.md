@@ -139,6 +139,18 @@ Migrations live in:
 packages/belluga/belluga_push_handler/database/migrations
 ```
 
+Tenant migrations must include the package migration path so tenant databases receive
+the push collections. Configure the host app to run both migration paths during
+tenant provisioning, for example:
+
+```php
+// config/multitenancy.php
+'tenant_migration_paths' => [
+    'database/migrations/tenants',
+    'packages/belluga/belluga_push_handler/database/migrations',
+],
+```
+
 ## Request/Response Expectations (Summary)
 This package follows the backend schema defined in:
 `foundation_documentation/todos/active/TODO-v1-telemetry-and-push-backend.md`
@@ -187,13 +199,34 @@ class PushPlanPolicy implements PushPlanPolicyContract
 }
 ```
 
-### Custom Audience Resolver
-Bind your own resolver implementation:
+### Custom Audience Eligibility
+Bind your own eligibility contract implementation (domain-aware rules live in the host app):
 ```php
-use Belluga\PushHandler\Contracts\EventAudienceResolverContract;
-use App\Services\YourAudienceResolver;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use App\Services\YourAudienceEligibility;
 
-app()->bind(EventAudienceResolverContract::class, YourAudienceResolver::class);
+app()->bind(PushAudienceEligibilityContract::class, YourAudienceEligibility::class);
+```
+
+If you want richer quota-check responses, also implement:
+```php
+use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+
+class PushPlanPolicy implements PushPlanPolicyContract, PushPlanPolicyDecisionContract
+{
+    public function quotaDecision(string $accountId, PushMessage $message, int $audienceSize): array
+    {
+        return [
+            'allowed' => true,
+            'limit' => 1000,
+            'current_used' => 250,
+            'requested' => $audienceSize,
+            'remaining_after' => 750 - $audienceSize,
+            'period' => 'monthly',
+            'reason' => null,
+        ];
+    }
+}
 ```
 
 ### FCM Client Binding
@@ -208,7 +241,7 @@ app()->bind(FcmClientContract::class, YourFcmClient::class);
 ## Common Integration Questions
 
 **Where do I enforce plan limits?**  
-Implement `PushPlanPolicyContract` and bind it. The package will call `canSend(...)` before delivery. You can check any plan or quota system.
+Implement `PushPlanPolicyContract` and bind it. The package will call `canSend(...)` before delivery. To power the quota-check endpoint, implement `PushPlanPolicyDecisionContract` and return a rich decision payload.
 
 **Can one class implement multiple policies?**  
 Yes. PHP allows a class to implement multiple interfaces. You can define a single `AccountPlanPolicy` class that implements several feature policies.

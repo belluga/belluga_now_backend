@@ -19,6 +19,7 @@ class TenantPushSettings extends Model
         'max_ttl_days',
         'telemetry',
         'firebase',
+        'firebase_credentials_id',
         'push',
     ];
 
@@ -28,6 +29,7 @@ class TenantPushSettings extends Model
         'max_ttl_days' => 'integer',
         'telemetry' => 'array',
         'firebase' => 'array',
+        'firebase_credentials_id' => 'string',
         'push' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',

@@ -164,9 +164,11 @@ class Tenant extends BaseTenant
 
     protected function runMigrations(): void
     {
+        $paths = config('multitenancy.tenant_migration_paths', ['database/migrations/tenants']);
+
         Artisan::call('migrate', [
             '--database' => config('multitenancy.tenant_database_connection_name'),
-            '--path' => 'database/migrations/tenants',
+            '--path' => $paths,
             '--force' => true
         ]);
 

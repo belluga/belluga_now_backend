@@ -15,6 +15,7 @@ class PushMessage extends Model
     protected $collection = 'push_messages';
 
     protected $fillable = [
+        'scope',
         'partner_id',
         'internal_name',
         'title_template',
@@ -25,6 +26,7 @@ class PushMessage extends Model
         'audience',
         'delivery',
         'payload_template',
+        'fcm_options',
         'template_defaults',
         'metrics',
         'sent_at',
@@ -36,6 +38,7 @@ class PushMessage extends Model
         'audience' => 'array',
         'delivery' => 'array',
         'payload_template' => 'array',
+        'fcm_options' => 'array',
         'template_defaults' => 'array',
         'metrics' => 'array',
         'sent_at' => 'datetime',
