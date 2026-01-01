@@ -728,6 +728,73 @@ class PushMessageFlowTest extends TestCase
         $action->assertJsonPath('reason', 'forbidden');
     }
 
+    public function testAudienceEligibilityContractDenyBlocksData(): void
+    {
+        $this->actingAsOperator();
+
+        $this->app->bind(PushAudienceEligibilityContract::class, static function () {
+            return new class implements PushAudienceEligibilityContract {
+                public function isEligible(
+                    AccountUser $user,
+                    PushMessage $message,
+                    array $audience,
+                    array $context = []
+                ): bool {
+                    return false;
+                }
+            };
+        });
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'all',
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data->assertStatus(403);
+        $data->assertJsonPath('reason', 'forbidden');
+    }
+
+    public function testAudienceEligibilityContractOverrideAllowsData(): void
+    {
+        $this->actingAsOperator();
+
+        $this->app->bind(PushAudienceEligibilityContract::class, static function () {
+            return new class implements PushAudienceEligibilityContract {
+                public function isEligible(
+                    AccountUser $user,
+                    PushMessage $message,
+                    array $audience,
+                    array $context = []
+                ): bool {
+                    return true;
+                }
+            };
+        });
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [Str::uuid()->toString()],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data->assertOk();
+        $data->assertJsonPath('ok', true);
+    }
+
     public function testTransactionalSendRequiresTransactionalType(): void
     {
         $this->actingAsOperator();
@@ -908,6 +975,101 @@ class PushMessageFlowTest extends TestCase
         $this->assertContains('failed', $statuses);
     }
 
+    public function testDeliveryServiceBatchesTokensByConfig(): void
+    {
+        config(['belluga_push_handler.fcm.max_batch_size' => 500]);
+
+        $batches = [];
+        $this->app->bind(FcmClientContract::class, function () use (&$batches) {
+            return new class($batches) implements FcmClientContract {
+                /**
+                 * @param array<int, int> $batches
+                 */
+                public function __construct(private array &$batches)
+                {
+                }
+
+                public function send(PushMessage $message, array $tokens): array
+                {
+                    $this->batches[] = count($tokens);
+                    return [
+                        'accepted_count' => count($tokens),
+                        'responses' => [],
+                    ];
+                }
+            };
+        });
+
+        $message = PushMessage::create($this->buildPayload());
+        $service = $this->app->make(PushDeliveryService::class);
+
+        $tokens = [];
+        for ($i = 1; $i <= 1200; $i++) {
+            $tokens[] = 'token-' . $i;
+        }
+
+        $response = $service->deliver($message, $tokens);
+
+        $this->assertSame([500, 500, 200], $batches);
+        $this->assertSame(1200, $response['accepted_count']);
+    }
+
+    public function testSendJobUpdatesAcceptedMetricsFromFcmResponse(): void
+    {
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract {
+                public function send(PushMessage $message, array $tokens): array
+                {
+                    return [
+                        'accepted_count' => 2,
+                        'responses' => [
+                            [
+                                'token' => $tokens[0] ?? '',
+                                'status' => 'accepted',
+                                'provider_message_id' => 'msg-1',
+                            ],
+                            [
+                                'token' => $tokens[1] ?? '',
+                                'status' => 'accepted',
+                                'provider_message_id' => 'msg-2',
+                            ],
+                        ],
+                    ];
+                }
+            };
+        });
+
+        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
+            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver {
+                public function __construct()
+                {
+                }
+
+                public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return ['token-1', 'token-2'];
+                }
+            };
+        });
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class)
+        );
+
+        $message->refresh();
+        $this->assertSame(2, $message->metrics['accepted_count'] ?? null);
+        $this->assertSame(1, $message->metrics['sent_count'] ?? null);
+        $this->assertSame('sent', $message->status);
+        $this->assertNotNull($message->sent_at);
+    }
+
     public function testFcmHttpClientBuildsPayloadWithOverrides(): void
     {
         $tenant = Tenant::query()->firstOrFail();
@@ -1031,6 +1193,80 @@ class PushMessageFlowTest extends TestCase
 
         $send->assertOk();
         $send->assertJsonPath('ok', true);
+    }
+
+    public function testTransactionalSendAcceptsUserIdTarget(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'type' => 'transactional',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        AccountUser::query()->where('_id', $this->operator->_id)->update([
+            'devices' => [
+                [
+                    'device_id' => 'device-1',
+                    'push_token' => 'token-1',
+                ],
+            ],
+        ]);
+
+        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+            'user_id' => (string) $this->operator->_id,
+            'dry_run' => true,
+        ]);
+
+        $send->assertOk();
+        $send->assertJsonPath('ok', true);
+    }
+
+    public function testTransactionalSendDeniedWhenEligibilityFails(): void
+    {
+        $this->actingAsOperator();
+
+        $this->app->bind(PushAudienceEligibilityContract::class, static function () {
+            return new class implements PushAudienceEligibilityContract {
+                public function isEligible(
+                    AccountUser $user,
+                    PushMessage $message,
+                    array $audience,
+                    array $context = []
+                ): bool {
+                    return false;
+                }
+            };
+        });
+
+        $payload = $this->buildPayload([
+            'type' => 'transactional',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+            'email' => 'push-operator@example.org',
+            'dry_run' => true,
+        ]);
+
+        $send->assertStatus(403);
+        $send->assertJsonPath('reason', 'forbidden');
     }
 
     private function actingAsOperator(): void

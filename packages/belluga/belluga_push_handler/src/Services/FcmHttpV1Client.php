@@ -44,7 +44,12 @@ class FcmHttpV1Client implements FcmClientContract
 
         $responses = [];
         $accepted = 0;
-        foreach (array_chunk($tokens, 500) as $chunk) {
+        $batchSize = (int) config('belluga_push_handler.fcm.max_batch_size', 500);
+        if ($batchSize <= 0) {
+            $batchSize = 500;
+        }
+
+        foreach (array_chunk($tokens, $batchSize) as $chunk) {
             $batchResponses = Http::pool(function (Pool $pool) use ($chunk, $accessToken, $endpoint, $basePayload) {
                 $requests = [];
                 foreach ($chunk as $token) {

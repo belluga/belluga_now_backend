@@ -20,4 +20,7 @@ return [
             'tenant_settings_path' => '{tenant_slug}/settings/push',
         ],
     ],
+    'fcm' => [
+        'max_batch_size' => 500,
+    ],
 ];
