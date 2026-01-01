@@ -27,13 +27,52 @@ class TenantPushSettings extends Model
         'push_message_types' => 'array',
         'push_message_routes' => 'array',
         'max_ttl_days' => 'integer',
-        'telemetry' => 'array',
         'firebase' => 'array',
         'firebase_credentials_id' => 'string',
         'push' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * @param mixed $value
+     * @return array<int, array<string, mixed>>
+     */
+    public function getTelemetryAttribute($value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            $telemetry = $value->getArrayCopy();
+        } elseif (is_array($value)) {
+            $telemetry = $value;
+        } elseif ($value instanceof \Traversable) {
+            $telemetry = iterator_to_array($value);
+        } elseif (is_object($value)) {
+            $telemetry = (array) $value;
+        } else {
+            $telemetry = [];
+        }
+
+        return $this->normalizeTelemetry($telemetry);
+    }
+
+    /**
+     * @param array<mixed> $telemetry
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeTelemetry(array $telemetry): array
+    {
+        if (isset($telemetry['mixpanel_token']) || isset($telemetry['enabled_events'])) {
+            return [[
+                'type' => 'mixpanel',
+                'token' => (string) ($telemetry['mixpanel_token'] ?? ''),
+                'events' => is_array($telemetry['enabled_events'] ?? null)
+                    ? $telemetry['enabled_events']
+                    : [],
+            ]];
+        }
+
+        return $telemetry;
+    }
 
     public static function current(): ?self
     {

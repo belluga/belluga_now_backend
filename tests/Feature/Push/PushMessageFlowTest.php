@@ -527,8 +527,11 @@ class PushMessageFlowTest extends TestCase
                 ],
             ],
             'telemetry' => [
-                'mixpanel_token' => 'token',
-                'enabled_events' => ['invite_received'],
+                [
+                    'type' => 'mixpanel',
+                    'token' => 'token',
+                    'events' => ['invite_received'],
+                ],
             ],
             'firebase' => [
                 'apiKey' => 'key',
@@ -547,6 +550,48 @@ class PushMessageFlowTest extends TestCase
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertOk();
         $response->assertJsonPath('data.push_message_routes.0.path_params.0', 'slug');
+    }
+
+    public function testTenantPushSettingsAcceptsTelemetryIntegrations(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $payload = [
+            'max_ttl_days' => 30,
+            'push_message_types' => [
+                [
+                    'key' => 'invite_received',
+                    'label' => 'Invite Received',
+                ],
+            ],
+            'telemetry' => [
+                [
+                    'type' => 'mixpanel',
+                    'token' => 'token',
+                    'events' => ['invite_received'],
+                ],
+                [
+                    'type' => 'firebase',
+                    'events' => ['invite_received'],
+                ],
+                [
+                    'type' => 'webhook',
+                    'url' => 'https://example.org/hook',
+                    'events' => ['invite_received'],
+                ],
+            ],
+        ];
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response->assertOk();
+        $response->assertJsonPath('data.telemetry.0.type', 'mixpanel');
+        $response->assertJsonPath('data.telemetry.1.type', 'firebase');
+        $response->assertJsonPath('data.telemetry.2.type', 'webhook');
     }
 
     public function testQuotaCheckReturnsDecision(): void

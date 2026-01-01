@@ -3,6 +3,7 @@
 namespace Tests\Api\v1\Tenants\Branding;
 
 use App\Models\Landlord\Tenant;
+use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Tests\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
 
@@ -47,6 +48,34 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             'main_domain',
             "https://{$this->tenant->subdomain}.{$this->host}"
         );
+    }
+
+    public function testEnvironmentApiNormalizesLegacyTelemetry(): void
+    {
+        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create([
+            'max_ttl_days' => 30,
+            'push_message_types' => [
+                [
+                    'key' => 'invite_received',
+                    'label' => 'Invite Received',
+                ],
+            ],
+            'telemetry' => [
+                'mixpanel_token' => 'legacy-token',
+                'enabled_events' => ['invite_received'],
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('telemetry.0.type', 'mixpanel');
+        $response->assertJsonPath('telemetry.0.token', 'legacy-token');
+        $response->assertJsonPath('telemetry.0.events.0', 'invite_received');
     }
 
 }
