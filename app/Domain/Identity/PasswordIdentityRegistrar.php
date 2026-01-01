@@ -47,11 +47,13 @@ class PasswordIdentityRegistrar
 
         $passwordHash = Hash::make($attributes['password']);
 
+        $now = Carbon::now();
+
         $payload = array_merge([
             'identity_state' => 'registered',
             'emails' => $emails->all(),
-            'first_seen_at' => Carbon::now(),
-            'registered_at' => Carbon::now(),
+            'first_seen_at' => $now,
+            'registered_at' => $now,
             'password' => $passwordHash,
             'fingerprints' => [],
             'credentials' => [],
@@ -61,7 +63,7 @@ class PasswordIdentityRegistrar
                 [
                     'from_state' => null,
                     'to_state' => 'registered',
-                    'promoted_at' => Carbon::now(),
+                    'promoted_at' => $now,
                     'operator_id' => null,
                     'source_user_id' => null,
                     'reason' => null,

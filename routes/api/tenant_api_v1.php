@@ -8,7 +8,6 @@ use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\MeController;
-use App\Http\Api\v1\Controllers\PushDeviceController;
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
@@ -40,11 +39,6 @@ Route::prefix('anonymous')
 Route::get('/me', [MeController::class, 'tenant'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class]);
 
-Route::post('/push/register', [PushDeviceController::class, 'register'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class]);
-
-Route::delete('/push/unregister', [PushDeviceController::class, 'unregister'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class]);
 
 Route::prefix('auth')
     ->group(function () {

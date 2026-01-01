@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Api\v1\Services;
+namespace Belluga\PushHandler\Services;
 
 use App\Models\Tenants\AccountUser;
 use Illuminate\Foundation\Auth\User as Authenticatable;

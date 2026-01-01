@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Api\v1\Controllers;
+namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use App\Http\Api\v1\Requests\PushRegisterRequest;
-use App\Http\Api\v1\Requests\PushUnregisterRequest;
-use App\Http\Api\v1\Services\PushDeviceService;
-use App\Models\Landlord\Tenant;
+use Belluga\PushHandler\Http\Requests\PushRegisterRequest;
+use Belluga\PushHandler\Http\Requests\PushUnregisterRequest;
+use Belluga\PushHandler\Services\PushDeviceService;
 use App\Http\Controllers\Controller;
+use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 
 class PushDeviceController extends Controller

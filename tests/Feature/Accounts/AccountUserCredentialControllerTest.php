@@ -13,10 +13,12 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
 
+#[Group('atlas-critical')]
 class AccountUserCredentialControllerTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

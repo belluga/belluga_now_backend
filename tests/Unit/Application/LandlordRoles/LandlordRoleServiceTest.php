@@ -7,9 +7,11 @@ namespace Tests\Unit\Application\LandlordRoles;
 use App\Application\LandlordRoles\LandlordRoleService;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
+#[Group('atlas-critical')]
 class LandlordRoleServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;

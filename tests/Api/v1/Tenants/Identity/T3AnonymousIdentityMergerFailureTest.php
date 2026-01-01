@@ -11,7 +11,11 @@ use Tests\Helpers\TenantLabels;
 
 class T3AnonymousIdentityMergerFailureTest extends ApiV1AnonymousIdentityMergerTestContract
 {
-    protected TenantLabels $tenant = TenantLabels::TENANT_PRIMARY;
+    protected TenantLabels $tenant {
+        get {
+            return $this->landlord->tenant_primary;
+        }
+    }
 
     public function testMergeFailsWhenAnonymousUserDoesNotExist(): void
     {

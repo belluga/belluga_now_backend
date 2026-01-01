@@ -43,6 +43,9 @@ class EnvironmentController extends Controller
             'domains' => $domains,
             'app_domains' => $resolved['app_domains'] ?? [],
             'theme_data_settings' => $resolved['theme_data_settings'] ?? [],
+            'telemetry' => $resolved['telemetry'] ?? [],
+            'firebase' => $resolved['firebase'] ?? [],
+            'push' => $resolved['push'] ?? [],
         ];
 
         return response()->json($payload);

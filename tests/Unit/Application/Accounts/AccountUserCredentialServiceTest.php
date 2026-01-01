@@ -12,11 +12,13 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
 
+#[Group('atlas-critical')]
 class AccountUserCredentialServiceTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;
@@ -152,4 +154,3 @@ class AccountUserCredentialServiceTest extends TestCase
         ], (string) $this->role->_id);
     }
 }
-

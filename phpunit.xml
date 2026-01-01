@@ -18,6 +18,9 @@
         <testsuite name="Feature-Tenants">
             <directory>tests/Feature/Tenants</directory>
         </testsuite>
+        <testsuite name="Feature-Push">
+            <directory>tests/Feature/Push</directory>
+        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
