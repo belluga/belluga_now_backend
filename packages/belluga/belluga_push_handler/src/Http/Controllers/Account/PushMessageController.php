@@ -9,6 +9,9 @@ use Belluga\PushHandler\Http\Requests\PushMessageStoreRequest;
 use Belluga\PushHandler\Http\Requests\PushMessageUpdateRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushMessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +19,9 @@ use Illuminate\Http\Request;
 class PushMessageController
 {
     public function __construct(
-        private readonly PushMessageService $service
+        private readonly PushMessageService $service,
+        private readonly PushMessageAudienceService $audienceService,
+        private readonly PushPlanPolicyContract $planPolicy
     ) {
     }
 
@@ -98,7 +103,17 @@ class PushMessageController
 
         $message = $this->service->create('account', (string) $account->_id, $payload);
 
-        return response()->json(['data' => $message], 201);
+        $response = ['data' => $message];
+        if ($this->planPolicy instanceof PushPlanPolicyDecisionContract) {
+            $audienceSize = $this->audienceService->audienceSize($message);
+            $response['quota_decision'] = $this->planPolicy->quotaDecision(
+                (string) $account->_id,
+                $message,
+                $audienceSize
+            );
+        }
+
+        return response()->json($response, 201);
     }
 
     public function update(PushMessageUpdateRequest $request): JsonResponse
