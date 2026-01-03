@@ -1,0 +1,22 @@
+{
+  "name": "belluga/push-handler",
+  "description": "Multi-tenant push messaging backend with delivery tracking and configurable routes.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\PushHandler\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\PushHandler\\PushHandlerServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}

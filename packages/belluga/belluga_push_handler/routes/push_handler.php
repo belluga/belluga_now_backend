@@ -14,6 +14,7 @@ use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageActionController as T
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageController as TenantPushMessageController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageDataController as TenantPushMessageDataController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageSendController as TenantPushMessageSendController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushStatusController;
 use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushSettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -105,15 +106,13 @@ Route::prefix($tenantPrefix)
                     ->middleware('abilities:push-settings:update');
                 Route::patch('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'update'])
                     ->middleware('abilities:push-settings:update');
+                Route::get('/' . ltrim($tenantSettingsPushPath, '/') . '/status', [TenantPushStatusController::class, 'show'])
+                    ->middleware('abilities:push-settings:update');
 
                 Route::prefix('push/credentials')->group(function () {
                     Route::get('/', [PushCredentialController::class, 'index'])
                         ->middleware('abilities:tenant-push-credentials:read');
-                    Route::post('/', [PushCredentialController::class, 'store'])
-                        ->middleware('abilities:tenant-push-credentials:update');
-                    Route::patch('/{credential_id}', [PushCredentialController::class, 'update'])
-                        ->middleware('abilities:tenant-push-credentials:update');
-                    Route::delete('/{credential_id}', [PushCredentialController::class, 'destroy'])
+                    Route::put('/', [PushCredentialController::class, 'upsert'])
                         ->middleware('abilities:tenant-push-credentials:update');
                 });
             });

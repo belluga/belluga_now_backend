@@ -76,12 +76,34 @@ class PushMessageSendController
             $message->save();
         }
 
-        return response()->json([
+        $responsePayload = [
             'ok' => true,
             'push_message_id' => (string) $message->_id,
             'recipient_user_id' => (string) $user->_id,
             'queued' => true,
-        ]);
+        ];
+
+        if (app()->environment('local') && isset($response)) {
+            $responses = $response['responses'] ?? [];
+            $sanitized = [];
+            foreach ($responses as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+                $token = $entry['token'] ?? null;
+                if (is_string($token) && $token !== '') {
+                    $entry['token_hash'] = hash('sha256', $token);
+                    unset($entry['token']);
+                }
+                $sanitized[] = $entry;
+            }
+            $responsePayload['delivery_debug'] = [
+                'accepted_count' => (int) ($response['accepted_count'] ?? 0),
+                'responses' => $sanitized,
+            ];
+        }
+
+        return response()->json($responsePayload);
     }
 
     /**

@@ -22,6 +22,9 @@ class TenantPushSettingsController
     public function update(TenantPushSettingsRequest $request): JsonResponse
     {
         $payload = $request->validated();
+        if (! isset($payload['max_ttl_days'])) {
+            $payload['max_ttl_days'] = 7;
+        }
         if (isset($payload['push_message_routes'])) {
             $payload['push_message_routes'] = $this->normalizeRoutes($payload['push_message_routes']);
         }

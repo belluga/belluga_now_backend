@@ -2,9 +2,11 @@
 
 namespace Tests\Traits;
 
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 trait RefreshLandlordAndTenantDatabases
 {
@@ -35,28 +37,20 @@ trait RefreshLandlordAndTenantDatabases
         $landlordDatabase = DB::connection('landlord')->getDatabase();
         $tenantDatabase = DB::connection('tenant')->getDatabase();
 
-        $landlordCollections = iterator_to_array($landlordDatabase->listCollectionNames());
-        $tenantCollections = iterator_to_array($tenantDatabase->listCollectionNames());
-
-        if (
-            static::$migrationsRan
-            && empty($landlordCollections)
-            && empty($tenantCollections)
-            && empty($tenantDatabaseNames)
-        ) {
-            return;
+        Log::info('Tests: landlord collections before wipe', [
+            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
+            'landlords_count' => Landlord::query()->count(),
+            'tenants_count' => Tenant::query()->count(),
+        ]);
+        Log::info('Tests: tenant collections before wipe', [
+            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
+        ]);
+        foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
+            $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
         }
 
-        if (! empty($landlordCollections)) {
-            foreach ($landlordCollections as $collectionName) {
-                $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
-            }
-        }
-
-        if (! empty($tenantCollections)) {
-            foreach ($tenantCollections as $collectionName) {
-                $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
-            }
+        foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
+            $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
         }
 
         if (! empty($tenantDatabaseNames)) {
@@ -70,6 +64,15 @@ trait RefreshLandlordAndTenantDatabases
                 }
             }
         }
+
+        Log::info('Tests: landlord collections after wipe', [
+            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
+            'landlords_count' => Landlord::query()->count(),
+            'tenants_count' => Tenant::query()->count(),
+        ]);
+        Log::info('Tests: tenant collections after wipe', [
+            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
+        ]);
 
         if (static::$migrationsRan) {
             return;

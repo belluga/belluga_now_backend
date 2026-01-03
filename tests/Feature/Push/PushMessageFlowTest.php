@@ -169,9 +169,9 @@ class PushMessageFlowTest extends TestCase
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
         $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
-        $data->assertStatus(403);
+        $data->assertStatus(404);
         $data->assertJsonPath('ok', false);
-        $data->assertJsonPath('reason', 'forbidden');
+        $data->assertJsonPath('reason', 'not_found');
     }
 
     public function testPushMessageDataInactiveReturnsOkFalse(): void
@@ -675,7 +675,7 @@ class PushMessageFlowTest extends TestCase
         $secondaryTenant->forgetCurrent();
     }
 
-    public function testTenantCrossTenantCredentialUpdateReturnsNotFound(): void
+    public function testTenantCrossTenantCredentialUpsertIsTenantScoped(): void
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
@@ -684,26 +684,30 @@ class PushMessageFlowTest extends TestCase
         $this->withServerVariables(['HTTP_HOST' => $secondaryHost]);
         Sanctum::actingAs($secondaryOperator, ['tenant-push-credentials:update']);
 
-        $create = $this->postJson('api/v1/settings/push/credentials', [
+        PushCredential::query()->delete();
+        $create = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'secondary-project',
             'client_email' => 'secondary@example.org',
             'private_key' => 'secondary-key',
         ]);
         $create->assertCreated();
 
-        $credentialId = $create->json('data.id');
-
         $primaryTenant->makeCurrent();
         $this->withServerVariables(['HTTP_HOST' => $this->tenantHost]);
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $primaryTenant->subdomain, $this->host);
-        $update = $this->patchJson($baseApiTenant . 'settings/push/credentials/' . $credentialId, [
+        $update = $this->putJson($baseApiTenant . 'settings/push/credentials', [
             'project_id' => 'primary-project',
             'client_email' => 'primary@example.org',
             'private_key' => 'primary-key',
         ]);
-        $update->assertStatus(404);
+        $update->assertOk();
+
+        $secondaryTenant->makeCurrent();
+        $secondaryCredential = PushCredential::query()->first();
+        $this->assertNotNull($secondaryCredential);
+        $this->assertSame('secondary-project', (string) $secondaryCredential->project_id);
 
         $secondaryTenant->forgetCurrent();
     }
@@ -825,22 +829,14 @@ class PushMessageFlowTest extends TestCase
 
         Sanctum::actingAs($visitor, ['push-settings:update']);
 
-        $payload = [
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
-                ],
-            ],
-        ];
+        $payload = $this->buildTenantSettingsPayload();
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertStatus(403);
     }
 
-    public function testTenantPushSettingsUpdateNormalizesRoutes(): void
+    public function testTenantPushSettingsRequiresFirebaseAndPushConfig(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -856,6 +852,43 @@ class PushMessageFlowTest extends TestCase
                     'label' => 'Invite Received',
                 ],
             ],
+        ];
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'firebase',
+            'push',
+        ]);
+    }
+
+    public function testTenantPushSettingsDefaultsMaxTtlDays(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $payload = $this->buildTenantSettingsPayload();
+        unset($payload['max_ttl_days']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response->assertOk();
+        $response->assertJsonPath('data.max_ttl_days', 7);
+    }
+
+    public function testTenantPushSettingsUpdateNormalizesRoutes(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $payload = $this->buildTenantSettingsPayload([
             'push_message_routes' => [
                 [
                     'key' => 'agenda.detail',
@@ -872,23 +905,66 @@ class PushMessageFlowTest extends TestCase
                     'events' => ['invite_received'],
                 ],
             ],
-            'firebase' => [
-                'apiKey' => 'key',
-                'appId' => 'app',
-                'projectId' => 'project',
-                'messagingSenderId' => 'sender',
-                'storageBucket' => 'bucket',
-            ],
-            'push' => [
-                'enabled' => true,
-                'types' => ['invite_received'],
-            ],
-        ];
+        ]);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertOk();
         $response->assertJsonPath('data.push_message_routes.0.path_params.0', 'slug');
+    }
+
+    public function testTenantPushStatusNotConfigured(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        TenantPushSettings::query()->delete();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response->assertOk();
+        $response->assertJsonPath('status', 'not_configured');
+    }
+
+    public function testTenantPushStatusPendingTests(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        PushDeliveryLog::query()->delete();
+        $this->seedPushSettings();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response->assertOk();
+        $response->assertJsonPath('status', 'pending_tests');
+    }
+
+    public function testTenantPushStatusActive(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        PushDeliveryLog::query()->delete();
+        $this->seedPushSettings();
+
+        PushDeliveryLog::create([
+            'push_message_id' => (string) new \MongoDB\BSON\ObjectId(),
+            'batch_id' => 'batch-1',
+            'token_hash' => 'token',
+            'status' => 'accepted',
+        ]);
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response->assertOk();
+        $response->assertJsonPath('status', 'active');
     }
 
     public function testTenantPushSettingsAcceptsTelemetryIntegrations(): void
@@ -899,14 +975,7 @@ class PushMessageFlowTest extends TestCase
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $payload = [
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
-                ],
-            ],
+        $payload = $this->buildTenantSettingsPayload([
             'telemetry' => [
                 [
                     'type' => 'mixpanel',
@@ -923,7 +992,7 @@ class PushMessageFlowTest extends TestCase
                     'events' => ['invite_received'],
                 ],
             ],
-        ];
+        ]);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
@@ -1181,7 +1250,8 @@ class PushMessageFlowTest extends TestCase
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
         $data = $this->getJson('api/v1/push/messages/' . $messageId . '/data');
-        $data->assertStatus(403);
+        $data->assertStatus(404);
+        $data->assertJsonPath('reason', 'not_found');
     }
 
     public function testTenantMessageActionsForbiddenWhenNotEligible(): void
@@ -1242,8 +1312,8 @@ class PushMessageFlowTest extends TestCase
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
         $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
-        $data->assertStatus(403);
-        $data->assertJsonPath('reason', 'forbidden');
+        $data->assertStatus(404);
+        $data->assertJsonPath('reason', 'not_found');
     }
 
     public function testAudienceEligibilityContractOverrideAllowsData(): void
@@ -1308,7 +1378,7 @@ class PushMessageFlowTest extends TestCase
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
 
-        $response = $this->postJson('api/v1/settings/push/credentials', [
+        $response = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
             'private_key' => 'secret',
@@ -1317,11 +1387,12 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function testTenantCredentialCreateAndUpdate(): void
+    public function testTenantCredentialUpsertCreatesAndUpdatesSingleRecord(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
-        $create = $this->postJson('api/v1/settings/push/credentials', [
+        PushCredential::query()->delete();
+        $create = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
             'private_key' => 'secret',
@@ -1338,19 +1409,22 @@ class PushMessageFlowTest extends TestCase
         $this->assertNotNull($stored);
         $this->assertNotSame('secret', (string) ($stored['private_key'] ?? ''));
 
-        $update = $this->patchJson('api/v1/settings/push/credentials/' . $credentialId, [
+        $update = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
             'private_key' => 'updated-secret',
         ]);
 
         $update->assertOk();
+        $update->assertJsonPath('data.id', $credentialId);
+        $this->assertSame(1, PushCredential::query()->count());
     }
 
     public function testTenantCredentialsIndexReturnsWithoutPrivateKey(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
+        PushCredential::query()->delete();
         $credential = PushCredential::create([
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
@@ -1366,11 +1440,83 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonMissing(['private_key']);
     }
 
+    public function testTenantCredentialsIndexReturnsConflictWhenMultiple(): void
+    {
+        Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
+
+        PushCredential::query()->delete();
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+        PushCredential::create([
+            'project_id' => 'project-id-2',
+            'client_email' => 'client2@example.org',
+            'private_key' => 'secret-2',
+        ]);
+
+        $response = $this->getJson('api/v1/settings/push/credentials');
+        $response->assertStatus(409);
+    }
+
+    public function testTenantCredentialsUpsertReturnsConflictWhenMultiple(): void
+    {
+        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+
+        PushCredential::query()->delete();
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+        PushCredential::create([
+            'project_id' => 'project-id-2',
+            'client_email' => 'client2@example.org',
+            'private_key' => 'secret-2',
+        ]);
+
+        $response = $this->putJson('api/v1/settings/push/credentials', [
+            'project_id' => 'project-id-3',
+            'client_email' => 'client3@example.org',
+            'private_key' => 'secret-3',
+        ]);
+        $response->assertStatus(409);
+    }
+
+    public function testTenantPushStatusReturnsConflictWhenMultipleCredentials(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        TenantPushSettings::query()->delete();
+        PushCredential::query()->delete();
+
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+        PushCredential::create([
+            'project_id' => 'project-id-2',
+            'client_email' => 'client2@example.org',
+            'private_key' => 'secret-2',
+        ]);
+
+        TenantPushSettings::create($this->buildTenantSettingsPayload());
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response->assertStatus(409);
+    }
+
     public function testTenantCredentialValidationReturns422(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
-        $response = $this->postJson('api/v1/settings/push/credentials', [
+        $response = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
         ]);
@@ -1378,7 +1524,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testTenantSettingsStoreFirebaseCredentialsId(): void
+    public function testTenantSettingsDoesNotExposeFirebaseCredentialsId(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1386,27 +1532,12 @@ class PushMessageFlowTest extends TestCase
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $credential = PushCredential::create([
-            'project_id' => 'project-id',
-            'client_email' => 'client@example.org',
-            'private_key' => 'secret',
-        ]);
-
-        $payload = [
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
-                ],
-            ],
-            'firebase_credentials_id' => (string) $credential->_id,
-        ];
+        $payload = $this->buildTenantSettingsPayload();
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertOk();
-        $response->assertJsonPath('data.firebase_credentials_id', (string) $credential->_id);
+        $response->assertJsonMissing(['firebase_credentials_id']);
     }
 
     public function testDeliveryLogsHaveNoTtlIndex(): void
@@ -1449,6 +1580,7 @@ class PushMessageFlowTest extends TestCase
             };
         });
 
+        PushDeliveryLog::query()->delete();
         $message = PushMessage::create($this->buildPayload());
         $service = $this->app->make(PushDeliveryService::class);
         $service->deliver($message, ['token-1', 'token-2']);
@@ -1560,6 +1692,7 @@ class PushMessageFlowTest extends TestCase
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
+        PushCredential::query()->delete();
         $keyResource = openssl_pkey_new([
             'private_key_type' => OPENSSL_KEYTYPE_RSA,
             'private_key_bits' => 2048,
@@ -1567,14 +1700,10 @@ class PushMessageFlowTest extends TestCase
         $privateKey = '';
         openssl_pkey_export($keyResource, $privateKey);
 
-        $credential = PushCredential::create([
+        PushCredential::create([
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
             'private_key' => $privateKey,
-        ]);
-
-        TenantPushSettings::query()->first()?->update([
-            'firebase_credentials_id' => (string) $credential->_id,
         ]);
 
         Http::fake([
@@ -1614,6 +1743,7 @@ class PushMessageFlowTest extends TestCase
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
+        PushCredential::query()->delete();
         $keyResource = openssl_pkey_new([
             'private_key_type' => OPENSSL_KEYTYPE_RSA,
             'private_key_bits' => 2048,
@@ -1621,14 +1751,10 @@ class PushMessageFlowTest extends TestCase
         $privateKey = '';
         openssl_pkey_export($keyResource, $privateKey);
 
-        $credential = PushCredential::create([
+        PushCredential::create([
             'project_id' => 'project-id',
             'client_email' => 'client@example.org',
             'private_key' => $privateKey,
-        ]);
-
-        TenantPushSettings::query()->first()?->update([
-            'firebase_credentials_id' => (string) $credential->_id,
         ]);
 
         Http::fake([
@@ -1894,14 +2020,13 @@ class PushMessageFlowTest extends TestCase
     private function seedPushSettings(): void
     {
         TenantPushSettings::query()->delete();
-        TenantPushSettings::create([
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
-                ],
-            ],
+        PushCredential::query()->delete();
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
             'push_message_routes' => [
                 [
                     'key' => 'agenda.search',
@@ -1921,7 +2046,42 @@ class PushMessageFlowTest extends TestCase
                     ],
                 ],
             ],
-        ]);
+        ]));
+    }
+
+    private function buildTenantSettingsPayload(array $overrides = []): array
+    {
+        $credential = PushCredential::query()->first();
+        if (! $credential) {
+            $credential = PushCredential::create([
+                'project_id' => 'project-id',
+                'client_email' => 'client@example.org',
+                'private_key' => 'secret',
+            ]);
+        }
+
+        $payload = [
+            'max_ttl_days' => 30,
+            'push_message_types' => [
+                [
+                    'key' => 'invite_received',
+                    'label' => 'Invite Received',
+                ],
+            ],
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+            'push' => [
+                'enabled' => true,
+                'types' => ['invite_received'],
+            ],
+        ];
+
+        return array_replace_recursive($payload, $overrides);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Pool;
@@ -24,7 +25,11 @@ class FcmHttpV1Client implements FcmClientContract
      */
     public function send(PushMessage $message, array $tokens): array
     {
-        $credentials = $this->credentialService->current();
+        try {
+            $credentials = $this->credentialService->current();
+        } catch (MultiplePushCredentialsException $exception) {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
         if (! $credentials) {
             return ['accepted_count' => 0, 'responses' => []];
         }

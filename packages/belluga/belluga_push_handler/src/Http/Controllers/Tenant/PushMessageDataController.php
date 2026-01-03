@@ -49,18 +49,12 @@ class PushMessageDataController
         if (! $this->audienceService->isEligible($user, $message, [
             'scope' => 'tenant',
         ])) {
-            return response()->json(['ok' => false, 'reason' => 'forbidden'], 403);
+            return response()->json(['ok' => false, 'reason' => 'not_found'], 404);
         }
 
         $payload = $this->renderer->render($message, [
             'user' => $user,
         ]);
-
-        $this->metricsService->recordAction($message, [
-            'action' => 'opened',
-            'step_index' => 0,
-            'idempotency_key' => 'opened:' . (string) $user->_id . ':' . (string) $message->_id,
-        ], (string) $user->_id);
 
         return response()->json([
             'ok' => true,

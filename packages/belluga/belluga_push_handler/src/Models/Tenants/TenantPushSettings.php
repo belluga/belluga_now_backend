@@ -13,13 +13,16 @@ class TenantPushSettings extends Model
 
     protected $collection = 'tenant_push_settings';
 
+    protected $hidden = [
+        'firebase_credentials_id',
+    ];
+
     protected $fillable = [
         'push_message_types',
         'push_message_routes',
         'max_ttl_days',
         'telemetry',
         'firebase',
-        'firebase_credentials_id',
         'push',
     ];
 
@@ -28,7 +31,6 @@ class TenantPushSettings extends Model
         'push_message_routes' => 'array',
         'max_ttl_days' => 'integer',
         'firebase' => 'array',
-        'firebase_credentials_id' => 'string',
         'push' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
