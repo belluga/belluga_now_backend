@@ -206,7 +206,7 @@ class PushMessageRenderer
      */
     private function routesByKey(): array
     {
-        $routes = TenantPushSettings::current()?->push_message_routes ?? [];
+        $routes = TenantPushSettings::current()?->getPushMessageRoutes() ?? [];
         if (! is_array($routes)) {
             return [];
         }

@@ -13,7 +13,7 @@ class IdentityMergeAudit extends Model
     use DocumentModel;
     use UsesTenantConnection;
 
-    protected $collection = 'identity_merge_audits';
+    protected $table = 'identity_merge_audits';
 
     protected $fillable = [
         'tenant_id',
@@ -27,4 +27,3 @@ class IdentityMergeAudit extends Model
         'target_identity_state',
     ];
 }
-

@@ -11,7 +11,7 @@ class PushDeliveryLog extends Model
 {
     use UsesTenantConnection;
 
-    protected $collection = 'push_delivery_logs';
+    protected $table = 'push_delivery_logs';
 
     protected $fillable = [
         'push_message_id',

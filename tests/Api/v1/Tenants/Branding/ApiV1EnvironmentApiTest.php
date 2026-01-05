@@ -57,11 +57,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         TenantPushSettings::query()->delete();
         TenantPushSettings::create([
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
+            'push' => [
+                'max_ttl_days' => 30,
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                    ],
                 ],
             ],
             'telemetry' => [

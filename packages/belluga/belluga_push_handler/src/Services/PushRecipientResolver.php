@@ -42,6 +42,10 @@ class PushRecipientResolver
                 }
 
                 foreach ($user->devices ?? [] as $device) {
+                    $isActive = $device['is_active'] ?? true;
+                    if ($isActive !== true) {
+                        continue;
+                    }
                     $token = $device['push_token'] ?? null;
                     if (is_string($token) && $token !== '') {
                         $tokens[$token] = true;
@@ -60,6 +64,10 @@ class PushRecipientResolver
     {
         $tokens = [];
         foreach ($user->devices ?? [] as $device) {
+            $isActive = $device['is_active'] ?? true;
+            if ($isActive !== true) {
+                continue;
+            }
             $token = $device['push_token'] ?? null;
             if (is_string($token) && $token !== '') {
                 $tokens[$token] = true;

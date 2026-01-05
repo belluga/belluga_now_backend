@@ -12,7 +12,7 @@ class PushMessage extends Model
 {
     use UsesTenantConnection;
 
-    protected $collection = 'push_messages';
+    protected $table = 'push_messages';
 
     protected $fillable = [
         'scope',
@@ -35,12 +35,6 @@ class PushMessage extends Model
 
     protected $casts = [
         'active' => 'boolean',
-        'audience' => 'array',
-        'delivery' => 'array',
-        'payload_template' => 'array',
-        'fcm_options' => 'array',
-        'template_defaults' => 'array',
-        'metrics' => 'array',
         'sent_at' => 'datetime',
         'archived_at' => 'datetime',
         'created_at' => 'datetime',

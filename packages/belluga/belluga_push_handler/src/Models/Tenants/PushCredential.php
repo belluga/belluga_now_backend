@@ -11,7 +11,7 @@ class PushCredential extends Model
 {
     use UsesTenantConnection;
 
-    protected $collection = 'push_credentials';
+    protected $table = 'push_credentials';
 
     protected $fillable = [
         'project_id',

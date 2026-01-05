@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Requests;
 
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\FcmOptionsValidator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -82,6 +83,13 @@ class PushMessageUpdateRequest extends FormRequest
         ];
     }
 
+    public function messages(): array
+    {
+        return [
+            'payload_template.buttons.*.action.route_key.in' => 'Route key is not defined in tenant settings.',
+        ];
+    }
+
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
@@ -96,6 +104,7 @@ class PushMessageUpdateRequest extends FormRequest
             }
 
             $routes = $this->routesByKey();
+            $allowedKeys = $this->allowedRouteKeysForValidation($routes);
 
             foreach ($buttons as $index => $button) {
                 $action = $button['action'] ?? null;
@@ -106,9 +115,20 @@ class PushMessageUpdateRequest extends FormRequest
                 $routeKey = $action['route_key'] ?? null;
                 $route = $routeKey && isset($routes[$routeKey]) ? $routes[$routeKey] : null;
                 if (! $route) {
+                    $routeKeyPath = "payload_template.buttons.$index.action.route_key";
+                    if (! $validator->errors()->has($routeKeyPath)) {
+                        $validator->errors()->add(
+                            $routeKeyPath,
+                            'Route key is not defined in tenant settings.'
+                        );
+                    }
+                    continue;
+                }
+
+                if ($allowedKeys !== null && ! in_array($routeKey, $allowedKeys, true)) {
                     $validator->errors()->add(
                         "payload_template.buttons.$index.action.route_key",
-                        'Route key is not defined in tenant settings.'
+                        $this->formatAllowedRouteKeysMessage($allowedKeys)
                     );
                     continue;
                 }
@@ -156,7 +176,7 @@ class PushMessageUpdateRequest extends FormRequest
      */
     private function routesByKey(): array
     {
-        $routes = TenantPushSettings::current()?->push_message_routes ?? [];
+        $routes = TenantPushSettings::current()?->getPushMessageRoutes() ?? [];
         if (! is_array($routes)) {
             return [];
         }
@@ -170,9 +190,122 @@ class PushMessageUpdateRequest extends FormRequest
             if (! is_string($key) || $key === '') {
                 continue;
             }
+            if (! $this->isActiveEntry($route)) {
+                continue;
+            }
             $indexed[$key] = $route;
         }
 
         return $indexed;
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     */
+    private function isActiveEntry(array $entry): bool
+    {
+        $active = $entry['active'] ?? true;
+        return $active !== false;
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function allowedRouteKeys(): ?array
+    {
+        $type = $this->resolveMessageType();
+        if (! is_string($type) || $type === '') {
+            return null;
+        }
+
+        $types = TenantPushSettings::current()?->getPushMessageTypes() ?? [];
+        if (! is_array($types)) {
+            return null;
+        }
+
+        foreach ($types as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+            if (($entry['key'] ?? null) !== $type) {
+                continue;
+            }
+            if (! $this->isActiveEntry($entry)) {
+                return [];
+            }
+            $allowed = $entry['allowed_route_keys'] ?? null;
+            if (! is_array($allowed)) {
+                return null;
+            }
+
+            $allowedKeys = [];
+            foreach ($allowed as $key) {
+                if (is_string($key) && $key !== '') {
+                    $allowedKeys[] = $key;
+                }
+            }
+
+            return array_values(array_unique($allowedKeys));
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $routes
+     * @return array<int, string>|null
+     */
+    private function allowedRouteKeysForValidation(array $routes): ?array
+    {
+        $allowedKeys = $this->allowedRouteKeys();
+        if ($allowedKeys === null) {
+            return null;
+        }
+
+        $activeKeys = array_keys($routes);
+        $filtered = [];
+        foreach ($allowedKeys as $key) {
+            if (in_array($key, $activeKeys, true)) {
+                $filtered[] = $key;
+            }
+        }
+
+        return array_values(array_unique($filtered));
+    }
+
+    /**
+     * @param array<int, string> $allowedKeys
+     */
+    private function formatAllowedRouteKeysMessage(array $allowedKeys): string
+    {
+        if ($allowedKeys === []) {
+            return 'Route key is not allowed for this message type. No route keys are allowed for this message type.';
+        }
+
+        return sprintf(
+            'Route key is not allowed for this message type. Allowed route keys: %s.',
+            implode(', ', $allowedKeys)
+        );
+    }
+
+    private function resolveMessageType(): ?string
+    {
+        $type = $this->input('type');
+        if (is_string($type) && $type !== '') {
+            return $type;
+        }
+
+        $messageId = (string) $this->route('push_message_id');
+        if ($messageId === '') {
+            return null;
+        }
+
+        $message = PushMessage::query()
+            ->where('scope', 'tenant')
+            ->where('_id', $messageId)
+            ->first();
+
+        $existingType = $message?->type ?? null;
+        return is_string($existingType) ? $existingType : null;
     }
 }

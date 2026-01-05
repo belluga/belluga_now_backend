@@ -52,7 +52,7 @@ class PushMessageController
         $payload = $request->validated();
 
         $expiresAt = $payload['delivery']['expires_at'] ?? null;
-        $maxTtlDays = TenantPushSettings::current()?->max_ttl_days ?? 30;
+        $maxTtlDays = TenantPushSettings::current()?->getPushMaxTtlDays() ?? 30;
         if ($expiresAt && now()->addDays($maxTtlDays)->lt(\Carbon\Carbon::parse($expiresAt))) {
             return response()->json([
                 'message' => 'expires_at exceeds max TTL.',
@@ -92,7 +92,7 @@ class PushMessageController
         $payload = $request->validated();
 
         $expiresAt = $payload['delivery']['expires_at'] ?? null;
-        $maxTtlDays = TenantPushSettings::current()?->max_ttl_days ?? 30;
+        $maxTtlDays = TenantPushSettings::current()?->getPushMaxTtlDays() ?? 30;
         if ($expiresAt && now()->addDays($maxTtlDays)->lt(\Carbon\Carbon::parse($expiresAt))) {
             return response()->json([
                 'message' => 'expires_at exceeds max TTL.',

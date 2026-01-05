@@ -19,6 +19,7 @@ use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Belluga\PushHandler\Services\PushDeviceService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,8 @@ use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Services\PushDeliveryService;
+use Belluga\PushHandler\Services\PushRecipientResolver;
+use MongoDB\BSON\UTCDateTime;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -829,14 +832,19 @@ class PushMessageFlowTest extends TestCase
 
         Sanctum::actingAs($visitor, ['push-settings:update']);
 
-        $payload = $this->buildTenantSettingsPayload();
+        $payload = [
+            'push' => [
+                'throttles' => [],
+                'max_ttl_days' => 30,
+            ],
+        ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertStatus(403);
     }
 
-    public function testTenantPushSettingsRequiresFirebaseAndPushConfig(): void
+    public function testTenantPushSettingsRequiresPushConfig(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -844,21 +852,12 @@ class PushMessageFlowTest extends TestCase
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $payload = [
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
-                ],
-            ],
-        ];
+        $payload = [];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
-            'firebase',
             'push',
         ]);
     }
@@ -867,12 +866,16 @@ class PushMessageFlowTest extends TestCase
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        TenantPushSettings::query()->delete();
 
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $payload = $this->buildTenantSettingsPayload();
-        unset($payload['max_ttl_days']);
+        $payload = [
+            'push' => [
+                'throttles' => [],
+            ],
+        ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
@@ -880,7 +883,36 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('data.max_ttl_days', 7);
     }
 
-    public function testTenantPushSettingsUpdateNormalizesRoutes(): void
+    public function testTenantFirebaseSettingsUpdateRequiresTenantAccess(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $visitor = LandlordUser::create([
+            'name' => 'Visitor',
+            'emails' => ['visitor-firebase@example.org'],
+            'password' => 'Secret!234',
+            'identity_state' => 'registered',
+        ]);
+
+        Sanctum::actingAs($visitor, ['push-settings:update']);
+
+        $payload = [
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+        ];
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
+        $response->assertStatus(403);
+    }
+
+    public function testTenantFirebaseSettingsRequiresFirebaseConfig(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -888,15 +920,72 @@ class PushMessageFlowTest extends TestCase
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $payload = $this->buildTenantSettingsPayload([
+        $payload = [];
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'firebase',
+        ]);
+    }
+
+    public function testTenantRouteTypesUpdateNormalizesRoutes(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $payload = [
+            [
+                'key' => 'agenda.detail',
+                'path' => '/agenda/evento/:slug',
+                'query_params' => ['event_id'],
+            ],
+        ];
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->patchJson($baseApiTenant . 'settings/push/route_types', $payload);
+        $response->assertOk();
+        $response->assertJsonFragment([
+            'key' => 'agenda.detail',
+            'path_params' => ['slug'],
+            'query_params' => [
+                'event_id' => 'string',
+            ],
+        ]);
+    }
+
+    public function testTenantPushSettingsRejectsRouteAndTypeFields(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $payload = [
             'push_message_routes' => [
                 [
-                    'key' => 'agenda.detail',
-                    'path' => '/agenda/evento/:slug',
-                    'query_params' => [
-                        'startWithHistory' => 'boolean',
-                    ],
+                    'key' => 'agenda.search',
+                    'path' => '/agenda/search',
                 ],
+            ],
+            'push_message_types' => [
+                [
+                    'key' => 'invite_received',
+                    'label' => 'Invite Updated',
+                ],
+            ],
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
             ],
             'telemetry' => [
                 [
@@ -905,12 +994,376 @@ class PushMessageFlowTest extends TestCase
                     'events' => ['invite_received'],
                 ],
             ],
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda/search',
+                    ],
+                ],
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Updated',
+                    ],
+                ],
+                'types' => ['invite_received'],
+                'enabled' => true,
+                'max_ttl_days' => 30,
+                'throttles' => [],
+            ],
+        ];
+
+        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'firebase',
+            'telemetry',
+            'push_message_routes',
+            'push_message_types',
+            'push.message_routes',
+            'push.message_types',
+            'push.types',
+            'push.enabled',
         ]);
+    }
+
+    public function testTenantRouteTypesPatchMergesByKey(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda',
+                        'path_params' => [],
+                        'query_params' => [],
+                    ],
+                    [
+                        'key' => 'agenda.detail',
+                        'path' => '/agenda/evento/:slug',
+                        'path_params' => ['slug'],
+                        'query_params' => [],
+                    ],
+                ],
+            ],
+        ]));
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $payload = [
+            [
+                'key' => 'agenda.search',
+                'path' => '/agenda/search',
+            ],
+            [
+                'key' => 'agenda.new',
+                'path' => '/agenda/new',
+            ],
+        ];
+
+        $response = $this->patchJson($baseApiTenant . 'settings/push/route_types', $payload);
         $response->assertOk();
-        $response->assertJsonPath('data.push_message_routes.0.path_params.0', 'slug');
+        $response->assertJsonFragment(['key' => 'agenda.search', 'path' => '/agenda/search']);
+        $response->assertJsonFragment(['key' => 'agenda.detail', 'path' => '/agenda/evento/:slug']);
+        $response->assertJsonFragment(['key' => 'agenda.new', 'path' => '/agenda/new']);
+    }
+
+    public function testTenantMessageTypesPatchMergesByKey(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                    ],
+                    [
+                        'key' => 'event_reminder',
+                        'label' => 'Event Reminder',
+                    ],
+                ],
+            ],
+        ]));
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $payload = [
+            [
+                'key' => 'invite_received',
+                'label' => 'Invite Updated',
+            ],
+            [
+                'key' => 'new_type',
+                'label' => 'New Type',
+            ],
+        ];
+
+        $response = $this->patchJson($baseApiTenant . 'settings/push/message_types', $payload);
+        $response->assertOk();
+        $response->assertJsonFragment(['key' => 'invite_received', 'label' => 'Invite Updated']);
+        $response->assertJsonFragment(['key' => 'event_reminder', 'label' => 'Event Reminder']);
+        $response->assertJsonFragment(['key' => 'new_type', 'label' => 'New Type']);
+    }
+
+    public function testTenantRouteTypesSoftDeleteByKey(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda',
+                        'path_params' => [],
+                        'query_params' => [],
+                    ],
+                    [
+                        'key' => 'agenda.detail',
+                        'path' => '/agenda/evento/:slug',
+                        'path_params' => ['slug'],
+                        'query_params' => [],
+                    ],
+                ],
+            ],
+        ]));
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $payload = ['keys' => ['agenda.detail']];
+
+        $response = $this->deleteJson($baseApiTenant . 'settings/push/route_types', $payload);
+        $response->assertOk();
+        $response->assertJsonFragment(['key' => 'agenda.search', 'path' => '/agenda']);
+        $response->assertJsonFragment(['key' => 'agenda.detail', 'active' => false]);
+    }
+
+    public function testTenantMessageTypesSoftDeleteByKey(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                    ],
+                    [
+                        'key' => 'event_reminder',
+                        'label' => 'Event Reminder',
+                    ],
+                ],
+            ],
+        ]));
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $payload = ['keys' => ['event_reminder']];
+
+        $response = $this->deleteJson($baseApiTenant . 'settings/push/message_types', $payload);
+        $response->assertOk();
+        $response->assertJsonFragment(['key' => 'invite_received', 'label' => 'Invite Received']);
+        $response->assertJsonFragment(['key' => 'event_reminder', 'active' => false]);
+    }
+
+    public function testInactiveRouteTypeRejectedWhenCreatingMessage(): void
+    {
+        $this->actingAsOperator();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda',
+                        'path_params' => [],
+                        'query_params' => [
+                            'startSearchActive' => 'boolean',
+                        ],
+                        'active' => false,
+                    ],
+                ],
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                    ],
+                ],
+            ],
+        ]));
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'allowDismiss' => 'true',
+                'steps' => [
+                    ['title' => 'Title'],
+                ],
+                'buttons' => [
+                    [
+                        'label' => 'Agenda',
+                        'action' => [
+                            'type' => 'route',
+                            'route_key' => 'agenda.search',
+                            'path_parameters' => [],
+                            'query_parameters' => [
+                                'startSearchActive' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.buttons.0.action.route_key' => 'Route key is not defined in tenant settings.',
+        ]);
+    }
+
+    public function testInactiveMessageTypeBlocksRouteFiltering(): void
+    {
+        $this->actingAsOperator();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda',
+                        'path_params' => [],
+                        'query_params' => [
+                            'startSearchActive' => 'boolean',
+                        ],
+                    ],
+                ],
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                        'allowed_route_keys' => ['agenda.search'],
+                        'active' => false,
+                    ],
+                ],
+            ],
+        ]));
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'allowDismiss' => 'true',
+                'steps' => [
+                    ['title' => 'Title'],
+                ],
+                'buttons' => [
+                    [
+                        'label' => 'Agenda',
+                        'action' => [
+                            'type' => 'route',
+                            'route_key' => 'agenda.search',
+                            'path_parameters' => [],
+                            'query_parameters' => [
+                                'startSearchActive' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.buttons.0.action.route_key' => 'Route key is not allowed for this message type. No route keys are allowed for this message type.',
+        ]);
+    }
+
+    public function testPushMessageCreateRejectsRouteKeyNotAllowedForType(): void
+    {
+        $this->actingAsOperator();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda',
+                        'path_params' => [],
+                        'query_params' => [
+                            'startSearchActive' => 'boolean',
+                        ],
+                    ],
+                    [
+                        'key' => 'agenda.detail',
+                        'path' => '/agenda/evento/:slug',
+                        'path_params' => ['slug'],
+                        'query_params' => [],
+                    ],
+                ],
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                        'allowed_route_keys' => ['agenda.detail'],
+                    ],
+                ],
+            ],
+        ]));
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'allowDismiss' => 'true',
+                'steps' => [
+                    ['title' => 'Title'],
+                ],
+                'buttons' => [
+                    [
+                        'label' => 'Agenda',
+                        'action' => [
+                            'type' => 'route',
+                            'route_key' => 'agenda.search',
+                            'path_parameters' => [],
+                            'query_parameters' => [
+                                'startSearchActive' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.buttons.0.action.route_key' => 'Route key is not allowed for this message type. Allowed route keys: agenda.detail.',
+        ]);
     }
 
     public function testTenantPushStatusNotConfigured(): void
@@ -939,6 +1392,8 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $enable = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $enable->assertOk();
         $response = $this->getJson($baseApiTenant . 'settings/push/status');
         $response->assertOk();
         $response->assertJsonPath('status', 'pending_tests');
@@ -962,12 +1417,14 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $enable = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $enable->assertOk();
         $response = $this->getJson($baseApiTenant . 'settings/push/status');
         $response->assertOk();
         $response->assertJsonPath('status', 'active');
     }
 
-    public function testTenantPushSettingsAcceptsTelemetryIntegrations(): void
+    public function testTenantTelemetryAddRemoveEnforcesUniqueTypes(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -975,31 +1432,89 @@ class PushMessageFlowTest extends TestCase
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $payload = $this->buildTenantSettingsPayload([
-            'telemetry' => [
-                [
-                    'type' => 'mixpanel',
-                    'token' => 'token',
-                    'events' => ['invite_received'],
-                ],
-                [
-                    'type' => 'firebase',
-                    'events' => ['invite_received'],
-                ],
-                [
-                    'type' => 'webhook',
-                    'url' => 'https://example.org/hook',
-                    'events' => ['invite_received'],
-                ],
-            ],
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+
+        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+            'type' => 'mixpanel',
+            'token' => 'token',
+            'events' => ['invite_received'],
         ]);
+        $response->assertOk();
+        $response->assertJsonPath('data.0.type', 'mixpanel');
+
+        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+            'type' => 'mixpanel',
+            'token' => 'token-updated',
+            'events' => ['invite_received'],
+        ]);
+        $response->assertOk();
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.token', 'token-updated');
+
+        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+            'type' => 'webhook',
+            'url' => 'https://example.org/hook',
+            'events' => ['invite_received'],
+        ]);
+        $response->assertOk();
+        $response->assertJsonCount(2, 'data');
+
+        $response = $this->deleteJson($baseApiTenant . 'settings/telemetry/mixpanel');
+        $response->assertOk();
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.type', 'webhook');
+    }
+
+    public function testTenantPushEnableRequiresConfig(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        TenantPushSettings::query()->delete();
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['firebase', 'push']);
+    }
+
+    public function testTenantPushEnableSetsEnabledTrue(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload());
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->postJson($baseApiTenant . 'settings/push/enable');
         $response->assertOk();
-        $response->assertJsonPath('data.telemetry.0.type', 'mixpanel');
-        $response->assertJsonPath('data.telemetry.1.type', 'firebase');
-        $response->assertJsonPath('data.telemetry.2.type', 'webhook');
+        $response->assertJsonPath('data.enabled', true);
+    }
+
+    public function testTenantPushDisableSetsEnabledFalse(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => ['enabled' => true],
+        ]));
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $response = $this->postJson($baseApiTenant . 'settings/push/disable');
+        $response->assertOk();
+        $response->assertJsonPath('data.enabled', false);
     }
 
     public function testPlanPolicyBlocksDispatchWhenCannotSend(): void
@@ -1508,6 +2023,8 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $enable = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $enable->assertOk();
         $response = $this->getJson($baseApiTenant . 'settings/push/status');
         $response->assertStatus(409);
     }
@@ -1532,10 +2049,18 @@ class PushMessageFlowTest extends TestCase
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
-        $payload = $this->buildTenantSettingsPayload();
+        $payload = [
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+        ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
         $response->assertOk();
         $response->assertJsonMissing(['firebase_credentials_id']);
     }
@@ -1909,6 +2434,153 @@ class PushMessageFlowTest extends TestCase
         $send->assertJsonPath('ok', true);
     }
 
+    public function testRegisterUpdatesDeviceTokenAndReactivates(): void
+    {
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $user->devices = [
+            [
+                'device_id' => 'device-1',
+                'platform' => 'android',
+                'push_token' => 'token-old',
+                'is_active' => false,
+                'invalidated_at' => new UTCDateTime(),
+            ],
+        ];
+        $user->save();
+
+        $service = $this->app->make(PushDeviceService::class);
+        $service->register($user, [
+            'device_id' => 'device-1',
+            'platform' => 'android',
+            'push_token' => 'token-new',
+        ]);
+
+        $user->refresh();
+        $this->assertCount(1, $user->devices ?? []);
+        $device = $user->devices[0];
+        $this->assertSame('token-new', $device['push_token'] ?? null);
+        $this->assertTrue($device['is_active'] ?? false);
+        $this->assertNull($device['invalidated_at'] ?? null);
+    }
+
+    public function testInvalidateTokensMarksInactiveAndKeepsOthers(): void
+    {
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $user->devices = [
+            [
+                'device_id' => 'device-1',
+                'platform' => 'android',
+                'push_token' => 'token-1',
+            ],
+            [
+                'device_id' => 'device-2',
+                'platform' => 'ios',
+                'push_token' => 'token-2',
+            ],
+        ];
+        $user->save();
+
+        $service = $this->app->make(PushDeviceService::class);
+        $service->invalidateTokens($user, ['token-1']);
+
+        $user->refresh();
+        $devices = collect($user->devices ?? []);
+        $device1 = $devices->firstWhere('device_id', 'device-1');
+        $device2 = $devices->firstWhere('device_id', 'device-2');
+
+        $this->assertSame(false, $device1['is_active'] ?? null);
+        $this->assertNotNull($device1['invalidated_at'] ?? null);
+        $this->assertTrue(($device2['is_active'] ?? true) === true);
+    }
+
+    public function testRecipientResolverSkipsInactiveTokens(): void
+    {
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $user->devices = [
+            [
+                'device_id' => 'device-1',
+                'platform' => 'android',
+                'push_token' => 'token-active',
+                'is_active' => true,
+            ],
+            [
+                'device_id' => 'device-2',
+                'platform' => 'ios',
+                'push_token' => 'token-inactive',
+                'is_active' => false,
+            ],
+        ];
+        $user->save();
+
+        $resolver = $this->app->make(PushRecipientResolver::class);
+        $tokens = $resolver->tokensForUser($user);
+
+        $this->assertSame(['token-active'], $tokens);
+    }
+
+    public function testSendInvalidatesNotFoundTokensAndSkipsOnNextSend(): void
+    {
+        $this->actingAsOperator();
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract {
+                public function send(PushMessage $message, array $tokens): array
+                {
+                    return [
+                        'accepted_count' => 0,
+                        'responses' => [
+                            [
+                                'token' => $tokens[0] ?? '',
+                                'status' => 'failed',
+                                'error_code' => 'NOT_FOUND',
+                                'error_message' => 'Requested entity was not found.',
+                            ],
+                        ],
+                    ];
+                }
+            };
+        });
+
+        $payload = $this->buildPayload([
+            'type' => 'transactional',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        AccountUser::query()->where('_id', $this->operator->_id)->update([
+            'devices' => [
+                [
+                    'device_id' => 'device-1',
+                    'push_token' => 'token-1',
+                    'platform' => 'android',
+                ],
+            ],
+        ]);
+
+        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+            'user_id' => (string) $this->operator->_id,
+        ]);
+        $send->assertOk();
+
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $device = collect($user->devices ?? [])->firstWhere('device_id', 'device-1');
+        $this->assertSame(false, $device['is_active'] ?? null);
+
+        $retry = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+            'user_id' => (string) $this->operator->_id,
+            'dry_run' => true,
+        ]);
+        $retry->assertStatus(422);
+        $retry->assertJsonPath('reason', 'no_tokens');
+    }
+
     public function testTransactionalSendDeniedWhenEligibilityFails(): void
     {
         $this->actingAsOperator();
@@ -2027,22 +2699,24 @@ class PushMessageFlowTest extends TestCase
             'private_key' => 'secret',
         ]);
         TenantPushSettings::create($this->buildTenantSettingsPayload([
-            'push_message_routes' => [
-                [
-                    'key' => 'agenda.search',
-                    'path' => '/agenda',
-                    'path_params' => [],
-                    'query_params' => [
-                        'startSearchActive' => 'boolean',
-                        'initialSearchQuery' => 'string',
+            'push' => [
+                'message_routes' => [
+                    [
+                        'key' => 'agenda.search',
+                        'path' => '/agenda',
+                        'path_params' => [],
+                        'query_params' => [
+                            'startSearchActive' => 'boolean',
+                            'initialSearchQuery' => 'string',
+                        ],
                     ],
-                ],
-                [
-                    'key' => 'agenda.detail',
-                    'path' => '/agenda/evento/:slug',
-                    'path_params' => ['slug'],
-                    'query_params' => [
-                        'startWithHistory' => 'boolean',
+                    [
+                        'key' => 'agenda.detail',
+                        'path' => '/agenda/evento/:slug',
+                        'path_params' => ['slug'],
+                        'query_params' => [
+                            'startWithHistory' => 'boolean',
+                        ],
                     ],
                 ],
             ],
@@ -2061,13 +2735,6 @@ class PushMessageFlowTest extends TestCase
         }
 
         $payload = [
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
-                ],
-            ],
             'firebase' => [
                 'apiKey' => 'key',
                 'appId' => 'app',
@@ -2076,8 +2743,13 @@ class PushMessageFlowTest extends TestCase
                 'storageBucket' => 'bucket',
             ],
             'push' => [
-                'enabled' => true,
-                'types' => ['invite_received'],
+                'max_ttl_days' => 30,
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                    ],
+                ],
             ],
         ];
 

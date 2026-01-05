@@ -9,6 +9,7 @@ use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Http\Requests\PushMessageSendRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushDeliveryService;
+use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +19,7 @@ class PushMessageSendController
     public function __construct(
         private readonly PushRecipientResolver $recipientResolver,
         private readonly PushDeliveryService $deliveryService,
+        private readonly PushDeviceService $pushDeviceService,
         private readonly PushMessageAudienceService $audienceService
     ) {
     }
@@ -62,6 +64,10 @@ class PushMessageSendController
         if (! empty($payload['device_id'])) {
             $tokens = array_values(array_filter($tokens, static function (string $token) use ($user, $payload): bool {
                 foreach ($user->devices ?? [] as $device) {
+                    $isActive = $device['is_active'] ?? true;
+                    if ($isActive !== true) {
+                        continue;
+                    }
                     if (($device['device_id'] ?? null) === $payload['device_id'] && ($device['push_token'] ?? null) === $token) {
                         return true;
                     }
@@ -76,6 +82,10 @@ class PushMessageSendController
 
         if (! ($payload['dry_run'] ?? false)) {
             $response = $this->deliveryService->deliver($message, $tokens);
+            $invalidTokens = $this->extractNotFoundTokens($response);
+            if ($invalidTokens !== []) {
+                $this->pushDeviceService->invalidateTokens($user, $invalidTokens);
+            }
 
             $metrics = $message->metrics ?? [];
             $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + (int) ($response['accepted_count'] ?? 0);
@@ -90,6 +100,32 @@ class PushMessageSendController
             'recipient_user_id' => (string) $user->_id,
             'queued' => true,
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     * @return array<int, string>
+     */
+    private function extractNotFoundTokens(array $response): array
+    {
+        $responses = $response['responses'] ?? [];
+        if (! is_array($responses)) {
+            return [];
+        }
+
+        $tokens = [];
+        foreach ($responses as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+            $errorCode = $entry['error_code'] ?? null;
+            $token = $entry['token'] ?? null;
+            if ($errorCode === 'NOT_FOUND' && is_string($token) && $token !== '') {
+                $tokens[$token] = true;
+            }
+        }
+
+        return array_keys($tokens);
     }
 
     /**

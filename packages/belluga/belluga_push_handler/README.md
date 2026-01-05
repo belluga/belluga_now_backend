@@ -110,9 +110,104 @@ Endpoints:
 - `DELETE /{tenant.unregister}` — device token unregister
 - `GET /{tenant.settings_prefix}/{tenant.settings_push}` — tenant push settings
 - `PATCH /{tenant.settings_prefix}/{tenant.settings_push}` — update tenant push settings
+- `POST /{tenant.settings_prefix}/{tenant.settings_push}/enable` — enable push after config
+- `POST /{tenant.settings_prefix}/{tenant.settings_push}/disable` — disable push
+- `GET /{tenant.settings_prefix}/firebase` — firebase settings
+- `PATCH /{tenant.settings_prefix}/firebase` — update firebase settings
+- `GET /{tenant.settings_prefix}/telemetry` — list telemetry integrations
+- `POST /{tenant.settings_prefix}/telemetry` — add/update telemetry integration
+- `DELETE /{tenant.settings_prefix}/telemetry/{type}` — remove telemetry integration
+- `GET /{tenant.settings_prefix}/{tenant.settings_push}/route_types` — list push route types
+- `PATCH /{tenant.settings_prefix}/{tenant.settings_push}/route_types` — replace push route types
+- `GET /{tenant.settings_prefix}/{tenant.settings_push}/message_types` — list push message types
+- `PATCH /{tenant.settings_prefix}/{tenant.settings_push}/message_types` — replace push message types
 
 Auth/middleware:
 - `auth:sanctum` + `CheckTenantAccess` (+ `abilities:push-settings:update` on settings)
+
+### Push Setup
+Use the tenant endpoints below to configure and enable push in order.
+
+1) **Create push credentials** (tenant scope)
+```json
+{
+  "project_id": "project-id",
+  "client_email": "client@example.org",
+  "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
+}
+```
+
+2) **Set firebase settings**
+```json
+{
+  "firebase": {
+    "apiKey": "AIzaSy...example",
+    "appId": "1:XXXXXXXXXXXX:android:f73db77742a1b07f2302f7",
+    "projectId": "string",
+    "messagingSenderId": "XXXXXXXXXXXX",
+    "storageBucket": "string.firebasestorage.app"
+  }
+}
+```
+
+3) **Set push settings**
+```json
+{
+  "push": {
+    "max_ttl_days": 30,
+    "throttles": {
+      "max_per_minute": 60,
+      "max_per_hour": 600
+    }
+  }
+}
+```
+
+4) **Define route types**
+```json
+[
+  { "key": "invite", "path": "/convites", "query_params": ["event_id"] },
+  { "key": "event_detail", "path": "/events/:event_id", "path_params": ["event_id"] },
+  { "key": "map", "path": "/map" }
+]
+```
+
+5) **Define message types**
+```json
+[
+  {
+    "key": "invite",
+    "label": "Invite",
+    "description": "Convites de evento",
+    "default_audience_type": "event",
+    "default_event_qualifier": "event.invited",
+    "allowed_route_keys": ["invite", "event_detail"]
+  }
+]
+```
+
+6) **(Optional) Add telemetry integration**
+```json
+{
+  "type": "mixpanel",
+  "token": "mixpanel-token",
+  "events": ["push.sent", "push.opened"]
+}
+```
+
+7) **Enable push**
+No body required.
+
+Notes:
+- `/settings/push` manages push-only fields; use `/settings/firebase` and `/settings/telemetry` for those domains.
+- `/settings/push` does not accept `push_message_routes` or `push_message_types`; use the dedicated endpoints above.
+- `push.message_routes` and `push.message_types` are stored under `push` in the settings document.
+- `/settings/push` does not accept `push.enabled`; use `/settings/push/enable` or `/settings/push/disable`.
+- `/settings/push` does not accept `push.types` (types come from `message_types`).
+- Use `push.max_ttl_days` instead of top-level `max_ttl_days`.
+- Telemetry types are unique; `POST /settings/telemetry` upserts by `type`.
+- `PATCH /settings/push/route_types` and `PATCH /settings/push/message_types` accept raw arrays of objects (no root key).
+- Deletes use `DELETE /settings/push/route_types` or `/message_types` with `{ "keys": ["..."] }`.
 
 ### Landlord Routes
 Mounted under:
@@ -132,7 +227,7 @@ The package provides MongoDB collections for:
 - `push_message_actions`
 - `push_message_metrics`
 - `push_devices`
-- `tenant_push_settings`
+- `settings`
 
 Migrations live in:
 ```
