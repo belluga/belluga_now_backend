@@ -29,7 +29,19 @@ class PushMessageSendController
         $message = PushMessage::query()
             ->where('scope', 'tenant')
             ->where('_id', $pushMessageId)
-            ->firstOrFail();
+            ->first();
+
+        if (! $message) {
+            $exists = PushMessage::query()
+                ->where('_id', $pushMessageId)
+                ->exists();
+
+            if ($exists) {
+                return response()->json(['ok' => false, 'reason' => 'inactive'], 422);
+            }
+
+            abort(404);
+        }
 
         if (! $message->isActive() || $message->isExpired()) {
             return response()->json(['ok' => false, 'reason' => 'inactive'], 422);

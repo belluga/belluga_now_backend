@@ -206,7 +206,7 @@ class PushMessageFlowTest extends TestCase
 
         $payload = $this->buildPayload([
             'delivery' => [
-                'expires_at' => now()->subDay()->toIso8601String(),
+                'expires_at' => now()->addDay()->toIso8601String(),
             ],
             'audience' => [
                 'type' => 'users',
@@ -217,7 +217,13 @@ class PushMessageFlowTest extends TestCase
         $create = $this->postJson($this->baseUrl, $payload);
         $create->assertCreated();
 
-        $messageId = $this->resolveMessageId($payload['internal_name']);
+        $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->firstOrFail();
+        $message->delivery = array_merge($message->delivery ?? [], [
+            'expires_at' => now()->subDay()->toIso8601String(),
+        ]);
+        $message->save();
+
+        $messageId = (string) $message->_id;
 
         $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
         $data->assertOk();
@@ -815,6 +821,97 @@ class PushMessageFlowTest extends TestCase
             'payload_template.buttons.0.action.query_parameters.startSearchActive' => [
                 'The start search active field must be true or false.',
             ],
+        ]);
+    }
+
+    public function testPushMessageCreateRequiresCoreTemplates(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        unset($payload['title_template'], $payload['body_template']);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'title_template',
+            'body_template',
+        ]);
+    }
+
+    public function testPushMessageCreateRequiresSteps(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        unset($payload['payload_template']['steps']);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.steps',
+        ]);
+    }
+
+    public function testPushMessageCreateRequiresAudienceType(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        unset($payload['audience']['type']);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.type',
+        ]);
+    }
+
+    public function testPushMessageCreateUsersAudienceRequiresUserIds(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.user_ids',
+        ]);
+    }
+
+    public function testPushMessageCreateRequiresExpiresAt(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        unset($payload['delivery']['expires_at']);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'delivery.expires_at',
+        ]);
+    }
+
+    public function testPushMessageCreateRejectsPastExpiresAt(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'delivery' => [
+                'expires_at' => now()->subMinute()->toIso8601String(),
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'delivery.expires_at',
         ]);
     }
 
@@ -2618,6 +2715,37 @@ class PushMessageFlowTest extends TestCase
 
         $send->assertStatus(403);
         $send->assertJsonPath('reason', 'forbidden');
+    }
+
+    public function testSendReturnsInactiveWhenScopeMismatch(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'type' => 'transactional',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $this->withServerVariables([
+            'HTTP_HOST' => $this->tenantHost,
+        ]);
+        Sanctum::actingAs($this->operator, ['tenant-push-messages:send']);
+
+        $send = $this->postJson('api/v1/push/messages/' . $messageId . '/send', [
+            'user_id' => (string) $this->operator->_id,
+            'dry_run' => true,
+        ]);
+
+        $send->assertStatus(422);
+        $send->assertJsonPath('reason', 'inactive');
     }
 
     private function actingAsOperator(): void

@@ -198,6 +198,13 @@ Use the tenant endpoints below to configure and enable push in order.
 7) **Enable push**
 No body required.
 
+8) **Manual validation checklist**
+- Send a push and confirm tap handling opens the expected in-app surface.
+- Verify logs show Firebase init, token acquisition, and `/api/v1/push/register` success.
+- Confirm the app registers a device with an anonymous token when logged out.
+- Confirm the registration payload uses supported platform values (`android` or `ios`).
+- Send an invite payload and confirm the invite list updates without a backend refetch.
+
 Notes:
 - `/settings/push` manages push-only fields; use `/settings/firebase` and `/settings/telemetry` for those domains.
 - `/settings/push` does not accept `push_message_routes` or `push_message_types`; use the dedicated endpoints above.

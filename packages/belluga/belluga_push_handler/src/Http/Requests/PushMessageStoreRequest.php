@@ -6,6 +6,7 @@ namespace Belluga\PushHandler\Http\Requests;
 
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmOptionsValidator;
+use Carbon\Carbon;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -96,6 +97,22 @@ class PushMessageStoreRequest extends FormRequest
             $fcmOptions = $this->input('fcm_options');
             if (is_array($fcmOptions)) {
                 app(FcmOptionsValidator::class)->validate($fcmOptions, $validator);
+            }
+
+            $expiresAt = $this->input('delivery.expires_at');
+            if ($expiresAt) {
+                $expiresAtValue = Carbon::parse($expiresAt);
+                if ($expiresAtValue->isPast()) {
+                    $validator->errors()->add('delivery.expires_at', 'Expires at must be in the future.');
+                }
+            }
+
+            $scheduledAt = $this->input('delivery.scheduled_at');
+            if ($expiresAt && $scheduledAt) {
+                $scheduledAtValue = Carbon::parse($scheduledAt);
+                if ($scheduledAtValue->gt(Carbon::parse($expiresAt))) {
+                    $validator->errors()->add('delivery.scheduled_at', 'Scheduled at must be before expires at.');
+                }
             }
 
             $buttons = $this->input('payload_template.buttons', []);
