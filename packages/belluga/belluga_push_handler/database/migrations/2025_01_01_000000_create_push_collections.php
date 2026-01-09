@@ -50,6 +50,7 @@ return new class extends Migration
 
         Schema::create('push_delivery_logs', function (Blueprint $collection) {
             $collection->index(['push_message_id' => 1]);
+            $collection->index(['message_instance_id' => 1]);
             $collection->index(['status' => 1]);
             $collection->index(['created_at' => -1]);
             $collection->index(['token_hash' => 1]);

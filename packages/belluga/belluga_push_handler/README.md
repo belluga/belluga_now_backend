@@ -186,7 +186,87 @@ Use the tenant endpoints below to configure and enable push in order.
 ]
 ```
 
-6) **(Optional) Add telemetry integration**
+6) **Push onboarding steps (payload template)**
+```json
+{
+  "layoutType": "fullScreen",
+  "closeOnLastStepAction": true,
+  "steps": [
+    {
+      "slug": "notify",
+      "type": "cta",
+      "title": "Seja avisado",
+      "body": "Ative as notificações para continuar.",
+      "dismissible": false,
+      "gate": {
+        "type": "notifications_permission",
+        "onFail": {
+          "toast": "Ative as notificações para continuar.",
+          "fallback_step": "notify"
+        }
+      },
+      "buttons": [
+        {
+          "label": "Ativar",
+          "action": { "type": "custom", "custom_action": "request_notifications" }
+        }
+      ]
+    },
+    {
+      "slug": "prefs",
+      "type": "question",
+      "title": "O que você procura?",
+      "body": "Escolha até 3 temas.",
+      "onSubmit": { "action": "save_response", "store_key": "preferences.tags" },
+      "config": {
+        "question_type": "multi_select",
+        "layout": "tags",
+        "min_selected": 1,
+        "max_selected": 3,
+        "option_source": {
+          "type": "method",
+          "name": "getTags",
+          "params": { "include": ["praias", "restaurantes", "experiencias_no_mar"] },
+          "cache_ttl_sec": 3600
+        }
+      }
+    }
+  ]
+}
+```
+
+### Delivery Timing (TTL + Deadline)
+Push messages do **not** accept `delivery.expires_at`. Delivery expiration is computed at send time:
+
+- **TTL** is derived by message `type` using `config('belluga_push_handler.delivery_ttl_minutes')`.
+- **Optional cap**: set `delivery_deadline_at` (ISO8601) to cap the delivery expiration.
+- Effective `expires_at` is `min(delivery_deadline_at, now + ttl)`. If no deadline is provided, it uses `now + ttl`.
+
+Example message payload (account scope):
+Note: `option_source` is method-based (`type: "method"` + `name`), resolved by the app via its options resolver/controller. The backend does not accept `endpoint/tags/query` option sources.
+```json
+{
+  "internal_name": "boora_onboarding_dynamic_2026_01_08_manual",
+  "title_template": "Bóora! Bem-vindo",
+  "body_template": "Vamos personalizar sua experiência.",
+  "type": "transactional",
+  "active": true,
+  "audience": { "type": "all" },
+  "delivery": {
+    "scheduled_at": null
+  },
+  "delivery_deadline_at": "2026-02-08T12:00:00Z",
+  "payload_template": {
+    "layoutType": "fullScreen",
+    "closeOnLastStepAction": true,
+    "steps": [
+      { "slug": "intro", "type": "cta", "title": "Começar" }
+    ]
+  }
+}
+```
+
+7) **(Optional) Add telemetry integration**
 ```json
 {
   "type": "mixpanel",
@@ -195,7 +275,7 @@ Use the tenant endpoints below to configure and enable push in order.
 }
 ```
 
-7) **Enable push**
+8) **Enable push**
 No body required.
 
 8) **Manual validation checklist**

@@ -33,8 +33,10 @@ class PushMessageStoreRequest extends FormRequest
             'audience.type' => ['required', 'string', Rule::in(['all', 'users', 'event'])],
             'audience.user_ids' => ['required_if:audience.type,users', 'array'],
             'audience.user_ids.*' => ['string'],
-            'delivery.expires_at' => ['required', 'date'],
+            'delivery' => ['nullable', 'array'],
+            'delivery.expires_at' => ['prohibited'],
             'delivery.scheduled_at' => ['nullable', 'date'],
+            'delivery_deadline_at' => ['nullable', 'date'],
             'payload_template.layoutType' => ['required', Rule::in([
                 'fullScreen',
                 'bottomModal',
@@ -49,11 +51,59 @@ class PushMessageStoreRequest extends FormRequest
                 'actionButton',
                 'snackBar',
             ])],
-            'payload_template.allowDismiss' => ['required', 'string'],
+            'payload_template.closeOnLastStepAction' => ['nullable', 'boolean'],
             'payload_template.steps' => ['required', 'array', 'min:1'],
+            'payload_template.steps.*.slug' => ['required', 'string', 'max:64', 'distinct'],
+            'payload_template.steps.*.type' => ['required', 'string', Rule::in([
+                'copy',
+                'cta',
+                'question',
+                'selector',
+            ])],
             'payload_template.steps.*.title' => ['required', 'string'],
             'payload_template.steps.*.body' => ['nullable', 'string'],
             'payload_template.steps.*.image' => ['nullable', 'array'],
+            'payload_template.steps.*.dismissible' => ['nullable', 'boolean'],
+            'payload_template.steps.*.gate' => ['nullable', 'array'],
+            'payload_template.steps.*.gate.type' => ['required_with:payload_template.steps.*.gate', 'string'],
+            'payload_template.steps.*.gate.onFail' => ['nullable', 'array'],
+            'payload_template.steps.*.gate.onFail.toast' => ['nullable', 'string'],
+            'payload_template.steps.*.gate.onFail.fallback_step' => ['nullable', 'string'],
+            'payload_template.steps.*.onSubmit' => ['nullable', 'array'],
+            'payload_template.steps.*.onSubmit.action' => ['required_with:payload_template.steps.*.onSubmit', 'string'],
+            'payload_template.steps.*.onSubmit.store_key' => ['required_with:payload_template.steps.*.onSubmit', 'string'],
+            'payload_template.steps.*.config' => ['nullable', 'array'],
+            'payload_template.steps.*.buttons' => ['nullable', 'array'],
+            'payload_template.steps.*.buttons.*.label' => ['required_with:payload_template.steps.*.buttons', 'string'],
+            'payload_template.steps.*.buttons.*.action' => ['required_with:payload_template.steps.*.buttons', 'array'],
+            'payload_template.steps.*.buttons.*.action.type' => ['required_with:payload_template.steps.*.buttons.*.action', Rule::in([
+                'route',
+                'external',
+                'custom',
+            ])],
+            'payload_template.steps.*.buttons.*.action.route_key' => [
+                'required_if:payload_template.steps.*.buttons.*.action.type,route',
+                'string',
+                Rule::in($routeKeys),
+            ],
+            'payload_template.steps.*.buttons.*.action.path_parameters' => [
+                'nullable',
+                'array',
+            ],
+            'payload_template.steps.*.buttons.*.action.path_parameters.*' => ['filled'],
+            'payload_template.steps.*.buttons.*.action.query_parameters' => ['nullable', 'array'],
+            'payload_template.steps.*.buttons.*.action.url' => [
+                'required_if:payload_template.steps.*.buttons.*.action.type,external',
+                'string',
+                'max:2048',
+            ],
+            'payload_template.steps.*.buttons.*.action.open_mode' => ['nullable', Rule::in(['in_app', 'external'])],
+            'payload_template.steps.*.buttons.*.action.custom_action' => [
+                'required_if:payload_template.steps.*.buttons.*.action.type,custom',
+                'string',
+            ],
+            'payload_template.steps.*.buttons.*.color' => ['nullable', 'string'],
+            'payload_template.steps.*.buttons.*.show_loading' => ['nullable', 'boolean'],
             'payload_template.buttons' => ['nullable', 'array'],
             'payload_template.buttons.*.label' => ['required_with:payload_template.buttons', 'string'],
             'payload_template.buttons.*.action' => ['required_with:payload_template.buttons', 'array'],
@@ -99,19 +149,19 @@ class PushMessageStoreRequest extends FormRequest
                 app(FcmOptionsValidator::class)->validate($fcmOptions, $validator);
             }
 
-            $expiresAt = $this->input('delivery.expires_at');
-            if ($expiresAt) {
-                $expiresAtValue = Carbon::parse($expiresAt);
-                if ($expiresAtValue->isPast()) {
-                    $validator->errors()->add('delivery.expires_at', 'Expires at must be in the future.');
+            $deadlineAt = $this->input('delivery_deadline_at');
+            if ($deadlineAt) {
+                $deadlineValue = Carbon::parse($deadlineAt);
+                if ($deadlineValue->isPast()) {
+                    $validator->errors()->add('delivery_deadline_at', 'Delivery deadline must be in the future.');
                 }
             }
 
             $scheduledAt = $this->input('delivery.scheduled_at');
-            if ($expiresAt && $scheduledAt) {
+            if ($deadlineAt && $scheduledAt) {
                 $scheduledAtValue = Carbon::parse($scheduledAt);
-                if ($scheduledAtValue->gt(Carbon::parse($expiresAt))) {
-                    $validator->errors()->add('delivery.scheduled_at', 'Scheduled at must be before expires at.');
+                if ($scheduledAtValue->gt(Carbon::parse($deadlineAt))) {
+                    $validator->errors()->add('delivery.scheduled_at', 'Scheduled at must be before delivery deadline.');
                 }
             }
 
@@ -177,7 +227,181 @@ class PushMessageStoreRequest extends FormRequest
                     }
                 }
             }
+
+            $this->validateSteps($validator);
         });
+    }
+
+    private function validateSteps(Validator $validator): void
+    {
+        $steps = $this->input('payload_template.steps');
+        if (! is_array($steps)) {
+            return;
+        }
+
+        $slugs = [];
+        foreach ($steps as $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+            $slug = $step['slug'] ?? null;
+            if (is_string($slug) && $slug !== '') {
+                $slugs[] = $slug;
+            }
+        }
+
+        $typeValues = ['copy', 'cta', 'question', 'selector'];
+        $layoutValues = ['row', 'grid', 'list', 'tags'];
+        $questionTypes = ['single_select', 'multi_select', 'text'];
+        $optionSourceTypes = ['method'];
+
+        foreach ($steps as $index => $step) {
+            if (! is_array($step)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index",
+                    'Step must be an object.'
+                );
+                continue;
+            }
+
+            $type = $step['type'] ?? null;
+            if (! is_string($type) || $type === '' || ! in_array($type, $typeValues, true)) {
+                continue;
+            }
+
+            $gate = $step['gate'] ?? null;
+            if (is_array($gate)) {
+                $gateType = $gate['type'] ?? null;
+                if (! is_string($gateType) || $gateType === '') {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.gate.type",
+                        'Gate type is required.'
+                    );
+                }
+
+                $fallbackStep = $gate['onFail']['fallback_step'] ?? null;
+                if (is_string($fallbackStep) && $fallbackStep !== '' && ! in_array($fallbackStep, $slugs, true)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.gate.onFail.fallback_step",
+                        'Fallback step must match an existing step slug.'
+                    );
+                }
+            }
+
+            if (! in_array($type, ['question', 'selector'], true)) {
+                continue;
+            }
+
+            $config = $step['config'] ?? null;
+            if (! is_array($config)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config",
+                    'Config is required for question/selector steps.'
+                );
+                continue;
+            }
+
+            if ($type === 'question') {
+                $questionType = $config['question_type'] ?? null;
+                if (! is_string($questionType) || ! in_array($questionType, $questionTypes, true)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.question_type",
+                        'Question type is invalid.'
+                    );
+                }
+            }
+
+            $layout = $config['layout'] ?? null;
+            if ($layout !== null && (! is_string($layout) || ! in_array($layout, $layoutValues, true))) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.layout",
+                    'Layout is invalid.'
+                );
+            }
+
+            if ($layout === 'grid') {
+                $gridColumns = $config['grid_columns'] ?? null;
+                if (! is_int($gridColumns) || $gridColumns < 1) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.grid_columns",
+                        'Grid columns must be a positive integer.'
+                    );
+                }
+            }
+
+            $optionSource = $config['option_source'] ?? null;
+            $options = $config['options'] ?? null;
+            if ($type === 'selector') {
+                if (! is_array($optionSource) && ! is_array($options)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.option_source",
+                        'Option source or options are required.'
+                    );
+                }
+            } elseif ($type === 'question') {
+                $questionType = $config['question_type'] ?? null;
+                $needsOptions = $questionType !== 'text';
+                if ($needsOptions && ! is_array($optionSource) && ! is_array($options)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.option_source",
+                        'Option source or options are required.'
+                    );
+                }
+            }
+
+            if (is_array($optionSource)) {
+                $sourceType = $optionSource['type'] ?? null;
+                if (! is_string($sourceType) || ! in_array($sourceType, $optionSourceTypes, true)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.option_source.type",
+                        'Option source type is invalid.'
+                    );
+                }
+                $sourceName = $optionSource['name'] ?? null;
+                if (! is_string($sourceName) || trim($sourceName) === '') {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.option_source.name",
+                        'Option source name is required.'
+                    );
+                }
+                $cacheTtl = $optionSource['cache_ttl_sec'] ?? null;
+                if ($cacheTtl !== null && (! is_int($cacheTtl) || $cacheTtl < 0)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.option_source.cache_ttl_sec",
+                        'Cache ttl must be a non-negative integer.'
+                    );
+                }
+            }
+
+            $minSelected = $config['min_selected'] ?? null;
+            $maxSelected = $config['max_selected'] ?? null;
+            if ($minSelected !== null && (! is_int($minSelected) || $minSelected < 0)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.min_selected",
+                    'Min selected must be a non-negative integer.'
+                );
+            }
+            if ($maxSelected !== null && (! is_int($maxSelected) || $maxSelected < 0)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.max_selected",
+                    'Max selected must be a non-negative integer.'
+                );
+            }
+            if (is_int($minSelected) && is_int($maxSelected) && $minSelected > $maxSelected) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.min_selected",
+                    'Min selected must be less than or equal to max selected.'
+                );
+            }
+
+            $storeKey = $config['store_key'] ?? null;
+            if ($storeKey !== null && ! is_string($storeKey)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.store_key",
+                    'Store key must be a string.'
+                );
+            }
+        }
     }
 
     /**

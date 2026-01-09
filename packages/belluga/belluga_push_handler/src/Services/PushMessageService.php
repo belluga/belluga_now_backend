@@ -32,7 +32,7 @@ class PushMessageService
         }
         $payload['status'] = $payload['status'] ?? 'scheduled';
         $payload['active'] = $payload['active'] ?? true;
-        $payload['delivery'] = $this->withTtlMinutes($payload['delivery'] ?? []);
+        $payload['delivery'] = $payload['delivery'] ?? [];
         $payload['metrics'] = $payload['metrics'] ?? [
             'sent_count' => 0,
             'opened_count' => 0,
@@ -52,20 +52,6 @@ class PushMessageService
         $this->dispatchSend($message, $scope, $accountId);
 
         return $message;
-    }
-
-    /**
-     * @param array<string, mixed> $delivery
-     * @return array<string, mixed>
-     */
-    private function withTtlMinutes(array $delivery): array
-    {
-        if (isset($delivery['expires_at'])) {
-            $expiresAt = Carbon::parse($delivery['expires_at']);
-            $delivery['ttl_minutes'] = max(0, now()->diffInMinutes($expiresAt, false));
-        }
-
-        return $delivery;
     }
 
     public function dispatchSend(PushMessage $message, string $scope, ?string $accountId): void

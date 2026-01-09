@@ -13,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Validation\ValidationException;
 
 class SendPushMessageJob implements ShouldQueue
 {
@@ -54,7 +55,11 @@ class SendPushMessageJob implements ShouldQueue
             return;
         }
 
-        $response = $deliveryService->deliver($message, $recipients);
+        try {
+            $response = $deliveryService->deliver($message, $recipients);
+        } catch (ValidationException) {
+            return;
+        }
 
         $metrics = $message->metrics ?? [];
         $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + (int) ($response['accepted_count'] ?? 0);

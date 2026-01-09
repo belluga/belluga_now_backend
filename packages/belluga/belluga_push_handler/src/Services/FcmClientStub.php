@@ -6,6 +6,7 @@ namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Carbon\Carbon;
 
 class FcmClientStub implements FcmClientContract
 {
@@ -13,7 +14,7 @@ class FcmClientStub implements FcmClientContract
      * @param array<int, string> $tokens
      * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
-    public function send(PushMessage $message, array $tokens): array
+    public function send(PushMessage $message, array $tokens, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
     {
         return [
             'accepted_count' => count($tokens),

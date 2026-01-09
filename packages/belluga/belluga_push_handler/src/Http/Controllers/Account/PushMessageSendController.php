@@ -13,6 +13,7 @@ use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
 
 class PushMessageSendController
 {
@@ -92,8 +93,17 @@ class PushMessageSendController
             return response()->json(['ok' => false, 'reason' => 'no_tokens'], 422);
         }
 
+        $messageInstanceId = null;
         if (! ($payload['dry_run'] ?? false)) {
-            $response = $this->deliveryService->deliver($message, $tokens);
+            try {
+                $response = $this->deliveryService->deliver($message, $tokens);
+            } catch (ValidationException $exception) {
+                return response()->json([
+                    'message' => 'Delivery TTL validation failed.',
+                    'errors' => $exception->errors(),
+                ], 422);
+            }
+            $messageInstanceId = $response['message_instance_id'] ?? null;
             $invalidTokens = $this->extractNotFoundTokens($response);
             if ($invalidTokens !== []) {
                 $this->pushDeviceService->invalidateTokens($user, $invalidTokens);
@@ -106,12 +116,17 @@ class PushMessageSendController
             $message->save();
         }
 
-        return response()->json([
+        $responsePayload = [
             'ok' => true,
             'push_message_id' => (string) $message->_id,
             'recipient_user_id' => (string) $user->_id,
             'queued' => true,
-        ]);
+        ];
+        if (is_string($messageInstanceId) && $messageInstanceId !== '') {
+            $responsePayload['message_instance_id'] = $messageInstanceId;
+        }
+
+        return response()->json($responsePayload);
     }
 
     /**

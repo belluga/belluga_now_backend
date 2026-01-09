@@ -20,10 +20,12 @@ use Belluga\PushHandler\Services\FcmHttpV1Client;
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Services\PushDeviceService;
+use Carbon\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
@@ -205,9 +207,7 @@ class PushMessageFlowTest extends TestCase
         $this->actingAsOperator();
 
         $payload = $this->buildPayload([
-            'delivery' => [
-                'expires_at' => now()->addDay()->toIso8601String(),
-            ],
+            'delivery_deadline_at' => now()->addDay()->toIso8601String(),
             'audience' => [
                 'type' => 'users',
                 'user_ids' => [(string) $this->operator->_id],
@@ -218,9 +218,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertCreated();
 
         $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->firstOrFail();
-        $message->delivery = array_merge($message->delivery ?? [], [
-            'expires_at' => now()->subDay()->toIso8601String(),
-        ]);
+        $message->delivery_deadline_at = now()->subDay()->toIso8601String();
         $message->save();
 
         $messageId = (string) $message->_id;
@@ -263,7 +261,6 @@ class PushMessageFlowTest extends TestCase
 
         $payload = $this->buildPayload([
             'delivery' => [
-                'expires_at' => now()->addDays(7)->toIso8601String(),
                 'scheduled_at' => now()->addDay()->toIso8601String(),
             ],
         ]);
@@ -729,7 +726,6 @@ class PushMessageFlowTest extends TestCase
 
         $payload = $this->buildPayload([
             'delivery' => [
-                'expires_at' => now()->addDays(7)->toIso8601String(),
                 'scheduled_at' => now()->addDay()->toIso8601String(),
             ],
         ]);
@@ -749,9 +745,14 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'allowDismiss' => 'true',
+                'closeOnLastStepAction' => true,
                 'steps' => [
-                    ['title' => 'Title'],
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                    ],
                 ],
                 'buttons' => [
                     [
@@ -795,9 +796,14 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'allowDismiss' => 'true',
+                'closeOnLastStepAction' => true,
                 'steps' => [
-                    ['title' => 'Title'],
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                    ],
                 ],
                 'buttons' => [
                     [
@@ -884,12 +890,15 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRequiresExpiresAt(): void
+    public function testPushMessageCreateRejectsDeliveryExpiresAt(): void
     {
         $this->actingAsOperator();
 
-        $payload = $this->buildPayload();
-        unset($payload['delivery']['expires_at']);
+        $payload = $this->buildPayload([
+            'delivery' => [
+                'expires_at' => now()->addDay()->toIso8601String(),
+            ],
+        ]);
 
         $response = $this->postJson($this->baseUrl, $payload);
         $response->assertStatus(422);
@@ -898,20 +907,18 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRejectsPastExpiresAt(): void
+    public function testPushMessageCreateRejectsPastDeadline(): void
     {
         $this->actingAsOperator();
 
         $payload = $this->buildPayload([
-            'delivery' => [
-                'expires_at' => now()->subMinute()->toIso8601String(),
-            ],
+            'delivery_deadline_at' => now()->subMinute()->toIso8601String(),
         ]);
 
         $response = $this->postJson($this->baseUrl, $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
-            'delivery.expires_at',
+            'delivery_deadline_at',
         ]);
     }
 
@@ -1315,9 +1322,14 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'allowDismiss' => 'true',
+                'closeOnLastStepAction' => true,
                 'steps' => [
-                    ['title' => 'Title'],
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                    ],
                 ],
                 'buttons' => [
                     [
@@ -1373,7 +1385,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'allowDismiss' => 'true',
+                'closeOnLastStepAction' => true,
                 'steps' => [
                     ['title' => 'Title'],
                 ],
@@ -1436,7 +1448,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'allowDismiss' => 'true',
+                'closeOnLastStepAction' => true,
                 'steps' => [
                     ['title' => 'Title'],
                 ],
@@ -2180,7 +2192,13 @@ class PushMessageFlowTest extends TestCase
     {
         $this->app->bind(FcmClientContract::class, static function () {
             return new class implements FcmClientContract {
-                public function send(PushMessage $message, array $tokens): array
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array
                 {
                     return [
                         'accepted_count' => 1,
@@ -2209,9 +2227,96 @@ class PushMessageFlowTest extends TestCase
 
         $logs = PushDeliveryLog::query()->get();
         $this->assertCount(2, $logs);
+        $this->assertNotNull($logs->first()->expires_at ?? null);
+        $this->assertNotNull($logs->first()->ttl_minutes ?? null);
         $statuses = $logs->pluck('status')->all();
         $this->assertContains('accepted', $statuses);
         $this->assertContains('failed', $statuses);
+    }
+
+    public function testDeliveryServiceCapsExpiresAtToDeadline(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    return [
+                        'accepted_count' => count($tokens),
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'accepted',
+                            'provider_message_id' => 'msg',
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
+
+        PushDeliveryLog::query()->delete();
+        $deadline = Carbon::now()->addMinutes(15);
+        $message = PushMessage::create($this->buildPayload([
+            'type' => 'transactional',
+            'delivery_deadline_at' => $deadline->toIso8601String(),
+        ]));
+
+        $service = $this->app->make(PushDeliveryService::class);
+        $service->deliver($message, ['token-1']);
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame($deadline->toISOString(), $log->expires_at->toISOString());
+        $this->assertSame(60, $log->ttl_minutes);
+
+        Carbon::setTestNow();
+    }
+
+    public function testDeliveryServiceRejectsPastDeadline(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
+
+        try {
+            $this->expectException(ValidationException::class);
+            $this->expectExceptionMessage('Delivery deadline must be in the future.');
+
+            $message = PushMessage::create($this->buildPayload([
+                'delivery_deadline_at' => Carbon::now()->subMinute()->toIso8601String(),
+            ]));
+
+            $service = $this->app->make(PushDeliveryService::class);
+            $service->deliver($message, ['token-1']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function testDeliveryServiceRejectsTtlBeyondMax(): void
+    {
+        $originalTtl = config('belluga_push_handler.delivery_ttl_minutes.transactional');
+        config([
+            'belluga_push_handler.delivery_ttl_minutes.transactional' => 60 * 24 * 40,
+        ]);
+
+        try {
+            $this->expectException(ValidationException::class);
+            $this->expectExceptionMessage('Computed TTL exceeds max allowed TTL');
+
+            $message = PushMessage::create($this->buildPayload([
+                'type' => 'transactional',
+            ]));
+
+            $service = $this->app->make(PushDeliveryService::class);
+            $service->deliver($message, ['token-1']);
+        } finally {
+            config([
+                'belluga_push_handler.delivery_ttl_minutes.transactional' => $originalTtl,
+            ]);
+        }
     }
 
     public function testDeliveryServiceBatchesTokensByConfig(): void
@@ -2228,7 +2333,13 @@ class PushMessageFlowTest extends TestCase
                 {
                 }
 
-                public function send(PushMessage $message, array $tokens): array
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array
                 {
                     $this->batches[] = count($tokens);
                     return [
@@ -2257,7 +2368,13 @@ class PushMessageFlowTest extends TestCase
     {
         $this->app->bind(FcmClientContract::class, static function () {
             return new class implements FcmClientContract {
-                public function send(PushMessage $message, array $tokens): array
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array
                 {
                     return [
                         'accepted_count' => 2,
@@ -2311,6 +2428,8 @@ class PushMessageFlowTest extends TestCase
 
     public function testFcmHttpClientBuildsPayloadWithOverrides(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
+
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
@@ -2345,23 +2464,32 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
+        $expiresAt = Carbon::now()->addMinutes(10);
         $client = $this->app->make(FcmHttpV1Client::class);
-        $client->send($message, ['token-1', 'token-2']);
+        $client->send($message, ['token-1', 'token-2'], 'instance-1', $expiresAt, 10);
 
         Http::assertSentCount(3);
-        Http::assertSent(function ($request) {
+        Http::assertSent(function ($request) use ($expiresAt) {
             if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
                 return true;
             }
             $payload = $request->data()['message'] ?? [];
             return ($payload['notification']['title'] ?? null) === 'Override title'
                 && ($payload['data']['custom'] ?? null) === 'value'
-                && isset($payload['data']['push_message_id']);
+                && isset($payload['data']['push_message_id'])
+                && isset($payload['data']['message_instance_id'])
+                && ($payload['android']['ttl'] ?? null) === '600s'
+                && ($payload['webpush']['headers']['TTL'] ?? null) === '600'
+                && (string) ($payload['apns']['headers']['apns-expiration'] ?? '') === (string) $expiresAt->getTimestamp();
         });
+
+        Carbon::setTestNow();
     }
 
     public function testFcmHttpClientHonorsPlatformOverrides(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
+
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
@@ -2406,10 +2534,11 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
+        $expiresAt = Carbon::now()->addMinutes(15);
         $client = $this->app->make(FcmHttpV1Client::class);
-        $client->send($message, ['token-1']);
+        $client->send($message, ['token-1'], 'instance-2', $expiresAt, 15);
 
-        Http::assertSent(function ($request) {
+        Http::assertSent(function ($request) use ($expiresAt) {
             if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
                 return true;
             }
@@ -2421,8 +2550,14 @@ class PushMessageFlowTest extends TestCase
                 && ($payload['android']['notification']['title'] ?? null) === 'Android title'
                 && ($payload['apns']['payload']['aps']['alert']['title'] ?? null) === 'Apns title'
                 && ($payload['apns']['payload']['aps']['alert']['body'] ?? null) === 'Apns body'
-                && isset($payload['data']['push_message_id']);
+                && isset($payload['data']['push_message_id'])
+                && isset($payload['data']['message_instance_id'])
+                && ($payload['android']['ttl'] ?? null) === '900s'
+                && ($payload['webpush']['headers']['TTL'] ?? null) === '900'
+                && (string) ($payload['apns']['headers']['apns-expiration'] ?? '') === (string) $expiresAt->getTimestamp();
         });
+
+        Carbon::setTestNow();
     }
 
     public function testQuotaCheckBlockedReturnsReason(): void
@@ -2621,7 +2756,13 @@ class PushMessageFlowTest extends TestCase
 
         $this->app->bind(FcmClientContract::class, static function () {
             return new class implements FcmClientContract {
-                public function send(PushMessage $message, array $tokens): array
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array
                 {
                     return [
                         'accepted_count' => 0,
@@ -2778,14 +2919,17 @@ class PushMessageFlowTest extends TestCase
             'audience' => [
                 'type' => 'all',
             ],
-            'delivery' => [
-                'expires_at' => now()->addDays(7)->toIso8601String(),
-            ],
+            'delivery' => [],
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'allowDismiss' => 'true',
+                'closeOnLastStepAction' => true,
                 'steps' => [
-                    ['title' => 'Title'],
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                    ],
                 ],
                 'buttons' => [
                     [
