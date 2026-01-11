@@ -19,6 +19,47 @@ class PushMessageUpdateRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $steps = $this->input('payload_template.steps');
+        if (! is_array($steps)) {
+            return;
+        }
+
+        $updated = false;
+        foreach ($steps as $index => $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+            if (($step['type'] ?? null) !== 'selector') {
+                continue;
+            }
+            $config = $step['config'] ?? null;
+            if (! is_array($config)) {
+                continue;
+            }
+            $selectionMode = $config['selection_mode'] ?? null;
+            if ($selectionMode !== null && $selectionMode !== '') {
+                continue;
+            }
+            $config['selection_mode'] = 'single';
+            $step['config'] = $config;
+            $steps[$index] = $step;
+            $updated = true;
+        }
+
+        if (! $updated) {
+            return;
+        }
+
+        $payloadTemplate = $this->input('payload_template');
+        if (! is_array($payloadTemplate)) {
+            $payloadTemplate = [];
+        }
+        $payloadTemplate['steps'] = $steps;
+        $this->merge(['payload_template' => $payloadTemplate]);
+    }
+
     public function rules(): array
     {
         $routeKeys = $this->routeKeys();
@@ -52,6 +93,12 @@ class PushMessageUpdateRequest extends FormRequest
                 'snackBar',
             ])],
             'payload_template.closeOnLastStepAction' => ['nullable', 'boolean'],
+            'payload_template.title' => ['nullable', 'string'],
+            'payload_template.body' => ['nullable', 'string'],
+            'payload_template.image' => ['nullable', 'array'],
+            'payload_template.image.path' => ['required_with:payload_template.image', 'string'],
+            'payload_template.image.width' => ['nullable', 'integer'],
+            'payload_template.image.height' => ['nullable', 'integer'],
             'payload_template.steps' => ['sometimes', 'array', 'min:1'],
             'payload_template.steps.*.slug' => ['required_with:payload_template.steps', 'string', 'max:64', 'distinct'],
             'payload_template.steps.*.type' => ['required_with:payload_template.steps', 'string', Rule::in([
@@ -69,12 +116,14 @@ class PushMessageUpdateRequest extends FormRequest
             'payload_template.steps.*.gate.onFail' => ['nullable', 'array'],
             'payload_template.steps.*.gate.onFail.toast' => ['nullable', 'string'],
             'payload_template.steps.*.gate.onFail.fallback_step' => ['nullable', 'string'],
+            'payload_template.steps.*.gate.min_selected' => ['nullable', 'integer', 'min:0'],
             'payload_template.steps.*.onSubmit' => ['nullable', 'array'],
             'payload_template.steps.*.onSubmit.action' => ['required_with:payload_template.steps.*.onSubmit', 'string'],
             'payload_template.steps.*.onSubmit.store_key' => ['required_with:payload_template.steps.*.onSubmit', 'string'],
             'payload_template.steps.*.config' => ['nullable', 'array'],
             'payload_template.steps.*.buttons' => ['nullable', 'array'],
             'payload_template.steps.*.buttons.*.label' => ['required_with:payload_template.steps.*.buttons', 'string'],
+            'payload_template.steps.*.buttons.*.continue_after_action' => ['nullable', 'boolean'],
             'payload_template.steps.*.buttons.*.action' => ['required_with:payload_template.steps.*.buttons', 'array'],
             'payload_template.steps.*.buttons.*.action.type' => ['required_with:payload_template.steps.*.buttons.*.action', Rule::in([
                 'route',
@@ -252,8 +301,12 @@ class PushMessageUpdateRequest extends FormRequest
 
         $typeValues = ['copy', 'cta', 'question', 'selector'];
         $layoutValues = ['row', 'grid', 'list', 'tags'];
-        $questionTypes = ['single_select', 'multi_select', 'text'];
+        $selectionModeValues = ['single', 'multi'];
+        $questionTypes = ['text'];
         $optionSourceTypes = ['method'];
+        $selectionUiValues = ['inline', 'external'];
+        $routes = $this->routesByKey();
+        $allowedKeys = $this->allowedRouteKeysForValidation($routes);
 
         foreach ($steps as $index => $step) {
             if (! is_array($step)) {
@@ -267,6 +320,31 @@ class PushMessageUpdateRequest extends FormRequest
             $type = $step['type'] ?? null;
             if (! is_string($type) || $type === '' || ! in_array($type, $typeValues, true)) {
                 continue;
+            }
+
+            $image = $step['image'] ?? null;
+            if (is_array($image)) {
+                $path = $image['path'] ?? null;
+                if (! is_string($path) || $path === '') {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.image.path",
+                        'Image path is required.'
+                    );
+                }
+                $width = $image['width'] ?? null;
+                if ($width !== null && ! is_int($width)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.image.width",
+                        'Image width must be an integer.'
+                    );
+                }
+                $height = $image['height'] ?? null;
+                if ($height !== null && ! is_int($height)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.image.height",
+                        'Image height must be an integer.'
+                    );
+                }
             }
 
             $gate = $step['gate'] ?? null;
@@ -289,6 +367,7 @@ class PushMessageUpdateRequest extends FormRequest
             }
 
             if (! in_array($type, ['question', 'selector'], true)) {
+                $this->validateStepButtons($validator, $step, $index, $routes, $allowedKeys);
                 continue;
             }
 
@@ -298,6 +377,7 @@ class PushMessageUpdateRequest extends FormRequest
                     "payload_template.steps.$index.config",
                     'Config is required for question/selector steps.'
                 );
+                $this->validateStepButtons($validator, $step, $index, $routes, $allowedKeys);
                 continue;
             }
 
@@ -311,7 +391,40 @@ class PushMessageUpdateRequest extends FormRequest
                 }
             }
 
+            $questionType = $config['question_type'] ?? null;
+            $selectionMode = $config['selection_mode'] ?? null;
+            $needsSelectionMode = $type === 'selector';
+            if ($needsSelectionMode) {
+                if (! is_string($selectionMode) || ! in_array($selectionMode, $selectionModeValues, true)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.selection_mode",
+                        'Selection mode is required and must be single or multi.'
+                    );
+                }
+            } elseif ($selectionMode !== null) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.selection_mode",
+                    'Selection mode is not allowed for text questions.'
+                );
+            }
+
+            $selectionUi = $config['selection_ui'] ?? null;
+            if ($type === 'selector') {
+                if (! is_string($selectionUi) || ! in_array($selectionUi, $selectionUiValues, true)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.selection_ui",
+                        'Selection UI is required for selector steps.'
+                    );
+                }
+            }
+
             $layout = $config['layout'] ?? null;
+            if ($type === 'selector' && $selectionUi === 'inline' && $layout === null) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.config.layout",
+                    'Layout is required for inline selectors.'
+                );
+            }
             if ($layout !== null && (! is_string($layout) || ! in_array($layout, $layoutValues, true))) {
                 $validator->errors()->add(
                     "payload_template.steps.$index.config.layout",
@@ -373,25 +486,74 @@ class PushMessageUpdateRequest extends FormRequest
                 }
             }
 
+            if (is_array($options)) {
+                foreach ($options as $optionIndex => $option) {
+                    if (! is_array($option)) {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.options.$optionIndex",
+                            'Option must be an object.'
+                        );
+                        continue;
+                    }
+                    $id = $option['id'] ?? null;
+                    if (! is_string($id) || $id === '') {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.options.$optionIndex.id",
+                            'Option id is required.'
+                        );
+                    }
+                    $label = $option['label'] ?? null;
+                    if (! is_string($label) || $label === '') {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.options.$optionIndex.label",
+                            'Option label is required.'
+                        );
+                    }
+                    $image = $option['image'] ?? null;
+                    if ($image !== null && ! is_string($image)) {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.options.$optionIndex.image",
+                            'Option image must be a string.'
+                        );
+                    }
+                }
+            }
+
             $minSelected = $config['min_selected'] ?? null;
             $maxSelected = $config['max_selected'] ?? null;
-            if ($minSelected !== null && (! is_int($minSelected) || $minSelected < 0)) {
-                $validator->errors()->add(
-                    "payload_template.steps.$index.config.min_selected",
-                    'Min selected must be a non-negative integer.'
-                );
-            }
-            if ($maxSelected !== null && (! is_int($maxSelected) || $maxSelected < 0)) {
-                $validator->errors()->add(
-                    "payload_template.steps.$index.config.max_selected",
-                    'Max selected must be a non-negative integer.'
-                );
-            }
-            if (is_int($minSelected) && is_int($maxSelected) && $minSelected > $maxSelected) {
-                $validator->errors()->add(
-                    "payload_template.steps.$index.config.min_selected",
-                    'Min selected must be less than or equal to max selected.'
-                );
+            $isMultiSelect = $selectionMode === 'multi';
+            if (! $isMultiSelect) {
+                if ($minSelected !== null) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.min_selected",
+                        'Min selected is only allowed when selection_mode is multi.'
+                    );
+                }
+                if ($maxSelected !== null) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.max_selected",
+                        'Max selected is only allowed when selection_mode is multi.'
+                    );
+                }
+            } else {
+                if ($minSelected !== null && (! is_int($minSelected) || $minSelected < 0)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.min_selected",
+                        'Min selected must be a non-negative integer.'
+                    );
+                }
+                if ($maxSelected !== null && (! is_int($maxSelected) || $maxSelected < 0)) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.max_selected",
+                        'Max selected must be a non-negative integer.'
+                    );
+                }
+                if (is_int($minSelected) && is_int($maxSelected) && $minSelected > $maxSelected) {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.min_selected",
+                        'Min selected must be less than or equal to max selected.'
+                    );
+                }
             }
 
             $storeKey = $config['store_key'] ?? null;
@@ -400,6 +562,116 @@ class PushMessageUpdateRequest extends FormRequest
                     "payload_template.steps.$index.config.store_key",
                     'Store key must be a string.'
                 );
+            }
+
+            $validatorConfig = $config['validator'] ?? null;
+            if ($validatorConfig !== null) {
+                if (is_string($validatorConfig)) {
+                    if (trim($validatorConfig) === '') {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.validator",
+                            'Validator name must be a non-empty string.'
+                        );
+                    }
+                } elseif (is_array($validatorConfig)) {
+                    $validatorName = $validatorConfig['name'] ?? null;
+                    if (! is_string($validatorName) || trim($validatorName) === '') {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.validator.name",
+                            'Validator name is required.'
+                        );
+                    }
+                    $params = $validatorConfig['params'] ?? null;
+                    if ($params !== null && ! is_array($params)) {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.config.validator.params",
+                            'Validator params must be an array.'
+                        );
+                    }
+                } else {
+                    $validator->errors()->add(
+                        "payload_template.steps.$index.config.validator",
+                        'Validator is invalid.'
+                    );
+                }
+            }
+
+            $this->validateStepButtons($validator, $step, $index, $routes, $allowedKeys);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $step
+     * @param array<string, array<string, mixed>> $routes
+     * @param array<int, string>|null $allowedKeys
+     */
+    private function validateStepButtons(
+        Validator $validator,
+        array $step,
+        int $index,
+        array $routes,
+        ?array $allowedKeys
+    ): void {
+        $buttons = $step['buttons'] ?? null;
+        if (! is_array($buttons)) {
+            return;
+        }
+
+        foreach ($buttons as $buttonIndex => $button) {
+            if (! is_array($button)) {
+                continue;
+            }
+            $action = $button['action'] ?? null;
+            if (! is_array($action) || ($action['type'] ?? null) !== 'route') {
+                continue;
+            }
+
+            $routeKey = $action['route_key'] ?? null;
+            $route = $routeKey && isset($routes[$routeKey]) ? $routes[$routeKey] : null;
+            if (! $route) {
+                $routeKeyPath = "payload_template.steps.$index.buttons.$buttonIndex.action.route_key";
+                if (! $validator->errors()->has($routeKeyPath)) {
+                    $validator->errors()->add(
+                        $routeKeyPath,
+                        'Route key is not defined in tenant settings.'
+                    );
+                }
+                continue;
+            }
+
+            if ($allowedKeys !== null && ! in_array($routeKey, $allowedKeys, true)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.buttons.$buttonIndex.action.route_key",
+                    $this->formatAllowedRouteKeysMessage($allowedKeys)
+                );
+                continue;
+            }
+
+            $pathParams = $route['path_params'] ?? [];
+            $pathValues = $action['path_parameters'] ?? [];
+            if (is_array($pathParams)) {
+                foreach ($pathParams as $param) {
+                    if (! array_key_exists($param, $pathValues) || $pathValues[$param] === null || $pathValues[$param] === '') {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.buttons.$buttonIndex.action.path_parameters.$param",
+                            'Path parameter is required.'
+                        );
+                    }
+                }
+            }
+
+            $queryRules = $route['query_params'] ?? [];
+            $queryValues = $action['query_parameters'] ?? null;
+            if (is_array($queryRules) && $queryRules !== [] && is_array($queryValues)) {
+                $queryValidator = \Illuminate\Support\Facades\Validator::make($queryValues, $queryRules);
+                foreach ($queryValidator->errors()->toArray() as $key => $messages) {
+                    foreach ($messages as $message) {
+                        $validator->errors()->add(
+                            "payload_template.steps.$index.buttons.$buttonIndex.action.query_parameters.$key",
+                            $message
+                        );
+                    }
+                }
             }
         }
     }

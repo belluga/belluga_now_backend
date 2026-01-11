@@ -214,12 +214,12 @@ Use the tenant endpoints below to configure and enable push in order.
     },
     {
       "slug": "prefs",
-      "type": "question",
+      "type": "selector",
       "title": "O que você procura?",
       "body": "Escolha até 3 temas.",
-      "onSubmit": { "action": "save_response", "store_key": "preferences.tags" },
       "config": {
-        "question_type": "multi_select",
+        "selection_ui": "inline",
+        "selection_mode": "multi",
         "layout": "tags",
         "min_selected": 1,
         "max_selected": 3,
@@ -228,7 +228,8 @@ Use the tenant endpoints below to configure and enable push in order.
           "name": "getTags",
           "params": { "include": ["praias", "restaurantes", "experiencias_no_mar"] },
           "cache_ttl_sec": 3600
-        }
+        },
+        "store_key": "preferences.tags"
       }
     }
   ]

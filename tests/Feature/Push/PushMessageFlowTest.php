@@ -859,6 +859,208 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
+    public function testPushMessageCreateRejectsNonTextQuestions(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeOnLastStepAction' => true,
+                'steps' => [
+                    [
+                        'slug' => 'pick-one',
+                        'type' => 'question',
+                        'title' => 'Pick one',
+                        'config' => [
+                            'question_type' => 'single_select',
+                            'layout' => 'list',
+                            'options' => [
+                                ['id' => 'a', 'label' => 'Option A'],
+                                ['id' => 'b', 'label' => 'Option B'],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.steps.0.config.question_type',
+        ]);
+    }
+
+    public function testPushMessageCreateRejectsSelectionModeOnQuestions(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeOnLastStepAction' => true,
+                'steps' => [
+                    [
+                        'slug' => 'text-question',
+                        'type' => 'question',
+                        'title' => 'Tell us more',
+                        'config' => [
+                            'question_type' => 'text',
+                            'selection_mode' => 'multi',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.steps.0.config.selection_mode',
+        ]);
+    }
+
+    public function testPushMessageCreateDefaultsSelectorSelectionMode(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeOnLastStepAction' => true,
+                'steps' => [
+                    [
+                        'slug' => 'pick-tags',
+                        'type' => 'selector',
+                        'title' => 'Pick tags',
+                        'config' => [
+                            'selection_ui' => 'inline',
+                            'layout' => 'list',
+                            'options' => [
+                                ['id' => 'a', 'label' => 'Option A'],
+                                ['id' => 'b', 'label' => 'Option B'],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+        $create->assertJsonPath('data.payload_template.steps.0.config.selection_mode', 'single');
+    }
+
+    public function testPushMessageCreatePersistsPayloadTemplateDisplayFields(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'title' => 'Onboarding Title',
+                'body' => 'Onboarding Body',
+                'image' => [
+                    'path' => 'https://example.com/hero.png',
+                    'width' => 720,
+                    'height' => 480,
+                ],
+                'steps' => [
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                        'gate' => [
+                            'type' => 'selection_min',
+                            'min_selected' => 2,
+                            'onFail' => [
+                                'toast' => 'Selecione pelo menos 2 itens.',
+                            ],
+                        ],
+                        'buttons' => [
+                            [
+                                'label' => 'Continuar',
+                                'continue_after_action' => true,
+                                'action' => [
+                                    'type' => 'custom',
+                                    'custom_action' => 'test_action',
+                                ],
+                                'show_loading' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+        $create->assertJsonPath('data.payload_template.title', 'Onboarding Title');
+        $create->assertJsonPath('data.payload_template.body', 'Onboarding Body');
+        $create->assertJsonPath('data.payload_template.image.path', 'https://example.com/hero.png');
+        $create->assertJsonPath('data.payload_template.image.width', 720);
+        $create->assertJsonPath('data.payload_template.image.height', 480);
+        $create->assertJsonPath('data.payload_template.steps.0.gate.min_selected', 2);
+        $create->assertJsonPath('data.payload_template.steps.0.buttons.0.continue_after_action', true);
+    }
+
+    public function testPushMessageUpdatePersistsPayloadTemplateDisplayFields(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $update = $this->patchJson($this->baseUrl . '/' . $messageId, [
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeOnLastStepAction' => true,
+                'title' => 'Updated Title',
+                'body' => 'Updated Body',
+                'image' => [
+                    'path' => 'https://example.com/updated.png',
+                    'width' => 640,
+                    'height' => 360,
+                ],
+                'steps' => [
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                        'gate' => [
+                            'type' => 'selection_min',
+                            'min_selected' => 1,
+                        ],
+                        'buttons' => [
+                            [
+                                'label' => 'Continuar',
+                                'continue_after_action' => false,
+                                'action' => [
+                                    'type' => 'custom',
+                                    'custom_action' => 'test_action',
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $update->assertOk();
+        $update->assertJsonPath('data.payload_template.title', 'Updated Title');
+        $update->assertJsonPath('data.payload_template.body', 'Updated Body');
+        $update->assertJsonPath('data.payload_template.image.path', 'https://example.com/updated.png');
+        $update->assertJsonPath('data.payload_template.image.width', 640);
+        $update->assertJsonPath('data.payload_template.image.height', 360);
+        $update->assertJsonPath('data.payload_template.steps.0.gate.min_selected', 1);
+        $update->assertJsonPath('data.payload_template.steps.0.buttons.0.continue_after_action', false);
+    }
+
     public function testPushMessageCreateRequiresAudienceType(): void
     {
         $this->actingAsOperator();
