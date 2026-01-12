@@ -6,6 +6,7 @@ namespace Belluga\PushHandler\Http\Requests;
 
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmOptionsValidator;
+use Belluga\PushHandler\Support\PushHtmlSanitizer;
 use Carbon\Carbon;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -20,7 +21,12 @@ class PushMessageStoreRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $steps = $this->input('payload_template.steps');
+        $payloadTemplate = $this->input('payload_template');
+        if (! is_array($payloadTemplate)) {
+            return;
+        }
+
+        $steps = $payloadTemplate['steps'] ?? null;
         if (! is_array($steps)) {
             return;
         }
@@ -30,31 +36,35 @@ class PushMessageStoreRequest extends FormRequest
             if (! is_array($step)) {
                 continue;
             }
-            if (($step['type'] ?? null) !== 'selector') {
-                continue;
+            $stepUpdated = false;
+            if (($step['type'] ?? null) === 'selector') {
+                $config = $step['config'] ?? null;
+                if (is_array($config)) {
+                    $selectionMode = $config['selection_mode'] ?? null;
+                    if ($selectionMode === null || $selectionMode === '') {
+                        $config['selection_mode'] = 'single';
+                        $step['config'] = $config;
+                        $stepUpdated = true;
+                    }
+                }
             }
-            $config = $step['config'] ?? null;
-            if (! is_array($config)) {
-                continue;
+            if (array_key_exists('body', $step) && is_string($step['body'])) {
+                $sanitized = PushHtmlSanitizer::sanitize($step['body']);
+                if ($sanitized !== $step['body']) {
+                    $step['body'] = $sanitized;
+                    $stepUpdated = true;
+                }
             }
-            $selectionMode = $config['selection_mode'] ?? null;
-            if ($selectionMode !== null && $selectionMode !== '') {
-                continue;
+            if ($stepUpdated) {
+                $steps[$index] = $step;
+                $updated = true;
             }
-            $config['selection_mode'] = 'single';
-            $step['config'] = $config;
-            $steps[$index] = $step;
-            $updated = true;
         }
 
         if (! $updated) {
             return;
         }
 
-        $payloadTemplate = $this->input('payload_template');
-        if (! is_array($payloadTemplate)) {
-            $payloadTemplate = [];
-        }
         $payloadTemplate['steps'] = $steps;
         $this->merge(['payload_template' => $payloadTemplate]);
     }
@@ -92,7 +102,8 @@ class PushMessageStoreRequest extends FormRequest
                 'actionButton',
                 'snackBar',
             ])],
-            'payload_template.closeOnLastStepAction' => ['nullable', 'boolean'],
+            'payload_template.closeBehavior' => ['required', Rule::in(['after_action', 'close_button'])],
+            'payload_template.closeOnLastStepAction' => ['prohibited'],
             'payload_template.title' => ['nullable', 'string'],
             'payload_template.body' => ['nullable', 'string'],
             'payload_template.image' => ['nullable', 'array'],
@@ -107,7 +118,7 @@ class PushMessageStoreRequest extends FormRequest
                 'question',
                 'selector',
             ])],
-            'payload_template.steps.*.title' => ['required', 'string'],
+            'payload_template.steps.*.title' => ['nullable', 'string'],
             'payload_template.steps.*.body' => ['nullable', 'string'],
             'payload_template.steps.*.image' => ['nullable', 'array'],
             'payload_template.steps.*.dismissible' => ['nullable', 'boolean'],
@@ -322,6 +333,8 @@ class PushMessageStoreRequest extends FormRequest
                 continue;
             }
 
+            $title = $step['title'] ?? null;
+            $body = $step['body'] ?? null;
             $image = $step['image'] ?? null;
             if (is_array($image)) {
                 $path = $image['path'] ?? null;
@@ -345,6 +358,18 @@ class PushMessageStoreRequest extends FormRequest
                         'Image height must be an integer.'
                     );
                 }
+            }
+
+            $hasTitle = is_string($title) && trim($title) !== '';
+            $hasBody = is_string($body) && trim($body) !== '';
+            $hasImage = is_array($image)
+                && is_string($image['path'] ?? null)
+                && trim((string) ($image['path'] ?? '')) !== '';
+            if (! ($hasTitle || $hasBody || $hasImage)) {
+                $validator->errors()->add(
+                    "payload_template.steps.$index.title",
+                    'At least one of title, body, or image is required.'
+                );
             }
 
             $gate = $step['gate'] ?? null;

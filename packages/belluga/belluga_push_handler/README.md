@@ -190,7 +190,7 @@ Use the tenant endpoints below to configure and enable push in order.
 ```json
 {
   "layoutType": "fullScreen",
-  "closeOnLastStepAction": true,
+  "closeBehavior": "after_action",
   "steps": [
     {
       "slug": "notify",
@@ -236,6 +236,12 @@ Use the tenant endpoints below to configure and enable push in order.
 }
 ```
 
+Notes:
+- Each step must provide at least one of `title`, `body`, or `image`.
+- HTML is auto-detected in `steps[].body` and stripped to a safe subset before storage:
+  `p`, `br`, `strong`, `em`, `u`, `span` (style: `color`, `font-size`, `font-weight`),
+  `ul`, `ol`, `li`, `img` (`src`, `width`, `height`, `alt`).
+
 ### Delivery Timing (TTL + Deadline)
 Push messages do **not** accept `delivery.expires_at`. Delivery expiration is computed at send time:
 
@@ -259,7 +265,7 @@ Note: `option_source` is method-based (`type: "method"` + `name`), resolved by t
   "delivery_deadline_at": "2026-02-08T12:00:00Z",
   "payload_template": {
     "layoutType": "fullScreen",
-    "closeOnLastStepAction": true,
+    "closeBehavior": "after_action",
     "steps": [
       { "slug": "intro", "type": "cta", "title": "Começar" }
     ]

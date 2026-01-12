@@ -745,7 +745,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'intro',
@@ -796,7 +796,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'intro',
@@ -859,6 +859,145 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
+    public function testPushMessageCreateRequiresStepContent(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeBehavior' => 'after_action',
+                'steps' => [
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => null,
+                        'body' => null,
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.steps.0.title',
+        ]);
+    }
+
+    public function testPushMessageCreateAcceptsImageOnlyStep(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeBehavior' => 'after_action',
+                'steps' => [
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'image' => [
+                            'path' => 'https://example.com/hero.png',
+                            'width' => 720,
+                            'height' => 480,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertCreated();
+    }
+
+    public function testPushMessageCreateSanitizesHtmlBody(): void
+    {
+        $this->actingAsOperator();
+
+        $body = '<p>Hello <strong>World</strong><script>alert(1)</script>'
+            . '<span style="color: #ff0000; font-weight: 700; font-size: 18px; background: blue;">Hi</span>'
+            . '<img src="javascript:alert(1)" />'
+            . '<img src="https://example.com/hero.png" width="120" height="80" onclick="nope" />'
+            . '<ul><li>One</li></ul>'
+            . '</p>';
+
+        $payload = $this->buildPayload([
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeBehavior' => 'after_action',
+                'steps' => [
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'body' => $body,
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertCreated();
+
+        $sanitized = $response->json('data.payload_template.steps.0.body');
+        $this->assertIsString($sanitized);
+        $this->assertStringContainsString('<strong>World</strong>', $sanitized);
+        $this->assertStringContainsString('<span style="color: #ff0000; font-weight: 700; font-size: 18px">Hi</span>', $sanitized);
+        $this->assertStringContainsString('https://example.com/hero.png', $sanitized);
+        $this->assertStringContainsString('<ul>', $sanitized);
+        $this->assertStringNotContainsString('<script>', $sanitized);
+        $this->assertStringNotContainsString('alert(1)', $sanitized);
+        $this->assertStringNotContainsString('background:', $sanitized);
+        $this->assertStringNotContainsString('javascript:', $sanitized);
+        $this->assertStringNotContainsString('onclick', $sanitized);
+    }
+
+    public function testPushMessageCreateRequiresCloseBehavior(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        unset($payload['payload_template']['closeBehavior']);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'payload_template.closeBehavior',
+        ]);
+    }
+
+    public function testPushMessageUpdateRejectsCloseOnLastStepAction(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload();
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $update = $this->patchJson($this->baseUrl . '/' . $messageId, [
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeBehavior' => 'after_action',
+                'closeOnLastStepAction' => true,
+                'steps' => [
+                    [
+                        'slug' => 'intro',
+                        'type' => 'copy',
+                        'title' => 'Title',
+                        'body' => 'Body text',
+                    ],
+                ],
+            ],
+        ]);
+
+        $update->assertStatus(422);
+        $update->assertJsonValidationErrors([
+            'payload_template.closeOnLastStepAction',
+        ]);
+    }
+
     public function testPushMessageCreateRejectsNonTextQuestions(): void
     {
         $this->actingAsOperator();
@@ -866,7 +1005,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'pick-one',
@@ -899,7 +1038,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'text-question',
@@ -928,7 +1067,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'pick-tags',
@@ -1018,7 +1157,7 @@ class PushMessageFlowTest extends TestCase
         $update = $this->patchJson($this->baseUrl . '/' . $messageId, [
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'title' => 'Updated Title',
                 'body' => 'Updated Body',
                 'image' => [
@@ -1524,7 +1663,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'intro',
@@ -1587,7 +1726,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     ['title' => 'Title'],
                 ],
@@ -1650,7 +1789,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     ['title' => 'Title'],
                 ],
@@ -3124,7 +3263,7 @@ class PushMessageFlowTest extends TestCase
             'delivery' => [],
             'payload_template' => [
                 'layoutType' => 'fullScreen',
-                'closeOnLastStepAction' => true,
+                'closeBehavior' => 'after_action',
                 'steps' => [
                     [
                         'slug' => 'intro',
