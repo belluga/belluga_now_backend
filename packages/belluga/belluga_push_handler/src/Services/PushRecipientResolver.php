@@ -20,6 +20,15 @@ class PushRecipientResolver
      */
     public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
     {
+        $result = $this->resolveTokensWithUsers($message, $scope, $accountId);
+        return $result['tokens'];
+    }
+
+    /**
+     * @return array{tokens: array<int, string>, token_user_map: array<string, string>}
+     */
+    public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+    {
         $query = AccountUser::query();
 
         if ($scope === 'account' && $accountId !== null) {
@@ -27,8 +36,9 @@ class PushRecipientResolver
         }
 
         $tokens = [];
+        $tokenUserMap = [];
 
-        $query->chunk(200, function (Collection $users) use ($message, $scope, $accountId, &$tokens): void {
+        $query->chunk(200, function (Collection $users) use ($message, $scope, $accountId, &$tokens, &$tokenUserMap): void {
             foreach ($users as $user) {
                 if (! $user instanceof AccountUser) {
                     continue;
@@ -49,12 +59,16 @@ class PushRecipientResolver
                     $token = $device['push_token'] ?? null;
                     if (is_string($token) && $token !== '') {
                         $tokens[$token] = true;
+                        $tokenUserMap[$token] = (string) $user->_id;
                     }
                 }
             }
         });
 
-        return array_keys($tokens);
+        return [
+            'tokens' => array_keys($tokens),
+            'token_user_map' => $tokenUserMap,
+        ];
     }
 
     /**

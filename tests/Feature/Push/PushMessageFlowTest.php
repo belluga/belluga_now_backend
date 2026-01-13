@@ -1915,6 +1915,26 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('data.0.type', 'webhook');
     }
 
+    public function testTenantTelemetryAcceptsTrackAllWithoutEvents(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+
+        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+            'type' => 'mixpanel',
+            'token' => 'token',
+            'track_all' => true,
+        ]);
+        $response->assertOk();
+        $response->assertJsonPath('data.0.type', 'mixpanel');
+        $response->assertJsonPath('data.0.track_all', true);
+    }
+
     public function testTenantPushEnableRequiresConfig(): void
     {
         $tenant = Tenant::query()->firstOrFail();
@@ -2746,6 +2766,17 @@ class PushMessageFlowTest extends TestCase
                 {
                     return ['token-1', 'token-2'];
                 }
+
+                public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [
+                        'tokens' => ['token-1', 'token-2'],
+                        'token_user_map' => [
+                            'token-1' => 'user-1',
+                            'token-2' => 'user-2',
+                        ],
+                    ];
+                }
             };
         });
 
@@ -3089,6 +3120,158 @@ class PushMessageFlowTest extends TestCase
         $tokens = $resolver->tokensForUser($user);
 
         $this->assertSame(['token-active'], $tokens);
+    }
+
+    public function testInviteReceivedTelemetryUsesUserIdDistinctId(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'telemetry' => [
+                [
+                    'type' => 'mixpanel',
+                    'token' => 'mixpanel-token',
+                    'events' => ['invite_received'],
+                ],
+                [
+                    'type' => 'webhook',
+                    'url' => 'https://telemetry.example/ingest',
+                    'events' => ['invite_received'],
+                ],
+            ],
+        ]));
+
+        $message = PushMessage::create($this->buildPayload());
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    $token = $tokens[0] ?? 'token-1';
+                    return [
+                        'accepted_count' => 1,
+                        'responses' => [
+                            [
+                                'token' => $token,
+                                'status' => 'accepted',
+                                'provider_message_id' => 'msg-1',
+                            ],
+                        ],
+                    ];
+                }
+            };
+        });
+
+        Http::fake([
+            'https://api.mixpanel.com/track' => Http::response([], 200),
+            'https://telemetry.example/ingest' => Http::response([], 200),
+        ]);
+
+        $service = $this->app->make(PushDeliveryService::class);
+        $userId = (string) $this->operator->_id;
+        $service->deliver($message, ['token-1'], ['token-1' => $userId]);
+
+        Http::assertSent(function ($request) use ($userId) {
+            if ($request->url() !== 'https://api.mixpanel.com/track') {
+                return true;
+            }
+            $payload = $request->data();
+            $properties = $payload['properties'] ?? [];
+            return ($properties['distinct_id'] ?? null) === $userId
+                && ($properties['user_id'] ?? null) === $userId
+                && isset($properties['$insert_id']);
+        });
+
+        Http::assertSent(function ($request) use ($userId) {
+            if ($request->url() !== 'https://telemetry.example/ingest') {
+                return true;
+            }
+            $payload = $request->data();
+            return ($payload['context']['user']['id'] ?? null) === $userId
+                && ($payload['payload']['event'] ?? null) === 'invite_received';
+        });
+    }
+
+    public function testInviteReceivedTelemetryTracksAllWithoutEventsList(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'telemetry' => [
+                [
+                    'type' => 'mixpanel',
+                    'token' => 'mixpanel-token',
+                    'track_all' => true,
+                ],
+                [
+                    'type' => 'webhook',
+                    'url' => 'https://telemetry.example/ingest',
+                    'track_all' => true,
+                ],
+            ],
+        ]));
+
+        $message = PushMessage::create($this->buildPayload());
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    $token = $tokens[0] ?? 'token-1';
+                    return [
+                        'accepted_count' => 1,
+                        'responses' => [
+                            [
+                                'token' => $token,
+                                'status' => 'accepted',
+                                'provider_message_id' => 'msg-1',
+                            ],
+                        ],
+                    ];
+                }
+            };
+        });
+
+        Http::fake([
+            'https://api.mixpanel.com/track' => Http::response([], 200),
+            'https://telemetry.example/ingest' => Http::response([], 200),
+        ]);
+
+        $service = $this->app->make(PushDeliveryService::class);
+        $userId = (string) $this->operator->_id;
+        $service->deliver($message, ['token-1'], ['token-1' => $userId]);
+
+        Http::assertSent(function ($request) use ($userId) {
+            if ($request->url() !== 'https://api.mixpanel.com/track') {
+                return true;
+            }
+            $payload = $request->data();
+            return ($payload['event'] ?? null) === 'invite_received'
+                && ($payload['properties']['distinct_id'] ?? null) === $userId;
+        });
+
+        Http::assertSent(function ($request) use ($userId) {
+            if ($request->url() !== 'https://telemetry.example/ingest') {
+                return true;
+            }
+            $payload = $request->data();
+            return ($payload['context']['user']['id'] ?? null) === $userId
+                && ($payload['payload']['event'] ?? null) === 'invite_received';
+        });
     }
 
     public function testSendInvalidatesNotFoundTokensAndSkipsOnNextSend(): void

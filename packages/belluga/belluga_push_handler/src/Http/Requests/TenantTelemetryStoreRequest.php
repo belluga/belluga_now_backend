@@ -18,7 +18,11 @@ class TenantTelemetryStoreRequest extends FormRequest
     {
         return [
             'type' => ['required', 'string', Rule::in(['mixpanel', 'firebase', 'webhook'])],
-            'events' => ['required', 'array', 'min:1'],
+            'track_all' => ['sometimes', 'boolean'],
+            'events' => [
+                'array',
+                Rule::requiredIf(fn () => ! $this->boolean('track_all')),
+            ],
             'events.*' => ['string'],
             'token' => ['required_if:type,mixpanel', 'string'],
             'url' => ['required_if:type,webhook', 'string'],

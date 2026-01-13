@@ -96,7 +96,8 @@ class PushMessageSendController
         $messageInstanceId = null;
         if (! ($payload['dry_run'] ?? false)) {
             try {
-                $response = $this->deliveryService->deliver($message, $tokens);
+                $tokenUserMap = array_fill_keys($tokens, (string) $user->_id);
+                $response = $this->deliveryService->deliver($message, $tokens, $tokenUserMap);
             } catch (ValidationException $exception) {
                 return response()->json([
                     'message' => 'Delivery TTL validation failed.',

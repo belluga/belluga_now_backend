@@ -15,15 +15,17 @@ use Illuminate\Support\Str;
 class PushDeliveryService
 {
     public function __construct(
-        private readonly FcmClientContract $fcmClient
+        private readonly FcmClientContract $fcmClient,
+        private readonly TelemetryDeliveryService $telemetryDelivery
     ) {
     }
 
     /**
      * @param array<int, string> $tokens
+     * @param array<string, string> $tokenUserMap
      * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
-    public function deliver(PushMessage $message, array $tokens): array
+    public function deliver(PushMessage $message, array $tokens, array $tokenUserMap = []): array
     {
         $batchSize = (int) config('belluga_push_handler.fcm.max_batch_size', 500);
         if ($batchSize <= 0) {
@@ -34,6 +36,7 @@ class PushDeliveryService
         $messageInstanceId = (string) Str::uuid();
         $responses = [];
         $accepted = 0;
+        $telemetryUserIds = [];
         foreach (array_chunk($tokens, $batchSize) as $chunk) {
             $batchId = (string) Str::uuid();
             $response = $this->fcmClient->send($message, $chunk, $messageInstanceId, $expiresAt, $ttlMinutes);
@@ -50,18 +53,36 @@ class PushDeliveryService
                     continue;
                 }
 
+                $status = $entry['status'] ?? 'failed';
+                if ($status === 'accepted' && $message->type === 'invite_received') {
+                    $userId = $tokenUserMap[$token] ?? null;
+                    if (is_string($userId) && $userId !== '') {
+                        $telemetryUserIds[$userId] = true;
+                    }
+                }
+
                 PushDeliveryLog::create([
                     'push_message_id' => (string) $message->_id,
                     'message_instance_id' => $messageInstanceId,
                     'batch_id' => $batchId,
                     'token_hash' => hash('sha256', $token),
-                    'status' => $entry['status'] ?? 'failed',
+                    'status' => $status,
                     'error_code' => $entry['error_code'] ?? null,
                     'error_message' => $entry['error_message'] ?? null,
                     'provider_message_id' => $entry['provider_message_id'] ?? null,
                     'expires_at' => $expiresAt->toISOString(),
                     'ttl_minutes' => $ttlMinutes,
                 ]);
+            }
+        }
+
+        if ($message->type === 'invite_received' && $telemetryUserIds !== []) {
+            foreach (array_keys($telemetryUserIds) as $userId) {
+                $this->telemetryDelivery->deliverInviteReceived(
+                    message: $message,
+                    userId: (string) $userId,
+                    messageInstanceId: $messageInstanceId
+                );
             }
         }
 

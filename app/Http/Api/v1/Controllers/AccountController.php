@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountManagementService;
 use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\AccountUpdateRequest;
@@ -19,7 +20,8 @@ use MongoDB\BSON\ObjectId;
 class AccountController extends Controller
 {
     public function __construct(
-        private readonly AccountManagementService $accountService
+        private readonly AccountManagementService $accountService,
+        private readonly TelemetryEmitter $telemetry
     ) {
     }
 
@@ -41,6 +43,18 @@ class AccountController extends Controller
     {
         $result = $this->accountService->create($request->validated());
 
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'account_created',
+                userId: (string) $user->_id,
+                properties: [
+                    'account_id' => (string) $result['account']->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
+
         return response()->json([
             'data' => $result,
         ], 201);
@@ -59,7 +73,21 @@ class AccountController extends Controller
     {
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
-        $updated = $this->accountService->update($account, $request->validated());
+        $validated = $request->validated();
+        $updated = $this->accountService->update($account, $validated);
+
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'account_updated',
+                userId: (string) $user->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'changed_fields' => array_keys($validated),
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $updated,
@@ -72,6 +100,18 @@ class AccountController extends Controller
 
         $this->accountService->delete($account);
 
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'account_deleted',
+                userId: (string) $user->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
+
         return response()->json();
     }
 
@@ -80,6 +120,18 @@ class AccountController extends Controller
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
         $restored = $this->accountService->restore($account);
+
+        $user = request()->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'account_restored',
+                userId: (string) $user->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $restored,
@@ -91,6 +143,18 @@ class AccountController extends Controller
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
         $this->accountService->forceDelete($account);
+
+        $user = request()->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'account_force_deleted',
+                userId: (string) $user->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
 
         return response()->json();
     }
@@ -111,10 +175,26 @@ class AccountController extends Controller
 
         if ($method === 'post') {
             $this->accountService->attachUser($account, $user, $role);
+            $event = 'account_user_role_attached';
         } elseif ($method === 'delete') {
             $this->accountService->detachUser($account, $user, $role);
+            $event = 'account_user_role_removed';
         } else {
             abort(422, 'Not found an action for this method.');
+        }
+
+        $actor = $request->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: $event,
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'target_user_id' => (string) $user->_id,
+                    'role_id' => (string) $role->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
         }
 
         return response()->json();

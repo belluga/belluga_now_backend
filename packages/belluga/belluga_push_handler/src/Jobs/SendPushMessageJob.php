@@ -43,7 +43,13 @@ class SendPushMessageJob implements ShouldQueue
             return;
         }
 
-        $recipients = $recipientResolver->resolveTokens($message, $this->scope, $this->accountId);
+        $recipientPayload = $recipientResolver->resolveTokensWithUsers(
+            $message,
+            $this->scope,
+            $this->accountId
+        );
+        $recipients = $recipientPayload['tokens'];
+        $tokenUserMap = $recipientPayload['token_user_map'];
         if ($this->scope === 'account' && $this->accountId !== null) {
             $audienceSize = count($recipients);
             if (! app(\Belluga\PushHandler\Contracts\PushPlanPolicyContract::class)->canSend($this->accountId, $message, $audienceSize)) {
@@ -56,7 +62,7 @@ class SendPushMessageJob implements ShouldQueue
         }
 
         try {
-            $response = $deliveryService->deliver($message, $recipients);
+            $response = $deliveryService->deliver($message, $recipients, $tokenUserMap);
         } catch (ValidationException) {
             return;
         }
