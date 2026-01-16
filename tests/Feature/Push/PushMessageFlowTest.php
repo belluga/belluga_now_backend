@@ -1891,6 +1891,8 @@ class PushMessageFlowTest extends TestCase
         ]);
         $response->assertOk();
         $response->assertJsonPath('data.0.type', 'mixpanel');
+        $payload = $response->json();
+        $this->assertContains('invite_received', $payload['available_events'] ?? []);
 
         $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
             'type' => 'mixpanel',
@@ -1908,6 +1910,8 @@ class PushMessageFlowTest extends TestCase
         ]);
         $response->assertOk();
         $response->assertJsonCount(2, 'data');
+        $payload = $response->json();
+        $this->assertContains('invite_received', $payload['available_events'] ?? []);
 
         $response = $this->deleteJson($baseApiTenant . 'settings/telemetry/mixpanel');
         $response->assertOk();
@@ -1933,6 +1937,8 @@ class PushMessageFlowTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('data.0.type', 'mixpanel');
         $response->assertJsonPath('data.0.track_all', true);
+        $payload = $response->json();
+        $this->assertContains('invite_received', $payload['available_events'] ?? []);
     }
 
     public function testTenantPushEnableRequiresConfig(): void

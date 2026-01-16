@@ -21,7 +21,10 @@ class TenantTelemetrySettingsAdminController
 
         $tenant->forgetCurrent();
 
-        return response()->json(['data' => $telemetry]);
+        return response()->json([
+            'data' => $telemetry,
+            'available_events' => $this->availableEvents(),
+        ]);
     }
 
     public function store(TenantTelemetryStoreRequest $request, string $tenant_slug): JsonResponse
@@ -45,7 +48,10 @@ class TenantTelemetrySettingsAdminController
 
         $tenant->forgetCurrent();
 
-        return response()->json(['data' => $settings->telemetry ?? []]);
+        return response()->json([
+            'data' => $settings->telemetry ?? [],
+            'available_events' => $this->availableEvents(),
+        ]);
     }
 
     public function destroy(string $tenant_slug, string $type): JsonResponse
@@ -62,7 +68,10 @@ class TenantTelemetrySettingsAdminController
         if (! $settings) {
             $tenant->forgetCurrent();
 
-            return response()->json(['data' => $telemetry]);
+            return response()->json([
+                'data' => $telemetry,
+                'available_events' => $this->availableEvents(),
+            ]);
         }
 
         $settings->fill(['telemetry' => $telemetry]);
@@ -70,7 +79,10 @@ class TenantTelemetrySettingsAdminController
 
         $tenant->forgetCurrent();
 
-        return response()->json(['data' => $settings->telemetry ?? []]);
+        return response()->json([
+            'data' => $settings->telemetry ?? [],
+            'available_events' => $this->availableEvents(),
+        ]);
     }
 
     /**
@@ -138,5 +150,26 @@ class TenantTelemetrySettingsAdminController
         }
 
         return $filtered;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function availableEvents(): array
+    {
+        $events = config('belluga_push_handler.telemetry.available_events', []);
+        if (! is_array($events)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($events as $event) {
+            if (! is_string($event) || $event === '') {
+                continue;
+            }
+            $normalized[] = $event;
+        }
+
+        return array_values(array_unique($normalized));
     }
 }

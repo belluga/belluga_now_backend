@@ -20,9 +20,14 @@ class CreateLandlordAction
         array $logoSettings,
         array $pwaIcon
     ): Landlord {
-        $landlord = Landlord::create([
-            'name' => $landlordData['name'],
-        ]);
+        $landlord = Landlord::query()->first();
+        if (! $landlord) {
+            $landlord = Landlord::create([
+                'name' => $landlordData['name'],
+            ]);
+        } else {
+            $landlord->name = $landlordData['name'];
+        }
 
         $landlord->branding_data = [
             'theme_data_settings' => $themeData,

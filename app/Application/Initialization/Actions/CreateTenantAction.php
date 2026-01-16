@@ -14,10 +14,19 @@ class CreateTenantAction
      */
     public function execute(array $tenantData, array $domains = []): Tenant
     {
-        $tenant = Tenant::create([
-            'name' => $tenantData['name'],
-            'subdomain' => $tenantData['subdomain'],
-        ]);
+        $tenant = Tenant::query()
+            ->where('subdomain', $tenantData['subdomain'])
+            ->first();
+
+        if (! $tenant) {
+            $tenant = Tenant::create([
+                'name' => $tenantData['name'],
+                'subdomain' => $tenantData['subdomain'],
+            ]);
+        } else {
+            $tenant->name = $tenantData['name'];
+            $tenant->save();
+        }
 
         if (! empty($domains)) {
             $tenant->addDomains($domains);
