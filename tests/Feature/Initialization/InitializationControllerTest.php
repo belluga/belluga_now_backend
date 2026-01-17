@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Initialization;
 
+use App\Models\Landlord\Landlord;
+use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
@@ -33,8 +35,8 @@ class InitializationControllerTest extends TestCase
         $response->assertStatus(201);
         $response->assertJsonPath('data.user.name', 'Admin Test');
 
-        $this->assertDatabaseCount('landlords', 1, 'landlord');
-        $this->assertDatabaseCount('tenants', 1, 'landlord');
+        $this->assertSame(1, Landlord::query()->count());
+        $this->assertSame(1, Tenant::query()->count());
     }
 
     public function testSubsequentInitializationIsRejected(): void
