@@ -7,13 +7,22 @@ use Belluga\PushHandler\Http\Controllers\Account\PushMessageController;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageDataController;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageSendController;
 use Belluga\PushHandler\Http\Controllers\Account\PushQuotaCheckController;
+use Belluga\PushHandler\Http\Controllers\Landlord\TenantFirebaseSettingsAdminController;
 use Belluga\PushHandler\Http\Controllers\Landlord\TenantPushSettingsAdminController;
+use Belluga\PushHandler\Http\Controllers\Landlord\TenantTelemetrySettingsAdminController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushCredentialController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushDeviceController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageActionController as TenantPushMessageActionController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageController as TenantPushMessageController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageDataController as TenantPushMessageDataController;
 use Belluga\PushHandler\Http\Controllers\Tenant\PushMessageSendController as TenantPushMessageSendController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantFirebaseSettingsController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushDisableController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushEnableController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushMessageTypesController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushRouteTypesController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantTelemetrySettingsController;
+use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushStatusController;
 use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushSettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -30,9 +39,13 @@ $tenantRegisterPath = $tenantRoutes['register'] ?? 'push/register';
 $tenantUnregisterPath = $tenantRoutes['unregister'] ?? 'push/unregister';
 $tenantSettingsPrefix = $tenantRoutes['settings_prefix'] ?? 'settings';
 $tenantSettingsPushPath = $tenantRoutes['settings_push'] ?? 'push';
+$tenantSettingsFirebasePath = $tenantRoutes['settings_firebase'] ?? 'firebase';
+$tenantSettingsTelemetryPath = $tenantRoutes['settings_telemetry'] ?? 'telemetry';
 
 $landlordPrefix = $landlordRoutes['prefix'] ?? 'admin/api/v1';
 $landlordTenantSettingsPath = $landlordRoutes['tenant_settings_path'] ?? '{tenant_slug}/settings/push';
+$landlordTenantSettingsFirebasePath = $landlordRoutes['tenant_settings_firebase_path'] ?? '{tenant_slug}/settings/firebase';
+$landlordTenantSettingsTelemetryPath = $landlordRoutes['tenant_settings_telemetry_path'] ?? '{tenant_slug}/settings/telemetry';
 
 Route::prefix($accountPrefix)
     ->middleware(['tenant'])
@@ -71,7 +84,9 @@ Route::prefix($tenantPrefix)
         $tenantRegisterPath,
         $tenantUnregisterPath,
         $tenantSettingsPrefix,
-        $tenantSettingsPushPath
+        $tenantSettingsPushPath,
+        $tenantSettingsFirebasePath,
+        $tenantSettingsTelemetryPath
     ) {
         Route::post('/' . ltrim($tenantRegisterPath, '/'), [PushDeviceController::class, 'register'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class]);
@@ -100,20 +115,44 @@ Route::prefix($tenantPrefix)
 
         Route::prefix($tenantSettingsPrefix)
             ->middleware(['auth:sanctum', CheckTenantAccess::class])
-            ->group(function () use ($tenantSettingsPushPath) {
+            ->group(function () use ($tenantSettingsPushPath, $tenantSettingsFirebasePath, $tenantSettingsTelemetryPath) {
                 Route::get('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'show'])
                     ->middleware('abilities:push-settings:update');
                 Route::patch('/' . ltrim($tenantSettingsPushPath, '/'), [TenantPushSettingsController::class, 'update'])
+                    ->middleware('abilities:push-settings:update');
+                Route::get('/' . ltrim($tenantSettingsFirebasePath, '/'), [TenantFirebaseSettingsController::class, 'show'])
+                    ->middleware('abilities:push-settings:update');
+                Route::patch('/' . ltrim($tenantSettingsFirebasePath, '/'), [TenantFirebaseSettingsController::class, 'update'])
+                    ->middleware('abilities:push-settings:update');
+                Route::get('/' . ltrim($tenantSettingsTelemetryPath, '/'), [TenantTelemetrySettingsController::class, 'index'])
+                    ->middleware('abilities:push-settings:update');
+                Route::post('/' . ltrim($tenantSettingsTelemetryPath, '/'), [TenantTelemetrySettingsController::class, 'store'])
+                    ->middleware('abilities:push-settings:update');
+                Route::delete('/' . ltrim($tenantSettingsTelemetryPath, '/') . '/{type}', [TenantTelemetrySettingsController::class, 'destroy'])
+                    ->middleware('abilities:push-settings:update');
+                Route::post('/' . ltrim($tenantSettingsPushPath, '/') . '/enable', TenantPushEnableController::class)
+                    ->middleware('abilities:push-settings:update');
+                Route::post('/' . ltrim($tenantSettingsPushPath, '/') . '/disable', TenantPushDisableController::class)
+                    ->middleware('abilities:push-settings:update');
+                Route::get('/' . ltrim($tenantSettingsPushPath, '/') . '/route_types', [TenantPushRouteTypesController::class, 'show'])
+                    ->middleware('abilities:push-settings:update');
+                Route::patch('/' . ltrim($tenantSettingsPushPath, '/') . '/route_types', [TenantPushRouteTypesController::class, 'update'])
+                    ->middleware('abilities:push-settings:update');
+                Route::delete('/' . ltrim($tenantSettingsPushPath, '/') . '/route_types', [TenantPushRouteTypesController::class, 'destroy'])
+                    ->middleware('abilities:push-settings:update');
+                Route::get('/' . ltrim($tenantSettingsPushPath, '/') . '/message_types', [TenantPushMessageTypesController::class, 'show'])
+                    ->middleware('abilities:push-settings:update');
+                Route::patch('/' . ltrim($tenantSettingsPushPath, '/') . '/message_types', [TenantPushMessageTypesController::class, 'update'])
+                    ->middleware('abilities:push-settings:update');
+                Route::delete('/' . ltrim($tenantSettingsPushPath, '/') . '/message_types', [TenantPushMessageTypesController::class, 'destroy'])
+                    ->middleware('abilities:push-settings:update');
+                Route::get('/' . ltrim($tenantSettingsPushPath, '/') . '/status', [TenantPushStatusController::class, 'show'])
                     ->middleware('abilities:push-settings:update');
 
                 Route::prefix('push/credentials')->group(function () {
                     Route::get('/', [PushCredentialController::class, 'index'])
                         ->middleware('abilities:tenant-push-credentials:read');
-                    Route::post('/', [PushCredentialController::class, 'store'])
-                        ->middleware('abilities:tenant-push-credentials:update');
-                    Route::patch('/{credential_id}', [PushCredentialController::class, 'update'])
-                        ->middleware('abilities:tenant-push-credentials:update');
-                    Route::delete('/{credential_id}', [PushCredentialController::class, 'destroy'])
+                    Route::put('/', [PushCredentialController::class, 'upsert'])
                         ->middleware('abilities:tenant-push-credentials:update');
                 });
             });
@@ -121,9 +160,23 @@ Route::prefix($tenantPrefix)
 
 Route::prefix($landlordPrefix)
     ->middleware(['landlord'])
-    ->group(function () use ($landlordTenantSettingsPath) {
+    ->group(function () use (
+        $landlordTenantSettingsPath,
+        $landlordTenantSettingsFirebasePath,
+        $landlordTenantSettingsTelemetryPath
+    ) {
         Route::get('/' . ltrim($landlordTenantSettingsPath, '/'), [TenantPushSettingsAdminController::class, 'show'])
             ->middleware('auth:sanctum', 'abilities:push-settings:update');
         Route::patch('/' . ltrim($landlordTenantSettingsPath, '/'), [TenantPushSettingsAdminController::class, 'update'])
+            ->middleware('auth:sanctum', 'abilities:push-settings:update');
+        Route::get('/' . ltrim($landlordTenantSettingsFirebasePath, '/'), [TenantFirebaseSettingsAdminController::class, 'show'])
+            ->middleware('auth:sanctum', 'abilities:push-settings:update');
+        Route::patch('/' . ltrim($landlordTenantSettingsFirebasePath, '/'), [TenantFirebaseSettingsAdminController::class, 'update'])
+            ->middleware('auth:sanctum', 'abilities:push-settings:update');
+        Route::get('/' . ltrim($landlordTenantSettingsTelemetryPath, '/'), [TenantTelemetrySettingsAdminController::class, 'index'])
+            ->middleware('auth:sanctum', 'abilities:push-settings:update');
+        Route::post('/' . ltrim($landlordTenantSettingsTelemetryPath, '/'), [TenantTelemetrySettingsAdminController::class, 'store'])
+            ->middleware('auth:sanctum', 'abilities:push-settings:update');
+        Route::delete('/' . ltrim($landlordTenantSettingsTelemetryPath, '/') . '/{type}', [TenantTelemetrySettingsAdminController::class, 'destroy'])
             ->middleware('auth:sanctum', 'abilities:push-settings:update');
     });

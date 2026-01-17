@@ -9,15 +9,18 @@ use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Http\Requests\PushMessageSendRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushDeliveryService;
+use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
 
 class PushMessageSendController
 {
     public function __construct(
         private readonly PushRecipientResolver $recipientResolver,
         private readonly PushDeliveryService $deliveryService,
+        private readonly PushDeviceService $pushDeviceService,
         private readonly PushMessageAudienceService $audienceService
     ) {
     }
@@ -34,7 +37,19 @@ class PushMessageSendController
             ->where('scope', 'account')
             ->where('partner_id', (string) $account->_id)
             ->where('_id', $pushMessageId)
-            ->firstOrFail();
+            ->first();
+
+        if (! $message) {
+            $exists = PushMessage::query()
+                ->where('_id', $pushMessageId)
+                ->exists();
+
+            if ($exists) {
+                return response()->json(['ok' => false, 'reason' => 'inactive'], 422);
+            }
+
+            abort(404);
+        }
 
         if (! $message->isActive() || $message->isExpired()) {
             return response()->json(['ok' => false, 'reason' => 'inactive'], 422);
@@ -62,6 +77,10 @@ class PushMessageSendController
         if (! empty($payload['device_id'])) {
             $tokens = array_values(array_filter($tokens, static function (string $token) use ($user, $payload): bool {
                 foreach ($user->devices ?? [] as $device) {
+                    $isActive = $device['is_active'] ?? true;
+                    if ($isActive !== true) {
+                        continue;
+                    }
                     if (($device['device_id'] ?? null) === $payload['device_id'] && ($device['push_token'] ?? null) === $token) {
                         return true;
                     }
@@ -74,8 +93,22 @@ class PushMessageSendController
             return response()->json(['ok' => false, 'reason' => 'no_tokens'], 422);
         }
 
+        $messageInstanceId = null;
         if (! ($payload['dry_run'] ?? false)) {
-            $response = $this->deliveryService->deliver($message, $tokens);
+            try {
+                $tokenUserMap = array_fill_keys($tokens, (string) $user->_id);
+                $response = $this->deliveryService->deliver($message, $tokens, $tokenUserMap);
+            } catch (ValidationException $exception) {
+                return response()->json([
+                    'message' => 'Delivery TTL validation failed.',
+                    'errors' => $exception->errors(),
+                ], 422);
+            }
+            $messageInstanceId = $response['message_instance_id'] ?? null;
+            $invalidTokens = $this->extractNotFoundTokens($response);
+            if ($invalidTokens !== []) {
+                $this->pushDeviceService->invalidateTokens($user, $invalidTokens);
+            }
 
             $metrics = $message->metrics ?? [];
             $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + (int) ($response['accepted_count'] ?? 0);
@@ -84,12 +117,43 @@ class PushMessageSendController
             $message->save();
         }
 
-        return response()->json([
+        $responsePayload = [
             'ok' => true,
             'push_message_id' => (string) $message->_id,
             'recipient_user_id' => (string) $user->_id,
             'queued' => true,
-        ]);
+        ];
+        if (is_string($messageInstanceId) && $messageInstanceId !== '') {
+            $responsePayload['message_instance_id'] = $messageInstanceId;
+        }
+
+        return response()->json($responsePayload);
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     * @return array<int, string>
+     */
+    private function extractNotFoundTokens(array $response): array
+    {
+        $responses = $response['responses'] ?? [];
+        if (! is_array($responses)) {
+            return [];
+        }
+
+        $tokens = [];
+        foreach ($responses as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+            $errorCode = $entry['error_code'] ?? null;
+            $token = $entry['token'] ?? null;
+            if ($errorCode === 'NOT_FOUND' && is_string($token) && $token !== '') {
+                $tokens[$token] = true;
+            }
+        }
+
+        return array_keys($tokens);
     }
 
     /**

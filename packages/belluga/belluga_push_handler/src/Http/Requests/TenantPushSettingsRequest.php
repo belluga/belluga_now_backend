@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class TenantPushSettingsRequest extends FormRequest
 {
@@ -17,44 +17,42 @@ class TenantPushSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'max_ttl_days' => ['required', 'integer', 'min:1', 'max:30'],
-            'push_message_types' => ['required', 'array', 'min:1'],
-            'push_message_types.*.key' => ['required', 'string'],
-            'push_message_types.*.label' => ['required', 'string'],
-            'push_message_types.*.description' => ['nullable', 'string'],
-            'push_message_types.*.default_audience_type' => ['nullable', Rule::in(['all', 'users', 'event'])],
-            'push_message_types.*.default_event_qualifier' => ['nullable', Rule::in([
-                'event.confirmed',
-                'event.invited',
-                'event.all',
-                'event.sent_invites',
-            ])],
-            'push_message_types.*.throttles' => ['nullable', 'array'],
-            'push_message_routes' => ['nullable', 'array'],
-            'push_message_routes.*.key' => ['required_with:push_message_routes', 'string'],
-            'push_message_routes.*.path' => ['required_with:push_message_routes', 'string'],
-            'push_message_routes.*.path_params' => ['nullable', 'array'],
-            'push_message_routes.*.path_params.*' => ['string'],
-            'push_message_routes.*.query_params' => ['nullable', 'array'],
-            'push_message_routes.*.query_params.*' => ['string'],
-            'telemetry' => ['nullable', 'array'],
-            'telemetry.*.type' => ['required_with:telemetry', Rule::in(['mixpanel', 'firebase', 'webhook'])],
-            'telemetry.*.events' => ['required_with:telemetry', 'array', 'min:1'],
-            'telemetry.*.events.*' => ['string'],
-            'telemetry.*.token' => ['required_if:telemetry.*.type,mixpanel', 'string'],
-            'telemetry.*.url' => ['required_if:telemetry.*.type,webhook', 'string'],
-            'firebase' => ['nullable', 'array'],
-            'firebase.apiKey' => ['nullable', 'string'],
-            'firebase.appId' => ['nullable', 'string'],
-            'firebase.projectId' => ['nullable', 'string'],
-            'firebase.messagingSenderId' => ['nullable', 'string'],
-            'firebase.storageBucket' => ['nullable', 'string'],
-            'firebase_credentials_id' => ['nullable', 'string'],
-            'push' => ['nullable', 'array'],
-            'push.enabled' => ['nullable', 'boolean'],
-            'push.types' => ['nullable', 'array'],
-            'push.types.*' => ['string'],
+            'push' => ['required', 'array'],
+            'push.max_ttl_days' => ['nullable', 'integer', 'min:1', 'max:30'],
             'push.throttles' => ['nullable', 'array'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if ($this->has('push_message_routes')) {
+                $validator->errors()->add('push_message_routes', 'Use /settings/push/route_types instead.');
+            }
+            if ($this->has('push_message_types')) {
+                $validator->errors()->add('push_message_types', 'Use /settings/push/message_types instead.');
+            }
+            if ($this->has('push.message_routes')) {
+                $validator->errors()->add('push.message_routes', 'Use /settings/push/route_types instead.');
+            }
+            if ($this->has('push.message_types')) {
+                $validator->errors()->add('push.message_types', 'Use /settings/push/message_types instead.');
+            }
+            if ($this->has('push.types')) {
+                $validator->errors()->add('push.types', 'Use /settings/push/message_types instead.');
+            }
+            if ($this->has('push.enabled')) {
+                $validator->errors()->add('push.enabled', 'Use /settings/push/enable or /settings/push/disable instead.');
+            }
+            if ($this->has('max_ttl_days')) {
+                $validator->errors()->add('max_ttl_days', 'Use push.max_ttl_days instead.');
+            }
+            if ($this->has('firebase')) {
+                $validator->errors()->add('firebase', 'Use /settings/firebase instead.');
+            }
+            if ($this->has('telemetry')) {
+                $validator->errors()->add('telemetry', 'Use /settings/telemetry instead.');
+            }
+        });
     }
 }

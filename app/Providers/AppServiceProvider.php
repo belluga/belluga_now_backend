@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Application\Push\PushAudienceEligibilityService;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
@@ -13,6 +14,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
 use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use App\Application\Tenants\TenantDomainResolverService;
@@ -36,6 +38,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             UpdateProfileRequestContract::class,
             UpdateProfileRequestLandlord::class
+        );
+
+        $this->app->bind(
+            PushAudienceEligibilityContract::class,
+            PushAudienceEligibilityService::class
         );
 
         $this->app->when(ProfileControllerLandlord::class)

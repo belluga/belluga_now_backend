@@ -40,7 +40,7 @@ return new class extends Migration
             $collection->index(['action' => 1]);
         });
 
-        Schema::create('tenant_push_settings', function (Blueprint $collection) {
+        Schema::create('settings', function (Blueprint $collection) {
             $collection->index(['created_at' => -1]);
         });
 
@@ -50,6 +50,7 @@ return new class extends Migration
 
         Schema::create('push_delivery_logs', function (Blueprint $collection) {
             $collection->index(['push_message_id' => 1]);
+            $collection->index(['message_instance_id' => 1]);
             $collection->index(['status' => 1]);
             $collection->index(['created_at' => -1]);
             $collection->index(['token_hash' => 1]);
@@ -60,7 +61,7 @@ return new class extends Migration
     {
         Schema::dropIfExists('push_messages');
         Schema::dropIfExists('push_message_actions');
-        Schema::dropIfExists('tenant_push_settings');
+        Schema::dropIfExists('settings');
         Schema::dropIfExists('push_credentials');
         Schema::dropIfExists('push_delivery_logs');
     }

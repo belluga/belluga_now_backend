@@ -110,9 +110,198 @@ Endpoints:
 - `DELETE /{tenant.unregister}` — device token unregister
 - `GET /{tenant.settings_prefix}/{tenant.settings_push}` — tenant push settings
 - `PATCH /{tenant.settings_prefix}/{tenant.settings_push}` — update tenant push settings
+- `POST /{tenant.settings_prefix}/{tenant.settings_push}/enable` — enable push after config
+- `POST /{tenant.settings_prefix}/{tenant.settings_push}/disable` — disable push
+- `GET /{tenant.settings_prefix}/firebase` — firebase settings
+- `PATCH /{tenant.settings_prefix}/firebase` — update firebase settings
+- `GET /{tenant.settings_prefix}/telemetry` — list telemetry integrations
+- `POST /{tenant.settings_prefix}/telemetry` — add/update telemetry integration
+- `DELETE /{tenant.settings_prefix}/telemetry/{type}` — remove telemetry integration
+- `GET /{tenant.settings_prefix}/{tenant.settings_push}/route_types` — list push route types
+- `PATCH /{tenant.settings_prefix}/{tenant.settings_push}/route_types` — replace push route types
+- `GET /{tenant.settings_prefix}/{tenant.settings_push}/message_types` — list push message types
+- `PATCH /{tenant.settings_prefix}/{tenant.settings_push}/message_types` — replace push message types
 
 Auth/middleware:
 - `auth:sanctum` + `CheckTenantAccess` (+ `abilities:push-settings:update` on settings)
+
+### Push Setup
+Use the tenant endpoints below to configure and enable push in order.
+
+1) **Create push credentials** (tenant scope)
+```json
+{
+  "project_id": "project-id",
+  "client_email": "client@example.org",
+  "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
+}
+```
+
+2) **Set firebase settings**
+```json
+{
+  "firebase": {
+    "apiKey": "AIzaSy...example",
+    "appId": "1:XXXXXXXXXXXX:android:f73db77742a1b07f2302f7",
+    "projectId": "string",
+    "messagingSenderId": "XXXXXXXXXXXX",
+    "storageBucket": "string.firebasestorage.app"
+  }
+}
+```
+
+3) **Set push settings**
+```json
+{
+  "push": {
+    "max_ttl_days": 30,
+    "throttles": {
+      "max_per_minute": 60,
+      "max_per_hour": 600
+    }
+  }
+}
+```
+
+4) **Define route types**
+```json
+[
+  { "key": "invite", "path": "/convites", "query_params": ["event_id"] },
+  { "key": "event_detail", "path": "/events/:event_id", "path_params": ["event_id"] },
+  { "key": "map", "path": "/map" }
+]
+```
+
+5) **Define message types**
+```json
+[
+  {
+    "key": "invite",
+    "label": "Invite",
+    "description": "Convites de evento",
+    "default_audience_type": "event",
+    "default_event_qualifier": "event.invited",
+    "allowed_route_keys": ["invite", "event_detail"]
+  }
+]
+```
+
+6) **Push onboarding steps (payload template)**
+```json
+{
+  "layoutType": "fullScreen",
+  "closeBehavior": "after_action",
+  "steps": [
+    {
+      "slug": "notify",
+      "type": "cta",
+      "title": "Seja avisado",
+      "body": "Ative as notificações para continuar.",
+      "dismissible": false,
+      "gate": {
+        "type": "notifications_permission",
+        "onFail": {
+          "toast": "Ative as notificações para continuar.",
+          "fallback_step": "notify"
+        }
+      },
+      "buttons": [
+        {
+          "label": "Ativar",
+          "action": { "type": "custom", "custom_action": "request_notifications" }
+        }
+      ]
+    },
+    {
+      "slug": "prefs",
+      "type": "selector",
+      "title": "O que você procura?",
+      "body": "Escolha até 3 temas.",
+      "config": {
+        "selection_ui": "inline",
+        "selection_mode": "multi",
+        "layout": "tags",
+        "min_selected": 1,
+        "max_selected": 3,
+        "option_source": {
+          "type": "method",
+          "name": "getTags",
+          "params": { "include": ["praias", "restaurantes", "experiencias_no_mar"] },
+          "cache_ttl_sec": 3600
+        },
+        "store_key": "preferences.tags"
+      }
+    }
+  ]
+}
+```
+
+Notes:
+- Each step must provide at least one of `title`, `body`, or `image`.
+- HTML is auto-detected in `steps[].body` and stripped to a safe subset before storage:
+  `p`, `br`, `strong`, `em`, `u`, `span` (style: `color`, `font-size`, `font-weight`),
+  `ul`, `ol`, `li`, `img` (`src`, `width`, `height`, `alt`).
+
+### Delivery Timing (TTL + Deadline)
+Push messages do **not** accept `delivery.expires_at`. Delivery expiration is computed at send time:
+
+- **TTL** is derived by message `type` using `config('belluga_push_handler.delivery_ttl_minutes')`.
+- **Optional cap**: set `delivery_deadline_at` (ISO8601) to cap the delivery expiration.
+- Effective `expires_at` is `min(delivery_deadline_at, now + ttl)`. If no deadline is provided, it uses `now + ttl`.
+
+Example message payload (account scope):
+Note: `option_source` is method-based (`type: "method"` + `name`), resolved by the app via its options resolver/controller. The backend does not accept `endpoint/tags/query` option sources.
+```json
+{
+  "internal_name": "boora_onboarding_dynamic_2026_01_08_manual",
+  "title_template": "Bóora! Bem-vindo",
+  "body_template": "Vamos personalizar sua experiência.",
+  "type": "transactional",
+  "active": true,
+  "audience": { "type": "all" },
+  "delivery": {
+    "scheduled_at": null
+  },
+  "delivery_deadline_at": "2026-02-08T12:00:00Z",
+  "payload_template": {
+    "layoutType": "fullScreen",
+    "closeBehavior": "after_action",
+    "steps": [
+      { "slug": "intro", "type": "cta", "title": "Começar" }
+    ]
+  }
+}
+```
+
+7) **(Optional) Add telemetry integration**
+```json
+{
+  "type": "mixpanel",
+  "token": "mixpanel-token",
+  "events": ["push.sent", "push.opened"]
+}
+```
+
+8) **Enable push**
+No body required.
+
+8) **Manual validation checklist**
+- Send a push and confirm tap handling opens the expected in-app surface.
+- Verify logs show Firebase init, token acquisition, and `/api/v1/push/register` success.
+- Confirm the app registers a device with an anonymous token when logged out.
+- Confirm the registration payload uses supported platform values (`android` or `ios`).
+- Send an invite payload and confirm the invite list updates without a backend refetch.
+
+Notes:
+- `/settings/push` manages push-only fields; use `/settings/firebase` and `/settings/telemetry` for those domains.
+- `/settings/push` does not accept `push_message_routes` or `push_message_types`; use the dedicated endpoints above.
+- `push.message_routes` and `push.message_types` are stored under `push` in the settings document.
+- `/settings/push` does not accept `push.enabled`; use `/settings/push/enable` or `/settings/push/disable`.
+- `/settings/push` does not accept `push.types` (types come from `message_types`).
+- Use `push.max_ttl_days` instead of top-level `max_ttl_days`.
+- Telemetry types are unique; `POST /settings/telemetry` upserts by `type`.
+- `PATCH /settings/push/route_types` and `PATCH /settings/push/message_types` accept raw arrays of objects (no root key).
+- Deletes use `DELETE /settings/push/route_types` or `/message_types` with `{ "keys": ["..."] }`.
 
 ### Landlord Routes
 Mounted under:
@@ -132,7 +321,7 @@ The package provides MongoDB collections for:
 - `push_message_actions`
 - `push_message_metrics`
 - `push_devices`
-- `tenant_push_settings`
+- `settings`
 
 Migrations live in:
 ```

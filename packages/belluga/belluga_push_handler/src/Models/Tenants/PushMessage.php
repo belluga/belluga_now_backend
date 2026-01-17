@@ -12,7 +12,7 @@ class PushMessage extends Model
 {
     use UsesTenantConnection;
 
-    protected $collection = 'push_messages';
+    protected $table = 'push_messages';
 
     protected $fillable = [
         'scope',
@@ -25,6 +25,7 @@ class PushMessage extends Model
         'status',
         'audience',
         'delivery',
+        'delivery_deadline_at',
         'payload_template',
         'fcm_options',
         'template_defaults',
@@ -35,12 +36,7 @@ class PushMessage extends Model
 
     protected $casts = [
         'active' => 'boolean',
-        'audience' => 'array',
-        'delivery' => 'array',
-        'payload_template' => 'array',
-        'fcm_options' => 'array',
-        'template_defaults' => 'array',
-        'metrics' => 'array',
+        'delivery_deadline_at' => 'datetime',
         'sent_at' => 'datetime',
         'archived_at' => 'datetime',
         'created_at' => 'datetime',
@@ -49,12 +45,12 @@ class PushMessage extends Model
 
     public function isExpired(): bool
     {
-        $expiresAt = data_get($this->delivery, 'expires_at');
-        if (! $expiresAt) {
+        $deadline = $this->delivery_deadline_at;
+        if (! $deadline) {
             return false;
         }
 
-        return Carbon::parse($expiresAt)->isPast();
+        return Carbon::parse($deadline)->isPast();
     }
 
     public function isActive(): bool

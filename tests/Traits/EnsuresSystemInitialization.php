@@ -14,11 +14,17 @@ trait EnsuresSystemInitialization
 
     protected function ensureSystemInitialized(): void
     {
-        if (static::$systemInitialized) {
+        $hasLandlordUser = LandlordUser::query()->exists();
+        $hasTenant = Tenant::query()->exists();
+
+        if ($hasLandlordUser && $hasTenant) {
+            static::$systemInitialized = true;
             return;
         }
 
-        if (LandlordUser::query()->exists()) {
+        static::$systemInitialized = false;
+
+        if ($hasLandlordUser) {
             $this->hydrateFromDatabase();
             static::$systemInitialized = true;
             return;

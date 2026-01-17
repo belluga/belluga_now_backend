@@ -11,25 +11,19 @@ class TenantPushSettings extends Model
 {
     use UsesTenantConnection;
 
-    protected $collection = 'tenant_push_settings';
+    protected $table = 'settings';
+
+    protected $hidden = [
+        'firebase_credentials_id',
+    ];
 
     protected $fillable = [
-        'push_message_types',
-        'push_message_routes',
-        'max_ttl_days',
         'telemetry',
         'firebase',
-        'firebase_credentials_id',
         'push',
     ];
 
     protected $casts = [
-        'push_message_types' => 'array',
-        'push_message_routes' => 'array',
-        'max_ttl_days' => 'integer',
-        'firebase' => 'array',
-        'firebase_credentials_id' => 'string',
-        'push' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -72,6 +66,59 @@ class TenantPushSettings extends Model
         }
 
         return $telemetry;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getPushConfig(): array
+    {
+        $push = $this->getAttribute('push');
+
+        if ($push instanceof \MongoDB\Model\BSONDocument || $push instanceof \MongoDB\Model\BSONArray) {
+            return $push->getArrayCopy();
+        }
+        if (is_array($push)) {
+            return $push;
+        }
+        if ($push instanceof \Traversable) {
+            return iterator_to_array($push);
+        }
+        if (is_object($push)) {
+            return (array) $push;
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPushMessageRoutes(): array
+    {
+        $push = $this->getPushConfig();
+        $routes = $push['message_routes'] ?? [];
+
+        return is_array($routes) ? $routes : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPushMessageTypes(): array
+    {
+        $push = $this->getPushConfig();
+        $types = $push['message_types'] ?? [];
+
+        return is_array($types) ? $types : [];
+    }
+
+    public function getPushMaxTtlDays(): ?int
+    {
+        $push = $this->getPushConfig();
+        $value = $push['max_ttl_days'] ?? null;
+
+        return is_int($value) ? $value : null;
     }
 
     public static function current(): ?self

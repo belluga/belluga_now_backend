@@ -13,11 +13,17 @@ class CreateTenantAdminTemplateAction
     {
         $tenant->makeCurrent();
 
-        $template = $tenant->roleTemplates()->create([
-            'name' => 'Admin',
-            'description' => 'Administrador',
-            'permissions' => ['*'],
-        ]);
+        $template = $tenant->roleTemplates()
+            ->where('name', 'Admin')
+            ->first();
+
+        if (! $template) {
+            $template = $tenant->roleTemplates()->create([
+                'name' => 'Admin',
+                'description' => 'Administrador',
+                'permissions' => ['*'],
+            ]);
+        }
 
         $tenant->forgetCurrent();
 

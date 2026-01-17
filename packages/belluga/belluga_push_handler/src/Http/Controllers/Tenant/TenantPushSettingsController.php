@@ -15,18 +15,24 @@ class TenantPushSettingsController
         $settings = TenantPushSettings::current();
 
         return response()->json([
-            'data' => $settings,
+            'data' => $this->extractPushSettings($settings),
         ]);
     }
 
     public function update(TenantPushSettingsRequest $request): JsonResponse
     {
-        $payload = $request->validated();
-        if (isset($payload['push_message_routes'])) {
-            $payload['push_message_routes'] = $this->normalizeRoutes($payload['push_message_routes']);
-        }
         $settings = TenantPushSettings::current();
+        $pushConfig = $settings?->getPushConfig() ?? [];
+        $incomingPush = $request->validated()['push'] ?? [];
+        $maxTtlDays = $incomingPush['max_ttl_days'] ?? $pushConfig['max_ttl_days'] ?? 7;
+        unset($incomingPush['max_ttl_days']);
 
+        $pushConfig = array_replace($pushConfig, $incomingPush);
+        $pushConfig['max_ttl_days'] = $maxTtlDays;
+
+        $payload = [
+            'push' => $pushConfig,
+        ];
         if (! $settings) {
             $settings = TenantPushSettings::create($payload);
         } else {
@@ -34,21 +40,25 @@ class TenantPushSettingsController
             $settings->save();
         }
 
-        return response()->json(['data' => $settings]);
+        return response()->json([
+            'data' => $this->extractPushSettings($settings),
+        ]);
     }
 
     /**
-     * @param array<int, array<string, mixed>> $routes
-     * @return array<int, array<string, mixed>>
+     * @param TenantPushSettings|null $settings
+     * @return array<string, mixed>
      */
-    private function normalizeRoutes(array $routes): array
+    private function extractPushSettings(?TenantPushSettings $settings): array
     {
-        return array_map(static function (array $route): array {
-            $path = (string) ($route['path'] ?? '');
-            preg_match_all('/:([A-Za-z0-9_]+)/', $path, $matches);
-            $route['path_params'] = $matches[1] ?? [];
-            $route['query_params'] = $route['query_params'] ?? [];
-            return $route;
-        }, $routes);
+        if (! $settings) {
+            return [];
+        }
+
+        $push = $settings->getPushConfig();
+        unset($push['message_routes'], $push['message_types']);
+        $push['max_ttl_days'] = $settings->getPushMaxTtlDays();
+
+        return $push;
     }
 }

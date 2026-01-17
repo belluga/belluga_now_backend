@@ -13,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Validation\ValidationException;
 
 class SendPushMessageJob implements ShouldQueue
 {
@@ -42,7 +43,13 @@ class SendPushMessageJob implements ShouldQueue
             return;
         }
 
-        $recipients = $recipientResolver->resolveTokens($message, $this->scope, $this->accountId);
+        $recipientPayload = $recipientResolver->resolveTokensWithUsers(
+            $message,
+            $this->scope,
+            $this->accountId
+        );
+        $recipients = $recipientPayload['tokens'];
+        $tokenUserMap = $recipientPayload['token_user_map'];
         if ($this->scope === 'account' && $this->accountId !== null) {
             $audienceSize = count($recipients);
             if (! app(\Belluga\PushHandler\Contracts\PushPlanPolicyContract::class)->canSend($this->accountId, $message, $audienceSize)) {
@@ -54,7 +61,11 @@ class SendPushMessageJob implements ShouldQueue
             return;
         }
 
-        $response = $deliveryService->deliver($message, $recipients);
+        try {
+            $response = $deliveryService->deliver($message, $recipients, $tokenUserMap);
+        } catch (ValidationException) {
+            return;
+        }
 
         $metrics = $message->metrics ?? [];
         $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + (int) ($response['accepted_count'] ?? 0);

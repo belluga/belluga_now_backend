@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
+use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Http\Requests\PushCredentialRequest;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Illuminate\Http\JsonResponse;
@@ -12,32 +13,41 @@ class PushCredentialController
 {
     public function index(): JsonResponse
     {
+        $credentials = PushCredential::query()->get();
+
+        if ($credentials->count() > 1) {
+            return response()->json([
+                'message' => (new MultiplePushCredentialsException($credentials->count()))->getMessage(),
+            ], 409);
+        }
+
         return response()->json([
-            'data' => PushCredential::query()->get(),
+            'data' => $credentials,
         ]);
     }
 
-    public function store(PushCredentialRequest $request): JsonResponse
+    public function upsert(PushCredentialRequest $request): JsonResponse
     {
-        $credential = PushCredential::create($request->validated());
+        $credentials = PushCredential::query()->get();
 
-        return response()->json(['data' => $credential], 201);
-    }
+        if ($credentials->count() > 1) {
+            return response()->json([
+                'message' => (new MultiplePushCredentialsException($credentials->count()))->getMessage(),
+            ], 409);
+        }
 
-    public function update(PushCredentialRequest $request, string $credential_id): JsonResponse
-    {
-        $credential = PushCredential::query()->findOrFail($credential_id);
-        $credential->fill($request->validated());
-        $credential->save();
+        $payload = $request->validated();
+        $credential = $credentials->first();
+        $status = 200;
 
-        return response()->json(['data' => $credential]);
-    }
+        if (! $credential) {
+            $credential = PushCredential::create($payload);
+            $status = 201;
+        } else {
+            $credential->fill($payload);
+            $credential->save();
+        }
 
-    public function destroy(string $credential_id): JsonResponse
-    {
-        $credential = PushCredential::query()->findOrFail($credential_id);
-        $credential->delete();
-
-        return response()->json(['ok' => true]);
+        return response()->json(['data' => $credential], $status);
     }
 }

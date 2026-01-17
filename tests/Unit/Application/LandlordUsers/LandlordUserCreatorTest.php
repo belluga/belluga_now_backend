@@ -39,7 +39,7 @@ class LandlordUserCreatorTest extends TestCase
             operatorId: '507f1f77bcf86cd799439011'
         );
 
-        $this->assertDatabaseCount('landlord_users', 1, 'landlord');
+        $this->assertSame(1, LandlordUser::query()->count());
         $this->assertEquals('New Support', $user->name);
         $this->assertEquals('registered', $user->identity_state);
         $this->assertCount(1, $user->promotion_audit);

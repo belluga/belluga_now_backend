@@ -27,7 +27,6 @@ class Account extends Model
     ];
 
     protected $casts = [
-        'settings' => 'array',
     ];
 
     /**

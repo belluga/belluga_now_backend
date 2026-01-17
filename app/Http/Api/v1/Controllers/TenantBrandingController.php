@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
 use App\Models\Landlord\Tenant;
@@ -13,7 +14,8 @@ class TenantBrandingController
     use HasLogoFiles;
 
     public function __construct(
-        private readonly TenantBrandingManagementService $brandingService
+        private readonly TenantBrandingManagementService $brandingService,
+        private readonly TelemetryEmitter $telemetry
     ) {
     }
 
@@ -36,6 +38,18 @@ class TenantBrandingController
             $uploadedLogos,
             $pwaVariants
         );
+
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_branding_updated',
+                userId: (string) $user->_id,
+                properties: [
+                    'changed_fields' => array_keys($validated),
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'message' => 'Branding data updated successfully.',

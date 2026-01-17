@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Cache;
@@ -22,9 +24,13 @@ class FcmHttpV1Client implements FcmClientContract
      * @param array<int, string> $tokens
      * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
-    public function send(PushMessage $message, array $tokens): array
+    public function send(PushMessage $message, array $tokens, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
     {
-        $credentials = $this->credentialService->current();
+        try {
+            $credentials = $this->credentialService->current();
+        } catch (MultiplePushCredentialsException $exception) {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
         if (! $credentials) {
             return ['accepted_count' => 0, 'responses' => []];
         }
@@ -40,7 +46,7 @@ class FcmHttpV1Client implements FcmClientContract
         }
 
         $endpoint = sprintf('https://fcm.googleapis.com/v1/projects/%s/messages:send', $credentials->project_id);
-        $basePayload = $this->buildPayload($message);
+        $basePayload = $this->buildPayload($message, $messageInstanceId, $expiresAt);
 
         $responses = [];
         $accepted = 0;
@@ -107,7 +113,7 @@ class FcmHttpV1Client implements FcmClientContract
     /**
      * @return array<string, mixed>
      */
-    private function buildPayload(PushMessage $message): array
+    private function buildPayload(PushMessage $message, string $messageInstanceId, Carbon $expiresAt): array
     {
         $fcmOptions = $message->fcm_options ?? [];
 
@@ -121,6 +127,7 @@ class FcmHttpV1Client implements FcmClientContract
             $data = [];
         }
         $data['push_message_id'] = (string) $message->_id;
+        $data['message_instance_id'] = $messageInstanceId;
 
         $payload = [
             'notification' => $notification,
@@ -132,6 +139,11 @@ class FcmHttpV1Client implements FcmClientContract
                 $payload[$platform] = $fcmOptions[$platform];
             }
         }
+
+        $ttlSeconds = max(0, (int) Carbon::now()->diffInSeconds($expiresAt, false));
+        $payload['android']['ttl'] = $ttlSeconds . 's';
+        $payload['webpush']['headers']['TTL'] = (string) $ttlSeconds;
+        $payload['apns']['headers']['apns-expiration'] = (string) $expiresAt->getTimestamp();
 
         return $payload;
     }

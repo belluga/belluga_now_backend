@@ -2,9 +2,12 @@
 
 namespace Tests\Traits;
 
+use App\Models\Landlord\Landlord;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 trait RefreshLandlordAndTenantDatabases
 {
@@ -34,42 +37,66 @@ trait RefreshLandlordAndTenantDatabases
 
         $landlordDatabase = DB::connection('landlord')->getDatabase();
         $tenantDatabase = DB::connection('tenant')->getDatabase();
+        $landlordDsn = (string) env('DB_URI_LANDLORD', '');
+        $tenantDsn = (string) env('DB_URI_TENANTS', '');
+        $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
+        $isAtlas = $dsn !== '' && str_contains($dsn, 'mongodb+srv://');
 
-        $landlordCollections = iterator_to_array($landlordDatabase->listCollectionNames());
-        $tenantCollections = iterator_to_array($tenantDatabase->listCollectionNames());
-
-        if (
-            static::$migrationsRan
-            && empty($landlordCollections)
-            && empty($tenantCollections)
-            && empty($tenantDatabaseNames)
-        ) {
-            return;
-        }
-
-        if (! empty($landlordCollections)) {
-            foreach ($landlordCollections as $collectionName) {
+        Log::info('Tests: landlord collections before wipe', [
+            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
+            'landlords_count' => Landlord::query()->count(),
+            'tenants_count' => Tenant::query()->count(),
+        ]);
+        Log::info('Tests: tenant collections before wipe', [
+            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
+        ]);
+        if ($isAtlas) {
+            foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
                 $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
             }
-        }
 
-        if (! empty($tenantCollections)) {
-            foreach ($tenantCollections as $collectionName) {
+            foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
                 $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
             }
-        }
 
-        if (! empty($tenantDatabaseNames)) {
-            $tenantClient = DB::connection('tenant')->getMongoClient();
+            LandlordUser::query()->forceDelete();
+            Landlord::query()->delete();
+            Tenant::query()->forceDelete();
 
-            foreach ($tenantDatabaseNames as $databaseName) {
-                $database = $tenantClient->selectDatabase($databaseName);
+            if (! empty($tenantDatabaseNames)) {
+                $tenantClient = DB::connection('tenant')->getMongoClient();
 
-                foreach ($database->listCollectionNames() as $collectionName) {
-                    $database->selectCollection($collectionName)->deleteMany([]);
+                foreach ($tenantDatabaseNames as $databaseName) {
+                    $database = $tenantClient->selectDatabase($databaseName);
+
+                    foreach ($database->listCollectionNames() as $collectionName) {
+                        $database->selectCollection($collectionName)->deleteMany([]);
+                    }
                 }
             }
+        } else {
+            $landlordDatabase->drop();
+            $tenantDatabase->drop();
+
+            if (! empty($tenantDatabaseNames)) {
+                $tenantClient = DB::connection('tenant')->getMongoClient();
+
+                foreach ($tenantDatabaseNames as $databaseName) {
+                    $tenantClient->selectDatabase($databaseName)->drop();
+                }
+            }
+
+            static::$migrationsRan = false;
         }
+
+        Log::info('Tests: landlord collections after wipe', [
+            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
+            'landlords_count' => Landlord::query()->count(),
+            'tenants_count' => Tenant::query()->count(),
+        ]);
+        Log::info('Tests: tenant collections after wipe', [
+            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
+        ]);
 
         if (static::$migrationsRan) {
             return;
@@ -88,6 +115,10 @@ trait RefreshLandlordAndTenantDatabases
             $command,
             $tenantPaths
         ));
+
+        LandlordUser::query()->forceDelete();
+        Landlord::query()->delete();
+        Tenant::query()->forceDelete();
 
         static::$migrationsRan = true;
     }

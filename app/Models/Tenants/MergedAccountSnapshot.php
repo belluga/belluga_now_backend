@@ -13,7 +13,7 @@ class MergedAccountSnapshot extends Model
     use DocumentModel;
     use UsesTenantConnection;
 
-    protected $collection = 'merged_account_snapshots';
+    protected $table = 'merged_account_snapshots';
 
     protected $fillable = [
         'tenant_id',

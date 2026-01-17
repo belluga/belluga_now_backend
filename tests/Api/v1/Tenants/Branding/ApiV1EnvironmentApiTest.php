@@ -29,8 +29,10 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             'domains',
             'app_domains',
             'theme_data_settings',
+            'telemetry',
         ]);
         $response->assertJsonPath('type', 'tenant');
+        $response->assertJsonPath('telemetry.location_freshness_minutes', 5);
     }
 
     public function testEnvironmentApiFallsBackToSubdomainWhenNoDomains(): void
@@ -57,11 +59,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         TenantPushSettings::query()->delete();
         TenantPushSettings::create([
-            'max_ttl_days' => 30,
-            'push_message_types' => [
-                [
-                    'key' => 'invite_received',
-                    'label' => 'Invite Received',
+            'push' => [
+                'max_ttl_days' => 30,
+                'message_types' => [
+                    [
+                        'key' => 'invite_received',
+                        'label' => 'Invite Received',
+                    ],
                 ],
             ],
             'telemetry' => [
@@ -73,9 +77,9 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response = $this->get("{$this->base_api_tenant}environment");
 
         $response->assertStatus(200);
-        $response->assertJsonPath('telemetry.0.type', 'mixpanel');
-        $response->assertJsonPath('telemetry.0.token', 'legacy-token');
-        $response->assertJsonPath('telemetry.0.events.0', 'invite_received');
+        $response->assertJsonPath('telemetry.trackers.0.type', 'mixpanel');
+        $response->assertJsonPath('telemetry.trackers.0.token', 'legacy-token');
+        $response->assertJsonPath('telemetry.trackers.0.events.0', 'invite_received');
     }
 
 }

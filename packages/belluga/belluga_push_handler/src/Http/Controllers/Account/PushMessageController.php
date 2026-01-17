@@ -8,7 +8,6 @@ use App\Models\Tenants\Account;
 use Belluga\PushHandler\Http\Requests\PushMessageStoreRequest;
 use Belluga\PushHandler\Http\Requests\PushMessageUpdateRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
@@ -75,19 +74,6 @@ class PushMessageController
 
         $payload = $request->validated();
 
-        $expiresAt = $payload['delivery']['expires_at'] ?? null;
-        $maxTtlDays = TenantPushSettings::current()?->max_ttl_days ?? 30;
-        if ($expiresAt && now()->addDays($maxTtlDays)->lt(\Carbon\Carbon::parse($expiresAt))) {
-            return response()->json([
-                'message' => 'expires_at exceeds max TTL.',
-                'errors' => ['delivery.expires_at' => "Must be within $maxTtlDays days."],
-            ], 422);
-        }
-
-        if ($expiresAt) {
-            $payload['delivery']['ttl_minutes'] = now()->diffInMinutes(\Carbon\Carbon::parse($expiresAt), false);
-        }
-
         $exists = PushMessage::query()
             ->where('scope', 'account')
             ->where('partner_id', (string) $account->_id)
@@ -131,15 +117,6 @@ class PushMessageController
             ->firstOrFail();
 
         $payload = $request->validated();
-
-        $expiresAt = $payload['delivery']['expires_at'] ?? null;
-        $maxTtlDays = TenantPushSettings::current()?->max_ttl_days ?? 30;
-        if ($expiresAt && now()->addDays($maxTtlDays)->lt(\Carbon\Carbon::parse($expiresAt))) {
-            return response()->json([
-                'message' => 'expires_at exceeds max TTL.',
-                'errors' => ['delivery.expires_at' => "Must be within $maxTtlDays days."],
-            ], 422);
-        }
 
         if (isset($payload['internal_name'])) {
             $exists = PushMessage::query()

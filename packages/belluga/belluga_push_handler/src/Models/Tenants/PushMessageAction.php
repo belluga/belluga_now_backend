@@ -11,7 +11,7 @@ class PushMessageAction extends Model
 {
     use UsesTenantConnection;
 
-    protected $collection = 'push_message_actions';
+    protected $table = 'push_message_actions';
 
     protected $fillable = [
         'push_message_id',
@@ -27,8 +27,6 @@ class PushMessageAction extends Model
 
     protected $casts = [
         'step_index' => 'integer',
-        'metadata' => 'array',
-        'context' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

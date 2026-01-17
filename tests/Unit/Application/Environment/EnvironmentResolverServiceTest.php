@@ -43,6 +43,7 @@ class EnvironmentResolverServiceTest extends TestCase
 
         $this->assertSame('tenant', $result['type']);
         $this->assertSame($tenant->name, $result['name']);
+        $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
     }
 
     public function testResolveFallsBackToLandlordEnvironment(): void
@@ -53,6 +54,7 @@ class EnvironmentResolverServiceTest extends TestCase
 
         $this->assertSame('landlord', $result['type']);
         $this->assertSame('https://landlord.test', $result['main_domain']);
+        $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
     }
 
     private function initializeSystem(): void

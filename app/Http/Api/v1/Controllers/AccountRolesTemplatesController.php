@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountRoleTemplateService;
 use App\Http\Api\v1\Requests\AccountRoleTemplatesStoreRequest;
 use App\Http\Api\v1\Requests\AccountRolesDeleteRequest;
@@ -18,7 +19,8 @@ use MongoDB\BSON\ObjectId;
 class AccountRolesTemplatesController extends Controller
 {
     public function __construct(
-        private readonly AccountRoleTemplateService $roleTemplateService
+        private readonly AccountRoleTemplateService $roleTemplateService,
+        private readonly TelemetryEmitter $telemetry
     ) {
     }
 
@@ -39,6 +41,19 @@ class AccountRolesTemplatesController extends Controller
         }
 
         $role = $this->roleTemplateService->create($account, $request->validated());
+
+        $actor = $request->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_role_created',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'role_id' => (string) $role->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $role,
@@ -77,7 +92,22 @@ class AccountRolesTemplatesController extends Controller
             ], 422);
         }
 
-        $updated = $this->roleTemplateService->update($role, $request->validated());
+        $validated = $request->validated();
+        $updated = $this->roleTemplateService->update($role, $validated);
+
+        $actor = $request->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_role_updated',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'role_id' => (string) $role->_id,
+                    'changed_fields' => array_keys($validated),
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $updated,
@@ -120,6 +150,19 @@ class AccountRolesTemplatesController extends Controller
             ], 422);
         }
 
+        $actor = $request->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_role_deleted',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'role_id' => (string) $roleToDelete->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
+
         return response()->json();
     }
 
@@ -128,6 +171,19 @@ class AccountRolesTemplatesController extends Controller
         $account = Account::current();
 
         $role = $this->roleTemplateService->restore($account, $role_id);
+
+        $actor = request()->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_role_restored',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'role_id' => (string) $role->_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $role,
@@ -139,6 +195,19 @@ class AccountRolesTemplatesController extends Controller
         $account = Account::current();
 
         $this->roleTemplateService->forceDelete($account, $role_id);
+
+        $actor = request()->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_role_force_deleted',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'role_id' => $role_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
 
         return response()->json([], 200);
     }

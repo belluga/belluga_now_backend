@@ -79,7 +79,7 @@ class EnvironmentResolverService
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => $pushSettings?->getAttribute('telemetry') ?? [],
+            'telemetry' => $this->resolveTelemetryPayload($pushSettings),
             'firebase' => $pushSettings?->getAttribute('firebase') ?? [],
             'push' => $pushSettings?->getAttribute('push') ?? [],
         ];
@@ -105,6 +105,7 @@ class EnvironmentResolverService
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
+            'telemetry' => $this->resolveTelemetryPayload(null),
         ];
     }
 
@@ -164,5 +165,65 @@ class EnvironmentResolverService
         }
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveTelemetryPayload(?TenantPushSettings $pushSettings): array
+    {
+        $defaultMinutes = (int) config('belluga_push_handler.telemetry.location_freshness_minutes', 5);
+        $defaultMinutes = $defaultMinutes > 0 ? $defaultMinutes : 5;
+        $trackers = [];
+        $locationOverride = null;
+
+        if ($pushSettings) {
+            $rawTelemetry = $pushSettings->getAttribute('telemetry');
+            if ($rawTelemetry instanceof \MongoDB\Model\BSONDocument || $rawTelemetry instanceof \MongoDB\Model\BSONArray) {
+                $rawTelemetry = $rawTelemetry->getArrayCopy();
+            } elseif ($rawTelemetry instanceof \Traversable) {
+                $rawTelemetry = iterator_to_array($rawTelemetry);
+            } elseif (is_object($rawTelemetry)) {
+                $rawTelemetry = (array) $rawTelemetry;
+            }
+
+            if (is_array($rawTelemetry)) {
+                if (array_key_exists('trackers', $rawTelemetry) ||
+                    array_key_exists('location_freshness_minutes', $rawTelemetry)) {
+                    $trackersRaw = $rawTelemetry['trackers'] ?? [];
+                    $trackers = is_array($trackersRaw) ? $trackersRaw : [];
+                    $locationOverride = $rawTelemetry['location_freshness_minutes'] ?? null;
+                } else {
+                    $trackers = $rawTelemetry;
+                }
+            }
+        }
+
+        if ($locationOverride === null && $pushSettings) {
+            $raw = $pushSettings->getAttribute('telemetry_context');
+            if ($raw instanceof \MongoDB\Model\BSONDocument || $raw instanceof \MongoDB\Model\BSONArray) {
+                $raw = $raw->getArrayCopy();
+            } elseif ($raw instanceof \Traversable) {
+                $raw = iterator_to_array($raw);
+            } elseif (is_object($raw)) {
+                $raw = (array) $raw;
+            }
+
+            $context = is_array($raw) ? $raw : [];
+            $locationOverride = $context['location_freshness_minutes'] ?? null;
+        }
+
+        $minutes = $defaultMinutes;
+        if (is_numeric($locationOverride)) {
+            $candidate = (int) $locationOverride;
+            if ($candidate > 0) {
+                $minutes = $candidate;
+            }
+        }
+
+        return [
+            'trackers' => $trackers,
+            'location_freshness_minutes' => $minutes,
+        ];
     }
 }
