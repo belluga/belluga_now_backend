@@ -1,0 +1,58 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Api\v1\Requests;
+
+use App\Support\Validation\InputConstraints;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class EventUpdateRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {
+        return [
+            'title' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'content' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'venue_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'artist_ids' => 'sometimes|array',
+            'artist_ids.*' => 'string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'type' => 'sometimes|array',
+            'type.id' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'type.name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'type.slug' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'type.description' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'type.icon' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'type.color' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'date_time_start' => 'sometimes|date',
+            'date_time_end' => 'sometimes|date',
+            'tags' => 'sometimes|array',
+            'tags.*' => 'string|max:' . InputConstraints::NAME_MAX,
+            'categories' => 'sometimes|array',
+            'categories.*' => 'string|max:' . InputConstraints::NAME_MAX,
+            'taxonomy_terms' => 'sometimes|array',
+            'taxonomy_terms.*.type' => 'required_with:taxonomy_terms|string|max:' . InputConstraints::NAME_MAX,
+            'taxonomy_terms.*.value' => 'required_with:taxonomy_terms|string|max:' . InputConstraints::NAME_MAX,
+            'thumb' => 'sometimes|array',
+            'thumb.type' => 'required_with:thumb|string|max:' . InputConstraints::NAME_MAX,
+            'thumb.data' => 'required_with:thumb|array',
+            'thumb.data.url' => 'required_with:thumb|string|max:' . InputConstraints::NAME_MAX,
+            'publication' => 'sometimes|array',
+            'publication.status' => [
+                'sometimes',
+                'string',
+                Rule::in(['published', 'publish_scheduled', 'draft', 'ended']),
+            ],
+            'publication.publish_at' => 'sometimes|date',
+        ];
+    }
+}
