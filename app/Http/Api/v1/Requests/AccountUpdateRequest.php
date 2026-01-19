@@ -29,6 +29,7 @@ class AccountUpdateRequest extends FormRequest
             'document' => 'sometimes|array',
             'document.type' => 'required_with:document.number|string|in:cpf,cnpj',
             'document.number' => 'required_with:document.type|string|max:' . InputConstraints::NAME_MAX,
+            'organization_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
         ];
     }
 

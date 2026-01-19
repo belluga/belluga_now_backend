@@ -45,7 +45,12 @@ class AccountControllerTest extends TestCase
             self::$bootstrapped = true;
         }
 
-        [$this->account, $this->role] = $this->seedAccountWithRole(['account-users:*']);
+        [$this->account, $this->role] = $this->seedAccountWithRole([
+            'account-users:view',
+            'account-users:create',
+            'account-users:update',
+            'account-users:delete',
+        ]);
         $this->account->makeCurrent();
 
         $this->accountService = $this->app->make(AccountManagementService::class);
@@ -53,7 +58,12 @@ class AccountControllerTest extends TestCase
 
         $operatorRole = $this->account->roleTemplates()->create([
             'name' => 'Operator',
-            'permissions' => ['account-users:*'],
+            'permissions' => [
+                'account-users:view',
+                'account-users:create',
+                'account-users:update',
+                'account-users:delete',
+            ],
         ]);
 
         $this->operator = $this->userService->create($this->account, [
@@ -62,7 +72,12 @@ class AccountControllerTest extends TestCase
             'password' => 'Secret!234',
         ], (string) $operatorRole->_id);
 
-        Sanctum::actingAs($this->operator, ['account-users:*']);
+        Sanctum::actingAs($this->operator, [
+            'account-users:view',
+            'account-users:create',
+            'account-users:update',
+            'account-users:delete',
+        ]);
 
         $this->baseUrl = sprintf('api/v1/accounts/%s', $this->account->slug);
     }
@@ -86,6 +101,32 @@ class AccountControllerTest extends TestCase
         Account::where('name', $name)->first()?->forceDelete();
     }
 
+    public function testStoreRejectsMissingDocument(): void
+    {
+        Sanctum::actingAs($this->operator, ['account-users:create']);
+
+        $response = $this->postJson('api/v1/accounts', [
+            'name' => 'Account Missing Document',
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function testStoreForbiddenWithoutCreateAbility(): void
+    {
+        Sanctum::actingAs($this->operator, ['account-users:view']);
+
+        $response = $this->postJson('api/v1/accounts', [
+            'name' => 'Account Forbidden',
+            'document' => [
+                'type' => 'cpf',
+                'number' => fake()->unique()->numerify('###################'),
+            ],
+        ]);
+
+        $response->assertStatus(403);
+    }
+
     public function testIndexFiltersByCurrentUser(): void
     {
         $response = $this->getJson('api/v1/accounts');
@@ -94,6 +135,35 @@ class AccountControllerTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $response->json('total'));
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertTrue($ids->contains((string) $this->account->_id));
+    }
+
+    public function testIndexForbiddenWithoutViewAbility(): void
+    {
+        Sanctum::actingAs($this->operator, ['account-users:create']);
+
+        $response = $this->getJson('api/v1/accounts');
+
+        $response->assertStatus(403);
+    }
+
+    public function testUpdateForbiddenWithoutUpdateAbility(): void
+    {
+        Sanctum::actingAs($this->operator, ['account-users:view']);
+
+        $response = $this->patchJson($this->baseUrl, [
+            'name' => 'Forbidden Update',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function testDeleteForbiddenWithoutDeleteAbility(): void
+    {
+        Sanctum::actingAs($this->operator, ['account-users:view']);
+
+        $response = $this->deleteJson($this->baseUrl);
+
+        $response->assertStatus(403);
     }
 
     public function testAccountUserManageAttachesAndDetaches(): void

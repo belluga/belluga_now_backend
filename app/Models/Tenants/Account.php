@@ -8,6 +8,7 @@ use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Context;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
+use MongoDB\Laravel\Relations\BelongsTo;
 use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 use Spatie\Sluggable\HasSlug;
@@ -24,6 +25,11 @@ class Account extends Model
     protected $fillable = [
         'name',
         'document',
+        'organization_id',
+        'created_by',
+        'created_by_type',
+        'updated_by',
+        'updated_by_type',
     ];
 
     protected $casts = [
@@ -39,6 +45,11 @@ class Account extends Model
 
     public function roleTemplates(): HasMany {
         return $this->hasMany(AccountRoleTemplate::class);
+    }
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     public function getSlugOptions(): SlugOptions

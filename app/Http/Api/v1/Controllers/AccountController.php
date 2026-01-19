@@ -41,7 +41,17 @@ class AccountController extends Controller
 
     public function store(AccountStoreRequest $request): JsonResponse
     {
-        $result = $this->accountService->create($request->validated());
+        $validated = $request->validated();
+        $actor = $request->user();
+
+        if ($actor) {
+            $validated['created_by'] = (string) $actor->_id;
+            $validated['created_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
+            $validated['updated_by'] = (string) $actor->_id;
+            $validated['updated_by_type'] = $validated['created_by_type'];
+        }
+
+        $result = $this->accountService->create($validated);
 
         $user = $request->user();
         if ($user) {
@@ -65,7 +75,16 @@ class AccountController extends Controller
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         return response()->json([
-            'data' => $account,
+            'data' => [
+                'id' => (string) $account->_id,
+                'name' => $account->name,
+                'slug' => $account->slug,
+                'document' => $account->document,
+                'organization_id' => $account->organization_id ?? null,
+                'created_at' => $account->created_at?->toJSON(),
+                'updated_at' => $account->updated_at?->toJSON(),
+                'deleted_at' => $account->deleted_at?->toJSON(),
+            ],
         ]);
     }
 
@@ -74,6 +93,12 @@ class AccountController extends Controller
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         $validated = $request->validated();
+        $actor = $request->user();
+
+        if ($actor) {
+            $validated['updated_by'] = (string) $actor->_id;
+            $validated['updated_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
+        }
         $updated = $this->accountService->update($account, $validated);
 
         $user = $request->user();
@@ -90,7 +115,16 @@ class AccountController extends Controller
         }
 
         return response()->json([
-            'data' => $updated,
+            'data' => [
+                'id' => (string) $updated->_id,
+                'name' => $updated->name,
+                'slug' => $updated->slug,
+                'document' => $updated->document,
+                'organization_id' => $updated->organization_id ?? null,
+                'created_at' => $updated->created_at?->toJSON(),
+                'updated_at' => $updated->updated_at?->toJSON(),
+                'deleted_at' => $updated->deleted_at?->toJSON(),
+            ],
         ]);
     }
 
