@@ -68,22 +68,29 @@ return Application::configure(basePath: dirname(__DIR__))
             $registerProjectRoutes(
                 'api/v1',
                 'tenant-maybe',
-                base_path('routes/api/project_public_api_v1.php'),
-                'project_public_api_v1'
+                base_path('routes/api/project_tenant_public_api_v1.php'),
+                'project_tenant_public_api_v1'
+            );
+
+            $registerProjectRoutes(
+                'api/v1',
+                'tenant-maybe',
+                base_path('routes/api/project_landlord_public_api_v1.php'),
+                'project_landlord_public_api_v1'
             );
 
             $registerProjectRoutes(
                 'admin/api/v1',
                 'landlord',
-                base_path('routes/api/project_landlord_api_v1.php'),
-                'project_landlord_api_v1'
+                base_path('routes/api/project_landlord_admin_api_v1.php'),
+                'project_landlord_admin_api_v1'
             );
 
             $registerProjectRoutes(
                 'api/v1',
                 'tenant',
-                base_path('routes/api/project_tenant_api_v1.php'),
-                'project_tenant_api_v1'
+                base_path('routes/api/project_tenant_admin_api_v1.php'),
+                'project_tenant_admin_api_v1'
             );
 
             $registerProjectRoutes(
