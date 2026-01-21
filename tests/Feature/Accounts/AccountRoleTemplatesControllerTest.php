@@ -8,6 +8,7 @@ use App\Application\Accounts\AccountRoleTemplateService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -68,7 +69,13 @@ class AccountRoleTemplatesControllerTest extends TestCase
 
         Sanctum::actingAs($operator, $operatorRole->permissions);
 
-        $this->baseUrl = sprintf('api/v1/accounts/%s/roles', $this->account->slug);
+        $tenant = Tenant::query()->where('subdomain', 'tenant-beta')->firstOrFail();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $this->baseUrl = sprintf(
+            'http://%s/api/v1/accounts/%s/roles',
+            $tenantHost,
+            $this->account->slug
+        );
     }
 
     public function testStoreCreatesRole(): void

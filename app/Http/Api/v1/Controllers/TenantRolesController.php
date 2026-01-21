@@ -53,8 +53,9 @@ class TenantRolesController extends Controller
         ], 201);
     }
 
-    public function show(string $role_id): JsonResponse
+    public function show(Request $request): JsonResponse
     {
+        $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $role = $this->tenantRoleService->find($tenant, $role_id);
 
@@ -63,8 +64,11 @@ class TenantRolesController extends Controller
         ]);
     }
 
-    public function update(TenantRoleUpdateRequest $request, string $role_id): JsonResponse
+    public function update(
+        TenantRoleUpdateRequest $request
+    ): JsonResponse
     {
+        $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $validated = $request->validated();
         $updated = $this->tenantRoleService->update(
@@ -91,8 +95,11 @@ class TenantRolesController extends Controller
         ]);
     }
 
-    public function destroy(TenantRoleDestroyRequest $request, string $role_id): JsonResponse
+    public function destroy(
+        TenantRoleDestroyRequest $request
+    ): JsonResponse
     {
+        $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $this->tenantRoleService->delete(
             $tenant,
@@ -115,8 +122,9 @@ class TenantRolesController extends Controller
         return response()->json();
     }
 
-    public function forceDestroy(string $role_id): JsonResponse
+    public function forceDestroy(Request $request): JsonResponse
     {
+        $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $this->tenantRoleService->forceDelete($tenant, $role_id);
 
@@ -135,8 +143,9 @@ class TenantRolesController extends Controller
         return response()->json();
     }
 
-    public function restore(string $role_id): JsonResponse
+    public function restore(Request $request): JsonResponse
     {
+        $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $role = $this->tenantRoleService->restore($tenant, $role_id);
 

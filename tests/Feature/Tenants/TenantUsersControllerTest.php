@@ -9,6 +9,7 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Accounts\TenantUserManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -70,7 +71,9 @@ class TenantUsersControllerTest extends TestCase
             'account-users:delete',
         ], 'sanctum');
 
-        $this->baseUrl = 'api/v1/users';
+        $tenant = Tenant::query()->where('subdomain', 'tenant-theta')->firstOrFail();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $this->baseUrl = "http://{$tenantHost}/admin/api/v1/users";
     }
 
     public function testIndexReturnsPaginatedUsers(): void

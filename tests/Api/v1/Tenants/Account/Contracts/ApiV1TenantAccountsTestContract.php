@@ -17,7 +17,7 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
     protected string $base_api_url {
         get{
-            return "{$this->base_api_tenant}accounts/";
+            return "{$this->base_tenant_api_admin}accounts/";
         }
     }
 

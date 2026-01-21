@@ -30,8 +30,10 @@ trait EnsuresSystemInitialization
             return;
         }
 
+        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
+        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
         $response = $this->post(
-            'api/v1/initialize',
+            $initializeUrl,
             $this->initializationPayload(),
             ['Content-Type' => 'multipart/form-data']
         );
