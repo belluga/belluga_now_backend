@@ -46,8 +46,9 @@ class AccountController extends Controller
         ], 201);
     }
 
-    public function show(string $tenant_domain, string $account_slug): JsonResponse
+    public function show(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         return response()->json([
@@ -56,11 +57,10 @@ class AccountController extends Controller
     }
 
     public function update(
-        AccountUpdateRequest $request,
-        string $tenant_domain,
-        string $account_slug
+        AccountUpdateRequest $request
     ): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         $updated = $this->accountService->update($account, $request->validated());
@@ -70,8 +70,9 @@ class AccountController extends Controller
         ]);
     }
 
-    public function destroy(Request $request, string $tenant_domain, string $account_slug): JsonResponse
+    public function destroy(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         $this->accountService->delete($account);
@@ -79,8 +80,9 @@ class AccountController extends Controller
         return response()->json();
     }
 
-    public function restore(string $tenant_domain, string $account_slug): JsonResponse
+    public function restore(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
         $restored = $this->accountService->restore($account);
@@ -90,8 +92,9 @@ class AccountController extends Controller
         ]);
     }
 
-    public function forceDestroy(string $tenant_domain, string $account_slug): JsonResponse
+    public function forceDestroy(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
         $this->accountService->forceDelete($account);
@@ -100,13 +103,12 @@ class AccountController extends Controller
     }
 
     public function accountUserManage(
-        AccountUserAttachRequest $request,
-        string $tenant_domain,
-        string $account_slug,
-        string $user_id,
-        string $role_id
+        AccountUserAttachRequest $request
     ): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
+        $user_id = (string) $request->route('user_id');
+        $role_id = (string) $request->route('role_id');
         $account = Account::current();
 
         $user = AccountUser::query()

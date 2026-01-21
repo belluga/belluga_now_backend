@@ -20,12 +20,10 @@ class AccountUserCredentialController extends Controller
     }
 
     public function store(
-        CredentialLinkRequest $request,
-        string $tenant_domain,
-        string $account_slug,
-        string $user_id
+        CredentialLinkRequest $request
     ): JsonResponse
     {
+        $user_id = (string) $request->route('user_id');
         $user = AccountUser::query()
             ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
@@ -43,14 +41,10 @@ class AccountUserCredentialController extends Controller
         ], 201);
     }
 
-    public function destroy(
-        Request $request,
-        string $tenant_domain,
-        string $account_slug,
-        string $user_id,
-        string $credential_id
-    ): JsonResponse
+    public function destroy(Request $request): JsonResponse
     {
+        $user_id = (string) $request->route('user_id');
+        $credential_id = (string) $request->route('credential_id');
         $user = AccountUser::query()
             ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
