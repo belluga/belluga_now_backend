@@ -70,7 +70,10 @@ class TenantBrandingControllerTest extends TestCase
         ];
 
         $response = $this->withHeaders(['X-App-Domain' => 'tenant-sigma.test'])
-            ->postJson('api/v1/branding/update', $payload);
+            ->postJson(
+                sprintf('http://%s.%s/admin/api/v1/branding/update', 'tenant-sigma', $this->host),
+                $payload
+            );
 
         $response->assertOk();
         $tenant = Tenant::query()->first()->fresh();
@@ -87,7 +90,7 @@ class TenantBrandingControllerTest extends TestCase
         $file = UploadedFile::fake()->image('light_logo.png', 120, 40);
 
         $response = $this->withHeaders(['X-App-Domain' => 'tenant-sigma.test'])
-            ->post('api/v1/branding/update', [
+            ->post(sprintf('http://%s.%s/admin/api/v1/branding/update', 'tenant-sigma', $this->host), [
                 'logo_settings' => [
                     'light_logo_uri' => $file,
                 ],

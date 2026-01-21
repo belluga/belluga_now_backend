@@ -112,7 +112,7 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}roles",
+            uri: "{$this->base_tenant_api_admin}roles",
             data: $data,
             headers: $headers,
         );
@@ -122,7 +122,7 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'get',
-            uri: "{$this->base_api_tenant}roles",
+            uri: "{$this->base_tenant_api_admin}roles",
             headers: $headers,
         );
     }

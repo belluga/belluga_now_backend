@@ -7,6 +7,7 @@ namespace Tests\Feature\Accounts;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use Laravel\Sanctum\Sanctum;
@@ -67,7 +68,13 @@ class AccountUserControllerTest extends TestCase
             'account-users:delete',
         ]);
 
-        $this->baseUrl = sprintf('api/v1/accounts/%s/users', $this->account->slug);
+        $tenant = Tenant::query()->where('subdomain', 'tenant-beta')->firstOrFail();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $this->baseUrl = sprintf(
+            'http://%s/api/v1/accounts/%s/users',
+            $tenantHost,
+            $this->account->slug
+        );
     }
 
     public function testStoreCreatesAccountUser(): void

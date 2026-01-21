@@ -139,7 +139,7 @@ abstract class ApiV1TenantApiTenantUsersTestContract extends TestCaseTenant {
     protected function _userCreate(array $data): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "http://nginx/admin/api/v1/users",
+            uri: "http://{$this->host}/admin/api/v1/users",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -148,7 +148,7 @@ abstract class ApiV1TenantApiTenantUsersTestContract extends TestCaseTenant {
     protected function tenantUserShow(string $user_id): TestResponse {
         return $this->json(
             method: 'get',
-            uri: "{$this->base_tenant_api_admin}users/$user_id",
+            uri: "http://{$this->host}/admin/api/v1/users/$user_id",
             headers: $this->getHeaders(),
         );
     }
@@ -156,7 +156,7 @@ abstract class ApiV1TenantApiTenantUsersTestContract extends TestCaseTenant {
     protected function tenantUserAttach(array $data): TestResponse {
         return $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}tenant-users",
+            uri: "{$this->base_tenant_api_admin}tenant-users",
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -165,7 +165,7 @@ abstract class ApiV1TenantApiTenantUsersTestContract extends TestCaseTenant {
     protected function tenantUserDettach(array $data): TestResponse {
         return $this->json(
             method: 'delete',
-            uri: "{$this->base_api_tenant}tenant-users",
+            uri: "{$this->base_tenant_api_admin}tenant-users",
             data: $data,
             headers: $this->getHeaders(),
         );

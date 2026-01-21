@@ -29,7 +29,7 @@ class TenantUsersController extends Controller
         );
     }
 
-    public function show(string $user_id): JsonResponse
+    public function show(string $tenant_domain, string $user_id): JsonResponse
     {
         $user = $this->tenantUserService->find($user_id);
 
@@ -45,14 +45,14 @@ class TenantUsersController extends Controller
         return response()->json();
     }
 
-    public function destroy(string $user_id): JsonResponse
+    public function destroy(string $tenant_domain, string $user_id): JsonResponse
     {
         $this->tenantUserService->delete($user_id);
 
         return response()->json();
     }
 
-    public function forceDestroy(string $user_id): JsonResponse
+    public function forceDestroy(string $tenant_domain, string $user_id): JsonResponse
     {
         $this->tenantUserService->forceDelete($user_id);
 

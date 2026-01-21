@@ -13,13 +13,56 @@ abstract class TestCase extends BaseTestCase {
 
     protected string $prefix = "default";
 
-    protected string $host = "nginx";
+    protected string $host {
+        get {
+            $host = parse_url(config('app.url'), PHP_URL_HOST);
+            if (is_string($host) && $host !== '') {
+                return $host;
+            }
+
+            return 'nginx';
+        }
+    }
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->clearConfigCacheOnce();
         $this->migrateOnce();
+        $_SERVER['HTTP_HOST'] = $this->host;
+        $_SERVER['SERVER_NAME'] = $this->host;
+        $this->withServerVariables(['HTTP_HOST' => $this->host]);
+    }
+
+    protected function normalizeTestUri(string $uri): string
+    {
+        if (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://')) {
+            return $uri;
+        }
+
+        if ($uri === '') {
+            return "http://{$this->host}/";
+        }
+
+        if ($uri[0] !== '/') {
+            $uri = "/{$uri}";
+        }
+
+        return "http://{$this->host}{$uri}";
+    }
+
+    public function call(
+        $method,
+        $uri,
+        $parameters = [],
+        $cookies = [],
+        $files = [],
+        $server = [],
+        $content = null
+    ) {
+        $uri = $this->normalizeTestUri($uri);
+
+        return parent::call($method, $uri, $parameters, $cookies, $files, $server, $content);
     }
 
     protected string $api_url_admin {

@@ -28,7 +28,7 @@ class DomainController extends Controller
         ], 201);
     }
 
-    public function restore(string $domain_id): JsonResponse
+    public function restore(string $tenant_domain, string $domain_id): JsonResponse
     {
         $tenant = Tenant::resolve();
         $domain = $this->domainService->restore($tenant, $domain_id);
@@ -38,7 +38,7 @@ class DomainController extends Controller
         ]);
     }
 
-    public function destroy(string $domain_id): JsonResponse
+    public function destroy(string $tenant_domain, string $domain_id): JsonResponse
     {
         $tenant = Tenant::resolve();
         $this->domainService->delete($tenant, $domain_id);
@@ -46,7 +46,7 @@ class DomainController extends Controller
         return response()->json();
     }
 
-    public function forceDestroy(string $domain_id): JsonResponse
+    public function forceDestroy(string $tenant_domain, string $domain_id): JsonResponse
     {
         $tenant = Tenant::resolve();
         $this->domainService->forceDelete($tenant, $domain_id);

@@ -46,7 +46,7 @@ class AccountController extends Controller
         ], 201);
     }
 
-    public function show(string $account_slug): JsonResponse
+    public function show(string $tenant_domain, string $account_slug): JsonResponse
     {
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
@@ -55,7 +55,11 @@ class AccountController extends Controller
         ]);
     }
 
-    public function update(AccountUpdateRequest $request, string $account_slug): JsonResponse
+    public function update(
+        AccountUpdateRequest $request,
+        string $tenant_domain,
+        string $account_slug
+    ): JsonResponse
     {
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
@@ -66,16 +70,16 @@ class AccountController extends Controller
         ]);
     }
 
-    public function destroy(Request $request): JsonResponse
+    public function destroy(Request $request, string $tenant_domain, string $account_slug): JsonResponse
     {
-        $account = Account::where('slug', $request->route('account_slug'))->firstOrFail();
+        $account = Account::where('slug', $account_slug)->firstOrFail();
 
         $this->accountService->delete($account);
 
         return response()->json();
     }
 
-    public function restore(string $account_slug): JsonResponse
+    public function restore(string $tenant_domain, string $account_slug): JsonResponse
     {
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
@@ -86,7 +90,7 @@ class AccountController extends Controller
         ]);
     }
 
-    public function forceDestroy(string $account_slug): JsonResponse
+    public function forceDestroy(string $tenant_domain, string $account_slug): JsonResponse
     {
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
@@ -95,16 +99,22 @@ class AccountController extends Controller
         return response()->json();
     }
 
-    public function accountUserManage(AccountUserAttachRequest $request): JsonResponse
+    public function accountUserManage(
+        AccountUserAttachRequest $request,
+        string $tenant_domain,
+        string $account_slug,
+        string $user_id,
+        string $role_id
+    ): JsonResponse
     {
         $account = Account::current();
 
         $user = AccountUser::query()
-            ->where('_id', new ObjectId($request->route('user_id')))
+            ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
 
         $role = $account->roleTemplates()
-            ->where('_id', new ObjectId($request->route('role_id')))
+            ->where('_id', new ObjectId($role_id))
             ->firstOrFail();
 
         $method = strtolower($request->method());

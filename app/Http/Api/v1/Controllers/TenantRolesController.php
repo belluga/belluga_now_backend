@@ -39,7 +39,7 @@ class TenantRolesController extends Controller
         ], 201);
     }
 
-    public function show(string $role_id): JsonResponse
+    public function show(string $tenant_domain, string $role_id): JsonResponse
     {
         $tenant = Tenant::resolve();
         $role = $this->tenantRoleService->find($tenant, $role_id);
@@ -49,7 +49,11 @@ class TenantRolesController extends Controller
         ]);
     }
 
-    public function update(TenantRoleUpdateRequest $request, string $role_id): JsonResponse
+    public function update(
+        TenantRoleUpdateRequest $request,
+        string $tenant_domain,
+        string $role_id
+    ): JsonResponse
     {
         $tenant = Tenant::resolve();
         $updated = $this->tenantRoleService->update(
@@ -63,7 +67,11 @@ class TenantRolesController extends Controller
         ]);
     }
 
-    public function destroy(TenantRoleDestroyRequest $request, string $role_id): JsonResponse
+    public function destroy(
+        TenantRoleDestroyRequest $request,
+        string $tenant_domain,
+        string $role_id
+    ): JsonResponse
     {
         $tenant = Tenant::resolve();
         $this->tenantRoleService->delete(
@@ -75,7 +83,7 @@ class TenantRolesController extends Controller
         return response()->json();
     }
 
-    public function forceDestroy(string $role_id): JsonResponse
+    public function forceDestroy(string $tenant_domain, string $role_id): JsonResponse
     {
         $tenant = Tenant::resolve();
         $this->tenantRoleService->forceDelete($tenant, $role_id);
@@ -83,7 +91,7 @@ class TenantRolesController extends Controller
         return response()->json();
     }
 
-    public function restore(string $role_id): JsonResponse
+    public function restore(string $tenant_domain, string $role_id): JsonResponse
     {
         $tenant = Tenant::resolve();
         $role = $this->tenantRoleService->restore($tenant, $role_id);

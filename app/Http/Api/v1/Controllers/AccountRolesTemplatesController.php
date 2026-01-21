@@ -45,7 +45,7 @@ class AccountRolesTemplatesController extends Controller
         ], 201);
     }
 
-    public function show(string $account_slug, string $role_id): JsonResponse
+    public function show(string $tenant_domain, string $account_slug, string $role_id): JsonResponse
     {
         $account = Account::current();
 
@@ -123,7 +123,7 @@ class AccountRolesTemplatesController extends Controller
         return response()->json();
     }
 
-    public function restore(string $account_slug, string $role_id): JsonResponse
+    public function restore(string $tenant_domain, string $account_slug, string $role_id): JsonResponse
     {
         $account = Account::current();
 
@@ -134,7 +134,7 @@ class AccountRolesTemplatesController extends Controller
         ]);
     }
 
-    public function forceDestroy(string $account_slug, string $role_id): JsonResponse
+    public function forceDestroy(string $tenant_domain, string $account_slug, string $role_id): JsonResponse
     {
         $account = Account::current();
 

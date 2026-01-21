@@ -144,7 +144,7 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant {
     protected function _updateBranding(): TestResponse {
         $response = $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}branding/update",
+            uri: "{$this->base_tenant_api_admin}branding/update",
             data: $this->_payloadBrandingUpdate(),
             headers: $this->getHeaders(),
         );
@@ -201,7 +201,7 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant {
     {
         $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}branding/update",
+            uri: "{$this->base_tenant_api_admin}branding/update",
             data: $this->defaultBrandingPayload(),
             headers: $this->getHeaders(),
         );
