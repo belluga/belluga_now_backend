@@ -20,6 +20,8 @@ class TenantDomainControllerTest extends TestCase
 
     private array $headers;
 
+    private string $baseUrl;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -40,6 +42,8 @@ class TenantDomainControllerTest extends TestCase
         );
         $this->tenant = $this->tenant->fresh();
         $this->tenant->makeCurrent();
+        $tenantHost = "{$this->tenant->subdomain}.{$this->host}";
+        $this->baseUrl = "http://{$tenantHost}/admin/api/v1/domains";
 
         $this->headers = [
             'X-App-Domain' => 'tenantkappa.app',
@@ -48,7 +52,7 @@ class TenantDomainControllerTest extends TestCase
 
     public function testStoreCreatesDomain(): void
     {
-        $response = $this->withHeaders($this->headers)->postJson('api/v1/domains', [
+        $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
             'path' => 'tenantkappa.com',
         ]);
 
@@ -70,7 +74,7 @@ class TenantDomainControllerTest extends TestCase
             'type' => 'web',
         ]);
         $response = $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s', $domain->_id));
+            ->deleteJson(sprintf('%s/%s', $this->baseUrl, $domain->_id));
 
         $response->assertOk();
         $this->assertSoftDeleted('domains', ['_id' => $domain->_id], 'landlord');
@@ -83,10 +87,10 @@ class TenantDomainControllerTest extends TestCase
             'type' => 'web',
         ]);
         $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s', $domain->_id));
+            ->deleteJson(sprintf('%s/%s', $this->baseUrl, $domain->_id));
 
         $response = $this->withHeaders($this->headers)
-            ->postJson(sprintf('api/v1/domains/%s/restore', $domain->_id));
+            ->postJson(sprintf('%s/%s/restore', $this->baseUrl, $domain->_id));
 
         $response->assertOk();
         $response->assertJsonPath('data.path', 'restorekappa.com');
@@ -99,10 +103,10 @@ class TenantDomainControllerTest extends TestCase
             'type' => 'web',
         ]);
         $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s', $domain->_id));
+            ->deleteJson(sprintf('%s/%s', $this->baseUrl, $domain->_id));
 
         $response = $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s/force-delete', $domain->_id));
+            ->deleteJson(sprintf('%s/%s/force-delete', $this->baseUrl, $domain->_id));
 
         $response->assertOk();
         $this->assertDatabaseMissing('domains', ['_id' => $domain->_id], 'landlord');

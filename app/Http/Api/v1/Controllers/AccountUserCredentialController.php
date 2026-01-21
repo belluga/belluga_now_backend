@@ -19,10 +19,13 @@ class AccountUserCredentialController extends Controller
     ) {
     }
 
-    public function store(CredentialLinkRequest $request, string $accountSlug, string $userId): JsonResponse
+    public function store(
+        CredentialLinkRequest $request
+    ): JsonResponse
     {
+        $user_id = (string) $request->route('user_id');
         $user = AccountUser::query()
-            ->where('_id', new ObjectId($userId))
+            ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
 
         $result = $this->credentialService->link($user, $request->validated());
@@ -38,13 +41,15 @@ class AccountUserCredentialController extends Controller
         ], 201);
     }
 
-    public function destroy(Request $request, string $accountSlug, string $userId, string $credentialId): JsonResponse
+    public function destroy(Request $request): JsonResponse
     {
+        $user_id = (string) $request->route('user_id');
+        $credential_id = (string) $request->route('credential_id');
         $user = AccountUser::query()
-            ->where('_id', new ObjectId($userId))
+            ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
 
-        $updatedUser = $this->credentialService->unlink($user, $credentialId);
+        $updatedUser = $this->credentialService->unlink($user, $credential_id);
 
         return response()->json([
             'data' => [

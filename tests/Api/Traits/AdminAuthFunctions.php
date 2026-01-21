@@ -23,7 +23,7 @@ trait AdminAuthFunctions
 
         $response = $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/logout",
+            uri: "http://{$this->host}/admin/api/v1/auth/logout",
             data: $payload,
             headers: [
                 'Authorization' => "Bearer {$user->token}",
@@ -39,7 +39,7 @@ trait AdminAuthFunctions
     protected function adminLogin(UserLabels $user, string $device_name = "default"): TestResponse {
         $response = $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: "http://{$this->host}/admin/api/v1/auth/login",
             data: [
                 "email" => $user->email_1,
                 "password" => $user->password,

@@ -28,7 +28,9 @@ class InitializationControllerTest extends TestCase
 
     public function testSystemInitializesSuccessfully(): void
     {
-        $response = $this->postJson('api/v1/initialize', $this->payload());
+        $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
+        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $response = $this->postJson($initializeUrl, $this->payload());
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.user.name', 'Admin Test');
@@ -39,9 +41,11 @@ class InitializationControllerTest extends TestCase
 
     public function testSubsequentInitializationIsRejected(): void
     {
-        $this->postJson('api/v1/initialize', $this->payload())->assertCreated();
+        $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
+        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $this->postJson($initializeUrl, $this->payload())->assertCreated();
 
-        $response = $this->postJson('api/v1/initialize', $this->payload());
+        $response = $this->postJson($initializeUrl, $this->payload());
         $response->assertStatus(403);
     }
 

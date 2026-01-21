@@ -20,6 +20,8 @@ class TenantAppDomainControllerTest extends TestCase
 
     private array $headers;
 
+    private string $baseUrl;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -33,6 +35,8 @@ class TenantAppDomainControllerTest extends TestCase
         $this->tenant = Tenant::query()->firstOrFail();
         $this->tenant->update(['app_domains' => ['tenanttheta.app']]);
         $this->tenant->makeCurrent();
+        $tenantHost = "{$this->tenant->subdomain}.{$this->host}";
+        $this->baseUrl = "http://{$tenantHost}/admin/api/v1/appdomains";
 
         $this->headers = [
             'X-App-Domain' => 'tenanttheta.app',
@@ -41,7 +45,7 @@ class TenantAppDomainControllerTest extends TestCase
 
     public function testIndexReturnsTenantAppDomains(): void
     {
-        $response = $this->withHeaders($this->headers)->getJson('api/v1/appdomains');
+        $response = $this->withHeaders($this->headers)->getJson($this->baseUrl);
 
         $response->assertOk();
         $response->assertJson([
@@ -51,7 +55,7 @@ class TenantAppDomainControllerTest extends TestCase
 
     public function testStoreAppendsDomain(): void
     {
-        $response = $this->withHeaders($this->headers)->postJson('api/v1/appdomains', [
+        $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
             'app_domain' => 'tenanttheta.mobile',
         ]);
 
@@ -66,7 +70,7 @@ class TenantAppDomainControllerTest extends TestCase
     {
         $this->tenant->update(['app_domains' => ['tenanttheta.app', 'removethis.app']]);
 
-        $response = $this->withHeaders($this->headers)->deleteJson('api/v1/appdomains', [
+        $response = $this->withHeaders($this->headers)->deleteJson($this->baseUrl, [
             'app_domain' => 'removethis.app',
         ]);
 

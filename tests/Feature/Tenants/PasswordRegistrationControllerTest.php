@@ -42,7 +42,7 @@ class PasswordRegistrationControllerTest extends TestCase
         );
 
         $response = $this->withHeaders(['X-App-Domain' => 'tenant-nu.test'])
-            ->postJson('/api/v1/auth/register/password', [
+            ->postJson(sprintf('http://%s.%s/api/v1/auth/register/password', 'tenant-nu', $this->host), [
                 'name' => 'Feature Registered User',
                 'email' => $email,
                 'password' => 'Secret!234',

@@ -9,6 +9,7 @@ use App\Application\Accounts\AccountUserCredentialService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -86,7 +87,13 @@ class AccountUserCredentialControllerTest extends TestCase
             'account-users:delete',
         ]);
 
-        $this->baseUrl = sprintf('api/v1/accounts/%s/users', $this->account->slug);
+        $tenant = Tenant::query()->where('subdomain', 'tenant-delta')->firstOrFail();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $this->baseUrl = sprintf(
+            'http://%s/api/v1/accounts/%s/users',
+            $tenantHost,
+            $this->account->slug
+        );
     }
 
     public function testStoreLinksCredential(): void

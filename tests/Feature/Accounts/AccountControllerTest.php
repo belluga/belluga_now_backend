@@ -8,6 +8,7 @@ use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -33,7 +34,11 @@ class AccountControllerTest extends TestCase
 
     private AccountUserService $userService;
 
+    private string $tenantAccountsAdminUrl;
+
     private string $baseUrl;
+
+    private string $baseAdminUrl;
 
     protected function setUp(): void
     {
@@ -64,7 +69,11 @@ class AccountControllerTest extends TestCase
 
         Sanctum::actingAs($this->operator, ['account-users:*']);
 
-        $this->baseUrl = sprintf('api/v1/accounts/%s', $this->account->slug);
+        $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $this->tenantAccountsAdminUrl = "http://{$tenantHost}/admin/api/v1/accounts";
+        $this->baseUrl = "http://{$tenantHost}/api/v1/accounts/{$this->account->slug}";
+        $this->baseAdminUrl = "http://{$tenantHost}/admin/api/v1/accounts/{$this->account->slug}";
     }
 
     public function testStoreCreatesAccount(): void
@@ -72,7 +81,7 @@ class AccountControllerTest extends TestCase
         $name = fake()->unique()->company();
         $documentNumber = fake()->unique()->numerify('###################');
 
-        $response = $this->postJson('api/v1/accounts', [
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
             'name' => $name,
             'document' => [
                 'type' => 'cpf',
@@ -88,7 +97,7 @@ class AccountControllerTest extends TestCase
 
     public function testIndexFiltersByCurrentUser(): void
     {
-        $response = $this->getJson('api/v1/accounts');
+        $response = $this->getJson($this->tenantAccountsAdminUrl);
 
         $response->assertOk();
         $this->assertGreaterThanOrEqual(1, $response->json('total'));
@@ -110,13 +119,13 @@ class AccountControllerTest extends TestCase
         ]);
 
         $attachResponse = $this->postJson(
-            sprintf('api/v1/accounts/%s/users/%s/roles/%s', $this->account->slug, $user->_id, $role->_id)
+            sprintf('%s/users/%s/roles/%s', $this->baseAdminUrl, $user->_id, $role->_id)
         );
 
         $attachResponse->assertOk();
 
         $detachResponse = $this->deleteJson(
-            sprintf('api/v1/accounts/%s/users/%s/roles/%s', $this->account->slug, $user->_id, $role->_id)
+            sprintf('%s/users/%s/roles/%s', $this->baseAdminUrl, $user->_id, $role->_id)
         );
 
         $detachResponse->assertOk();
