@@ -11,6 +11,7 @@ use App\Application\Telemetry\TelemetryEmitter;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Landlord\Tenant;
 use App\Http\Api\v1\Requests\PasswordRegistrationRequest;
+use App\Http\Api\v1\Resources\MeResource;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 
@@ -68,6 +69,7 @@ class PasswordRegistrationController extends Controller
                 'user_id' => (string) $result->user->_id,
                 'identity_state' => $result->user->identity_state,
                 'token' => $result->plainTextToken,
+                'me' => MeResource::fromTenant($result->user),
             ],
         ];
 

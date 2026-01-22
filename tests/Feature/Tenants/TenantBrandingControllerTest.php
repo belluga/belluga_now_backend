@@ -4,40 +4,33 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Tenants;
 
-use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountRoleTemplate;
-use App\Models\Tenants\AccountUser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Laravel\Sanctum\Sanctum;
-use Tests\TestCase;
+use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
-use Tests\Traits\SeedsTenantAccounts;
+use Tests\Helpers\TenantLabels;
 
-class TenantBrandingControllerTest extends TestCase
+class TenantBrandingControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
-    use SeedsTenantAccounts;
+
+    protected TenantLabels $tenant {
+        get {
+            return $this->landlord->tenant_primary;
+        }
+    }
 
     private static bool $bootstrapped = false;
 
-    private Account $account;
-
-    private AccountRoleTemplate $role;
-
-    private AccountUser $operator;
-
-    private AccountUserService $userService;
+    private array $headers;
+    private string $baseUrl;
 
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->withoutMiddleware(\Laravel\Sanctum\Http\Middleware\CheckAbilities::class);
 
         if (! self::$bootstrapped) {
             $this->refreshLandlordAndTenantDatabases();
@@ -45,18 +38,11 @@ class TenantBrandingControllerTest extends TestCase
             self::$bootstrapped = true;
         }
 
-        [$this->account, $this->role] = $this->seedAccountWithRole(['tenant-branding:update']);
-        $this->account->makeCurrent();
-
-        $this->userService = $this->app->make(AccountUserService::class);
-
-        $this->operator = $this->userService->create($this->account, [
-            'name' => 'Branding Operator',
-            'email' => 'branding-operator@example.org',
-            'password' => 'Secret!234',
-        ], (string) $this->role->_id);
-
-        Sanctum::actingAs($this->operator, ['tenant-branding:update'], 'sanctum');
+        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->baseUrl = "{$this->base_tenant_api_admin}branding/update";
+        $this->headers = $this->getHeaders();
+        unset($this->headers['Content-Type']);
+        $this->headers['X-App-Domain'] = 'tenant-sigma.test';
     }
 
     public function testUpdatePersistsBrandingData(): void
@@ -69,8 +55,8 @@ class TenantBrandingControllerTest extends TestCase
             ],
         ];
 
-        $response = $this->withHeaders(['X-App-Domain' => 'tenant-sigma.test'])
-            ->postJson('api/v1/branding/update', $payload);
+        $response = $this->withHeaders($this->headers)
+            ->postJson($this->baseUrl, $payload);
 
         $response->assertOk();
         $tenant = Tenant::query()->first()->fresh();
@@ -86,8 +72,8 @@ class TenantBrandingControllerTest extends TestCase
 
         $file = UploadedFile::fake()->image('light_logo.png', 120, 40);
 
-        $response = $this->withHeaders(['X-App-Domain' => 'tenant-sigma.test'])
-            ->post('api/v1/branding/update', [
+        $response = $this->withHeaders($this->headers)
+            ->post($this->baseUrl, [
                 'logo_settings' => [
                     'light_logo_uri' => $file,
                 ],

@@ -40,6 +40,8 @@ class Tenant extends BaseTenant
         'subdomain',
         'app_domains',
         'domains',
+        'settings',
+        'organization_id',
     ];
 
     public function roleTemplates(): HasMany {

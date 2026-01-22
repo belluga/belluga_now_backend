@@ -11,6 +11,7 @@ use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Landlord\Tenant;
 use App\Support\Auth\AbilityCatalog;
 use App\Models\Tenants\AccountUser;
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +22,7 @@ class TenantPasswordRegistrationService
     public function __construct(
         private readonly PasswordIdentityRegistrar $registrar,
         private readonly AnonymousIdentityMerger $identityMerger,
+        private readonly AccountProfileBootstrapService $profileBootstrapper,
     ) {
     }
 
@@ -94,6 +96,8 @@ class TenantPasswordRegistrationService
             $accessToken->save();
             $expiresAt = $accessToken->expires_at;
         }
+
+        $this->profileBootstrapper->ensurePersonalAccount($user);
 
         return new TenantPasswordRegistrationResult($user, $plainToken, $expiresAt);
     }

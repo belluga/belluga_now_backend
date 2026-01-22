@@ -34,64 +34,86 @@ return Application::configure(basePath: dirname(__DIR__))
                 ]);
             };
 
-            Route::prefix('api/v1/initialize')
-                ->middleware('guest')
-                ->group(base_path('routes/api/initialize.php'));
+            $mainHost = parse_url(config('app.url'), PHP_URL_HOST);
+            if (!is_string($mainHost) || $mainHost === '') {
+                $mainHost = (string) config('app.url');
+            }
+            $mainHost = trim($mainHost);
+            $tenantDomainPattern = $mainHost === ''
+                ? '.+'
+                : '^(?!' . preg_quote($mainHost, '/') . '$).+';
 
-            Route::prefix('admin/api/v1')
-                ->middleware('landlord')
-                ->group(base_path('routes/api/landlord_api_v1.php'));
+            Route::domain($mainHost)->group(function () use ($registerProjectRoutes): void {
+                Route::prefix('admin/api/v1')
+                    ->middleware('landlord')
+                    ->group(base_path('routes/api/landlord_api_v1.php'));
 
-            Route::prefix('api/v1')
-                ->middleware('tenant')
-                ->group(base_path('routes/api/tenant_api_v1.php'));
+                $registerProjectRoutes(
+                    'api/v1',
+                    [],
+                    base_path('routes/api/project_landlord_public_api_v1.php'),
+                    'project_landlord_public_api_v1'
+                );
 
-            Route::prefix('api/v1')
-                ->middleware('tenant-maybe')
-                ->group(base_path('routes/api/public_tenant_maybe_api_v1.php'));
-
-            Route::prefix('api/v1/accounts/{account_slug}')
-                ->middleware(['tenant'])
-                ->group(base_path('routes/api/account_api_v1.php'));
+                $registerProjectRoutes(
+                    'admin/api/v1',
+                    'landlord',
+                    base_path('routes/api/project_landlord_admin_api_v1.php'),
+                    'project_landlord_admin_api_v1'
+                );
+            });
 
             Route::prefix('api/v2')
 //                ->middleware('api')
                 ->group(base_path('routes/api/api_v2.php'));
 
-            $registerProjectRoutes(
-                'api/v1/initialize',
-                'guest',
-                base_path('routes/api/project_initialize.php'),
-                'project_initialize'
-            );
+            Route::domain('{tenant_domain}')
+                ->where(['tenant_domain' => $tenantDomainPattern])
+                ->group(function () use ($registerProjectRoutes): void {
+                    Route::prefix('api/v1/initialize')
+                        ->middleware('guest')
+                        ->group(base_path('routes/api/initialize.php'));
 
-            $registerProjectRoutes(
-                'api/v1',
-                'tenant-maybe',
-                base_path('routes/api/project_public_api_v1.php'),
-                'project_public_api_v1'
-            );
+                    Route::prefix('admin/api/v1')
+                        ->middleware(['tenant', 'landlord'])
+                        ->group(base_path('routes/api/tenant_api_v1.php'));
 
-            $registerProjectRoutes(
-                'admin/api/v1',
-                'landlord',
-                base_path('routes/api/project_landlord_api_v1.php'),
-                'project_landlord_api_v1'
-            );
+                    Route::prefix('api/v1')
+                        ->middleware('tenant-maybe')
+                        ->group(base_path('routes/api/public_tenant_maybe_api_v1.php'));
 
-            $registerProjectRoutes(
-                'api/v1',
-                'tenant',
-                base_path('routes/api/project_tenant_api_v1.php'),
-                'project_tenant_api_v1'
-            );
+                    Route::prefix('api/v1/accounts/{account_slug}')
+                        ->middleware(['tenant'])
+                        ->group(base_path('routes/api/account_api_v1.php'));
 
-            $registerProjectRoutes(
-                'api/v1/accounts/{account_slug}',
-                ['tenant'],
-                base_path('routes/api/project_account_api_v1.php'),
-                'project_account_api_v1'
-            );
+                    $registerProjectRoutes(
+                        'api/v1/initialize',
+                        'guest',
+                        base_path('routes/api/project_initialize.php'),
+                        'project_initialize'
+                    );
+
+                    $registerProjectRoutes(
+                        'api/v1',
+                        'tenant-maybe',
+                        base_path('routes/api/project_tenant_public_api_v1.php'),
+                        'project_tenant_public_api_v1'
+                    );
+
+                    $registerProjectRoutes(
+                        'admin/api/v1',
+                        ['tenant', 'landlord'],
+                        base_path('routes/api/project_tenant_admin_api_v1.php'),
+                        'project_tenant_admin_api_v1'
+                    );
+
+                    $registerProjectRoutes(
+                        'api/v1/accounts/{account_slug}',
+                        ['tenant'],
+                        base_path('routes/api/project_account_api_v1.php'),
+                        'project_account_api_v1'
+                    );
+                });
         }
     )
     ->withMiddleware(function (Middleware $middleware) {

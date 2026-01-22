@@ -17,8 +17,8 @@ trait MigrateFreshSeedOnce
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
 
-        // Atlas drops can hang or fail; prefer non-destructive migrate in that case.
-        if ($dsn !== '' && str_contains($dsn, 'mongodb+srv://')) {
+        // Avoid migrate:fresh on Mongo; dropDatabase can race with subsequent migrations.
+        if ($dsn !== '' && str_contains($dsn, 'mongodb')) {
             return 'migrate';
         }
 
@@ -34,6 +34,9 @@ trait MigrateFreshSeedOnce
 
             if ($command === 'migrate') {
                 $this->wipeMongoCollections();
+            }
+            if ($command === 'migrate:fresh') {
+                $this->dropTenantDatabases();
             }
 
             Artisan::call(sprintf(
@@ -73,11 +76,11 @@ trait MigrateFreshSeedOnce
         $tenantDatabase = DB::connection('tenant')->getDatabase();
 
         foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
-            $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
+            $landlordDatabase->dropCollection($collectionName);
         }
 
         foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
-            $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
+            $tenantDatabase->dropCollection($collectionName);
         }
 
         if (empty($tenantDatabaseNames)) {
@@ -90,7 +93,21 @@ trait MigrateFreshSeedOnce
             $database = $tenantClient->selectDatabase($databaseName);
 
             foreach ($database->listCollectionNames() as $collectionName) {
-                $database->selectCollection($collectionName)->deleteMany([]);
+                $database->dropCollection($collectionName);
+            }
+        }
+    }
+
+    protected function dropTenantDatabases(): void
+    {
+        $tenantClient = DB::connection('tenant')->getMongoClient();
+        $defaultTenantDb = (string) config('database.connections.tenant.database');
+
+        foreach ($tenantClient->listDatabases() as $databaseInfo) {
+            $databaseName = $databaseInfo->getName();
+
+            if (str_starts_with($databaseName, 'tenant_') || $databaseName === $defaultTenantDb) {
+                $tenantClient->selectDatabase($databaseName)->drop();
             }
         }
     }

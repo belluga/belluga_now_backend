@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Accounts;
 
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -43,6 +44,7 @@ class AccountManagementService
     {
         try {
             return DB::connection('tenant')->transaction(function () use ($payload): array {
+                $payload = $this->applyDefaultOrganization($payload);
                 $account = Account::create($payload);
 
                 $role = $account->roleTemplates()->create([
@@ -67,6 +69,26 @@ class AccountManagementService
                 'account' => ['Something went wrong when trying to create the account.'],
             ]);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function applyDefaultOrganization(array $payload): array
+    {
+        $createdByType = $payload['created_by_type'] ?? null;
+
+        if (! empty($payload['organization_id']) || $createdByType !== 'landlord') {
+            return $payload;
+        }
+
+        $tenant = Tenant::current();
+        if ($tenant && ! empty($tenant->organization_id)) {
+            $payload['organization_id'] = (string) $tenant->organization_id;
+        }
+
+        return $payload;
     }
 
     /**

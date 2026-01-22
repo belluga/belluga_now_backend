@@ -90,7 +90,7 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
             $this->getHeader($this->tenant->account_primary->user_admin)
         );
 
-        $rolesList->assertStatus(403);
+        $rolesList->assertStatus(401);
     }
 
     public function testListWithPermissionWithoutTenant(): void {
@@ -112,7 +112,7 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'post',
-            uri: "{$this->base_api_tenant}roles",
+            uri: "{$this->base_tenant_api_admin}roles",
             data: $data,
             headers: $headers,
         );
@@ -122,7 +122,7 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
     {
         return $this->json(
             method: 'get',
-            uri: "{$this->base_api_tenant}roles",
+            uri: "{$this->base_tenant_api_admin}roles",
             headers: $headers,
         );
     }

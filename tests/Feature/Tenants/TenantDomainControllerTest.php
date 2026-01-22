@@ -7,18 +7,27 @@ namespace Tests\Feature\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
-use Tests\TestCase;
+use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Helpers\TenantLabels;
 
-class TenantDomainControllerTest extends TestCase
+class TenantDomainControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
 
+    protected TenantLabels $tenant {
+        get {
+            return $this->landlord->tenant_primary;
+        }
+    }
+
     private static bool $bootstrapped = false;
 
-    private Tenant $tenant;
+    private Tenant $tenantModel;
 
     private array $headers;
+
+    private string $baseUrl;
 
     protected function setUp(): void
     {
@@ -30,25 +39,26 @@ class TenantDomainControllerTest extends TestCase
             self::$bootstrapped = true;
         }
 
-        $this->tenant = Tenant::query()->firstOrFail();
-        $this->tenant->update([
+        $this->tenantModel = Tenant::query()->firstOrFail();
+        $this->tenantModel->update([
             'app_domains' => ['tenantkappa.app'],
         ]);
-        $this->tenant->domains()->updateOrCreate(
+        $this->tenantModel->domains()->updateOrCreate(
             ['path' => 'tenantkappa.test'],
             ['type' => 'web']
         );
-        $this->tenant = $this->tenant->fresh();
-        $this->tenant->makeCurrent();
+        $this->tenantModel = $this->tenantModel->fresh();
+        $this->tenantModel->makeCurrent();
+        $this->baseUrl = "{$this->base_tenant_api_admin}domains";
 
-        $this->headers = [
+        $this->headers = array_merge($this->getHeaders(), [
             'X-App-Domain' => 'tenantkappa.app',
-        ];
+        ]);
     }
 
     public function testStoreCreatesDomain(): void
     {
-        $response = $this->withHeaders($this->headers)->postJson('api/v1/domains', [
+        $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
             'path' => 'tenantkappa.com',
         ]);
 
@@ -65,12 +75,12 @@ class TenantDomainControllerTest extends TestCase
 
     public function testDestroySoftDeletesDomain(): void
     {
-        $domain = $this->tenant->domains()->create([
+        $domain = $this->tenantModel->domains()->create([
             'path' => 'removekappa.com',
             'type' => 'web',
         ]);
         $response = $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s', $domain->_id));
+            ->deleteJson(sprintf('%s/%s', $this->baseUrl, $domain->_id));
 
         $response->assertOk();
         $this->assertSoftDeleted('domains', ['_id' => $domain->_id], 'landlord');
@@ -78,15 +88,15 @@ class TenantDomainControllerTest extends TestCase
 
     public function testRestoreBringsBackDomain(): void
     {
-        $domain = $this->tenant->domains()->create([
+        $domain = $this->tenantModel->domains()->create([
             'path' => 'restorekappa.com',
             'type' => 'web',
         ]);
         $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s', $domain->_id));
+            ->deleteJson(sprintf('%s/%s', $this->baseUrl, $domain->_id));
 
         $response = $this->withHeaders($this->headers)
-            ->postJson(sprintf('api/v1/domains/%s/restore', $domain->_id));
+            ->postJson(sprintf('%s/%s/restore', $this->baseUrl, $domain->_id));
 
         $response->assertOk();
         $response->assertJsonPath('data.path', 'restorekappa.com');
@@ -94,15 +104,15 @@ class TenantDomainControllerTest extends TestCase
 
     public function testForceDeleteRemovesDomain(): void
     {
-        $domain = $this->tenant->domains()->create([
+        $domain = $this->tenantModel->domains()->create([
             'path' => 'forcekappa.com',
             'type' => 'web',
         ]);
         $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s', $domain->_id));
+            ->deleteJson(sprintf('%s/%s', $this->baseUrl, $domain->_id));
 
         $response = $this->withHeaders($this->headers)
-            ->deleteJson(sprintf('api/v1/domains/%s/force-delete', $domain->_id));
+            ->deleteJson(sprintf('%s/%s/force-delete', $this->baseUrl, $domain->_id));
 
         $response->assertOk();
         $this->assertDatabaseMissing('domains', ['_id' => $domain->_id], 'landlord');

@@ -37,11 +37,36 @@ class TenantResolutionTest extends TestCase
             ],
         ];
 
-        $response = $this->withHeaders(['Host' => 'unknown.example.test'])
-            ->postJson('api/v1/anonymous/identities', $payload);
+        $response = $this->postJson(
+            sprintf('http://%s.%s/api/v1/anonymous/identities', 'unknown', $this->host),
+            $payload
+        );
 
         $response->assertStatus(400)
             ->assertJson(['message' => 'Tenant not found for this host.']);
+    }
+
+    public function testTenantAuthRoutesAreNotAvailableOnMainDomain(): void
+    {
+        $response = $this->postJson(
+            sprintf('http://%s/api/v1/auth/login', $this->host),
+            [
+                'email' => 'nonexistent@example.org',
+                'password' => 'Secret!234',
+                'device_name' => 'main-host',
+            ]
+        );
+
+        $response->assertStatus(404);
+    }
+
+    public function testLandlordAdminRoutesAreNotAvailableOnTenantDomain(): void
+    {
+        $response = $this->getJson(
+            sprintf('http://%s.%s/admin/api/v1/tenants', 'tenant-alpha', $this->host)
+        );
+
+        $response->assertStatus(404);
     }
 
     private function initializeSystem(): void

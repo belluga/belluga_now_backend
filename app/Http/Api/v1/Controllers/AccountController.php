@@ -41,7 +41,17 @@ class AccountController extends Controller
 
     public function store(AccountStoreRequest $request): JsonResponse
     {
-        $result = $this->accountService->create($request->validated());
+        $validated = $request->validated();
+        $actor = $request->user();
+
+        if ($actor) {
+            $validated['created_by'] = (string) $actor->_id;
+            $validated['created_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
+            $validated['updated_by'] = (string) $actor->_id;
+            $validated['updated_by_type'] = $validated['created_by_type'];
+        }
+
+        $result = $this->accountService->create($validated);
 
         $user = $request->user();
         if ($user) {
@@ -60,20 +70,39 @@ class AccountController extends Controller
         ], 201);
     }
 
-    public function show(string $account_slug): JsonResponse
+    public function show(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         return response()->json([
-            'data' => $account,
+            'data' => [
+                'id' => (string) $account->_id,
+                'name' => $account->name,
+                'slug' => $account->slug,
+                'document' => $account->document,
+                'organization_id' => $account->organization_id ?? null,
+                'created_at' => $account->created_at?->toJSON(),
+                'updated_at' => $account->updated_at?->toJSON(),
+                'deleted_at' => $account->deleted_at?->toJSON(),
+            ],
         ]);
     }
 
-    public function update(AccountUpdateRequest $request, string $account_slug): JsonResponse
+    public function update(
+        AccountUpdateRequest $request
+    ): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::where('slug', $account_slug)->firstOrFail();
 
         $validated = $request->validated();
+        $actor = $request->user();
+
+        if ($actor) {
+            $validated['updated_by'] = (string) $actor->_id;
+            $validated['updated_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
+        }
         $updated = $this->accountService->update($account, $validated);
 
         $user = $request->user();
@@ -90,13 +119,23 @@ class AccountController extends Controller
         }
 
         return response()->json([
-            'data' => $updated,
+            'data' => [
+                'id' => (string) $updated->_id,
+                'name' => $updated->name,
+                'slug' => $updated->slug,
+                'document' => $updated->document,
+                'organization_id' => $updated->organization_id ?? null,
+                'created_at' => $updated->created_at?->toJSON(),
+                'updated_at' => $updated->updated_at?->toJSON(),
+                'deleted_at' => $updated->deleted_at?->toJSON(),
+            ],
         ]);
     }
 
     public function destroy(Request $request): JsonResponse
     {
-        $account = Account::where('slug', $request->route('account_slug'))->firstOrFail();
+        $account_slug = (string) $request->route('account_slug');
+        $account = Account::where('slug', $account_slug)->firstOrFail();
 
         $this->accountService->delete($account);
 
@@ -115,8 +154,9 @@ class AccountController extends Controller
         return response()->json();
     }
 
-    public function restore(string $account_slug): JsonResponse
+    public function restore(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
         $restored = $this->accountService->restore($account);
@@ -138,8 +178,9 @@ class AccountController extends Controller
         ]);
     }
 
-    public function forceDestroy(string $account_slug): JsonResponse
+    public function forceDestroy(Request $request): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
         $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
 
         $this->accountService->forceDelete($account);
@@ -159,16 +200,21 @@ class AccountController extends Controller
         return response()->json();
     }
 
-    public function accountUserManage(AccountUserAttachRequest $request): JsonResponse
+    public function accountUserManage(
+        AccountUserAttachRequest $request
+    ): JsonResponse
     {
+        $account_slug = (string) $request->route('account_slug');
+        $user_id = (string) $request->route('user_id');
+        $role_id = (string) $request->route('role_id');
         $account = Account::current();
 
         $user = AccountUser::query()
-            ->where('_id', new ObjectId($request->route('user_id')))
+            ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
 
         $role = $account->roleTemplates()
-            ->where('_id', new ObjectId($request->route('role_id')))
+            ->where('_id', new ObjectId($role_id))
             ->firstOrFail();
 
         $method = strtolower($request->method());

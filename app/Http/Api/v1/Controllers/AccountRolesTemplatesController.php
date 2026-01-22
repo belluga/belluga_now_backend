@@ -60,8 +60,9 @@ class AccountRolesTemplatesController extends Controller
         ], 201);
     }
 
-    public function show(string $account_slug, string $role_id): JsonResponse
+    public function show(Request $request): JsonResponse
     {
+        $role_id = (string) $request->route('role_id');
         $account = Account::current();
 
         $role = $account->roleTemplates()
@@ -166,11 +167,13 @@ class AccountRolesTemplatesController extends Controller
         return response()->json();
     }
 
-    public function restore(string $account_slug, string $role_id): JsonResponse
+    public function restore(Request $request): JsonResponse
     {
         $account = Account::current();
-
-        $role = $this->roleTemplateService->restore($account, $role_id);
+        $role = $this->roleTemplateService->restore(
+            $account,
+            (string) $request->route('role_id')
+        );
 
         $actor = request()->user();
         if ($actor) {
@@ -190,11 +193,14 @@ class AccountRolesTemplatesController extends Controller
         ]);
     }
 
-    public function forceDestroy(string $account_slug, string $role_id): JsonResponse
+    public function forceDestroy(Request $request): JsonResponse
     {
         $account = Account::current();
-
-        $this->roleTemplateService->forceDelete($account, $role_id);
+        $roleId = (string) $request->route('role_id');
+        $this->roleTemplateService->forceDelete(
+            $account,
+            $roleId
+        );
 
         $actor = request()->user();
         if ($actor) {
@@ -203,7 +209,7 @@ class AccountRolesTemplatesController extends Controller
                 userId: (string) $actor->_id,
                 properties: [
                     'account_id' => (string) $account->_id,
-                    'role_id' => $role_id,
+                    'role_id' => $roleId,
                 ],
                 idempotencyKey: request()->header('X-Request-Id')
             );
