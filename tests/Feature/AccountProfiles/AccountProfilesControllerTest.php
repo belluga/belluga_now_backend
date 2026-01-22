@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
-use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantSettings;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
@@ -33,8 +32,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
-    private AccountUserService $userService;
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -54,8 +51,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'account-users:update',
             'account-users:delete',
         ]);
-        $this->userService = $this->app->make(AccountUserService::class);
-
         TenantSettings::query()->delete();
         TenantSettings::create([
             'profile_type_registry' => [
@@ -83,7 +78,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function testAccountProfileTypesReturnsRegistry(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}account_profile_types", $this->getHeaders());
+        $response = $this->getJson("{$this->base_tenant_api_admin}account_profile_types", $this->getHeaders());
 
         $response->assertStatus(200);
         $response->assertJsonStructure(['data']);
@@ -92,11 +87,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function testAccountProfileTypesForbiddenWithoutAbility(): void
     {
-        $user = $this->createAccountUser(['account-users:create']);
+        $user = LandlordUser::query()->firstOrFail();
 
         Sanctum::actingAs($user, ['account-users:create']);
 
-        $response = $this->getJson("{$this->base_api_tenant}account_profile_types");
+        $response = $this->getJson("{$this->base_tenant_api_admin}account_profile_types");
 
         $response->assertStatus(403);
     }
@@ -104,7 +99,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function testAccountProfileCreateRequiresLocationWhenPoiEnabled(): void
     {
         $response = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'venue',
@@ -116,7 +111,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
 
         $created = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'venue',
@@ -137,7 +132,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function testAccountProfileCreateRejectsUnknownProfileType(): void
     {
         $response = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'unknown_type',
@@ -153,7 +148,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function testAccountProfileCreateRejectsMissingAccount(): void
     {
         $response = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => '605b9b3b8f1d2c6d88f4c123',
                 'profile_type' => 'personal',
@@ -168,11 +163,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function testAccountProfileCreateForbiddenWithoutAbility(): void
     {
-        $user = $this->createAccountUser(['account-users:view']);
+        $user = LandlordUser::query()->firstOrFail();
 
         Sanctum::actingAs($user, ['account-users:view']);
 
-        $response = $this->postJson("{$this->base_api_tenant}account_profiles", [
+        $response = $this->postJson("{$this->base_tenant_api_admin}account_profiles", [
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'personal',
             'display_name' => 'Personal',
@@ -184,7 +179,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function testAccountProfileUpdateRejectsInvalidProfileType(): void
     {
         $created = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'personal',
@@ -198,7 +193,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profileId = $created->json('data.id');
 
         $response = $this->patchJson(
-            "{$this->base_api_tenant}account_profiles/{$profileId}",
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
             [
                 'profile_type' => 'invalid_type',
             ],
@@ -217,7 +212,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
 
         $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'personal',
@@ -227,7 +222,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         )->assertStatus(201);
 
         $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $otherAccount->_id,
                 'profile_type' => 'personal',
@@ -237,7 +232,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         )->assertStatus(201);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}account_profiles?account_id=" . (string) $this->account->_id,
+            "{$this->base_tenant_api_admin}account_profiles?account_id=" . (string) $this->account->_id,
             $this->getHeaders()
         );
 
@@ -248,7 +243,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function testAccountProfileGeoIndexRequiresAuth(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}account_profiles/geo");
+        $response = $this->getJson("{$this->base_tenant_api_admin}account_profiles/geo");
 
         $response->assertStatus(401);
     }
@@ -256,7 +251,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function testAccountProfileGeoIndexFiltersByType(): void
     {
         $venue = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'venue',
@@ -272,7 +267,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $venue->assertStatus(201);
 
         $personal = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'personal',
@@ -288,7 +283,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $personal->assertStatus(201);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}account_profiles/geo?origin_lat=-20.0&origin_lng=-40.0&profile_type=venue",
+            "{$this->base_tenant_api_admin}account_profiles/geo?origin_lat=-20.0&origin_lng=-40.0&profile_type=venue",
             $this->getHeaders()
         );
 
@@ -301,7 +296,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function testAccountProfileGeoIndexSkipsInactiveProfiles(): void
     {
         $created = $this->postJson(
-            "{$this->base_api_tenant}account_profiles",
+            "{$this->base_tenant_api_admin}account_profiles",
             [
                 'account_id' => (string) $this->account->_id,
                 'profile_type' => 'venue',
@@ -322,27 +317,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profile->save();
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}account_profiles/geo?origin_lat=-21.0&origin_lng=-41.0",
+            "{$this->base_tenant_api_admin}account_profiles/geo?origin_lat=-21.0&origin_lng=-41.0",
             $this->getHeaders()
         );
 
         $response->assertStatus(200);
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertFalse($ids->contains($profileId));
-    }
-
-    private function createAccountUser(array $permissions): AccountUser
-    {
-        $role = $this->account->roleTemplates()->create([
-            'name' => 'Test Role',
-            'permissions' => $permissions,
-        ]);
-
-        return $this->userService->create($this->account, [
-            'name' => 'Test User',
-            'email' => uniqid('user', true) . '@example.org',
-            'password' => 'Secret!234',
-        ], (string) $role->_id);
     }
 
     private function initializeSystem(): void

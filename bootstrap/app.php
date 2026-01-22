@@ -75,7 +75,7 @@ return Application::configure(basePath: dirname(__DIR__))
                         ->group(base_path('routes/api/initialize.php'));
 
                     Route::prefix('admin/api/v1')
-                        ->middleware('tenant')
+                        ->middleware(['tenant', 'landlord'])
                         ->group(base_path('routes/api/tenant_api_v1.php'));
 
                     Route::prefix('api/v1')
@@ -102,7 +102,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
                     $registerProjectRoutes(
                         'admin/api/v1',
-                        'tenant',
+                        ['tenant', 'landlord'],
                         base_path('routes/api/project_tenant_admin_api_v1.php'),
                         'project_tenant_admin_api_v1'
                     );

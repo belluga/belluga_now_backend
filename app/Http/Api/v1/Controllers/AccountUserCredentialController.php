@@ -64,12 +64,12 @@ class AccountUserCredentialController extends Controller
     public function destroy(Request $request): JsonResponse
     {
         $user_id = (string) $request->route('user_id');
-        $credential_id = (string) $request->route('credential_id');
+        $credentialId = (string) $request->route('credential_id');
         $user = AccountUser::query()
             ->where('_id', new ObjectId($user_id))
             ->firstOrFail();
 
-        $updatedUser = $this->credentialService->unlink($user, $credential_id);
+        $updatedUser = $this->credentialService->unlink($user, $credentialId);
 
         $actor = $request->user();
         $account = Account::current();

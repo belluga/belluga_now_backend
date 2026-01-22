@@ -25,6 +25,8 @@ class EventIndexRequest extends FormRequest
             'page_size' => 'sometimes|integer|min:1',
             'search' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'archived' => 'sometimes|boolean',
+            'account_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'account_profile_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
             'status' => [
                 'sometimes',
                 'string',

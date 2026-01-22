@@ -21,6 +21,8 @@ class EventStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'account_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'account_profile_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
             'title' => 'required|string|max:' . InputConstraints::NAME_MAX,
             'content' => 'required|string|max:' . InputConstraints::DESCRIPTION_MAX,
             'venue_id' => 'required|string|size:' . InputConstraints::OBJECT_ID_LENGTH,

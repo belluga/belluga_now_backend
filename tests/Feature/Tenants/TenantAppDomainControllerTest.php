@@ -7,16 +7,23 @@ namespace Tests\Feature\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
-use Tests\TestCase;
+use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Helpers\TenantLabels;
 
-class TenantAppDomainControllerTest extends TestCase
+class TenantAppDomainControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
 
+    protected TenantLabels $tenant {
+        get {
+            return $this->landlord->tenant_primary;
+        }
+    }
+
     private static bool $bootstrapped = false;
 
-    private Tenant $tenant;
+    private Tenant $tenantModel;
 
     private array $headers;
 
@@ -32,15 +39,14 @@ class TenantAppDomainControllerTest extends TestCase
             self::$bootstrapped = true;
         }
 
-        $this->tenant = Tenant::query()->firstOrFail();
-        $this->tenant->update(['app_domains' => ['tenanttheta.app']]);
-        $this->tenant->makeCurrent();
-        $tenantHost = "{$this->tenant->subdomain}.{$this->host}";
-        $this->baseUrl = "http://{$tenantHost}/admin/api/v1/appdomains";
+        $this->tenantModel = Tenant::query()->firstOrFail();
+        $this->tenantModel->update(['app_domains' => ['tenanttheta.app']]);
+        $this->tenantModel->makeCurrent();
+        $this->baseUrl = "{$this->base_tenant_api_admin}appdomains";
 
-        $this->headers = [
+        $this->headers = array_merge($this->getHeaders(), [
             'X-App-Domain' => 'tenanttheta.app',
-        ];
+        ]);
     }
 
     public function testIndexReturnsTenantAppDomains(): void
@@ -68,7 +74,7 @@ class TenantAppDomainControllerTest extends TestCase
 
     public function testDestroyRemovesDomain(): void
     {
-        $this->tenant->update(['app_domains' => ['tenanttheta.app', 'removethis.app']]);
+        $this->tenantModel->update(['app_domains' => ['tenanttheta.app', 'removethis.app']]);
 
         $response = $this->withHeaders($this->headers)->deleteJson($this->baseUrl, [
             'app_domain' => 'removethis.app',

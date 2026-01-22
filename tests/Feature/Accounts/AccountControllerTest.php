@@ -8,10 +8,10 @@ use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
-use App\Models\Tenants\AccountUser;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -23,8 +23,6 @@ class AccountControllerTest extends TestCase
     use SeedsTenantAccounts;
 
     private static bool $bootstrapped = false;
-
-    private AccountUser $operator;
 
     private Account $account;
 
@@ -61,23 +59,8 @@ class AccountControllerTest extends TestCase
         $this->accountService = $this->app->make(AccountManagementService::class);
         $this->userService = $this->app->make(AccountUserService::class);
 
-        $operatorRole = $this->account->roleTemplates()->create([
-            'name' => 'Operator',
-            'permissions' => [
-                'account-users:view',
-                'account-users:create',
-                'account-users:update',
-                'account-users:delete',
-            ],
-        ]);
-
-        $this->operator = $this->userService->create($this->account, [
-            'name' => 'Operator',
-            'email' => 'operator@example.org',
-            'password' => 'Secret!234',
-        ], (string) $operatorRole->_id);
-
-        Sanctum::actingAs($this->operator, [
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, [
             'account-users:view',
             'account-users:create',
             'account-users:update',
@@ -112,9 +95,9 @@ class AccountControllerTest extends TestCase
 
     public function testStoreRejectsMissingDocument(): void
     {
-        Sanctum::actingAs($this->operator, ['account-users:create']);
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
 
-        $response = $this->postJson('api/v1/accounts', [
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
             'name' => 'Account Missing Document',
         ]);
 
@@ -123,9 +106,9 @@ class AccountControllerTest extends TestCase
 
     public function testStoreForbiddenWithoutCreateAbility(): void
     {
-        Sanctum::actingAs($this->operator, ['account-users:view']);
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
-        $response = $this->postJson('api/v1/accounts', [
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
             'name' => 'Account Forbidden',
             'document' => [
                 'type' => 'cpf',
@@ -148,18 +131,18 @@ class AccountControllerTest extends TestCase
 
     public function testIndexForbiddenWithoutViewAbility(): void
     {
-        Sanctum::actingAs($this->operator, ['account-users:create']);
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
 
-        $response = $this->getJson('api/v1/accounts');
+        $response = $this->getJson($this->tenantAccountsAdminUrl);
 
         $response->assertStatus(403);
     }
 
     public function testUpdateForbiddenWithoutUpdateAbility(): void
     {
-        Sanctum::actingAs($this->operator, ['account-users:view']);
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
-        $response = $this->patchJson($this->baseUrl, [
+        $response = $this->patchJson($this->baseAdminUrl, [
             'name' => 'Forbidden Update',
         ]);
 
@@ -168,9 +151,9 @@ class AccountControllerTest extends TestCase
 
     public function testDeleteForbiddenWithoutDeleteAbility(): void
     {
-        Sanctum::actingAs($this->operator, ['account-users:view']);
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
-        $response = $this->deleteJson($this->baseUrl);
+        $response = $this->deleteJson($this->baseAdminUrl);
 
         $response->assertStatus(403);
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Events;
 
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Event;
 use App\Models\Tenants\TenantSettings;
@@ -98,6 +99,8 @@ class EventQueryService
 
         return [
             'search' => trim((string) ($queryParams['search'] ?? '')),
+            'account_id' => isset($queryParams['account_id']) ? (string) $queryParams['account_id'] : null,
+            'account_profile_id' => isset($queryParams['account_profile_id']) ? (string) $queryParams['account_profile_id'] : null,
             'categories' => $this->normalizeStringArray($queryParams['categories'] ?? []),
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
@@ -174,6 +177,7 @@ class EventQueryService
             $pipeline[] = ['$match' => $baseMatch];
         }
 
+        $this->applyAccountFilter($pipeline, $filters['account_id'] ?? null, $filters['account_profile_id'] ?? null);
         $this->applyPublicationFilter($pipeline, $now);
         $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
@@ -248,6 +252,7 @@ class EventQueryService
 
         $pipeline[] = ['$match' => $baseMatch];
 
+        $this->applyAccountFilter($pipeline, $filters['account_id'] ?? null, $filters['account_profile_id'] ?? null);
         $this->applyPublicationFilter($pipeline, $now);
         $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
@@ -393,6 +398,56 @@ class EventQueryService
                 'confirmed_user_ids' => (string) $user->_id,
             ],
         ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $pipeline
+     */
+    private function applyAccountFilter(array &$pipeline, ?string $accountId, ?string $accountProfileId): void
+    {
+        if ($accountProfileId !== null && $accountProfileId !== '') {
+            $pipeline[] = [
+                '$match' => [
+                    '$or' => [
+                        ['account_profile_id' => $accountProfileId],
+                        ['venue.id' => $accountProfileId],
+                    ],
+                ],
+            ];
+
+            return;
+        }
+
+        if ($accountId === null || $accountId === '') {
+            return;
+        }
+
+        $profileIds = $this->resolveAccountProfileIds($accountId);
+
+        $match = [
+            '$or' => [
+                ['account_id' => $accountId],
+            ],
+        ];
+
+        if ($profileIds !== []) {
+            $match['$or'][] = ['venue.id' => ['$in' => $profileIds]];
+        }
+
+        $pipeline[] = ['$match' => $match];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveAccountProfileIds(string $accountId): array
+    {
+        return AccountProfile::query()
+            ->where('account_id', $accountId)
+            ->pluck('_id')
+            ->map(static fn ($id): string => (string) $id)
+            ->values()
+            ->all();
     }
 
     /**

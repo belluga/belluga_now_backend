@@ -196,9 +196,10 @@ class AccountRolesTemplatesController extends Controller
     public function forceDestroy(Request $request): JsonResponse
     {
         $account = Account::current();
+        $roleId = (string) $request->route('role_id');
         $this->roleTemplateService->forceDelete(
             $account,
-            (string) $request->route('role_id')
+            $roleId
         );
 
         $actor = request()->user();
@@ -208,7 +209,7 @@ class AccountRolesTemplatesController extends Controller
                 userId: (string) $actor->_id,
                 properties: [
                     'account_id' => (string) $account->_id,
-                    'role_id' => $role_id,
+                    'role_id' => $roleId,
                 ],
                 idempotencyKey: request()->header('X-Request-Id')
             );

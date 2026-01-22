@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Organizations;
 
-use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Organization;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -31,8 +30,6 @@ class OrganizationsControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
-    private AccountUserService $userService;
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -53,13 +50,12 @@ class OrganizationsControllerTest extends TestCaseTenant
             'account-users:delete',
         ]);
 
-        $this->userService = $this->app->make(AccountUserService::class);
     }
 
     public function testOrganizationCreateAndShow(): void
     {
         $response = $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             [
                 'name' => 'Org Alpha',
                 'description' => 'Tenant org',
@@ -73,7 +69,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $orgId = $response->json('data._id') ?? $response->json('data.id');
         $this->assertNotEmpty($orgId);
 
-        $show = $this->getJson("{$this->base_api_tenant}organizations/{$orgId}", $this->getHeaders());
+        $show = $this->getJson("{$this->base_tenant_api_admin}organizations/{$orgId}", $this->getHeaders());
         $show->assertStatus(200);
         $show->assertJsonPath('data.name', 'Org Alpha');
     }
@@ -81,7 +77,7 @@ class OrganizationsControllerTest extends TestCaseTenant
     public function testOrganizationCreateValidation(): void
     {
         $response = $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             [],
             $this->getHeaders()
         );
@@ -94,18 +90,18 @@ class OrganizationsControllerTest extends TestCaseTenant
         Organization::query()->delete();
 
         $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             ['name' => 'Org One'],
             $this->getHeaders()
         )->assertStatus(201);
 
         $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             ['name' => 'Org Two'],
             $this->getHeaders()
         )->assertStatus(201);
 
-        $response = $this->getJson("{$this->base_api_tenant}organizations", $this->getHeaders());
+        $response = $this->getJson("{$this->base_tenant_api_admin}organizations", $this->getHeaders());
         $response->assertStatus(200);
         $this->assertGreaterThanOrEqual(2, count($response->json('data')));
     }
@@ -113,7 +109,7 @@ class OrganizationsControllerTest extends TestCaseTenant
     public function testOrganizationUpdate(): void
     {
         $created = $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             ['name' => 'Org Update'],
             $this->getHeaders()
         );
@@ -122,7 +118,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $orgId = $created->json('data._id') ?? $created->json('data.id');
 
         $updated = $this->patchJson(
-            "{$this->base_api_tenant}organizations/{$orgId}",
+            "{$this->base_tenant_api_admin}organizations/{$orgId}",
             ['name' => 'Org Updated'],
             $this->getHeaders()
         );
@@ -134,7 +130,7 @@ class OrganizationsControllerTest extends TestCaseTenant
     public function testOrganizationDeleteRestore(): void
     {
         $created = $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             ['name' => 'Org Delete'],
             $this->getHeaders()
         );
@@ -142,23 +138,23 @@ class OrganizationsControllerTest extends TestCaseTenant
         $created->assertStatus(201);
         $orgId = $created->json('data._id') ?? $created->json('data.id');
 
-        $this->deleteJson("{$this->base_api_tenant}organizations/{$orgId}", [], $this->getHeaders())
+        $this->deleteJson("{$this->base_tenant_api_admin}organizations/{$orgId}", [], $this->getHeaders())
             ->assertStatus(200);
 
-        $this->getJson("{$this->base_api_tenant}organizations/{$orgId}", $this->getHeaders())
+        $this->getJson("{$this->base_tenant_api_admin}organizations/{$orgId}", $this->getHeaders())
             ->assertStatus(404);
 
-        $this->postJson("{$this->base_api_tenant}organizations/{$orgId}/restore", [], $this->getHeaders())
+        $this->postJson("{$this->base_tenant_api_admin}organizations/{$orgId}/restore", [], $this->getHeaders())
             ->assertStatus(200);
 
-        $this->getJson("{$this->base_api_tenant}organizations/{$orgId}", $this->getHeaders())
+        $this->getJson("{$this->base_tenant_api_admin}organizations/{$orgId}", $this->getHeaders())
             ->assertStatus(200);
     }
 
     public function testOrganizationForceDelete(): void
     {
         $created = $this->postJson(
-            "{$this->base_api_tenant}organizations",
+            "{$this->base_tenant_api_admin}organizations",
             ['name' => 'Org Force'],
             $this->getHeaders()
         );
@@ -166,40 +162,26 @@ class OrganizationsControllerTest extends TestCaseTenant
         $created->assertStatus(201);
         $orgId = $created->json('data._id') ?? $created->json('data.id');
 
-        $this->deleteJson("{$this->base_api_tenant}organizations/{$orgId}", [], $this->getHeaders())
+        $this->deleteJson("{$this->base_tenant_api_admin}organizations/{$orgId}", [], $this->getHeaders())
             ->assertStatus(200);
 
-        $this->postJson("{$this->base_api_tenant}organizations/{$orgId}/force_delete", [], $this->getHeaders())
+        $this->postJson("{$this->base_tenant_api_admin}organizations/{$orgId}/force_delete", [], $this->getHeaders())
             ->assertStatus(200);
 
-        $this->getJson("{$this->base_api_tenant}organizations/{$orgId}", $this->getHeaders())
+        $this->getJson("{$this->base_tenant_api_admin}organizations/{$orgId}", $this->getHeaders())
             ->assertStatus(404);
     }
 
     public function testOrganizationCreateForbiddenWithoutAbility(): void
     {
-        $user = $this->createAccountUser(['account-users:view']);
+        $user = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($user, ['account-users:view']);
 
-        $response = $this->postJson("{$this->base_api_tenant}organizations", [
+        $response = $this->postJson("{$this->base_tenant_api_admin}organizations", [
             'name' => 'Forbidden Org',
         ]);
 
         $response->assertStatus(403);
-    }
-
-    private function createAccountUser(array $permissions): AccountUser
-    {
-        $role = $this->account->roleTemplates()->create([
-            'name' => 'Test Role',
-            'permissions' => $permissions,
-        ]);
-
-        return $this->userService->create($this->account, [
-            'name' => 'Test User',
-            'email' => uniqid('org-user', true) . '@example.org',
-            'password' => 'Secret!234',
-        ], (string) $role->_id);
     }
 
     private function initializeSystem(): void

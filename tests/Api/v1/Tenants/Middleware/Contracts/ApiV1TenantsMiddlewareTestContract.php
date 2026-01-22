@@ -90,7 +90,7 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
             $this->getHeader($this->tenant->account_primary->user_admin)
         );
 
-        $rolesList->assertStatus(403);
+        $rolesList->assertStatus(401);
     }
 
     public function testListWithPermissionWithoutTenant(): void {

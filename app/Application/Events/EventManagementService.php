@@ -84,6 +84,22 @@ class EventManagementService
             $resolvedVenue = $this->resolveVenuePayload($venueId, $existing);
             $normalized['venue'] = $resolvedVenue['venue'];
             $normalized['geo_location'] = $resolvedVenue['location'];
+            $normalized['account_id'] = $resolvedVenue['account_id'];
+            $normalized['account_profile_id'] = $resolvedVenue['account_profile_id'];
+
+            $expectedAccountId = $payload['account_id'] ?? null;
+            if ($expectedAccountId && $expectedAccountId !== $resolvedVenue['account_id']) {
+                throw ValidationException::withMessages([
+                    'account_id' => ['Account must match the venue account.'],
+                ]);
+            }
+
+            $expectedProfileId = $payload['account_profile_id'] ?? null;
+            if ($expectedProfileId && $expectedProfileId !== $resolvedVenue['account_profile_id']) {
+                throw ValidationException::withMessages([
+                    'account_profile_id' => ['Account profile must match the venue profile.'],
+                ]);
+            }
         }
 
         if ($artistIds !== null || $existing === null) {
@@ -130,7 +146,7 @@ class EventManagementService
     }
 
     /**
-     * @return array{venue: array<string, mixed>, location: array<string, mixed>}
+     * @return array{venue: array<string, mixed>, location: array<string, mixed>, account_id: string, account_profile_id: string}
      */
     private function resolveVenuePayload(?string $venueId, ?Event $existing): array
     {
@@ -163,6 +179,8 @@ class EventManagementService
         }
 
         return [
+            'account_id' => (string) $profile->account_id,
+            'account_profile_id' => (string) $profile->_id,
             'venue' => [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,

@@ -17,6 +17,8 @@ class Event extends Model
     protected $table = 'events';
 
     protected $fillable = [
+        'account_id',
+        'account_profile_id',
         'slug',
         'type',
         'title',

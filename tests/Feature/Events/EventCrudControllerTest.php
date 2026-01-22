@@ -9,6 +9,7 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Jobs\PublishScheduledEventsJob;
 use App\Models\Landlord\Tenant;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
@@ -39,6 +40,8 @@ class EventCrudControllerTest extends TestCaseTenant
     private AccountUser $user;
     private AccountProfile $venue;
     private AccountProfile $artist;
+    private string $accountEventsBase;
+    private string $tenantAdminEventsBase;
 
     protected function setUp(): void
     {
@@ -66,15 +69,18 @@ class EventCrudControllerTest extends TestCaseTenant
             'events:delete',
         ]);
 
-        $this->venue = $this->createAccountProfile('venue', 'Main Venue');
+        $this->venue = $this->createAccountProfile('venue', 'Main Venue', $this->account);
         $this->artist = $this->createAccountProfile('artist', 'DJ Test');
+
+        $this->accountEventsBase = "{$this->base_api_tenant}accounts/{$this->account->slug}/events";
+        $this->tenantAdminEventsBase = "{$this->base_tenant_api_admin}events";
     }
 
     public function testEventCreateStoresEvent(): void
     {
         $payload = $this->makeEventPayload();
 
-        $response = $this->postJson("{$this->base_api_tenant}events", $payload);
+        $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.title', $payload['title']);
@@ -91,7 +97,7 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ]);
 
-        $response = $this->postJson("{$this->base_api_tenant}events", $payload);
+        $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(422);
     }
@@ -102,20 +108,15 @@ class EventCrudControllerTest extends TestCaseTenant
             'artist_ids' => [(string) $this->venue->_id],
         ]);
 
-        $response = $this->postJson("{$this->base_api_tenant}events", $payload);
+        $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(422);
     }
 
     public function testEventCreateRejectsVenueWithoutLocation(): void
     {
-        $account = Account::create([
-            'name' => 'Venue Without Location',
-            'document' => (string) Str::uuid(),
-        ]);
-
         $venue = AccountProfile::create([
-            'account_id' => (string) $account->_id,
+            'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'No Location Venue',
             'taxonomy_terms' => [],
@@ -127,7 +128,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'venue_id' => (string) $venue->_id,
         ]);
 
-        $response = $this->postJson("{$this->base_api_tenant}events", $payload);
+        $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(422);
     }
@@ -137,13 +138,16 @@ class EventCrudControllerTest extends TestCaseTenant
         $limited = $this->createAccountUser(['*']);
         Sanctum::actingAs($limited, ['events:read']);
 
-        $response = $this->postJson("{$this->base_api_tenant}events", $this->makeEventPayload());
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
         $response->assertStatus(403);
     }
 
     public function testEventIndexFiltersByStatus(): void
     {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
         $this->createEvent([
             'title' => 'Draft Event',
             'publication' => ['status' => 'draft'],
@@ -153,7 +157,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'publication' => ['status' => 'published', 'publish_at' => Carbon::now()->subMinute()],
         ]);
 
-        $response = $this->getJson("{$this->base_api_tenant}events?status=published");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?status=published");
 
         $response->assertStatus(200);
         $items = $response->json('data');
@@ -165,7 +169,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $event = $this->createEvent();
 
-        $response = $this->patchJson("{$this->base_api_tenant}events/{$event->_id}", [
+        $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
             'title' => 'Updated Title',
             'publication' => ['status' => 'ended'],
         ]);
@@ -177,7 +181,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function testEventUpdateReturns404WhenMissing(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}events/missing-event", [
+        $response = $this->patchJson("{$this->accountEventsBase}/missing-event", [
             'title' => 'Missing',
         ]);
 
@@ -188,7 +192,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $event = $this->createEvent();
 
-        $response = $this->deleteJson("{$this->base_api_tenant}events/{$event->_id}");
+        $response = $this->deleteJson("{$this->accountEventsBase}/{$event->_id}");
 
         $response->assertStatus(200);
 
@@ -228,6 +232,75 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('publish_scheduled', $futurePublication['status'] ?? null);
     }
 
+    public function testTenantAdminCreateRequiresOnBehalfAccount(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:create']);
+
+        $payload = $this->makeEventPayload();
+
+        $response = $this->postJson($this->tenantAdminEventsBase, $payload);
+
+        $response->assertStatus(422);
+    }
+
+    public function testTenantAdminCreateOnBehalfIsScopedToTargetAccount(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:create', 'events:read']);
+
+        $payload = $this->makeEventPayload([
+            'account_id' => (string) $this->account->_id,
+        ]);
+
+        $response = $this->postJson($this->tenantAdminEventsBase, $payload);
+        $response->assertStatus(201);
+
+        $accountList = $this->getJson($this->accountEventsBase);
+        $accountList->assertStatus(200);
+        $this->assertCount(1, $accountList->json('data'));
+
+        $otherAccount = Account::create([
+            'name' => 'Other Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $otherBase = "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events";
+
+        $otherList = $this->getJson($otherBase);
+        $otherList->assertStatus(200);
+        $this->assertCount(0, $otherList->json('data'));
+    }
+
+    public function testAccountUserCannotManageAnotherAccountEvents(): void
+    {
+        $event = $this->createEvent();
+
+        $otherAccount = Account::create([
+            'name' => 'Second Account',
+            'document' => (string) Str::uuid(),
+        ]);
+
+        $role = $otherAccount->roleTemplates()->create([
+            'name' => 'Other Events Role',
+            'permissions' => ['*'],
+        ]);
+
+        $otherUser = $this->userService->create($otherAccount, [
+            'name' => 'Other User',
+            'email' => uniqid('other-user', true) . '@example.org',
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
+
+        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+
+        $otherBase = "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}";
+        $response = $this->patchJson($otherBase, [
+            'title' => 'Should Not Update',
+        ]);
+
+        $response->assertStatus(404);
+    }
+
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
@@ -242,9 +315,9 @@ class EventCrudControllerTest extends TestCaseTenant
         ], (string) $role->_id);
     }
 
-    private function createAccountProfile(string $profileType, string $displayName): AccountProfile
+    private function createAccountProfile(string $profileType, string $displayName, ?Account $account = null): AccountProfile
     {
-        $account = Account::create([
+        $account = $account ?? Account::create([
             'name' => $displayName . ' Account',
             'document' => (string) Str::uuid(),
         ]);
@@ -303,6 +376,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $now = Carbon::now();
 
         return Event::create(array_merge([
+            'account_id' => (string) $this->venue->account_id,
+            'account_profile_id' => (string) $this->venue->_id,
             'title' => 'Stored Event',
             'content' => 'Event content',
             'type' => [
