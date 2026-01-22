@@ -50,7 +50,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
                 $registerProjectRoutes(
                     'api/v1',
-                    'tenant-maybe',
+                    [],
                     base_path('routes/api/project_landlord_public_api_v1.php'),
                     'project_landlord_public_api_v1'
                 );

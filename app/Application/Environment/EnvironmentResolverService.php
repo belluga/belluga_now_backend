@@ -51,6 +51,17 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $pushSettings = TenantPushSettings::current();
         $settings = TenantSettings::current();
+        $profileTypes = $settings?->getAttribute('profile_type_registry') ?? [];
+        if ($profileTypes instanceof \MongoDB\Model\BSONDocument || $profileTypes instanceof \MongoDB\Model\BSONArray) {
+            $profileTypes = $profileTypes->getArrayCopy();
+        } elseif ($profileTypes instanceof \Traversable) {
+            $profileTypes = iterator_to_array($profileTypes);
+        } elseif (is_object($profileTypes)) {
+            $profileTypes = (array) $profileTypes;
+        }
+        if (! is_array($profileTypes)) {
+            $profileTypes = [];
+        }
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
@@ -84,6 +95,7 @@ class EnvironmentResolverService
             'telemetry' => $this->resolveTelemetryPayload($pushSettings),
             'firebase' => $pushSettings?->getAttribute('firebase') ?? [],
             'push' => $pushSettings?->getAttribute('push') ?? [],
+            'profile_types' => array_values($profileTypes),
             'settings' => [
                 'map_ui' => $settings?->getAttribute('map_ui') ?? [],
             ],

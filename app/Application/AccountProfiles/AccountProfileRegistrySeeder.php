@@ -17,47 +17,15 @@ class AccountProfileRegistrySeeder
             [
                 'type' => 'personal',
                 'label' => 'Personal',
-                'parent_type' => null,
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => false,
-                ],
-            ],
-            [
-                'type' => 'business',
-                'label' => 'Business',
-                'parent_type' => null,
-                'allowed_taxonomies' => [],
-                'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => false,
-                ],
-            ],
-            [
-                'type' => 'influencer',
-                'label' => 'Influencer',
-                'parent_type' => 'personal',
-                'allowed_taxonomies' => [],
-                'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => false,
-                ],
-            ],
-            [
-                'type' => 'curator',
-                'label' => 'Curator',
-                'parent_type' => 'personal',
-                'allowed_taxonomies' => [],
-                'capabilities' => [
-                    'is_favoritable' => true,
+                    'is_favoritable' => false,
                     'is_poi_enabled' => false,
                 ],
             ],
             [
                 'type' => 'artist',
                 'label' => 'Artist',
-                'parent_type' => 'personal',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_favoritable' => true,
@@ -67,21 +35,10 @@ class AccountProfileRegistrySeeder
             [
                 'type' => 'venue',
                 'label' => 'Venue',
-                'parent_type' => 'business',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
-                ],
-            ],
-            [
-                'type' => 'experience_provider',
-                'label' => 'Experience Provider',
-                'parent_type' => 'business',
-                'allowed_taxonomies' => [],
-                'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => false,
                 ],
             ],
         ];

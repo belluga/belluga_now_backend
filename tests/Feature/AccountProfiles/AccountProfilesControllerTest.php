@@ -62,17 +62,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 [
                     'type' => 'personal',
                     'label' => 'Personal',
-                    'parent_type' => null,
                     'allowed_taxonomies' => [],
                     'capabilities' => [
-                        'is_favoritable' => true,
+                        'is_favoritable' => false,
                         'is_poi_enabled' => false,
                     ],
                 ],
                 [
                     'type' => 'venue',
                     'label' => 'Venue',
-                    'parent_type' => 'business',
                     'allowed_taxonomies' => [],
                     'capabilities' => [
                         'is_favoritable' => true,
