@@ -46,6 +46,7 @@ class EnvironmentController extends Controller
             'telemetry' => $resolved['telemetry'] ?? [],
             'firebase' => $resolved['firebase'] ?? [],
             'push' => $resolved['push'] ?? [],
+            'profile_types' => $resolved['profile_types'] ?? [],
         ];
 
         return response()->json($payload);
