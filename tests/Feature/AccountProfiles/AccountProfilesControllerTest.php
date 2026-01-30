@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
+use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantSettings;
+use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\TenantProfileType;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCaseTenant;
@@ -32,6 +35,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
+    private AccountRoleTemplate $accountRoleTemplate;
     protected function setUp(): void
     {
         parent::setUp();
@@ -42,38 +46,98 @@ class AccountProfilesControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
+        $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
-        [$this->account] = $this->seedAccountWithRole([
+        AccountProfile::query()->delete();
+
+        [$this->account, $this->accountRoleTemplate] = $this->seedAccountWithRole([
             'account-users:view',
             'account-users:create',
             'account-users:update',
             'account-users:delete',
         ]);
-        TenantSettings::query()->delete();
-        TenantSettings::create([
-            'profile_type_registry' => [
-                [
-                    'type' => 'personal',
-                    'label' => 'Personal',
-                    'allowed_taxonomies' => [],
-                    'capabilities' => [
-                        'is_favoritable' => false,
-                        'is_poi_enabled' => false,
-                    ],
-                ],
-                [
-                    'type' => 'venue',
-                    'label' => 'Venue',
-                    'allowed_taxonomies' => [],
-                    'capabilities' => [
-                        'is_favoritable' => true,
-                        'is_poi_enabled' => true,
-                    ],
-                ],
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'personal',
+            'label' => 'Personal',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => false,
+                'is_poi_enabled' => false,
             ],
         ]);
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+    }
+
+    public function testAccountProfileIndexAccessibleForAccountUser(): void
+    {
+        $user = $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile Viewer',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $this->assertNotEmpty($response->json('data'));
+    }
+
+    public function testPublicAccountProfileIndexFiltersByProfileType(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile Personal',
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Account Secondary',
+            'document' => 'DOC-SECONDARY',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Profile Venue',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?filter[profile_type]=venue"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertNotEmpty($items);
+        $this->assertTrue($items->every(fn (array $item): bool => $item['profile_type'] === 'venue'));
+    }
+
+    public function testPublicAccountProfileIndexReturnsEmptyWhenNone(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::query()->delete();
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('data'));
     }
 
     public function testAccountProfileTypesReturnsRegistry(): void
@@ -178,19 +242,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function testAccountProfileUpdateRejectsInvalidProfileType(): void
     {
-        $created = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
-            [
-                'account_id' => (string) $this->account->_id,
-                'profile_type' => 'personal',
-                'display_name' => 'Profile A',
-            ],
-            $this->getHeaders()
-        );
-
-        $created->assertStatus(201);
-
-        $profileId = $created->json('data.id');
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile A',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+        $this->assertNotEmpty($profileId);
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
@@ -266,10 +327,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $venue->assertStatus(201);
 
+        $secondaryAccount = Account::create([
+            'name' => 'Account Secondary',
+            'document' => 'DOC-SECONDARY-' . uniqid(),
+        ]);
+
         $personal = $this->postJson(
             "{$this->base_tenant_api_admin}account_profiles",
             [
-                'account_id' => (string) $this->account->_id,
+                'account_id' => (string) $secondaryAccount->_id,
                 'profile_type' => 'personal',
                 'display_name' => 'Personal',
                 'location' => [
@@ -346,5 +412,23 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+    }
+
+    private function createAccountUser(array $permissions): AccountUser
+    {
+        $service = $this->app->make(AccountUserService::class);
+        $user = $service->create(
+            $this->account,
+            [
+                'name' => 'Account Viewer',
+                'email' => uniqid('account-viewer', true) . '@example.org',
+                'password' => 'Secret!234',
+            ],
+            (string) $this->accountRoleTemplate->_id
+        );
+
+        Sanctum::actingAs($user, $permissions);
+
+        return $user;
     }
 }

@@ -87,6 +87,11 @@ abstract class AbstractQueryService
     private function applyFilter(Builder $query, string $field, mixed $value): void
     {
         if (in_array($field, $this->stringFields(), true)) {
+            if (is_array($value)) {
+                $query->whereIn($field, $value);
+
+                return;
+            }
             $this->applyStringFilter($query, $field, (string) $value);
 
             return;

@@ -160,6 +160,15 @@ Route::prefix('account_profiles')
 Route::get('/account_profile_types', [AccountProfileTypesController::class, 'index'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
+Route::post('/account_profile_types', [AccountProfileTypesController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+Route::patch('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'update'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::delete('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'destroy'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
 Route::prefix('roles')->group(function () {
     Route::get('/', [TenantRolesController::class, 'index'])
         ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-roles:view']);

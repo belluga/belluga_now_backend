@@ -13,8 +13,11 @@ use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\TenantProfileType;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use MongoDB\BSON\ObjectId;
 
 class AccountProfilesController extends Controller
 {
@@ -39,6 +42,32 @@ class AccountProfilesController extends Controller
         return response()->json($paginator->toArray());
     }
 
+    public function publicIndex(Request $request): JsonResponse
+    {
+        $perPage = (int) $request->get('per_page', 15) ?: 15;
+        $allowedTypes = TenantProfileType::query()->pluck('type')->all();
+        $query = $request->query();
+        if (! empty($allowedTypes)) {
+            $existingFilters = (array) ($query['filter'] ?? []);
+            $requested = $existingFilters['profile_type'] ?? null;
+            if ($requested !== null) {
+                $requestedList = is_array($requested) ? $requested : [$requested];
+                $effectiveTypes = array_values(array_intersect($allowedTypes, $requestedList));
+            } else {
+                $effectiveTypes = $allowedTypes;
+            }
+
+            $query['filter'] = array_merge(
+                $existingFilters,
+                ['profile_type' => $effectiveTypes]
+            );
+        }
+
+        $paginator = $this->profileQueryService->paginate($query, false, $perPage);
+
+        return response()->json($paginator->toArray());
+    }
+
     public function store(AccountProfileStoreRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -58,18 +87,18 @@ class AccountProfilesController extends Controller
         ], 201);
     }
 
-    public function show(string $account_profile_id): JsonResponse
+    public function show(string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = AccountProfile::query()->where('_id', $account_profile_id)->firstOrFail();
+        $profile = $this->findProfileOrFail($account_profile_id);
 
         return response()->json([
             'data' => $this->formatProfile($profile),
         ]);
     }
 
-    public function update(AccountProfileUpdateRequest $request, string $account_profile_id): JsonResponse
+    public function update(AccountProfileUpdateRequest $request, string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = AccountProfile::query()->where('_id', $account_profile_id)->firstOrFail();
+        $profile = $this->findProfileOrFail($account_profile_id);
 
         $validated = $request->validated();
         $actor = $request->user();
@@ -85,17 +114,17 @@ class AccountProfilesController extends Controller
         ]);
     }
 
-    public function destroy(string $account_profile_id): JsonResponse
+    public function destroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = AccountProfile::query()->where('_id', $account_profile_id)->firstOrFail();
+        $profile = $this->findProfileOrFail($account_profile_id);
         $this->profileService->delete($profile);
 
         return response()->json();
     }
 
-    public function restore(string $account_profile_id): JsonResponse
+    public function restore(string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = AccountProfile::onlyTrashed()->where('_id', $account_profile_id)->firstOrFail();
+        $profile = $this->findProfileOrFail($account_profile_id, true);
         $restored = $this->profileService->restore($profile);
 
         return response()->json([
@@ -103,9 +132,9 @@ class AccountProfilesController extends Controller
         ]);
     }
 
-    public function forceDestroy(string $account_profile_id): JsonResponse
+    public function forceDestroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = AccountProfile::onlyTrashed()->where('_id', $account_profile_id)->firstOrFail();
+        $profile = $this->findProfileOrFail($account_profile_id, true);
         $this->profileService->forceDelete($profile);
 
         return response()->json();
@@ -164,5 +193,25 @@ class AccountProfilesController extends Controller
             'lat' => (float) $coordinates[1],
             'lng' => (float) $coordinates[0],
         ];
+    }
+
+    private function findProfileOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
+    {
+        $query = $onlyTrashed ? AccountProfile::onlyTrashed() : AccountProfile::query();
+        $profile = $query->find($profileId);
+
+        if (! $profile) {
+            try {
+                $profile = $query->where('_id', new ObjectId($profileId))->first();
+            } catch (\Throwable $exception) {
+                $profile = null;
+            }
+        }
+
+        if (! $profile) {
+            throw (new ModelNotFoundException())->setModel(AccountProfile::class, [$profileId]);
+        }
+
+        return $profile;
     }
 }

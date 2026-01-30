@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Models\Tenants\TenantSettings;
+use App\Models\Tenants\TenantProfileType;
 
 class AccountProfileRegistrySeeder
 {
@@ -46,29 +46,12 @@ class AccountProfileRegistrySeeder
 
     public function ensureDefaults(): void
     {
-        $settings = TenantSettings::current();
-        $registry = $settings?->profile_type_registry ?? [];
-
-        $types = collect($registry)
-            ->map(static fn (array $entry): ?string => $entry['type'] ?? null)
-            ->filter()
-            ->all();
-
-        if (in_array('personal', $types, true)) {
+        if (TenantProfileType::query()->where('type', 'personal')->exists()) {
             return;
         }
 
-        $merged = array_merge($registry, $this->defaults());
-
-        if (! $settings) {
-            TenantSettings::create([
-                'profile_type_registry' => $merged,
-            ]);
-
-            return;
+        foreach ($this->defaults() as $entry) {
+            TenantProfileType::create($entry);
         }
-
-        $settings->profile_type_registry = $merged;
-        $settings->save();
     }
 }

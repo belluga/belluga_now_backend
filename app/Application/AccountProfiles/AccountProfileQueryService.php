@@ -15,7 +15,7 @@ class AccountProfileQueryService extends AbstractQueryService
         $query = AccountProfile::query();
 
         return $this->buildPaginator($query, $queryParams, $includeArchived, $perPage)
-            ->through(static function (AccountProfile $profile): array {
+            ->through(function (AccountProfile $profile): array {
                 return [
                     'id' => (string) $profile->_id,
                     'account_id' => (string) $profile->account_id,

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\AgendaController;
 use App\Http\Api\v1\Controllers\EventStreamController;
 use App\Http\Api\v1\Controllers\EventsController;
@@ -12,4 +13,5 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::get('/events', [EventsController::class, 'index']);
         Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/events/stream', [EventStreamController::class, 'stream']);
+        Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
     });
