@@ -6,6 +6,8 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -34,7 +36,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
+        $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
         $this->seedAccountWithRole([
@@ -170,6 +172,32 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_favoritable', true);
     }
 
+    public function testProfileTypeUpdateUsesRouteParam(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'restaurante',
+            'label' => 'Restaurante',
+            'allowed_taxonomies' => ['cuisine', 'genre'],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => false,
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/restaurante",
+            [
+                'label' => 'Restaurante Atualizado',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.type', 'restaurante');
+        $response->assertJsonPath('data.label', 'Restaurante Atualizado');
+    }
+
     public function testProfileTypeDelete(): void
     {
         TenantProfileType::query()->delete();
@@ -196,5 +224,27 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $this->assertCount(0, $response->json('data'));
+    }
+
+    private function initializeSystem(): void
+    {
+        $service = $this->app->make(SystemInitializationService::class);
+
+        $payload = new InitializationPayload(
+            landlord: ['name' => 'Landlord HQ'],
+            tenant: ['name' => 'Tenant Zeta', 'subdomain' => 'tenant-zeta'],
+            role: ['name' => 'Root', 'permissions' => ['*']],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            themeDataSettings: [
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#fff',
+                'secondary_seed_color' => '#000',
+            ],
+            logoSettings: ['light_logo_uri' => '/logos/light.png'],
+            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
+            tenantDomains: ['tenant-zeta.test']
+        );
+
+        $service->initialize($payload);
     }
 }

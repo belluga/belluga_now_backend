@@ -35,6 +35,7 @@ class AccountProfileRegistryManagementService
      */
     public function update(string $type, array $payload): array
     {
+        $type = trim($type);
         $model = TenantProfileType::query()->where('type', $type)->first();
         if (! $model) {
             abort(404, 'Profile type not found.');
@@ -49,6 +50,7 @@ class AccountProfileRegistryManagementService
 
     public function delete(string $type): void
     {
+        $type = trim($type);
         $model = TenantProfileType::query()->where('type', $type)->first();
         if (! $model) {
             abort(404, 'Profile type not found.');

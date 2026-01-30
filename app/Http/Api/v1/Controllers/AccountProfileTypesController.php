@@ -34,10 +34,10 @@ class AccountProfileTypesController extends Controller
     }
 
     public function update(
-        AccountProfileTypeUpdateRequest $request,
-        string $profile_type
+        AccountProfileTypeUpdateRequest $request
     ): JsonResponse {
-        $entry = $this->managementService->update($profile_type, $request->validated());
+        $profileType = (string) $request->route('profile_type', '');
+        $entry = $this->managementService->update($profileType, $request->validated());
 
         return response()->json(['data' => $entry]);
     }
