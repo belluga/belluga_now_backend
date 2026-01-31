@@ -262,6 +262,45 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
+    public function testAccountProfileUpdateReplacesCoverUpload(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Profile Replace Cover',
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.id');
+        $originalCoverUrl = $createResponse->json('data.cover_url');
+        $this->assertNotEmpty($originalCoverUrl);
+        $originalPath = $this->assertMediaStored($profileId, 'cover');
+
+        $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                '_method' => 'PATCH',
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1400, 700),
+            ],
+        );
+
+        $updateResponse->assertStatus(200);
+        $newCoverUrl = $updateResponse->json('data.cover_url');
+        $this->assertNotEmpty($newCoverUrl);
+
+        $this->assertMediaUrlHealthy($newCoverUrl);
+        $this->assertMediaStored($profileId, 'cover');
+        if ($originalPath) {
+            Storage::disk('public')->assertMissing($originalPath);
+        }
+    }
+
     public function testAccountProfileRemoveAvatarAndCoverClearsMedia(): void
     {
         Storage::fake('public');

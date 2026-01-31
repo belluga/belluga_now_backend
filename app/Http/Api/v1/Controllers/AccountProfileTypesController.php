@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Api\v1\Requests\AccountProfileTypeStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileTypeUpdateRequest;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AccountProfileTypesController extends Controller
 {
@@ -42,9 +43,10 @@ class AccountProfileTypesController extends Controller
         return response()->json(['data' => $entry]);
     }
 
-    public function destroy(string $profile_type): JsonResponse
+    public function destroy(Request $request): JsonResponse
     {
-        $this->managementService->delete($profile_type);
+        $profileType = (string) $request->route('profile_type', '');
+        $this->managementService->delete($profileType);
 
         return response()->json([]);
     }
