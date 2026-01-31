@@ -21,7 +21,5 @@ class TenantProfileType extends Model
     ];
 
     protected $casts = [
-        'allowed_taxonomies' => 'array',
-        'capabilities' => 'array',
     ];
 }
