@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileGeoQueryService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileOwnershipService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
@@ -23,6 +24,7 @@ class AccountProfilesController extends Controller
 {
     public function __construct(
         private readonly AccountProfileManagementService $profileService,
+        private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileGeoQueryService $geoQueryService,
         private readonly AccountProfileOwnershipService $ownershipService,
@@ -71,6 +73,7 @@ class AccountProfilesController extends Controller
     public function store(AccountProfileStoreRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        unset($validated['avatar'], $validated['cover']);
         $actor = $request->user();
 
         if ($actor) {
@@ -81,6 +84,7 @@ class AccountProfilesController extends Controller
         }
 
         $profile = $this->profileService->create($validated);
+        $this->mediaService->applyUploads($request, $profile);
 
         return response()->json([
             'data' => $this->formatProfile($profile),
@@ -101,6 +105,7 @@ class AccountProfilesController extends Controller
         $profile = $this->findProfileOrFail($account_profile_id);
 
         $validated = $request->validated();
+        unset($validated['avatar'], $validated['cover']);
         $actor = $request->user();
         if ($actor) {
             $validated['updated_by'] = (string) $actor->_id;
@@ -108,6 +113,7 @@ class AccountProfilesController extends Controller
         }
 
         $updated = $this->profileService->update($profile, $validated);
+        $this->mediaService->applyUploads($request, $updated);
 
         return response()->json([
             'data' => $this->formatProfile($updated),

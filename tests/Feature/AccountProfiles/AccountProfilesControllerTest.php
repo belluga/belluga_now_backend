@@ -14,6 +14,8 @@ use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCaseTenant;
@@ -191,6 +193,109 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $created->assertStatus(201);
         $created->assertJsonPath('data.account_id', (string) $this->account->_id);
         $created->assertJsonPath('data.profile_type', 'venue');
+    }
+
+    public function testAccountProfileCreateStoresAvatarAndCoverUploads(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Profile Media',
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $avatarUrl = $response->json('data.avatar_url');
+        $coverUrl = $response->json('data.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+
+        $profileId = (string) $response->json('data.id');
+        $this->assertMediaUrlHealthy($avatarUrl);
+        $this->assertMediaUrlHealthy($coverUrl);
+        $this->assertMediaStored($profileId, 'avatar');
+        $this->assertMediaStored($profileId, 'cover');
+    }
+
+    public function testAccountProfileUpdateReplacesAvatarUpload(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Profile Replace',
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.id');
+        $originalAvatarUrl = $createResponse->json('data.avatar_url');
+        $this->assertNotEmpty($originalAvatarUrl);
+        $originalPath = $this->assertMediaStored($profileId, 'avatar');
+
+        $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                '_method' => 'PATCH',
+                'avatar' => UploadedFile::fake()->image('avatar.jpg', 220, 220),
+            ],
+        );
+
+        $updateResponse->assertStatus(200);
+        $newAvatarUrl = $updateResponse->json('data.avatar_url');
+        $this->assertNotEmpty($newAvatarUrl);
+
+        $this->assertMediaUrlHealthy($newAvatarUrl);
+        $this->assertMediaStored($profileId, 'avatar');
+        if ($originalPath) {
+            Storage::disk('public')->assertMissing($originalPath);
+        }
+    }
+
+    public function testAccountProfileRemoveAvatarAndCoverClearsMedia(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Profile Remove',
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.id');
+        $avatarPath = $this->assertMediaStored($profileId, 'avatar');
+        $coverPath = $this->assertMediaStored($profileId, 'cover');
+
+        $removeResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'remove_avatar' => true,
+                'remove_cover' => true,
+            ],
+            $this->getHeaders()
+        );
+
+        $removeResponse->assertStatus(200);
+        $this->assertNull($removeResponse->json('data.avatar_url'));
+        $this->assertNull($removeResponse->json('data.cover_url'));
+        Storage::disk('public')->assertMissing($avatarPath);
+        Storage::disk('public')->assertMissing($coverPath);
     }
 
     public function testAccountProfileCreateRejectsUnknownProfileType(): void
@@ -430,5 +535,41 @@ class AccountProfilesControllerTest extends TestCaseTenant
         Sanctum::actingAs($user, $permissions);
 
         return $user;
+    }
+
+    private function assertMediaUrlHealthy(?string $url): void
+    {
+        $this->assertNotEmpty($url);
+        $this->assertStringContainsString(
+            "{$this->base_tenant_url}account-profiles/",
+            $url
+        );
+        $this->assertStringContainsString('v=', $url);
+
+        $response = $this->get($url);
+        $response->assertStatus(200);
+    }
+
+    private function assertMediaStored(string $profileId, string $kind): string
+    {
+        $tenant = Tenant::current();
+        $tenantSlug = $tenant?->slug ?? $this->tenant->subdomain;
+        $directory = "tenants/{$tenantSlug}/account_profiles/{$profileId}";
+        $files = Storage::disk('public')->files($directory);
+        $match = collect($files)->first(
+            fn (string $path): bool => str_contains(basename($path), "{$kind}.")
+        );
+        $this->assertNotEmpty($match);
+
+        return $match;
+    }
+
+    private function getMultipartHeaders(): array
+    {
+        $headers = $this->getHeaders();
+        unset($headers['Content-Type']);
+        $headers['Accept'] = 'application/json';
+
+        return $headers;
     }
 }

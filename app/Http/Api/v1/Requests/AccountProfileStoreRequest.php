@@ -30,6 +30,8 @@ class AccountProfileStoreRequest extends FormRequest
             'taxonomy_terms.*.type' => 'required_with:taxonomy_terms|string|max:' . InputConstraints::NAME_MAX,
             'taxonomy_terms.*.value' => 'required_with:taxonomy_terms|string|max:' . InputConstraints::NAME_MAX,
             'bio' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:' . InputConstraints::IMAGE_MAX_KB,
+            'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:' . InputConstraints::IMAGE_MAX_KB,
             'avatar_url' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'cover_url' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
         ];
