@@ -22,6 +22,11 @@ class AccountProfileTypeStoreRequest extends FormRequest
             'capabilities' => ['sometimes', 'array'],
             'capabilities.is_favoritable' => ['sometimes', 'boolean'],
             'capabilities.is_poi_enabled' => ['sometimes', 'boolean'],
+            'capabilities.has_bio' => ['sometimes', 'boolean'],
+            'capabilities.has_taxonomies' => ['sometimes', 'boolean'],
+            'capabilities.has_avatar' => ['sometimes', 'boolean'],
+            'capabilities.has_cover' => ['sometimes', 'boolean'],
+            'capabilities.has_events' => ['sometimes', 'boolean'],
         ];
     }
 }

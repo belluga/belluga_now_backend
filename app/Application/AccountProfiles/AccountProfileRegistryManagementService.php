@@ -74,6 +74,11 @@ class AccountProfileRegistryManagementService
             'capabilities' => [
                 'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
+                'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
+                'has_taxonomies' => (bool) ($capabilities['has_taxonomies'] ?? false),
+                'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
+                'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
+                'has_events' => (bool) ($capabilities['has_events'] ?? false),
             ],
         ];
     }
@@ -103,6 +108,21 @@ class AccountProfileRegistryManagementService
                 'is_poi_enabled' => array_key_exists('is_poi_enabled', $capabilities)
                     ? (bool) $capabilities['is_poi_enabled']
                     : (bool) ($currentCapabilities['is_poi_enabled'] ?? false),
+                'has_bio' => array_key_exists('has_bio', $capabilities)
+                    ? (bool) $capabilities['has_bio']
+                    : (bool) ($currentCapabilities['has_bio'] ?? false),
+                'has_taxonomies' => array_key_exists('has_taxonomies', $capabilities)
+                    ? (bool) $capabilities['has_taxonomies']
+                    : (bool) ($currentCapabilities['has_taxonomies'] ?? false),
+                'has_avatar' => array_key_exists('has_avatar', $capabilities)
+                    ? (bool) $capabilities['has_avatar']
+                    : (bool) ($currentCapabilities['has_avatar'] ?? false),
+                'has_cover' => array_key_exists('has_cover', $capabilities)
+                    ? (bool) $capabilities['has_cover']
+                    : (bool) ($currentCapabilities['has_cover'] ?? false),
+                'has_events' => array_key_exists('has_events', $capabilities)
+                    ? (bool) $capabilities['has_events']
+                    : (bool) ($currentCapabilities['has_events'] ?? false),
             ],
         ];
     }
@@ -139,6 +159,11 @@ class AccountProfileRegistryManagementService
             'capabilities' => [
                 'is_favoritable' => (bool) ($model->capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),
+                'has_bio' => (bool) ($model->capabilities['has_bio'] ?? false),
+                'has_taxonomies' => (bool) ($model->capabilities['has_taxonomies'] ?? false),
+                'has_avatar' => (bool) ($model->capabilities['has_avatar'] ?? false),
+                'has_cover' => (bool) ($model->capabilities['has_cover'] ?? false),
+                'has_events' => (bool) ($model->capabilities['has_events'] ?? false),
             ],
         ];
     }
