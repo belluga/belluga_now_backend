@@ -6,28 +6,28 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountRoleTemplateService;
+use App\Application\Accounts\AccountRoleTemplateQueryService;
 use App\Http\Api\v1\Requests\AccountRoleTemplatesStoreRequest;
 use App\Http\Api\v1\Requests\AccountRolesDeleteRequest;
 use App\Http\Api\v1\Requests\AccountRolesUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use MongoDB\BSON\ObjectId;
 
 class AccountRolesTemplatesController extends Controller
 {
     public function __construct(
         private readonly AccountRoleTemplateService $roleTemplateService,
+        private readonly AccountRoleTemplateQueryService $roleTemplateQueryService,
         private readonly TelemetryEmitter $telemetry
     ) {
     }
 
     public function index(Request $request): JsonResponse
     {
-        $roles = AccountRoleTemplate::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->paginate(15);
+        $perPage = (int) $request->get('per_page', 15) ?: 15;
+        $roles = $this->roleTemplateQueryService->paginate($request->boolean('archived'), $perPage);
 
         return response()->json($roles);
     }
@@ -65,9 +65,7 @@ class AccountRolesTemplatesController extends Controller
         $role_id = (string) $request->route('role_id');
         $account = Account::current();
 
-        $role = $account->roleTemplates()
-            ->where('_id', new ObjectId($role_id))
-            ->firstOrFail();
+        $role = $this->roleTemplateQueryService->findByIdForAccountOrFail($account, $role_id);
 
         return response()->json([
             'data' => $role,
@@ -78,9 +76,10 @@ class AccountRolesTemplatesController extends Controller
     {
         $account = Account::current();
 
-        $role = $account->roleTemplates()
-            ->where('_id', new ObjectId($request->route('role_id')))
-            ->firstOrFail();
+        $role = $this->roleTemplateQueryService->findByIdForAccountOrFail(
+            $account,
+            (string) $request->route('role_id')
+        );
 
         if (empty($request->validated())) {
             return response()->json([
@@ -130,13 +129,14 @@ class AccountRolesTemplatesController extends Controller
 
         $account = Account::current();
 
-        $roleToDelete = $account->roleTemplates()
-            ->where('_id', new ObjectId($request->route('role_id')))
-            ->firstOrFail();
-
-        $fallbackRole = $account->roleTemplates()
-            ->where('_id', new ObjectId($request->validated()['background_role_id']))
-            ->firstOrFail();
+        $roleToDelete = $this->roleTemplateQueryService->findByIdForAccountOrFail(
+            $account,
+            (string) $request->route('role_id')
+        );
+        $fallbackRole = $this->roleTemplateQueryService->findByIdForAccountOrFail(
+            $account,
+            (string) $request->validated()['background_role_id']
+        );
 
         try {
             $this->roleTemplateService->delete($account, $roleToDelete, $fallbackRole);

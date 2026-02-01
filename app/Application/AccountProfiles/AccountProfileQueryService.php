@@ -6,7 +6,10 @@ namespace App\Application\AccountProfiles;
 
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\TenantProfileType;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use MongoDB\BSON\ObjectId;
 
 class AccountProfileQueryService extends AbstractQueryService
 {
@@ -32,6 +35,49 @@ class AccountProfileQueryService extends AbstractQueryService
                     'deleted_at' => $profile->deleted_at?->toJSON(),
                 ];
             });
+    }
+
+    public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
+    {
+        $allowedTypes = TenantProfileType::query()->pluck('type')->all();
+        $query = $queryParams;
+        if (! empty($allowedTypes)) {
+            $existingFilters = (array) ($query['filter'] ?? []);
+            $requested = $existingFilters['profile_type'] ?? null;
+            if ($requested !== null) {
+                $requestedList = is_array($requested) ? $requested : [$requested];
+                $effectiveTypes = array_values(array_intersect($allowedTypes, $requestedList));
+            } else {
+                $effectiveTypes = $allowedTypes;
+            }
+
+            $query['filter'] = array_merge(
+                $existingFilters,
+                ['profile_type' => $effectiveTypes]
+            );
+        }
+
+        return $this->paginate($query, false, $perPage);
+    }
+
+    public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
+    {
+        $query = $onlyTrashed ? AccountProfile::onlyTrashed() : AccountProfile::query();
+        $profile = $query->find($profileId);
+
+        if (! $profile) {
+            try {
+                $profile = $query->where('_id', new ObjectId($profileId))->first();
+            } catch (\Throwable) {
+                $profile = null;
+            }
+        }
+
+        if (! $profile) {
+            throw (new ModelNotFoundException())->setModel(AccountProfile::class, [$profileId]);
+        }
+
+        return $profile;
     }
 
     /**

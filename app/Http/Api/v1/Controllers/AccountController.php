@@ -6,21 +6,24 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountManagementService;
+use App\Application\Accounts\AccountQueryService;
+use App\Application\Accounts\AccountRoleTemplateQueryService;
+use App\Application\Accounts\AccountUserQueryService;
 use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\AccountUpdateRequest;
 use App\Http\Api\v1\Requests\AccountUserAttachRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountRoleTemplate;
-use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use MongoDB\BSON\ObjectId;
 
 class AccountController extends Controller
 {
     public function __construct(
         private readonly AccountManagementService $accountService,
+        private readonly AccountQueryService $accountQueryService,
+        private readonly AccountUserQueryService $accountUserQueryService,
+        private readonly AccountRoleTemplateQueryService $accountRoleTemplateQueryService,
         private readonly TelemetryEmitter $telemetry
     ) {
     }
@@ -73,19 +76,10 @@ class AccountController extends Controller
     public function show(Request $request): JsonResponse
     {
         $account_slug = (string) $request->route('account_slug');
-        $account = Account::where('slug', $account_slug)->firstOrFail();
+        $account = $this->accountQueryService->findBySlugOrFail($account_slug);
 
         return response()->json([
-            'data' => [
-                'id' => (string) $account->_id,
-                'name' => $account->name,
-                'slug' => $account->slug,
-                'document' => $account->document,
-                'organization_id' => $account->organization_id ?? null,
-                'created_at' => $account->created_at?->toJSON(),
-                'updated_at' => $account->updated_at?->toJSON(),
-                'deleted_at' => $account->deleted_at?->toJSON(),
-            ],
+            'data' => $this->accountQueryService->format($account),
         ]);
     }
 
@@ -94,7 +88,7 @@ class AccountController extends Controller
     ): JsonResponse
     {
         $account_slug = (string) $request->route('account_slug');
-        $account = Account::where('slug', $account_slug)->firstOrFail();
+        $account = $this->accountQueryService->findBySlugOrFail($account_slug);
 
         $validated = $request->validated();
         $actor = $request->user();
@@ -119,23 +113,14 @@ class AccountController extends Controller
         }
 
         return response()->json([
-            'data' => [
-                'id' => (string) $updated->_id,
-                'name' => $updated->name,
-                'slug' => $updated->slug,
-                'document' => $updated->document,
-                'organization_id' => $updated->organization_id ?? null,
-                'created_at' => $updated->created_at?->toJSON(),
-                'updated_at' => $updated->updated_at?->toJSON(),
-                'deleted_at' => $updated->deleted_at?->toJSON(),
-            ],
+            'data' => $this->accountQueryService->format($updated),
         ]);
     }
 
     public function destroy(Request $request): JsonResponse
     {
         $account_slug = (string) $request->route('account_slug');
-        $account = Account::where('slug', $account_slug)->firstOrFail();
+        $account = $this->accountQueryService->findBySlugOrFail($account_slug);
 
         $this->accountService->delete($account);
 
@@ -157,7 +142,7 @@ class AccountController extends Controller
     public function restore(Request $request): JsonResponse
     {
         $account_slug = (string) $request->route('account_slug');
-        $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
+        $account = $this->accountQueryService->findBySlugOrFail($account_slug, true);
 
         $restored = $this->accountService->restore($account);
 
@@ -181,7 +166,7 @@ class AccountController extends Controller
     public function forceDestroy(Request $request): JsonResponse
     {
         $account_slug = (string) $request->route('account_slug');
-        $account = Account::onlyTrashed()->where('slug', $account_slug)->firstOrFail();
+        $account = $this->accountQueryService->findBySlugOrFail($account_slug, true);
 
         $this->accountService->forceDelete($account);
 
@@ -209,13 +194,12 @@ class AccountController extends Controller
         $role_id = (string) $request->route('role_id');
         $account = Account::current();
 
-        $user = AccountUser::query()
-            ->where('_id', new ObjectId($user_id))
-            ->firstOrFail();
+        if (! $account) {
+            abort(401, 'Account context not available.');
+        }
 
-        $role = $account->roleTemplates()
-            ->where('_id', new ObjectId($role_id))
-            ->firstOrFail();
+        $user = $this->accountUserQueryService->findByIdForAccountOrFail($account, $user_id);
+        $role = $this->accountRoleTemplateQueryService->findByIdForAccountOrFail($account, $role_id);
 
         $method = strtolower($request->method());
 

@@ -9,7 +9,6 @@ use App\Application\Organizations\OrganizationQueryService;
 use App\Http\Api\v1\Requests\OrganizationStoreRequest;
 use App\Http\Api\v1\Requests\OrganizationUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Tenants\Organization;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -45,26 +44,26 @@ class OrganizationsController extends Controller
 
     public function show(string $organizationId): JsonResponse
     {
-        $organization = Organization::query()->where('_id', $organizationId)->firstOrFail();
+        $organization = $this->organizationQueryService->findByIdOrFail($organizationId);
 
         return response()->json([
-            'data' => $organization,
+            'data' => $this->organizationQueryService->format($organization),
         ]);
     }
 
     public function update(OrganizationUpdateRequest $request, string $organizationId): JsonResponse
     {
-        $organization = Organization::query()->where('_id', $organizationId)->firstOrFail();
+        $organization = $this->organizationQueryService->findByIdOrFail($organizationId);
         $updated = $this->organizationService->update($organization, $request->validated());
 
         return response()->json([
-            'data' => $updated,
+            'data' => $this->organizationQueryService->format($updated),
         ]);
     }
 
     public function destroy(string $organizationId): JsonResponse
     {
-        $organization = Organization::query()->where('_id', $organizationId)->firstOrFail();
+        $organization = $this->organizationQueryService->findByIdOrFail($organizationId);
         $this->organizationService->delete($organization);
 
         return response()->json();
@@ -72,17 +71,17 @@ class OrganizationsController extends Controller
 
     public function restore(string $organizationId): JsonResponse
     {
-        $organization = Organization::onlyTrashed()->where('_id', $organizationId)->firstOrFail();
+        $organization = $this->organizationQueryService->findByIdOrFail($organizationId, true);
         $restored = $this->organizationService->restore($organization);
 
         return response()->json([
-            'data' => $restored,
+            'data' => $this->organizationQueryService->format($restored),
         ]);
     }
 
     public function forceDestroy(string $organizationId): JsonResponse
     {
-        $organization = Organization::onlyTrashed()->where('_id', $organizationId)->firstOrFail();
+        $organization = $this->organizationQueryService->findByIdOrFail($organizationId, true);
         $this->organizationService->forceDelete($organization);
 
         return response()->json();

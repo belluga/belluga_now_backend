@@ -45,6 +45,30 @@ class AccountQueryService extends AbstractQueryService
             });
     }
 
+    public function findBySlugOrFail(string $slug, bool $onlyTrashed = false): Account
+    {
+        $query = $onlyTrashed ? Account::onlyTrashed() : Account::query();
+
+        return $query->where('slug', $slug)->firstOrFail();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function format(Account $account): array
+    {
+        return [
+            'id' => (string) $account->_id,
+            'name' => $account->name,
+            'slug' => $account->slug,
+            'document' => $account->document,
+            'organization_id' => $account->organization_id ?? null,
+            'created_at' => $account->created_at?->toJSON(),
+            'updated_at' => $account->updated_at?->toJSON(),
+            'deleted_at' => $account->deleted_at?->toJSON(),
+        ];
+    }
+
     protected function baseSearchableFields(): array
     {
         return array_diff((new Account())->getFillable(), ['document']);

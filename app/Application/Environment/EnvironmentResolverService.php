@@ -70,13 +70,15 @@ class EnvironmentResolverService
             }
         }
 
+        $domains = $tenant->domains()->get()->all();
+
         return [
             'tenant_id' => (string) $tenant->_id,
             'name' => $tenant->name,
             'type' => 'tenant',
             'subdomain' => $tenant->subdomain,
             'main_domain' => $mainDomain,
-            'domains' => $tenant->domains()->get()->all(),
+            'domains' => $this->normalizeDomains($domains),
             'app_domains' => $tenant->app_domains,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
@@ -137,6 +139,23 @@ class EnvironmentResolverService
         }
 
         return $branding['pwa_icon']['icon512_uri'] ?? null;
+    }
+
+    /**
+     * @param array<int, mixed> $domains
+     * @return array<int, string>
+     */
+    private function normalizeDomains(array $domains): array
+    {
+        $normalized = array_map(static function ($domain): string {
+            if (is_string($domain)) {
+                return $domain;
+            }
+
+            return (string) ($domain['path'] ?? $domain->path ?? '');
+        }, $domains);
+
+        return array_values(array_filter($normalized, static fn (string $domain): bool => $domain !== ''));
     }
 
     private function forceHttps(?string $domain): ?string

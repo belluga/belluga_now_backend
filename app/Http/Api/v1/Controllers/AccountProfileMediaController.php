@@ -4,20 +4,19 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Http\Controllers\Controller;
-use App\Models\Tenants\AccountProfile;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use MongoDB\BSON\ObjectId;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class AccountProfileMediaController extends Controller
 {
     public function __construct(
-        private readonly AccountProfileMediaService $mediaService
+        private readonly AccountProfileMediaService $mediaService,
+        private readonly AccountProfileQueryService $profileQueryService
     ) {
     }
 
@@ -33,7 +32,7 @@ class AccountProfileMediaController extends Controller
 
     private function serve(Request $request, string $accountProfileId, string $kind): Response
     {
-        $profile = $this->findProfileOrFail($accountProfileId);
+        $profile = $this->profileQueryService->findOrFail($accountProfileId);
         $path = $this->mediaService->resolveMediaPath($profile, $kind);
 
         if ($path === null) {
@@ -56,26 +55,5 @@ class AccountProfileMediaController extends Controller
         }
 
         return $response;
-    }
-
-    private function findProfileOrFail(string $profileId): AccountProfile
-    {
-        $profile = AccountProfile::query()->find($profileId);
-
-        if (! $profile) {
-            try {
-                $profile = AccountProfile::query()
-                    ->where('_id', new ObjectId($profileId))
-                    ->first();
-            } catch (\Throwable $exception) {
-                $profile = null;
-            }
-        }
-
-        if (! $profile) {
-            throw (new ModelNotFoundException())->setModel(AccountProfile::class, [$profileId]);
-        }
-
-        return $profile;
     }
 }

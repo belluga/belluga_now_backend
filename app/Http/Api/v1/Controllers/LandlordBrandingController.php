@@ -2,9 +2,9 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Branding\LandlordBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
 use App\Models\Landlord\Landlord;
-use App\Support\Helpers\ArrayReplaceEmptyAware;
 use App\Traits\HasLogoFiles;
 use Illuminate\Http\JsonResponse;
 
@@ -13,6 +13,11 @@ class LandlordBrandingController
 
     use HasLogoFiles;
 
+    public function __construct(
+        private readonly LandlordBrandingManagementService $brandingService
+    ) {
+    }
+
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
         $landlord = Landlord::singleton();
@@ -20,24 +25,23 @@ class LandlordBrandingController
 
         $uploadedLogoUrls = $this->processLogoUploads($request);
 
-        $brandingArray = $newData;
-        $brandingArray['logo_settings'] = $uploadedLogoUrls;
-
+        $pwaVariants = [];
         if ($request->hasFile("logo_settings.pwa_icon")) {
-            $brandingArray['pwa_icon'] = $this->generatePwaIconVariants(
+            $pwaVariants = $this->generatePwaIconVariants(
                 sourceFile: $request->file("logo_settings.pwa_icon"),
             );
         }
 
-        $landlord->branding_data = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
-            mainArray:  $landlord->branding_data,
-            overrideArray: $brandingArray
+        $brandingData = $this->brandingService->update(
+            $landlord,
+            $newData,
+            $uploadedLogoUrls,
+            $pwaVariants
         );
-        $landlord->save();
 
         return response()->json([
             'message' => 'Branding data updated successfully.',
-            'branding_data' => $landlord->branding_data,
+            'branding_data' => $brandingData,
         ]);
     }
 }
