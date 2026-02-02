@@ -14,6 +14,8 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Event;
+use App\Models\Tenants\Taxonomy;
+use App\Models\Tenants\TaxonomyTerm;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -57,6 +59,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         Event::query()->delete();
+        TaxonomyTerm::query()->delete();
+        Taxonomy::query()->delete();
 
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
@@ -74,6 +78,19 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->accountEventsBase = "{$this->base_api_tenant}accounts/{$this->account->slug}/events";
         $this->tenantAdminEventsBase = "{$this->base_tenant_api_admin}events";
+
+        $taxonomy = Taxonomy::create([
+            'slug' => 'event_style',
+            'name' => 'Event Style',
+            'applies_to' => ['event'],
+            'icon' => 'celebration',
+            'color' => '#FFAA00',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'showcase',
+            'name' => 'Showcase',
+        ]);
     }
 
     public function testEventCreateStoresEvent(): void
@@ -87,6 +104,34 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.venue_id', (string) $this->venue->_id);
         $response->assertJsonPath('data.publication.status', 'published');
         $this->assertSame($payload['type']['slug'], $response->json('data.type.slug'));
+    }
+
+    public function testEventCreateRejectsUnknownTaxonomy(): void
+    {
+        $payload = $this->makeEventPayload([
+            'taxonomy_terms' => [
+                ['type' => 'unknown', 'value' => 'value'],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+    }
+
+    public function testEventCreateAcceptsAllowedTaxonomy(): void
+    {
+        $payload = $this->makeEventPayload([
+            'taxonomy_terms' => [
+                ['type' => 'event_style', 'value' => 'showcase'],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.taxonomy_terms.0.type', 'event_style');
+        $response->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
     }
 
     public function testEventCreateRejectsScheduledWithoutPublishAt(): void
@@ -115,8 +160,9 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function testEventCreateRejectsVenueWithoutLocation(): void
     {
+        [$extraAccount] = $this->seedAccountWithRole(['*']);
         $venue = AccountProfile::create([
-            'account_id' => (string) $this->account->_id,
+            'account_id' => (string) $extraAccount->_id,
             'profile_type' => 'venue',
             'display_name' => 'No Location Venue',
             'taxonomy_terms' => [],
@@ -167,9 +213,11 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function testEventUpdateChangesFields(): void
     {
-        $event = $this->createEvent();
-
-        $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
+        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $createResponse->assertStatus(201);
+        $eventId = $createResponse->json('data.id');
+        $this->assertNotEmpty($eventId);
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Updated Title',
             'publication' => ['status' => 'ended'],
         ]);

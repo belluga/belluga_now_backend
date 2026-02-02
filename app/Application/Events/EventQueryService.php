@@ -12,6 +12,7 @@ use App\Models\Tenants\TenantSettings;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
+use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Laravel\Eloquent\Collection;
@@ -106,7 +107,10 @@ class EventQueryService
     public function findByIdOrSlug(string $eventId): ?Event
     {
         if ($this->looksLikeObjectId($eventId)) {
-            $byId = Event::query()->where('_id', $eventId)->first();
+            $byId = Event::query()->where('_id', new ObjectId($eventId))->first();
+            if (! $byId) {
+                $byId = Event::query()->where('_id', $eventId)->first();
+            }
             if ($byId) {
                 return $byId;
             }
@@ -725,6 +729,7 @@ class EventQueryService
         $thumb = $this->normalizeArray($event->thumb ?? null);
         $artists = $this->normalizeArray($event->artists ?? []);
         $tags = $this->normalizeArray($event->tags ?? []);
+        $taxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
 
         $artists = array_map(function ($artist): array {
             $payload = $this->normalizeArray($artist);
@@ -788,6 +793,7 @@ class EventQueryService
             'sent_invites' => $this->normalizeArray($event->sent_invites ?? []),
             'friends_going' => $this->normalizeArray($event->friends_going ?? []),
             'tags' => array_values(array_map('strval', $tags)),
+            'taxonomy_terms' => $taxonomyTerms,
         ];
     }
 

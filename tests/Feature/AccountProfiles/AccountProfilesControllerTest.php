@@ -13,6 +13,8 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\Taxonomy;
+use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -52,6 +54,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         AccountProfile::query()->delete();
+        TaxonomyTerm::query()->delete();
+        Taxonomy::query()->delete();
 
         [$this->account, $this->accountRoleTemplate] = $this->seedAccountWithRole([
             'account-users:view',
@@ -72,11 +76,24 @@ class AccountProfilesControllerTest extends TestCaseTenant
         TenantProfileType::create([
             'type' => 'venue',
             'label' => 'Venue',
-            'allowed_taxonomies' => [],
+            'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
             ],
+        ]);
+
+        $taxonomy = Taxonomy::create([
+            'slug' => 'cuisine',
+            'name' => 'Cuisine',
+            'applies_to' => ['account_profile', 'event', 'static_asset'],
+            'icon' => 'restaurant',
+            'color' => '#FFAA00',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'italian',
+            'name' => 'Italian',
         ]);
     }
 
@@ -221,6 +238,70 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaUrlHealthy($coverUrl);
         $this->assertMediaStored($profileId, 'avatar');
         $this->assertMediaStored($profileId, 'cover');
+    }
+
+    public function testAccountProfileCreateRejectsUnknownTaxonomy(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'venue',
+                'display_name' => 'Venue Taxonomy',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+                'taxonomy_terms' => [
+                    ['type' => 'unknown', 'value' => 'value'],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+    }
+
+    public function testAccountProfileCreateRejectsDisallowedTaxonomy(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Personal Taxonomy',
+                'taxonomy_terms' => [
+                    ['type' => 'cuisine', 'value' => 'italian'],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+    }
+
+    public function testAccountProfileCreateAcceptsAllowedTaxonomy(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles",
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'venue',
+                'display_name' => 'Venue Taxonomy',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+                'taxonomy_terms' => [
+                    ['type' => 'cuisine', 'value' => 'italian'],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.taxonomy_terms.0.type', 'cuisine');
+        $response->assertJsonPath('data.taxonomy_terms.0.value', 'italian');
     }
 
     public function testAccountProfileUpdateReplacesAvatarUpload(): void

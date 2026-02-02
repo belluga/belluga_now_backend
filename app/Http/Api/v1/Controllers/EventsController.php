@@ -68,13 +68,15 @@ class EventsController extends Controller
         $event = $this->eventManagementService->create($payload);
 
         return response()->json([
-            'data' => $this->formatManagementEvent($event),
+            'data' => $this->eventQueryService->formatManagementEvent($event),
         ], 201);
     }
 
     public function update(EventUpdateRequest $request, string $event_id): JsonResponse
     {
-        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        $eventId = (string) ($request->route('event_id') ?? $event_id);
+
+        $event = $this->eventQueryService->findByIdOrSlug($eventId);
 
         if (! $event) {
             abort(404, 'Event not found.');
@@ -94,7 +96,8 @@ class EventsController extends Controller
 
     public function destroy(string $event_id): JsonResponse
     {
-        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        $eventId = (string) (request()->route('event_id') ?? $event_id);
+        $event = $this->eventQueryService->findByIdOrSlug($eventId);
 
         if (! $event) {
             abort(404, 'Event not found.');
@@ -112,7 +115,8 @@ class EventsController extends Controller
 
     public function show(Request $request, string $event_id): JsonResponse
     {
-        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        $eventId = (string) ($request->route('event_id') ?? $event_id);
+        $event = $this->eventQueryService->findByIdOrSlug($eventId);
 
         if (! $event) {
             abort(404, 'Event not found.');

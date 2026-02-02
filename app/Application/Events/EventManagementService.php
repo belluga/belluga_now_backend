@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Events;
 
+use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\Event;
 use Illuminate\Support\Carbon;
@@ -12,16 +13,19 @@ use Illuminate\Validation\ValidationException;
 
 class EventManagementService
 {
+    public function __construct(
+        private readonly TaxonomyValidationService $taxonomyValidationService,
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
     public function create(array $payload): Event
     {
-        return DB::connection('tenant')->transaction(function () use ($payload): Event {
-            $normalized = $this->normalizePayload($payload, null);
+        $normalized = $this->normalizePayload($payload, null);
 
-            return Event::create($normalized)->fresh();
-        });
+        return Event::create($normalized)->fresh();
     }
 
     /**
@@ -61,6 +65,13 @@ class EventManagementService
         ] as $field) {
             if (array_key_exists($field, $payload)) {
                 $normalized[$field] = $payload[$field];
+            }
+        }
+
+        if (array_key_exists('taxonomy_terms', $payload)) {
+            $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
+            if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
+                $this->taxonomyValidationService->assertTermsAllowedForEvent($taxonomyTerms);
             }
         }
 

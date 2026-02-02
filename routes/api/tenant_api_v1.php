@@ -10,6 +10,10 @@ use App\Http\Api\v1\Controllers\TenantBrandingController;
 use App\Http\Api\v1\Controllers\OrganizationsController;
 use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\AccountProfileTypesController;
+use App\Http\Api\v1\Controllers\StaticAssetsController;
+use App\Http\Api\v1\Controllers\StaticProfileTypesController;
+use App\Http\Api\v1\Controllers\TaxonomiesController;
+use App\Http\Api\v1\Controllers\TaxonomyTermsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
@@ -168,6 +172,69 @@ Route::patch('/account_profile_types/{profile_type}', [AccountProfileTypesContro
 
 Route::delete('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'destroy'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+Route::get('/static_profile_types', [StaticProfileTypesController::class, 'index'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+Route::post('/static_profile_types', [StaticProfileTypesController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+Route::patch('/static_profile_types/{profile_type}', [StaticProfileTypesController::class, 'update'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::delete('/static_profile_types/{profile_type}', [StaticProfileTypesController::class, 'destroy'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+Route::get('/taxonomies', [TaxonomiesController::class, 'index'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+Route::post('/taxonomies', [TaxonomiesController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+Route::patch('/taxonomies/{taxonomy_id}', [TaxonomiesController::class, 'update'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::delete('/taxonomies/{taxonomy_id}', [TaxonomiesController::class, 'destroy'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+Route::get('/taxonomies/{taxonomy_id}/terms', [TaxonomyTermsController::class, 'index'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+Route::post('/taxonomies/{taxonomy_id}/terms', [TaxonomyTermsController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+Route::patch('/taxonomies/{taxonomy_id}/terms/{term_id}', [TaxonomyTermsController::class, 'update'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::delete('/taxonomies/{taxonomy_id}/terms/{term_id}', [TaxonomyTermsController::class, 'destroy'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+Route::prefix('static_assets')
+    ->group(function () {
+        Route::get('/', [StaticAssetsController::class, 'index'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+        Route::post('/', [StaticAssetsController::class, 'store'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+        Route::prefix('{asset_id}')
+            ->group(function () {
+                Route::get('/', [StaticAssetsController::class, 'show'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+                Route::patch('/', [StaticAssetsController::class, 'update'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::delete('/', [StaticAssetsController::class, 'destroy'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+                Route::post('/restore', [StaticAssetsController::class, 'restore'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::delete('/force_delete', [StaticAssetsController::class, 'forceDestroy'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+            });
+    });
 
 Route::prefix('roles')->group(function () {
     Route::get('/', [TenantRolesController::class, 'index'])

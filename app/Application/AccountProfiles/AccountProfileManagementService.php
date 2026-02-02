@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,8 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class AccountProfileManagementService
 {
     public function __construct(
-        private readonly AccountProfileRegistryService $registryService
+        private readonly AccountProfileRegistryService $registryService,
+        private readonly TaxonomyValidationService $taxonomyValidationService,
     ) {
     }
 
@@ -44,6 +46,14 @@ class AccountProfileManagementService
                     'location' => ['Location is required for POI-enabled profiles.'],
                 ]);
             }
+        }
+
+        $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
+        if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
+            $this->taxonomyValidationService->assertTermsAllowedForAccountProfile(
+                $profileType,
+                $taxonomyTerms
+            );
         }
 
         try {
@@ -93,6 +103,16 @@ class AccountProfileManagementService
                         'location' => ['Location is required for POI-enabled profiles.'],
                     ]);
                 }
+            }
+        }
+
+        if (array_key_exists('taxonomy_terms', $attributes)) {
+            $taxonomyTerms = $attributes['taxonomy_terms'] ?? [];
+            if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
+                $this->taxonomyValidationService->assertTermsAllowedForAccountProfile(
+                    $profileType,
+                    $taxonomyTerms
+                );
             }
         }
 
