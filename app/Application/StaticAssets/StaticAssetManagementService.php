@@ -6,6 +6,8 @@ namespace App\Application\StaticAssets;
 
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\StaticAsset;
+use App\Jobs\MapPois\DeleteMapPoiByRefJob;
+use App\Jobs\MapPois\UpsertMapPoiFromStaticAssetJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -57,7 +59,7 @@ class StaticAssetManagementService
         }
 
         try {
-            return DB::connection('tenant')->transaction(function () use ($payload): StaticAsset {
+            $asset = DB::connection('tenant')->transaction(function () use ($payload): StaticAsset {
                 if (! array_key_exists('is_active', $payload)) {
                     $payload['is_active'] = true;
                 }
@@ -65,6 +67,10 @@ class StaticAssetManagementService
 
                 return StaticAsset::create($payload)->fresh();
             });
+
+            UpsertMapPoiFromStaticAssetJob::dispatch((string) $asset->_id);
+
+            return $asset;
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -130,24 +136,32 @@ class StaticAssetManagementService
         $asset->fill($attributes);
         $asset->save();
 
-        return $asset->fresh();
+        $asset = $asset->fresh();
+        UpsertMapPoiFromStaticAssetJob::dispatch((string) $asset->_id);
+
+        return $asset;
     }
 
     public function delete(StaticAsset $asset): void
     {
         $asset->delete();
+        DeleteMapPoiByRefJob::dispatch('static', (string) $asset->_id);
     }
 
     public function restore(StaticAsset $asset): StaticAsset
     {
         $asset->restore();
 
-        return $asset->fresh();
+        $asset = $asset->fresh();
+        UpsertMapPoiFromStaticAssetJob::dispatch((string) $asset->_id);
+
+        return $asset;
     }
 
     public function forceDelete(StaticAsset $asset): void
     {
         $asset->forceDelete();
+        DeleteMapPoiByRefJob::dispatch('static', (string) $asset->_id);
     }
 
     /**

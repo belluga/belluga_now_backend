@@ -7,6 +7,8 @@ namespace App\Application\Events;
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\Event;
+use App\Jobs\MapPois\DeleteMapPoiByRefJob;
+use App\Jobs\MapPois\UpsertMapPoiFromEventJob;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -25,7 +27,10 @@ class EventManagementService
     {
         $normalized = $this->normalizePayload($payload, null);
 
-        return Event::create($normalized)->fresh();
+        $event = Event::create($normalized)->fresh();
+        UpsertMapPoiFromEventJob::dispatch((string) $event->_id);
+
+        return $event;
     }
 
     /**
@@ -38,12 +43,16 @@ class EventManagementService
         $event->fill($normalized);
         $event->save();
 
-        return $event->fresh();
+        $event = $event->fresh();
+        UpsertMapPoiFromEventJob::dispatch((string) $event->_id);
+
+        return $event;
     }
 
     public function delete(Event $event): void
     {
         $event->delete();
+        DeleteMapPoiByRefJob::dispatch('event', (string) $event->_id);
     }
 
     /**

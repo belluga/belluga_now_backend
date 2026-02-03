@@ -15,6 +15,7 @@ class TenantSettings extends Model
 
     protected $fillable = [
         'map_ui',
+        'events',
     ];
 
     /**
@@ -22,6 +23,15 @@ class TenantSettings extends Model
      * @return array<string, mixed>
      */
     public function getMapUiAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    public function getEventsAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

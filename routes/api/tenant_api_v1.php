@@ -139,9 +139,6 @@ Route::prefix('account_profiles')
         Route::post('/', [AccountProfilesController::class, 'store'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
 
-        Route::get('/geo', [AccountProfilesController::class, 'geoIndex'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
         Route::prefix('{account_profile_id}')
             ->group(function () {
                 Route::get('/', [AccountProfilesController::class, 'show'])

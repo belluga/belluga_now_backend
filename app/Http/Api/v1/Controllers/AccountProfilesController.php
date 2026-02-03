@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\AccountProfiles\AccountProfileGeoQueryService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
@@ -21,7 +20,6 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileManagementService $profileService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
-        private readonly AccountProfileGeoQueryService $geoQueryService,
         private readonly AccountProfileFormatterService $formatter,
     ) {
     }
@@ -123,12 +121,4 @@ class AccountProfilesController extends Controller
         return response()->json();
     }
 
-    public function geoIndex(Request $request): JsonResponse
-    {
-        $results = $this->geoQueryService->search($request->query());
-
-        return response()->json([
-            'data' => $results,
-        ]);
-    }
 }

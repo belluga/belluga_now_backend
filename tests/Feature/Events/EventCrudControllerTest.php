@@ -8,12 +8,14 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Jobs\PublishScheduledEventsJob;
+use App\Jobs\MapPois\UpsertMapPoiFromEventJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Event;
+use App\Models\Tenants\MapPoi;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use Illuminate\Support\Carbon;
@@ -266,7 +268,7 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ]);
 
-        (new PublishScheduledEventsJob())->handle();
+        app()->call([new PublishScheduledEventsJob(), 'handle']);
 
         Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
 
@@ -278,6 +280,19 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame('published', $readyPublication['status'] ?? null);
         $this->assertSame('publish_scheduled', $futurePublication['status'] ?? null);
+
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', (string) $ready->_id)
+                ->exists()
+        );
+        $this->assertFalse(
+            MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', (string) $future->_id)
+                ->exists()
+        );
     }
 
     public function testTenantAdminCreateRequiresOnBehalfAccount(): void
