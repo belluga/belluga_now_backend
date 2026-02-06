@@ -9,6 +9,7 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use MongoDB\BSON\ObjectId;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -52,7 +53,8 @@ class PasswordRegistrationControllerTest extends TestCase
         $response->assertJsonPath('data.identity_state', 'registered');
 
         $userId = $response->json('data.user_id');
-        $user = \App\Models\Tenants\AccountUser::query()->findOrFail($userId);
+        Tenant::query()->firstOrFail()->makeCurrent();
+        $user = \App\Models\Tenants\AccountUser::query()->findOrFail(new ObjectId($userId));
         $this->assertSame('registered', $user->identity_state);
         $this->assertTrue(Hash::check('Secret!234', (string) $user->password));
     }

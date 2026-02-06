@@ -33,6 +33,12 @@
         <testsuite name="Feature-Push">
             <directory>tests/Feature/Push</directory>
         </testsuite>
+        <testsuite name="Feature-Map">
+            <directory>tests/Feature/Map</directory>
+        </testsuite>
+        <testsuite name="Feature-StaticAssets">
+            <directory>tests/Feature/StaticAssets</directory>
+        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>

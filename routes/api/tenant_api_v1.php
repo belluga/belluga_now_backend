@@ -233,6 +233,66 @@ Route::prefix('static_assets')
             });
     });
 
+Route::prefix('organizations')
+    ->group(function () {
+        Route::get('/', [OrganizationsController::class, 'index'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+        Route::post('/', [OrganizationsController::class, 'store'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+        Route::prefix('{organization_id}')
+            ->group(function () {
+                Route::get('/', [OrganizationsController::class, 'show'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+                Route::patch('/', [OrganizationsController::class, 'update'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::delete('/', [OrganizationsController::class, 'destroy'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+                Route::post('/restore', [OrganizationsController::class, 'restore'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::post('/force_delete', [OrganizationsController::class, 'forceDestroy'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+            });
+    });
+
+Route::prefix('account_profiles')
+    ->group(function () {
+        Route::get('/', [AccountProfilesController::class, 'index'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+        Route::post('/', [AccountProfilesController::class, 'store'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+        Route::get('/geo', [AccountProfilesController::class, 'geoIndex'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+        Route::prefix('{account_profile_id}')
+            ->group(function () {
+                Route::get('/', [AccountProfilesController::class, 'show'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+                Route::patch('/', [AccountProfilesController::class, 'update'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::delete('/', [AccountProfilesController::class, 'destroy'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+                Route::post('/restore', [AccountProfilesController::class, 'restore'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::post('/force_delete', [AccountProfilesController::class, 'forceDestroy'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+            });
+    });
+
+Route::get('/account_profile_types', [AccountProfileTypesController::class, 'index'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
 Route::prefix('roles')->group(function () {
     Route::get('/', [TenantRolesController::class, 'index'])
         ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-roles:view']);
