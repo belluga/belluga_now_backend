@@ -225,11 +225,13 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
 
     public function testPasswordRegistrationPreservesAnonymousDevices(): void
     {
-        $firstHash = hash('sha256', 'merge-device-one');
-        $secondHash = hash('sha256', 'merge-device-two');
+        // Keep fingerprints unique for this scenario to avoid reusing identities
+        // created in other tests that may already be promoted to registered.
+        $firstHash = hash('sha256', 'preserve-device-one');
+        $secondHash = hash('sha256', 'preserve-device-two');
 
-        $firstAnonymous = $this->issueAnonymousIdentityForMerge($firstHash, 'merge-device-one');
-        $secondAnonymous = $this->issueAnonymousIdentityForMerge($secondHash, 'merge-device-two');
+        $firstAnonymous = $this->issueAnonymousIdentityForMerge($firstHash, 'preserve-device-one');
+        $secondAnonymous = $this->issueAnonymousIdentityForMerge($secondHash, 'preserve-device-two');
 
         $this->registerAnonymousDevice(
             $firstAnonymous['token'],
