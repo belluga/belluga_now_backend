@@ -6,10 +6,13 @@ namespace App\Application\Events;
 
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\Event;
 use App\Models\Tenants\TenantSettings;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
+use Illuminate\Pagination\LengthAwarePaginator;
+use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Laravel\Eloquent\Collection;
@@ -50,16 +53,144 @@ class EventQueryService
         ];
     }
 
+    /**
+     * @param array<string, mixed> $queryParams
+     */
+    public function paginateManagement(
+        array $queryParams,
+        bool $includeArchived,
+        int $perPage,
+        bool $isAdminContext,
+        ?Account $accountContext = null,
+        ?string $accountId = null,
+        ?string $accountProfileId = null
+    ): LengthAwarePaginator {
+        $query = Event::query();
+
+        if ($includeArchived && $isAdminContext) {
+            $query->onlyTrashed();
+        }
+
+        if ($accountContext) {
+            $this->applyAccountFiltersToQuery($query, (string) $accountContext->_id, '');
+        } elseif ($accountId || $accountProfileId) {
+            $this->applyAccountFiltersToQuery(
+                $query,
+                (string) ($accountId ?? ''),
+                (string) ($accountProfileId ?? '')
+            );
+        }
+
+        $search = trim((string) ($queryParams['search'] ?? ''));
+        if ($search !== '') {
+            $query->where(function ($builder) use ($search): void {
+                $builder->where('title', 'like', '%' . $search . '%')
+                    ->orWhere('content', 'like', '%' . $search . '%')
+                    ->orWhere('venue.display_name', 'like', '%' . $search . '%');
+            });
+        }
+
+        if (array_key_exists('status', $queryParams) && $queryParams['status'] !== null) {
+            $query->where('publication.status', $queryParams['status']);
+        }
+
+        if (! $isAdminContext) {
+            $this->applyPublicPublicationFilter($query);
+        }
+
+        return $query
+            ->orderBy('date_time_start', 'desc')
+            ->paginate($perPage)
+            ->through(fn (Event $event): array => $this->formatManagementEvent($event));
+    }
+
     public function findByIdOrSlug(string $eventId): ?Event
     {
         if ($this->looksLikeObjectId($eventId)) {
-            $byId = Event::query()->where('_id', $eventId)->first();
+            $byId = Event::query()->where('_id', new ObjectId($eventId))->first();
+            if (! $byId) {
+                $byId = Event::query()->where('_id', $eventId)->first();
+            }
             if ($byId) {
                 return $byId;
             }
         }
 
         return Event::query()->where('slug', $eventId)->first();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function formatManagementEvent(Event $event): array
+    {
+        $payload = $this->formatEvent($event);
+
+        $publication = $event->publication ?? null;
+        $publication = is_array($publication) ? $publication : (array) $publication;
+        $publishAt = $publication['publish_at'] ?? null;
+        if ($publishAt instanceof \MongoDB\BSON\UTCDateTime) {
+            $publishAt = $publishAt->toDateTime();
+        }
+        if ($publishAt instanceof \DateTimeInterface) {
+            $publishAt = $publishAt->format(\DateTimeInterface::ATOM);
+        }
+
+        $payload['publication'] = [
+            'status' => $publication['status'] ?? 'draft',
+            'publish_at' => $publishAt,
+        ];
+        $payload['venue_id'] = $payload['venue']['id'] ?? null;
+        $payload['artist_ids'] = array_values(array_filter(array_map(
+            static fn ($artist): ?string => is_array($artist) ? (string) ($artist['id'] ?? '') : null,
+            $payload['artists'] ?? []
+        )));
+        $payload['created_at'] = $event->created_at?->toJSON();
+        $payload['updated_at'] = $event->updated_at?->toJSON();
+        $payload['deleted_at'] = $event->deleted_at?->toJSON();
+
+        return $payload;
+    }
+
+    public function eventBelongsToAccount(Event $event, Account $account): bool
+    {
+        $accountId = (string) $account->_id;
+
+        if ((string) ($event->account_id ?? '') === $accountId) {
+            return true;
+        }
+
+        $profileId = $event->account_profile_id
+            ?? ($event->venue['id'] ?? null);
+
+        if (! $profileId) {
+            return false;
+        }
+
+        return AccountProfile::query()
+            ->where('_id', (string) $profileId)
+            ->where('account_id', $accountId)
+            ->exists();
+    }
+
+    public function assertPublicVisible(Event $event): void
+    {
+        $publication = $event->publication ?? [];
+        $publication = is_array($publication) ? $publication : (array) $publication;
+        $status = (string) ($publication['status'] ?? 'published');
+        $publishAt = $publication['publish_at'] ?? null;
+
+        if ($status !== 'published') {
+            abort(404, 'Event not found.');
+        }
+
+        if ($publishAt instanceof \MongoDB\BSON\UTCDateTime) {
+            $publishAt = $publishAt->toDateTime();
+        }
+
+        if ($publishAt instanceof \DateTimeInterface && $publishAt > Carbon::now()) {
+            abort(404, 'Event not found.');
+        }
     }
 
     /**
@@ -598,6 +729,7 @@ class EventQueryService
         $thumb = $this->normalizeArray($event->thumb ?? null);
         $artists = $this->normalizeArray($event->artists ?? []);
         $tags = $this->normalizeArray($event->tags ?? []);
+        $taxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
 
         $artists = array_map(function ($artist): array {
             $payload = $this->normalizeArray($artist);
@@ -661,6 +793,7 @@ class EventQueryService
             'sent_invites' => $this->normalizeArray($event->sent_invites ?? []),
             'friends_going' => $this->normalizeArray($event->friends_going ?? []),
             'tags' => array_values(array_map('strval', $tags)),
+            'taxonomy_terms' => $taxonomyTerms,
         ];
     }
 
@@ -730,5 +863,45 @@ class EventQueryService
     private function looksLikeObjectId(string $value): bool
     {
         return (bool) preg_match('/^[a-f0-9]{24}$/i', $value);
+    }
+
+    private function applyAccountFiltersToQuery($query, string $accountId, string $accountProfileId): void
+    {
+        if ($accountProfileId !== '') {
+            $query->where(function ($builder) use ($accountProfileId): void {
+                $builder->where('account_profile_id', $accountProfileId)
+                    ->orWhere('venue.id', $accountProfileId);
+            });
+
+            return;
+        }
+
+        if ($accountId === '') {
+            return;
+        }
+
+        $profileIds = $this->resolveAccountProfileIds($accountId);
+
+        $query->where(function ($builder) use ($accountId, $profileIds): void {
+            $builder->where('account_id', $accountId);
+            if ($profileIds !== []) {
+                $builder->orWhereIn('venue.id', $profileIds);
+            }
+        });
+    }
+
+    private function applyPublicPublicationFilter($query): void
+    {
+        $now = Carbon::now();
+
+        $query->where(function ($builder) {
+            $builder->where('publication.status', 'published')
+                ->orWhereNull('publication.status');
+        });
+
+        $query->where(function ($builder) use ($now) {
+            $builder->whereNull('publication.publish_at')
+                ->orWhere('publication.publish_at', '<=', $now);
+        });
     }
 }

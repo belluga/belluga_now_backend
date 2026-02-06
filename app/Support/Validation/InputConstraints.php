@@ -23,6 +23,7 @@ final class InputConstraints
 
     public const METADATA_MAX_ITEMS = 20;
     public const METADATA_MAX_KB = 8;
+    public const IMAGE_MAX_KB = 5120;
 
     public const OBJECT_ID_LENGTH = 24;
 }

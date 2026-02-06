@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Jobs\MapPois\DeleteMapPoiByRefJob;
+use App\Jobs\MapPois\UpsertMapPoiFromAccountProfileJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -13,7 +16,8 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class AccountProfileManagementService
 {
     public function __construct(
-        private readonly AccountProfileRegistryService $registryService
+        private readonly AccountProfileRegistryService $registryService,
+        private readonly TaxonomyValidationService $taxonomyValidationService,
     ) {
     }
 
@@ -46,8 +50,16 @@ class AccountProfileManagementService
             }
         }
 
+        $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
+        if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
+            $this->taxonomyValidationService->assertTermsAllowedForAccountProfile(
+                $profileType,
+                $taxonomyTerms
+            );
+        }
+
         try {
-            return DB::connection('tenant')->transaction(function () use ($payload): AccountProfile {
+            $profile = DB::connection('tenant')->transaction(function () use ($payload): AccountProfile {
                 if (! array_key_exists('is_active', $payload)) {
                     $payload['is_active'] = true;
                 }
@@ -56,6 +68,10 @@ class AccountProfileManagementService
 
                 return AccountProfile::create($payload)->fresh();
             });
+
+            UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
+
+            return $profile;
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -96,6 +112,16 @@ class AccountProfileManagementService
             }
         }
 
+        if (array_key_exists('taxonomy_terms', $attributes)) {
+            $taxonomyTerms = $attributes['taxonomy_terms'] ?? [];
+            if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
+                $this->taxonomyValidationService->assertTermsAllowedForAccountProfile(
+                    $profileType,
+                    $taxonomyTerms
+                );
+            }
+        }
+
         if (array_key_exists('location', $attributes)) {
             $attributes['location'] = $this->formatLocation($attributes['location']);
         }
@@ -103,24 +129,32 @@ class AccountProfileManagementService
         $profile->fill($attributes);
         $profile->save();
 
-        return $profile->fresh();
+        $profile = $profile->fresh();
+        UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
+
+        return $profile;
     }
 
     public function delete(AccountProfile $profile): void
     {
         $profile->delete();
+        DeleteMapPoiByRefJob::dispatch('account_profile', (string) $profile->_id);
     }
 
     public function restore(AccountProfile $profile): AccountProfile
     {
         $profile->restore();
 
-        return $profile->fresh();
+        $profile = $profile->fresh();
+        UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
+
+        return $profile;
     }
 
     public function forceDelete(AccountProfile $profile): void
     {
         $profile->forceDelete();
+        DeleteMapPoiByRefJob::dispatch('account_profile', (string) $profile->_id);
     }
 
     /**

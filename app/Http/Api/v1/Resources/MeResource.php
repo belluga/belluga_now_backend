@@ -26,6 +26,7 @@ final class MeResource
                 avatarUrl: null,
                 userLevel: $user->user_level ?? 'basic',
                 privacyMode: $user->privacy_mode ?? 'public',
+                timezone: $user->timezone ?? null,
                 socialScore: $user->social_score ?? SocialScoreDefaults::payload(),
                 counters: $user->counters ?? [
                     'pending_invites' => 0,
@@ -54,6 +55,7 @@ final class MeResource
                 avatarUrl: null,
                 userLevel: $user->user_level ?? 'basic',
                 privacyMode: $user->privacy_mode ?? 'public',
+                timezone: $user->timezone ?? null,
                 socialScore: $user->social_score ?? SocialScoreDefaults::payload(),
                 counters: $user->counters ?? [
                     'pending_invites' => 0,
@@ -78,6 +80,7 @@ final class MeResource
         ?string $avatarUrl,
         string $userLevel,
         string $privacyMode,
+        ?string $timezone,
         array $socialScore,
         array $counters,
         array $roleClaims
@@ -88,6 +91,7 @@ final class MeResource
             'avatar_url' => $avatarUrl,
             'user_level' => $userLevel,
             'privacy_mode' => $privacyMode,
+            'timezone' => $timezone,
             'social_score' => $socialScore,
             'counters' => $counters,
             'role_claims' => $roleClaims,

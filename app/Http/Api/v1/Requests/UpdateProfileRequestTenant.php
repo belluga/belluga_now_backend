@@ -26,6 +26,7 @@ class UpdateProfileRequestTenant extends UpdateProfileRequestContract
     public function rules(): array {
         return [
             'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'timezone' => 'sometimes|string|max:64',
         ];
     }
 

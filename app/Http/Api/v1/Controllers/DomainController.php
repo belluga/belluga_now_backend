@@ -70,9 +70,10 @@ class DomainController extends Controller
     public function destroy(\Illuminate\Http\Request $request): JsonResponse
     {
         $tenant = Tenant::resolve();
+        $domainId = (string) $request->route('domain_id');
         $this->domainService->delete(
             $tenant,
-            (string) $request->route('domain_id')
+            $domainId
         );
 
         $user = request()->user();
@@ -81,7 +82,7 @@ class DomainController extends Controller
                 event: 'domain_deleted',
                 userId: (string) $user->_id,
                 properties: [
-                    'domain_id' => $domain_id,
+                    'domain_id' => $domainId,
                 ],
                 idempotencyKey: request()->header('X-Request-Id')
             );
@@ -93,9 +94,10 @@ class DomainController extends Controller
     public function forceDestroy(\Illuminate\Http\Request $request): JsonResponse
     {
         $tenant = Tenant::resolve();
+        $domainId = (string) $request->route('domain_id');
         $this->domainService->forceDelete(
             $tenant,
-            (string) $request->route('domain_id')
+            $domainId
         );
 
         $user = request()->user();
@@ -104,7 +106,7 @@ class DomainController extends Controller
                 event: 'domain_force_deleted',
                 userId: (string) $user->_id,
                 properties: [
-                    'domain_id' => $domain_id,
+                    'domain_id' => $domainId,
                 ],
                 idempotencyKey: request()->header('X-Request-Id')
             );

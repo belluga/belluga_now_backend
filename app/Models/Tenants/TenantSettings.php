@@ -14,26 +14,24 @@ class TenantSettings extends Model
     protected $table = 'settings';
 
     protected $fillable = [
-        'profile_type_registry',
         'map_ui',
+        'events',
     ];
-
-    /**
-     * @param mixed $value
-     * @return array<int, array<string, mixed>>
-     */
-    public function getProfileTypeRegistryAttribute(mixed $value): array
-    {
-        $registry = $this->normalizeArray($value);
-
-        return array_values(array_filter($registry, static fn ($entry): bool => is_array($entry)));
-    }
 
     /**
      * @param mixed $value
      * @return array<string, mixed>
      */
     public function getMapUiAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    public function getEventsAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

@@ -39,6 +39,7 @@ class AccountUser extends Authenticatable
         'merged_source_ids',
         'devices',
         'version',
+        'timezone',
     ];
 
     protected $hidden = [

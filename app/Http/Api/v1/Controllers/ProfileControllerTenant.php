@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Profiles\TenantProfileService;
 use App\Application\Telemetry\TelemetryEmitter;
+use App\Application\Accounts\AccountUserQueryService;
 use App\Http\Api\v1\Requests\EmailsAddRequest;
 use App\Http\Api\v1\Requests\EmailRemoveRequest;
 use App\Http\Api\v1\Requests\GenerateTokenRequest;
@@ -23,6 +24,7 @@ class ProfileControllerTenant extends Controller
 {
     public function __construct(
         private readonly TenantProfileService $profileService,
+        private readonly AccountUserQueryService $accountUserQueryService,
         private readonly TelemetryEmitter $telemetry
     ) {
     }
@@ -68,9 +70,7 @@ class ProfileControllerTenant extends Controller
         $email = $request->validated()['email'];
         $this->profileService->sendResetToken($email);
 
-        $user = AccountUser::query()
-            ->where('emails', 'all', [strtolower($email)])
-            ->first();
+        $user = $this->accountUserQueryService->findByEmail($email);
 
         if ($user) {
             $this->telemetry->emit(
@@ -95,9 +95,7 @@ class ProfileControllerTenant extends Controller
             $validated['password']
         );
 
-        $user = AccountUser::query()
-            ->where('emails', 'all', [strtolower($validated['email'])])
-            ->first();
+        $user = $this->accountUserQueryService->findByEmail($validated['email']);
 
         if ($user) {
             $this->telemetry->emit(

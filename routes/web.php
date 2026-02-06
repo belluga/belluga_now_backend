@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\BrandingController;
 use App\Http\Api\v1\Controllers\EnvironmentController;
 use Illuminate\Support\Facades\Route;
@@ -15,6 +16,8 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('tenant-maybe')->group(function () {
+    Route::get('/account-profiles/{account_profile}/avatar', [AccountProfileMediaController::class, 'avatar']);
+    Route::get('/account-profiles/{account_profile}/cover', [AccountProfileMediaController::class, 'cover']);
     Route::get('/manifest.json', [BrandingController::class, 'getManifest']);
     Route::get('/favicon.ico', [BrandingController::class, 'getFavicon']);
     Route::get('/icon/icon-maskable-512x512.png', [BrandingController::class, 'getMaskableIcon']);

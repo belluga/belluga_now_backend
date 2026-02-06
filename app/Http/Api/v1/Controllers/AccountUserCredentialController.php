@@ -6,18 +6,18 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountUserCredentialService;
+use App\Application\Accounts\AccountUserQueryService;
 use App\Http\Api\v1\Requests\CredentialLinkRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use MongoDB\BSON\ObjectId;
 
 class AccountUserCredentialController extends Controller
 {
     public function __construct(
         private readonly AccountUserCredentialService $credentialService,
+        private readonly AccountUserQueryService $accountUserQueryService,
         private readonly TelemetryEmitter $telemetry
     ) {
     }
@@ -26,10 +26,14 @@ class AccountUserCredentialController extends Controller
         CredentialLinkRequest $request
     ): JsonResponse
     {
-        $user_id = (string) $request->route('user_id');
-        $user = AccountUser::query()
-            ->where('_id', new ObjectId($user_id))
-            ->firstOrFail();
+        $userId = (string) $request->route('user_id');
+        $account = Account::current();
+
+        if (! $account) {
+            abort(401, 'Account context not available.');
+        }
+
+        $user = $this->accountUserQueryService->findByIdForAccountOrFail($account, $userId);
 
         $result = $this->credentialService->link($user, $request->validated());
 
@@ -63,11 +67,15 @@ class AccountUserCredentialController extends Controller
 
     public function destroy(Request $request): JsonResponse
     {
-        $user_id = (string) $request->route('user_id');
+        $userId = (string) $request->route('user_id');
         $credentialId = (string) $request->route('credential_id');
-        $user = AccountUser::query()
-            ->where('_id', new ObjectId($user_id))
-            ->firstOrFail();
+        $account = Account::current();
+
+        if (! $account) {
+            abort(401, 'Account context not available.');
+        }
+
+        $user = $this->accountUserQueryService->findByIdForAccountOrFail($account, $userId);
 
         $updatedUser = $this->credentialService->unlink($user, $credentialId);
 

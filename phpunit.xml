@@ -15,6 +15,18 @@
         <testsuite name="Feature-Accounts">
             <directory>tests/Feature/Accounts</directory>
         </testsuite>
+        <testsuite name="Feature-AccountProfiles">
+            <directory>tests/Feature/AccountProfiles</directory>
+        </testsuite>
+        <testsuite name="Feature-Map">
+            <directory>tests/Feature/Map</directory>
+        </testsuite>
+        <testsuite name="Feature-StaticAssets">
+            <directory>tests/Feature/StaticAssets</directory>
+        </testsuite>
+        <testsuite name="Feature-Taxonomies">
+            <directory>tests/Feature/Taxonomies</directory>
+        </testsuite>
         <testsuite name="Feature-Tenants">
             <directory>tests/Feature/Tenants</directory>
         </testsuite>

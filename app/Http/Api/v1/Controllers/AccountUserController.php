@@ -15,7 +15,6 @@ use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use MongoDB\BSON\ObjectId;
 use Illuminate\Validation\ValidationException;
 
 class AccountUserController extends Controller
@@ -179,10 +178,13 @@ class AccountUserController extends Controller
 
     private function getFirstUserByRouteOrFail(): AccountUser
     {
-        $userId = request()->route('user_id');
+        $userId = (string) request()->route('user_id');
+        $account = Account::current();
 
-        return AccountUser::where('_id', new ObjectId($userId))
-            ->where('account_roles.account_id', Account::current()->id)
-            ->firstOrFail();
+        if (! $account) {
+            abort(401, 'Account context not available.');
+        }
+
+        return $this->accountUserQueryService->findByIdForAccountOrFail($account, $userId);
     }
 }

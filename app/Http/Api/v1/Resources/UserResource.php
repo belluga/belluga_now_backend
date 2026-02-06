@@ -12,6 +12,7 @@ class UserResource extends JsonResource {
             'id' => $this->id,
             'name' => $this->name,
             'emails' => $this->emails,
+            'timezone' => $this->timezone ?? null,
         ];
     }
 }

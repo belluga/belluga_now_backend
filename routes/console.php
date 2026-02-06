@@ -4,6 +4,7 @@ use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Jobs\PublishScheduledEventsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
+use App\Models\Tenants\TenantProfileType;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -26,19 +27,10 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 
     $registry = (new AccountProfileRegistrySeeder())->defaults();
 
-    $settings = TenantSettings::current();
-    if (! $settings) {
-        TenantSettings::create([
-            'profile_type_registry' => $registry,
-        ]);
-
-        $this->info("Profile type registry created for tenant [{$tenantSlug}].");
-
-        return 0;
+    TenantProfileType::query()->delete();
+    foreach ($registry as $entry) {
+        TenantProfileType::create($entry);
     }
-
-    $settings->profile_type_registry = $registry;
-    $settings->save();
 
     $this->info("Profile type registry updated for tenant [{$tenantSlug}].");
 

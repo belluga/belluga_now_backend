@@ -10,6 +10,7 @@ use App\Models\Tenants\TenantSettings;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Illuminate\Support\Str;
+use App\Application\AccountProfiles\AccountProfileRegistryService;
 
 class EnvironmentResolverService
 {
@@ -51,17 +52,7 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $pushSettings = TenantPushSettings::current();
         $settings = TenantSettings::current();
-        $profileTypes = $settings?->getAttribute('profile_type_registry') ?? [];
-        if ($profileTypes instanceof \MongoDB\Model\BSONDocument || $profileTypes instanceof \MongoDB\Model\BSONArray) {
-            $profileTypes = $profileTypes->getArrayCopy();
-        } elseif ($profileTypes instanceof \Traversable) {
-            $profileTypes = iterator_to_array($profileTypes);
-        } elseif (is_object($profileTypes)) {
-            $profileTypes = (array) $profileTypes;
-        }
-        if (! is_array($profileTypes)) {
-            $profileTypes = [];
-        }
+        $profileTypes = (new AccountProfileRegistryService())->registry();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
@@ -79,13 +70,15 @@ class EnvironmentResolverService
             }
         }
 
+        $domains = $tenant->domains()->get()->all();
+
         return [
             'tenant_id' => (string) $tenant->_id,
             'name' => $tenant->name,
             'type' => 'tenant',
             'subdomain' => $tenant->subdomain,
             'main_domain' => $mainDomain,
-            'domains' => $tenant->domains()->get()->all(),
+            'domains' => $this->normalizeDomains($domains),
             'app_domains' => $tenant->app_domains,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
@@ -95,7 +88,7 @@ class EnvironmentResolverService
             'telemetry' => $this->resolveTelemetryPayload($pushSettings),
             'firebase' => $pushSettings?->getAttribute('firebase') ?? [],
             'push' => $pushSettings?->getAttribute('push') ?? [],
-            'profile_types' => array_values($profileTypes),
+            'profile_types' => $profileTypes,
             'settings' => [
                 'map_ui' => $settings?->getAttribute('map_ui') ?? [],
             ],
@@ -146,6 +139,23 @@ class EnvironmentResolverService
         }
 
         return $branding['pwa_icon']['icon512_uri'] ?? null;
+    }
+
+    /**
+     * @param array<int, mixed> $domains
+     * @return array<int, string>
+     */
+    private function normalizeDomains(array $domains): array
+    {
+        $normalized = array_map(static function ($domain): string {
+            if (is_string($domain)) {
+                return $domain;
+            }
+
+            return (string) ($domain['path'] ?? $domain->path ?? '');
+        }, $domains);
+
+        return array_values(array_filter($normalized, static fn (string $domain): bool => $domain !== ''));
     }
 
     private function forceHttps(?string $domain): ?string

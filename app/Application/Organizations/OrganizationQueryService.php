@@ -28,6 +28,29 @@ class OrganizationQueryService extends AbstractQueryService
             });
     }
 
+    public function findByIdOrFail(string $organizationId, bool $onlyTrashed = false): Organization
+    {
+        $query = $onlyTrashed ? Organization::onlyTrashed() : Organization::query();
+
+        return $query->where('_id', $organizationId)->firstOrFail();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function format(Organization $organization): array
+    {
+        return [
+            'id' => (string) $organization->_id,
+            'name' => $organization->name,
+            'slug' => $organization->slug,
+            'description' => $organization->description,
+            'created_at' => $organization->created_at?->toJSON(),
+            'updated_at' => $organization->updated_at?->toJSON(),
+            'deleted_at' => $organization->deleted_at?->toJSON(),
+        ];
+    }
+
     protected function baseSearchableFields(): array
     {
         return (new Organization())->getFillable();
