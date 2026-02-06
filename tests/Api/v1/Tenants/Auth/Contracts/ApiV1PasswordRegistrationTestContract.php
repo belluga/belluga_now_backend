@@ -223,6 +223,55 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         $invalidTokenCheck->assertStatus(401);
     }
 
+    public function testPasswordRegistrationPreservesAnonymousDevices(): void
+    {
+        // Keep fingerprints unique for this scenario to avoid reusing identities
+        // created in other tests that may already be promoted to registered.
+        $firstHash = hash('sha256', 'preserve-device-one');
+        $secondHash = hash('sha256', 'preserve-device-two');
+
+        $firstAnonymous = $this->issueAnonymousIdentityForMerge($firstHash, 'preserve-device-one');
+        $secondAnonymous = $this->issueAnonymousIdentityForMerge($secondHash, 'preserve-device-two');
+
+        $this->registerAnonymousDevice(
+            $firstAnonymous['token'],
+            'merge-device-1',
+            'android',
+            'token-merge-1',
+        );
+        $this->registerAnonymousDevice(
+            $secondAnonymous['token'],
+            'merge-device-2',
+            'ios',
+            'token-merge-2',
+        );
+
+        $payload = [
+            'name' => 'Merged Device Identity',
+            'email' => 'merged-device@example.org',
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [
+                $firstAnonymous['id'],
+                $secondAnonymous['id'],
+            ],
+        ];
+
+        $response = $this->registerPassword($payload);
+        $response->assertStatus(201);
+
+        $this->tenantModel->makeCurrent();
+
+        $canonicalId = $response->json('data.user_id');
+        $canonicalUser = AccountUser::query()
+            ->where('_id', new ObjectId($canonicalId))
+            ->firstOrFail();
+
+        $devices = collect($canonicalUser->devices ?? []);
+        $this->assertNotNull($devices->firstWhere('device_id', 'merge-device-1'));
+        $this->assertNotNull($devices->firstWhere('device_id', 'merge-device-2'));
+        $this->assertCount(2, $devices);
+    }
+
     public function testPasswordRegistrationRejectsUnknownAnonymousIdentity(): void
     {
         $payload = [
@@ -318,6 +367,29 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
             'id' => $response->json('data.user_id'),
             'token' => $response->json('data.token'),
         ];
+    }
+
+    protected function registerAnonymousDevice(
+        string $token,
+        string $deviceId,
+        string $platform,
+        string $pushToken,
+    ): void {
+        $response = $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}push/register",
+            data: [
+                'device_id' => $deviceId,
+                'platform' => $platform,
+                'push_token' => $pushToken,
+            ],
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ],
+        );
+
+        $response->assertStatus(200);
     }
 
     protected function toCarbon(mixed $value): Carbon

@@ -43,6 +43,9 @@ class AnonymousIdentityMerger
             $fingerprints = Collection::make($target->fingerprints ?? [])
                 ->keyBy(static fn (array $fingerprint): string => (string) ($fingerprint['hash'] ?? spl_object_id((object) $fingerprint)));
 
+            $devices = Collection::make($target->devices ?? [])
+                ->keyBy(static fn (array $device): string => (string) ($device['device_id'] ?? spl_object_id((object) $device)));
+
             $consents = $target->consents ?? [];
             $mergedSourceIds = Collection::make($target->merged_source_ids ?? []);
             $promotionAudit = Collection::make($target->promotion_audit ?? []);
@@ -50,6 +53,7 @@ class AnonymousIdentityMerger
             $mergeAuditSources = Collection::make();
 
             foreach ($sourceCollection as $source) {
+                $source = $this->refreshSource($source);
                 $sourceId = (string) $source->_id;
                 $sourceObjectId = new ObjectId($sourceId);
                 $mergedAt = Carbon::now();
@@ -93,6 +97,12 @@ class AnonymousIdentityMerger
                     $consents = array_replace_recursive($consents, $source->consents);
                 }
 
+                $devices = $this->mergeDevices(
+                    $devices,
+                    $source->devices ?? [],
+                    $now
+                );
+
                 $mergedSourceIds->push($sourceId);
                 $mergeAuditEntry = [
                     'source_user_id' => $sourceObjectId,
@@ -131,6 +141,7 @@ class AnonymousIdentityMerger
 
             $updatePayload = [
                 'fingerprints' => $fingerprints->values()->all(),
+                'devices' => $devices->values()->all(),
                 'consents' => $consents,
                 'merged_source_ids' => $mergedSourceIds->unique()->values()->all(),
                 'promotion_audit' => $promotionAudit->values()->all(),
@@ -232,6 +243,64 @@ class AnonymousIdentityMerger
         }
     }
 
+    private function refreshSource(AccountUser $source): AccountUser
+    {
+        return AccountUser::query()->find($source->_id) ?? $source;
+    }
+
+    /**
+     * @param Collection<int, array<string, mixed>> $devices
+     * @param array<int, array<string, mixed>> $sourceDevices
+     */
+    private function mergeDevices(Collection $devices, array $sourceDevices, Carbon $now): Collection
+    {
+        foreach ($sourceDevices as $device) {
+            if (! is_array($device)) {
+                continue;
+            }
+            $deviceId = (string) ($device['device_id'] ?? '');
+            if ($deviceId === '') {
+                continue;
+            }
+            $existing = $devices->get($deviceId);
+            if ($existing === null) {
+                $devices->put($deviceId, $device);
+                continue;
+            }
+            $devices->put(
+                $deviceId,
+                $this->resolveLatestDevice($existing, $device, $now)
+            );
+        }
+
+        return $devices;
+    }
+
+    /**
+     * @param array<string, mixed> $current
+     * @param array<string, mixed> $incoming
+     */
+    private function resolveLatestDevice(array $current, array $incoming, Carbon $now): array
+    {
+        $currentAt = $this->toCarbon($current['updated_at'] ?? $current['created_at'] ?? null);
+        $incomingAt = $this->toCarbon($incoming['updated_at'] ?? $incoming['created_at'] ?? null);
+
+        if ($currentAt === null && $incomingAt === null) {
+            return $incoming;
+        }
+        if ($currentAt === null) {
+            return $incoming;
+        }
+        if ($incomingAt === null) {
+            return $current;
+        }
+        if ($incomingAt->greaterThan($currentAt)) {
+            return $incoming;
+        }
+
+        return $current;
+    }
+
     /**
      * @param Collection<int, array<string, mixed>> $fingerprints
      */
@@ -309,6 +378,10 @@ class AnonymousIdentityMerger
 
         if ($value instanceof \DateTimeInterface) {
             return Carbon::instance($value);
+        }
+
+        if ($value instanceof \MongoDB\BSON\UTCDateTime) {
+            return Carbon::instance($value->toDateTime());
         }
 
         if (is_string($value) && $value !== '') {
