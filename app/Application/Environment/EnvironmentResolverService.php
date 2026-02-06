@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
-use App\DataObjects\Settings\MapUiSettings;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
@@ -54,7 +53,6 @@ class EnvironmentResolverService
         $pushSettings = TenantPushSettings::current();
         $settings = TenantSettings::current();
         $profileTypes = (new AccountProfileRegistryService())->registry();
-        $mapUi = MapUiSettings::fromValue($settings?->getAttribute('map_ui'));
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
@@ -92,7 +90,7 @@ class EnvironmentResolverService
             'push' => $pushSettings?->getAttribute('push') ?? [],
             'profile_types' => $profileTypes,
             'settings' => [
-                'map_ui' => $mapUi->toArray(),
+                'map_ui' => $settings?->getAttribute('map_ui') ?? [],
             ],
         ];
     }
