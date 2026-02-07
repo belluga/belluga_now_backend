@@ -85,27 +85,42 @@ jobs:
 
       - name: Initialize MongoDB replica set
         run: |
-          MONGO_CID="$(docker ps -q --filter 'name=mongo' | head -n 1)"
-          if [[ -z "$MONGO_CID" ]]; then
-            echo "MongoDB service container not found"
-            docker ps -a
-            exit 1
-          fi
+          php -r '
+          $manager = new MongoDB\Driver\Manager("mongodb://127.0.0.1:27017");
 
-          docker exec "$MONGO_CID" mongosh --quiet --eval 'try { rs.status().ok } catch (err) { rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27017"}]}) }'
+          try {
+              $manager->executeCommand("admin", new MongoDB\Driver\Command(["replSetGetStatus" => 1]));
+          } catch (Throwable $e) {
+              $manager->executeCommand("admin", new MongoDB\Driver\Command([
+                  "replSetInitiate" => [
+                      "_id" => "rs0",
+                      "members" => [
+                          ["_id" => 0, "host" => "127.0.0.1:27017"]
+                      ],
+                  ],
+              ]));
+          }
 
-          for i in {1..30}; do
-            state="$(docker exec "$MONGO_CID" mongosh --quiet --eval 'try { rs.status().myState } catch (err) { 0 }' | tr -d '\r')"
-            if [[ "$state" == "1" ]]; then
-              echo "MongoDB replica set is primary"
-              exit 0
-            fi
-            sleep 2
-          done
+          $primary = false;
+          for ($i = 0; $i < 30; $i++) {
+              try {
+                  $hello = $manager->executeCommand("admin", new MongoDB\Driver\Command(["hello" => 1]))->toArray()[0] ?? null;
+                  if ($hello && (!empty($hello->isWritablePrimary) || !empty($hello->ismaster))) {
+                      $primary = true;
+                      break;
+                  }
+              } catch (Throwable $e) {
+              }
+              usleep(500000);
+          }
 
-          echo "MongoDB replica set did not become primary in time"
-          docker logs "$MONGO_CID" || true
-          exit 1
+          if (!$primary) {
+              fwrite(STDERR, "MongoDB replica set did not become primary in time\n");
+              exit(1);
+          }
+
+          echo "MongoDB replica set is primary\n";
+          '
 
       - name: Run Laravel unit suite
         env:
