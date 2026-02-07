@@ -1,0 +1,82 @@
+name: Laravel CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - stage
+      - main
+      - cicd-implementation
+
+concurrency:
+  group: laravel-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mongodb
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Start local MongoDB replica set
+        run: |
+          docker run -d --name mongo-rs -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
+
+          for i in {1..30}; do
+            if docker exec mongo-rs mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          docker exec mongo-rs mongosh --quiet --eval 'try { rs.status() } catch (err) { rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27017"}]}) }'
+
+          for i in {1..30}; do
+            state="$(docker exec mongo-rs mongosh --quiet --eval 'try { rs.status().myState } catch (err) { 0 }' | tr -d '\r')"
+            if [ "$state" = "1" ]; then
+              echo "MongoDB replica set is primary"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "MongoDB replica set did not become primary in time"
+          docker logs mongo-rs || true
+          exit 1
+
+      - name: Run Laravel test suite
+        env:
+          APP_ENV: testing
+          DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0
+          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0
+          DB_URI_TENANTS: mongodb://127.0.0.1:27017/tenants_test?replicaSet=rs0
+          DB_DATABASE: landlord_test
+          DB_DATABASE_LANDLORD: landlord_test
+          DB_DATABASE_TENANTS: tenants_test
+        run: php artisan test
+
+      - name: Stop MongoDB
+        if: always()
+        run: docker rm -f mongo-rs || true
