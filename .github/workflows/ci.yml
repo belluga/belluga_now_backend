@@ -26,8 +26,15 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mongodb
+          extensions: mongodb, mbstring, xml, ctype, dom, fileinfo, tokenizer, openssl
+          tools: composer:v2
           coverage: none
+
+      - name: PHP and Composer diagnostics
+        run: |
+          php --version
+          php -m
+          composer --version
 
       - name: Cache Composer dependencies
         uses: actions/cache@v4
@@ -38,7 +45,10 @@ jobs:
             ${{ runner.os }}-composer-
 
       - name: Install PHP dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist
+        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
+
+      - name: Laravel package discovery
+        run: php artisan package:discover --ansi
 
       - name: Start local MongoDB replica set
         run: |
