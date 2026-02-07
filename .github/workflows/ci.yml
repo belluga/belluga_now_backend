@@ -47,9 +47,6 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
 
-      - name: Laravel package discovery
-        run: php artisan package:discover --ansi
-
       - name: Start local MongoDB replica set
         run: |
           docker run -d --name mongo-rs -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
