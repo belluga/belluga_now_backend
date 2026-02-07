@@ -59,7 +59,7 @@ jobs:
             sleep 1
           done
 
-          docker exec mongo-rs mongosh --quiet --eval 'try { rs.status().ok } catch (err) { rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27017"}]}) }'
+          docker exec mongo-rs mongosh --quiet --eval 'try { rs.status().ok } catch (err) { rs.initiate({_id:"rs0", members:[{_id:0, host:"localhost:27017"}]}) }'
 
           for i in {1..60}; do
             state="$(docker exec mongo-rs mongosh --quiet --eval 'try { rs.status().myState } catch (err) { 0 }' | tr -d '\r')"
@@ -76,7 +76,7 @@ jobs:
 
       - name: Wait for MongoDB client readiness
         env:
-          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_LANDLORD: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
         run: |
           php -r '
           $uri = getenv("DB_URI_LANDLORD");
@@ -104,9 +104,9 @@ jobs:
       - name: Run Laravel full test suite
         env:
           APP_ENV: testing
-          DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
-          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
-          DB_URI_TENANTS: mongodb://127.0.0.1:27017/tenants_test?replicaSet=rs0&directConnection=true
+          DB_URI: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_LANDLORD: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_TENANTS: mongodb://localhost:27017/tenants_test?replicaSet=rs0&directConnection=true
           DB_DATABASE: landlord_test
           DB_DATABASE_LANDLORD: landlord_test
           DB_DATABASE_TENANTS: tenants_test
