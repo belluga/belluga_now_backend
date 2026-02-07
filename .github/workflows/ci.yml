@@ -101,6 +101,16 @@ jobs:
           echo "MongoDB client readiness check passed\\n";
           '
 
+      - name: Prepare Laravel writable directories
+        run: |
+          mkdir -p bootstrap/cache
+          mkdir -p storage/framework/cache
+          mkdir -p storage/framework/sessions
+          mkdir -p storage/framework/testing
+          mkdir -p storage/framework/views
+          mkdir -p storage/logs
+          chmod -R ug+rwX bootstrap/cache storage
+
       - name: Run Laravel full test suite
         env:
           APP_ENV: testing
