@@ -115,6 +115,7 @@ jobs:
         env:
           APP_ENV: testing
           APP_KEY: base64:GmmALtgdmR+nNYciHr0ynX/QoqHXmoXXtbwHVNWg8Pk=
+          APP_FAKER_LOCALE: pt_BR
           DB_CONNECTION_LANDLORD: landlord
           DB_CONNECTION_TENANTS: tenant
           DB_URI: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
