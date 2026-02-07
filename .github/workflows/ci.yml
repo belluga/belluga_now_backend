@@ -84,8 +84,8 @@ jobs:
 
           for ($i = 0; $i < 60; $i++) {
               try {
-                  $manager = new MongoDB\\Driver\\Manager($uri);
-                  $manager->executeCommand("admin", new MongoDB\\Driver\\Command(["ping" => 1]));
+                  $manager = new MongoDB\Driver\Manager($uri);
+                  $manager->executeCommand("admin", new MongoDB\Driver\Command(["ping" => 1]));
                   $ok = true;
                   break;
               } catch (Throwable $e) {
