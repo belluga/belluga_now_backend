@@ -74,8 +74,6 @@ jobs:
           exit 1
 
       - name: Run Laravel unit suite
-        id: unit_tests
-        continue-on-error: true
         env:
           APP_ENV: testing
           DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0
@@ -85,23 +83,7 @@ jobs:
           DB_DATABASE_LANDLORD: landlord_test
           DB_DATABASE_TENANTS: tenants_test
         run: |
-          mkdir -p storage/test-results
-          php artisan test --testsuite=Unit --log-junit=storage/test-results/junit.xml
-
-      - name: Publish Laravel unit report
-        if: always()
-        uses: dorny/test-reporter@v1
-        with:
-          name: Laravel Unit Report
-          path: storage/test-results/junit.xml
-          reporter: java-junit
-          fail-on-error: false
-
-      - name: Fail if unit suite failed
-        if: steps.unit_tests.outcome != 'success'
-        run: |
-          echo "Laravel unit suite failed"
-          exit 1
+          php artisan test --testsuite=Unit
 
       - name: Stop MongoDB
         if: always()
