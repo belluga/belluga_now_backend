@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -74,14 +74,43 @@ jobs:
           docker logs mongo-rs || true
           exit 1
 
-      - name: Run MongoDB PHP driver smoke check
+      - name: Wait for MongoDB client readiness
+        env:
+          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
         run: |
           php -r '
-          $manager = new MongoDB\Driver\Manager("mongodb://127.0.0.1:27017");
-          $cmd = new MongoDB\Driver\Command(["ping" => 1]);
-          $manager->executeCommand("admin", $cmd);
-          echo "Mongo connectivity smoke passed\n";
+          $uri = getenv("DB_URI_LANDLORD");
+          $ok = false;
+
+          for ($i = 0; $i < 60; $i++) {
+              try {
+                  $manager = new MongoDB\\Driver\\Manager($uri);
+                  $manager->executeCommand("admin", new MongoDB\\Driver\\Command(["ping" => 1]));
+                  $ok = true;
+                  break;
+              } catch (Throwable $e) {
+                  usleep(500000);
+              }
+          }
+
+          if (!$ok) {
+              fwrite(STDERR, "MongoDB client readiness check failed\\n");
+              exit(1);
+          }
+
+          echo "MongoDB client readiness check passed\\n";
           '
+
+      - name: Run Laravel full test suite
+        env:
+          APP_ENV: testing
+          DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_TENANTS: mongodb://127.0.0.1:27017/tenants_test?replicaSet=rs0&directConnection=true
+          DB_DATABASE: landlord_test
+          DB_DATABASE_LANDLORD: landlord_test
+          DB_DATABASE_TENANTS: tenants_test
+        run: php artisan test
 
       - name: Stop MongoDB
         if: always()
