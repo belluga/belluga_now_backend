@@ -58,6 +58,31 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
 
+      - name: Wait for MongoDB TCP readiness
+        run: |
+          python3 - <<'PY'
+          import socket
+          import sys
+          import time
+
+          host, port = "127.0.0.1", 27017
+          for attempt in range(60):
+              sock = socket.socket()
+              sock.settimeout(1)
+              try:
+                  sock.connect((host, port))
+                  print(f"MongoDB reachable at {host}:{port}")
+                  sock.close()
+                  sys.exit(0)
+              except OSError:
+                  time.sleep(1)
+              finally:
+                  sock.close()
+
+          print(f"MongoDB not reachable at {host}:{port} after timeout", file=sys.stderr)
+          sys.exit(1)
+          PY
+
       - name: Run Laravel unit suite
         env:
           APP_ENV: testing
