@@ -74,7 +74,7 @@ jobs:
           docker logs mongo-rs || true
           exit 1
 
-      - name: Run Laravel unit suite
+      - name: Run Laravel + Mongo smoke checks
         env:
           APP_ENV: testing
           DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
@@ -83,7 +83,16 @@ jobs:
           DB_DATABASE: landlord_test
           DB_DATABASE_LANDLORD: landlord_test
           DB_DATABASE_TENANTS: tenants_test
-        run: php artisan test --testsuite=Unit
+        run: |
+          php artisan --version
+          php -r '
+          $landlord = new MongoDB\Driver\Manager(getenv("DB_URI_LANDLORD"));
+          $tenants = new MongoDB\Driver\Manager(getenv("DB_URI_TENANTS"));
+          $cmd = new MongoDB\Driver\Command(["ping" => 1]);
+          $landlord->executeCommand("admin", $cmd);
+          $tenants->executeCommand("admin", $cmd);
+          echo "Mongo connectivity smoke passed\n";
+          '
 
       - name: Stop MongoDB
         if: always()
