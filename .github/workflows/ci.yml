@@ -17,16 +17,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    services:
-      mongo:
-        image: mongo:7.0
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
 
     steps:
       - name: Checkout
@@ -58,77 +48,43 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
 
-      - name: Wait for MongoDB TCP readiness
+      - name: Start MongoDB replica set
         run: |
-          python3 - <<'PY'
-          import socket
-          import sys
-          import time
+          docker run -d --name mongo-rs -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
 
-          host, port = "127.0.0.1", 27017
-          for attempt in range(60):
-              sock = socket.socket()
-              sock.settimeout(1)
-              try:
-                  sock.connect((host, port))
-                  print(f"MongoDB reachable at {host}:{port}")
-                  sock.close()
-                  sys.exit(0)
-              except OSError:
-                  time.sleep(1)
-              finally:
-                  sock.close()
+          for i in {1..60}; do
+            if docker exec mongo-rs mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
 
-          print(f"MongoDB not reachable at {host}:{port} after timeout", file=sys.stderr)
-          sys.exit(1)
-          PY
+          docker exec mongo-rs mongosh --quiet --eval 'try { rs.status().ok } catch (err) { rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27017"}]}) }'
 
-      - name: Initialize MongoDB replica set
-        run: |
-          php -r '
-          $manager = new MongoDB\Driver\Manager("mongodb://127.0.0.1:27017");
+          for i in {1..60}; do
+            state="$(docker exec mongo-rs mongosh --quiet --eval 'try { rs.status().myState } catch (err) { 0 }' | tr -d '\r')"
+            if [[ "$state" == "1" ]]; then
+              echo "MongoDB replica set is primary"
+              exit 0
+            fi
+            sleep 1
+          done
 
-          try {
-              $manager->executeCommand("admin", new MongoDB\Driver\Command(["replSetGetStatus" => 1]));
-          } catch (Throwable $e) {
-              $manager->executeCommand("admin", new MongoDB\Driver\Command([
-                  "replSetInitiate" => [
-                      "_id" => "rs0",
-                      "members" => [
-                          ["_id" => 0, "host" => "127.0.0.1:27017"]
-                      ],
-                  ],
-              ]));
-          }
-
-          $primary = false;
-          for ($i = 0; $i < 30; $i++) {
-              try {
-                  $hello = $manager->executeCommand("admin", new MongoDB\Driver\Command(["hello" => 1]))->toArray()[0] ?? null;
-                  if ($hello && (!empty($hello->isWritablePrimary) || !empty($hello->ismaster))) {
-                      $primary = true;
-                      break;
-                  }
-              } catch (Throwable $e) {
-              }
-              usleep(500000);
-          }
-
-          if (!$primary) {
-              fwrite(STDERR, "MongoDB replica set did not become primary in time\n");
-              exit(1);
-          }
-
-          echo "MongoDB replica set is primary\n";
-          '
+          echo "MongoDB replica set did not become primary in time"
+          docker logs mongo-rs || true
+          exit 1
 
       - name: Run Laravel unit suite
         env:
           APP_ENV: testing
-          DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0
-          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0
-          DB_URI_TENANTS: mongodb://127.0.0.1:27017/tenants_test?replicaSet=rs0
+          DB_URI: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_LANDLORD: mongodb://127.0.0.1:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_TENANTS: mongodb://127.0.0.1:27017/tenants_test?replicaSet=rs0&directConnection=true
           DB_DATABASE: landlord_test
           DB_DATABASE_LANDLORD: landlord_test
           DB_DATABASE_TENANTS: tenants_test
         run: php artisan test --testsuite=Unit
+
+      - name: Stop MongoDB
+        if: always()
+        run: docker rm -f mongo-rs || true
