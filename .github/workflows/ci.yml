@@ -58,17 +58,6 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
 
-      - name: Wait for local MongoDB service
-        run: |
-          for i in {1..30}; do
-            if mongosh --quiet --host 127.0.0.1 --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
-
-          mongosh --quiet --host 127.0.0.1 --eval "db.adminCommand({ ping: 1 })"
-
       - name: Run Laravel unit suite
         env:
           APP_ENV: testing
