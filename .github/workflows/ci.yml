@@ -114,6 +114,8 @@ jobs:
       - name: Run Laravel full test suite
         env:
           APP_ENV: testing
+          DB_CONNECTION_LANDLORD: landlord
+          DB_CONNECTION_TENANTS: tenant
           DB_URI: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
           DB_URI_LANDLORD: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
           DB_URI_TENANTS: mongodb://localhost:27017/tenants_test?replicaSet=rs0&directConnection=true
