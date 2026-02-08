@@ -26,13 +26,14 @@ jobs:
   lane_policy:
     name: Lane Promotion Policy
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
 
     steps:
       - name: Checkout
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@v4
 
       - name: Enforce branch promotion lanes
+        if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
 
@@ -61,6 +62,10 @@ jobs:
           esac
 
           echo "OK: lane promotion policy passed for '$HEAD_REF' -> '$BASE_REF'."
+
+      - name: Skip lane policy on non-PR events
+        if: github.event_name != 'pull_request'
+        run: echo "SKIP: lane policy is only enforced for pull_request events."
 
   test:
     runs-on: ubuntu-latest
