@@ -2,6 +2,15 @@ name: Laravel CI
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - dev
+      - stage
+      - main
   push:
     branches:
       - dev
@@ -14,9 +23,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lane_policy:
+    name: Lane Promotion Policy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enforce branch promotion lanes
+        run: |
+          set -euo pipefail
+
+          BASE_REF="${GITHUB_BASE_REF:-}"
+          HEAD_REF="${GITHUB_HEAD_REF:-}"
+
+          if [[ -z "$BASE_REF" || -z "$HEAD_REF" ]]; then
+            echo "ERROR: missing pull request branch context (base/head)." >&2
+            exit 1
+          fi
+
+          case "$BASE_REF" in
+            stage)
+              [[ "$HEAD_REF" == "dev" ]] || { echo "ERROR: only 'dev' may target 'stage' (received '$HEAD_REF' -> '$BASE_REF')." >&2; exit 1; }
+              ;;
+            main)
+              [[ "$HEAD_REF" == "stage" ]] || { echo "ERROR: only 'stage' may target 'main' (received '$HEAD_REF' -> '$BASE_REF')." >&2; exit 1; }
+              ;;
+            dev)
+              echo "OK: '$HEAD_REF' -> '$BASE_REF' allowed for development integration."
+              ;;
+            *)
+              echo "ERROR: unsupported base branch '$BASE_REF'. Allowed bases: dev, stage, main." >&2
+              exit 1
+              ;;
+          esac
+
+          echo "OK: lane promotion policy passed for '$HEAD_REF' -> '$BASE_REF'."
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs:
+      - lane_policy
+    if: ${{ github.event_name != 'pull_request' || needs.lane_policy.result == 'success' }}
 
     steps:
       - name: Checkout
