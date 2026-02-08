@@ -65,7 +65,8 @@ jobs:
 
       - name: Skip lane policy on non-PR events
         if: github.event_name != 'pull_request'
-        run: echo "SKIP: lane policy is only enforced for pull_request events."
+        run: |
+          echo "SKIP: lane policy is only enforced for pull_request events."
 
   test:
     runs-on: ubuntu-latest
