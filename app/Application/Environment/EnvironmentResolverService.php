@@ -66,7 +66,11 @@ class EnvironmentResolverService
                 ?? $this->resolveRootHost($requestRoot, $tenant->subdomain)
                 ?? $this->resolveRootHost((string) config('app.url'), $tenant->subdomain);
             if ($rootHost) {
-                $mainDomain = $this->forceHttps($tenant->subdomain . '.' . $rootHost);
+                $host = $tenant->subdomain . '.' . $rootHost;
+                $mainDomain = $this->originWithRequestRoot(
+                    requestRoot: $requestRoot,
+                    host: $host,
+                ) ?? $this->forceHttps($host);
             }
         }
 
@@ -192,6 +196,31 @@ class EnvironmentResolverService
         }
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function originWithRequestRoot(?string $requestRoot, string $host): ?string
+    {
+        if (! $requestRoot) {
+            return null;
+        }
+
+        $parts = parse_url($requestRoot);
+        if (! is_array($parts)) {
+            return null;
+        }
+
+        $scheme = $parts['scheme'] ?? null;
+        if (! is_string($scheme) || $scheme === '') {
+            return null;
+        }
+
+        $origin = $scheme . '://' . $host;
+        $port = $parts['port'] ?? null;
+        if (is_int($port)) {
+            $origin .= ':' . $port;
+        }
+
+        return $origin;
     }
 
     /**

@@ -20,7 +20,10 @@ class DomainTenantFinder extends TenantFinder
     public function findForRequest(Request $request): ?IsTenant
     {
         if($this->isRequestFromSubdomain()){
-            return $this->findTenantBySubdomain();
+            $tenant = $this->findTenantBySubdomain();
+            if ($tenant !== null) {
+                return $tenant;
+            }
         }
 
         if($this->isRequestFromApp()){
@@ -32,7 +35,11 @@ class DomainTenantFinder extends TenantFinder
 
     protected function findTenantByAppDomain(): ?IsTenant
     {
-        $appDomain = request()->header('X-App-Domain');
+        $appDomain = $this->resolveAppDomainFromRequest();
+        if ($appDomain === null) {
+            return null;
+        }
+
         return app(IsTenant::class)::where('app_domains', 'all', [$appDomain])->first();
     }
 
@@ -52,16 +59,28 @@ class DomainTenantFinder extends TenantFinder
     }
 
     protected function isRequestFromApp(): bool {
-        return request()->hasHeader('X-App-Domain');
+        return $this->resolveAppDomainFromRequest() !== null;
     }
 
     protected function isRequestFromSubdomain(): bool {
         $host = request()->getHost();
         $parts_request = explode('.', $host, 2);
 
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return false;
+        }
+
         if (count($parts_request) >= 2) {
             $parts_config = explode('://', config('app.url'));
-            return $parts_request[1] === $parts_config[1];
+            if ($parts_request[1] === $parts_config[1]) {
+                return true;
+            }
+
+            if (app()->environment('local')) {
+                return ! in_array($parts_request[0], $this->local_environment_alternatives, true);
+            }
+
+            return false;
         }
 
         if($this->isLocalEnvironment()){
@@ -73,5 +92,25 @@ class DomainTenantFinder extends TenantFinder
 
     private function isLocalEnvironment(): bool {
         return in_array(request()->getHost(), $this->local_environment_alternatives);
+    }
+
+    private function resolveAppDomainFromRequest(): ?string
+    {
+        $headerDomain = request()->header('X-App-Domain');
+        if (is_string($headerDomain) && trim($headerDomain) !== '') {
+            return trim($headerDomain);
+        }
+
+        $queryDomain = request()->query('app_domain');
+        if (is_string($queryDomain) && trim($queryDomain) !== '') {
+            return trim($queryDomain);
+        }
+
+        $inputDomain = request()->input('app_domain');
+        if (is_string($inputDomain) && trim($inputDomain) !== '') {
+            return trim($inputDomain);
+        }
+
+        return null;
     }
 }
