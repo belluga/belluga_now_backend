@@ -6,6 +6,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpFoundation\Request;
 use \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
 
@@ -117,6 +118,13 @@ return Application::configure(basePath: dirname(__DIR__))
         }
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Cloudflare (Flexible SSL) terminates HTTPS at the edge and forwards to origin via HTTP.
+        // We only trust proxy headers from private network ranges (Docker bridge / host->container),
+        // and we only need X-Forwarded-Proto for correct scheme detection (avoid mixed-content).
+        $middleware->trustProxies(
+            at: env('TRUSTED_PROXIES', '172.16.0.0/12'),
+            headers: Request::HEADER_X_FORWARDED_PROTO
+        );
 
         $middleware
             ->group(
