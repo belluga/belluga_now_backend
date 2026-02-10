@@ -48,7 +48,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath(
             'main_domain',
-            "https://{$this->tenant->subdomain}.{$this->host}"
+            "http://{$this->tenant->subdomain}.{$this->host}"
         );
     }
 
