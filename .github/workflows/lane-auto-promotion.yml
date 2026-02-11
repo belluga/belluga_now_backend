@@ -1,0 +1,89 @@
+name: Lane Auto Promotion PR
+
+on:
+  push:
+    branches:
+      - dev
+      - stage
+  workflow_dispatch:
+    inputs:
+      head:
+        description: "Source lane branch (dev|stage)"
+        required: true
+        type: string
+      base:
+        description: "Target lane branch (stage|main)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: lane-auto-promotion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  open_or_update:
+    name: Open/Update lane promotion PR
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || github.token }}
+
+    steps:
+      - name: Resolve lane mapping
+        id: lane
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            head="${{ inputs.head }}"
+            base="${{ inputs.base }}"
+          else
+            head="${GITHUB_REF_NAME}"
+            case "$head" in
+              dev) base="stage" ;;
+              stage) base="main" ;;
+              *)
+                echo "ERROR: unsupported source lane '$head'" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          case "${head}->${base}" in
+            dev->stage|stage->main) ;;
+            *)
+              echo "ERROR: invalid lane promotion '${head}->${base}'." >&2
+              exit 1
+              ;;
+          esac
+
+          echo "head=${head}" >> "$GITHUB_OUTPUT"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update PR
+        env:
+          HEAD_BRANCH: ${{ steps.lane.outputs.head }}
+          BASE_BRANCH: ${{ steps.lane.outputs.base }}
+        run: |
+          set -euo pipefail
+
+          title="chore(lane): promote ${HEAD_BRANCH} -> ${BASE_BRANCH}"
+          body=$'Automated lane promotion PR.\n\n- Source lane: '"${HEAD_BRANCH}"$'\n- Target lane: '"${BASE_BRANCH}"$'\n- Trigger: '"${GITHUB_EVENT_NAME}"$'\n'
+
+          existing="$(gh pr list --repo "${GITHUB_REPOSITORY}" --base "${BASE_BRANCH}" --head "${HEAD_BRANCH}" --json number --jq '.[0].number // empty')"
+
+          if [[ -n "${existing}" ]]; then
+            gh pr edit "${existing}" --repo "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}"
+            echo "Updated existing PR #${existing}: ${HEAD_BRANCH} -> ${BASE_BRANCH}"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base "${BASE_BRANCH}" \
+            --head "${HEAD_BRANCH}" \
+            --title "${title}" \
+            --body "${body}"
