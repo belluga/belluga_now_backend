@@ -20,25 +20,51 @@ jobs:
       # Prefer a dedicated dispatch token, but allow reusing the shared ecosystem token
       # to avoid mandatory secret renames across repos.
       DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN || secrets.WEB_APP_REPO_TOKEN }}
+      DOCKER_SYNC_TARGET_REPO: ${{ vars.DOCKER_SYNC_TARGET_REPO }}
+      DOCKER_SYNC_SUBMODULE_PATH: ${{ vars.DOCKER_SYNC_SUBMODULE_PATH }}
+      DOCKER_SYNC_EVENT_TYPE: ${{ vars.DOCKER_SYNC_EVENT_TYPE }}
 
     steps:
-      - name: Validate dispatch token
+      - name: Validate dispatch configuration
+        id: config
         run: |
           set -euo pipefail
+
+          missing=()
+
           if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
-            echo "ERROR: missing dispatch token. Provide DOCKER_REPO_DISPATCH_TOKEN (or fallback SUBMODULES_REPO_TOKEN / WEB_APP_REPO_TOKEN) as a repository secret." >&2
+            missing+=("DOCKER_REPO_DISPATCH_TOKEN")
+          fi
+
+          if [[ -z "${DOCKER_SYNC_TARGET_REPO:-}" ]]; then
+            missing+=("DOCKER_SYNC_TARGET_REPO")
+          fi
+
+          if [[ -z "${DOCKER_SYNC_SUBMODULE_PATH:-}" ]]; then
+            missing+=("DOCKER_SYNC_SUBMODULE_PATH")
+          fi
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "ERROR: missing dispatch configuration (${missing[*]})." >&2
+            echo "Required: secret DOCKER_REPO_DISPATCH_TOKEN (or fallback SUBMODULES_REPO_TOKEN / WEB_APP_REPO_TOKEN) and repository variables DOCKER_SYNC_TARGET_REPO + DOCKER_SYNC_SUBMODULE_PATH." >&2
             exit 1
           fi
+
+          event_type="${DOCKER_SYNC_EVENT_TYPE:-submodule-updated}"
+
+          echo "target_repo=${DOCKER_SYNC_TARGET_REPO}" >> "$GITHUB_OUTPUT"
+          echo "submodule=${DOCKER_SYNC_SUBMODULE_PATH}" >> "$GITHUB_OUTPUT"
+          echo "event_type=${event_type}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch repository event
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
-          repository: belluga/belluga_now_docker
-          event-type: submodule-updated
+          repository: ${{ steps.config.outputs.target_repo }}
+          event-type: ${{ steps.config.outputs.event_type }}
           client-payload: >-
             {
-              "submodule": "laravel-app",
+              "submodule": "${{ steps.config.outputs.submodule }}",
               "sha": "${{ github.sha }}",
               "lane": "${{ github.ref_name }}",
               "source_repo": "${{ github.repository }}",
