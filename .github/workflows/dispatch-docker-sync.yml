@@ -14,22 +14,24 @@ jobs:
   dispatch:
     name: Notify docker repo to open/update submodule pin PR
     runs-on: ubuntu-latest
+    env:
+      # Prefer a dedicated dispatch token, but allow reusing the shared ecosystem token
+      # to avoid mandatory secret renames across repos.
+      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN }}
 
     steps:
       - name: Validate dispatch token
-        env:
-          DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
-            echo "ERROR: missing required secret DOCKER_REPO_DISPATCH_TOKEN." >&2
+            echo "ERROR: missing dispatch token. Provide either DOCKER_REPO_DISPATCH_TOKEN or SUBMODULES_REPO_TOKEN as a repository secret." >&2
             exit 1
           fi
 
       - name: Dispatch repository event
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN }}
+          token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
           repository: belluga/belluga_now_docker
           event-type: submodule-updated
           client-payload: >-
