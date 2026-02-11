@@ -17,14 +17,14 @@ jobs:
     env:
       # Prefer a dedicated dispatch token, but allow reusing the shared ecosystem token
       # to avoid mandatory secret renames across repos.
-      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN }}
+      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN || secrets.WEB_APP_REPO_TOKEN }}
 
     steps:
       - name: Validate dispatch token
         run: |
           set -euo pipefail
           if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
-            echo "ERROR: missing dispatch token. Provide either DOCKER_REPO_DISPATCH_TOKEN or SUBMODULES_REPO_TOKEN as a repository secret." >&2
+            echo "ERROR: missing dispatch token. Provide DOCKER_REPO_DISPATCH_TOKEN (or fallback SUBMODULES_REPO_TOKEN / WEB_APP_REPO_TOKEN) as a repository secret." >&2
             exit 1
           fi
 
