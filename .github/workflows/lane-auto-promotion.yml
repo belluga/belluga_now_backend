@@ -18,18 +18,18 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 concurrency:
   group: lane-auto-promotion-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  open_or_update:
-    name: Open/Update lane promotion PR
+  request_promotion_pr:
+    name: Request lane promotion PR in orchestrator
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ github.token }}
+      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN || secrets.WEB_APP_REPO_TOKEN }}
+      DOCKER_SYNC_TARGET_REPO: ${{ vars.DOCKER_SYNC_TARGET_REPO }}
 
     steps:
       - name: Resolve lane mapping
@@ -63,27 +63,41 @@ jobs:
           echo "head=${head}" >> "$GITHUB_OUTPUT"
           echo "base=${base}" >> "$GITHUB_OUTPUT"
 
-      - name: Open or update PR
-        env:
-          HEAD_BRANCH: ${{ steps.lane.outputs.head }}
-          BASE_BRANCH: ${{ steps.lane.outputs.base }}
+      - name: Validate dispatch configuration
+        id: config
         run: |
           set -euo pipefail
 
-          title="chore(lane): promote ${HEAD_BRANCH} -> ${BASE_BRANCH}"
-          body=$'Automated lane promotion PR.\n\n- Source lane: '"${HEAD_BRANCH}"$'\n- Target lane: '"${BASE_BRANCH}"$'\n- Trigger: '"${GITHUB_EVENT_NAME}"$'\n'
+          missing=()
 
-          existing="$(gh pr list --repo "${GITHUB_REPOSITORY}" --base "${BASE_BRANCH}" --head "${HEAD_BRANCH}" --json number --jq '.[0].number // empty')"
-
-          if [[ -n "${existing}" ]]; then
-            gh pr edit "${existing}" --repo "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}"
-            echo "Updated existing PR #${existing}: ${HEAD_BRANCH} -> ${BASE_BRANCH}"
-            exit 0
+          if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
+            missing+=("DOCKER_REPO_DISPATCH_TOKEN")
           fi
 
-          gh pr create \
-            --repo "${GITHUB_REPOSITORY}" \
-            --base "${BASE_BRANCH}" \
-            --head "${HEAD_BRANCH}" \
-            --title "${title}" \
-            --body "${body}"
+          if [[ -z "${DOCKER_SYNC_TARGET_REPO:-}" ]]; then
+            missing+=("DOCKER_SYNC_TARGET_REPO")
+          fi
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "ERROR: missing lane promotion dispatch configuration (${missing[*]})." >&2
+            exit 1
+          fi
+
+          echo "target_repo=${DOCKER_SYNC_TARGET_REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch lane promotion request
+        uses: peter-evans/repository-dispatch@v3
+        env:
+          HEAD_BRANCH: ${{ steps.lane.outputs.head }}
+          BASE_BRANCH: ${{ steps.lane.outputs.base }}
+        with:
+          token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
+          repository: ${{ steps.config.outputs.target_repo }}
+          event-type: lane-promotion-request
+          client-payload: >-
+            {
+              "source_repo": "${{ github.repository }}",
+              "head": "${{ env.HEAD_BRANCH }}",
+              "base": "${{ env.BASE_BRANCH }}",
+              "trigger_event": "${{ github.event_name }}"
+            }
