@@ -29,7 +29,7 @@ jobs:
     name: Open/Update lane promotion PR
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || github.token }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Resolve lane mapping
