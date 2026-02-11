@@ -6,6 +6,7 @@ namespace Tests\Feature\Tenants;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -28,7 +29,7 @@ class TenantResolutionTest extends TestCase
         }
     }
 
-    public function testReturnsJson400WhenTenantCannotBeResolved(): void
+    public function testReturns404WhenTenantCannotBeResolved(): void
     {
         $payload = [
             'device_name' => 'unknown-host-device',
@@ -42,8 +43,8 @@ class TenantResolutionTest extends TestCase
             $payload
         );
 
-        $response->assertStatus(400)
-            ->assertJson(['message' => 'Tenant not found for this host.']);
+        $response->assertStatus(404)
+            ->assertJson(['message' => 'Resource you are looking for was not found.']);
     }
 
     public function testTenantAuthRoutesAreNotAvailableOnMainDomain(): void
@@ -69,6 +70,27 @@ class TenantResolutionTest extends TestCase
         $response->assertStatus(404);
     }
 
+    public function testUnknownHostCannotResolveTenantUsingAppDomain(): void
+    {
+        $response = $this->getJson(
+            sprintf('http://%s.%s/api/v1/environment?app_domain=tenant-alpha.test', 'unknown', $this->host)
+        );
+
+        $response->assertStatus(404)
+            ->assertJson(['message' => 'Resource you are looking for was not found.']);
+    }
+
+    public function testMainDomainCanResolveTenantUsingAppDomain(): void
+    {
+        $response = $this->getJson(
+            sprintf('http://%s/api/v1/environment?app_domain=tenant-alpha.test', $this->host)
+        );
+
+        $response->assertStatus(200)
+            ->assertJsonPath('type', 'tenant')
+            ->assertJsonPath('subdomain', 'tenant-alpha');
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);
@@ -89,5 +111,9 @@ class TenantResolutionTest extends TestCase
         );
 
         $service->initialize($payload);
+
+        Tenant::query()
+            ->where('subdomain', 'tenant-alpha')
+            ->update(['app_domains' => ['tenant-alpha.test']]);
     }
 }

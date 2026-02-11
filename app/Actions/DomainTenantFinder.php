@@ -26,7 +26,7 @@ class DomainTenantFinder extends TenantFinder
             }
         }
 
-        if($this->isRequestFromApp()){
+        if($this->isRequestFromApp() && $this->isRequestToLandlordHost()){
             return $this->findTenantByAppDomain();
         }
 
@@ -112,5 +112,15 @@ class DomainTenantFinder extends TenantFinder
         }
 
         return null;
+    }
+
+    private function isRequestToLandlordHost(): bool
+    {
+        $configuredHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (! is_string($configuredHost) || $configuredHost === '') {
+            $configuredHost = (string) config('app.url');
+        }
+
+        return strcasecmp(request()->getHost(), trim($configuredHost)) === 0;
     }
 }

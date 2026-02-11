@@ -30,8 +30,7 @@ class InitializationControllerTest extends TestCase
 
     public function testSystemInitializesSuccessfully(): void
     {
-        $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $initializeUrl = "http://{$this->host}/api/v1/initialize";
         $response = $this->postJson($initializeUrl, $this->payload());
 
         $response->assertStatus(201);
@@ -43,12 +42,20 @@ class InitializationControllerTest extends TestCase
 
     public function testSubsequentInitializationIsRejected(): void
     {
-        $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $initializeUrl = "http://{$this->host}/api/v1/initialize";
         $this->postJson($initializeUrl, $this->payload())->assertCreated();
 
         $response = $this->postJson($initializeUrl, $this->payload());
         $response->assertStatus(403);
+    }
+
+    public function testInitializationRouteIsNotAvailableOnTenantDomain(): void
+    {
+        $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
+        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+
+        $response = $this->postJson($initializeUrl, $this->payload());
+        $response->assertStatus(404);
     }
 
     /**

@@ -30,8 +30,7 @@ trait EnsuresSystemInitialization
             return;
         }
 
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $initializeUrl = "http://{$this->host}/api/v1/initialize";
         $response = $this->post(
             $initializeUrl,
             $this->initializationPayload(),
