@@ -97,8 +97,7 @@ class ApiV1InitializeTest extends TestCase {
     // }
 
     protected function initiate(): TestResponse {
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $initializeUrl = "http://{$this->host}/api/v1/initialize";
         return $this->post(
             $initializeUrl,
             $this->payloadInitiate(),
@@ -109,8 +108,7 @@ class ApiV1InitializeTest extends TestCase {
     }
 
     protected function initiateCheck(): TestResponse {
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $initializeUrl = "http://{$this->host}/api/v1/initialize";
         return $this->json(
             method: 'get',
             uri: $initializeUrl,

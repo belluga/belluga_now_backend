@@ -1,0 +1,103 @@
+name: Lane Auto Promotion PR
+
+on:
+  push:
+    branches:
+      - dev
+      - stage
+  workflow_dispatch:
+    inputs:
+      head:
+        description: "Source lane branch (dev|stage)"
+        required: true
+        type: string
+      base:
+        description: "Target lane branch (stage|main)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lane-auto-promotion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  request_promotion_pr:
+    name: Request lane promotion PR in orchestrator
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN || secrets.WEB_APP_REPO_TOKEN }}
+      DOCKER_SYNC_TARGET_REPO: ${{ vars.DOCKER_SYNC_TARGET_REPO }}
+
+    steps:
+      - name: Resolve lane mapping
+        id: lane
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            head="${{ inputs.head }}"
+            base="${{ inputs.base }}"
+          else
+            head="${GITHUB_REF_NAME}"
+            case "$head" in
+              dev) base="stage" ;;
+              stage) base="main" ;;
+              *)
+                echo "ERROR: unsupported source lane '$head'" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          case "${head}->${base}" in
+            "dev->stage"|"stage->main") ;;
+            *)
+              echo "ERROR: invalid lane promotion '${head}->${base}'." >&2
+              exit 1
+              ;;
+          esac
+
+          echo "head=${head}" >> "$GITHUB_OUTPUT"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate dispatch configuration
+        id: config
+        run: |
+          set -euo pipefail
+
+          missing=()
+
+          if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
+            missing+=("DOCKER_REPO_DISPATCH_TOKEN")
+          fi
+
+          if [[ -z "${DOCKER_SYNC_TARGET_REPO:-}" ]]; then
+            missing+=("DOCKER_SYNC_TARGET_REPO")
+          fi
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "ERROR: missing lane promotion dispatch configuration (${missing[*]})." >&2
+            exit 1
+          fi
+
+          echo "target_repo=${DOCKER_SYNC_TARGET_REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch lane promotion request
+        uses: peter-evans/repository-dispatch@v3
+        env:
+          HEAD_BRANCH: ${{ steps.lane.outputs.head }}
+          BASE_BRANCH: ${{ steps.lane.outputs.base }}
+        with:
+          token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
+          repository: ${{ steps.config.outputs.target_repo }}
+          event-type: lane-promotion-request
+          client-payload: >-
+            {
+              "source_repo": "${{ github.repository }}",
+              "head": "${{ env.HEAD_BRANCH }}",
+              "base": "${{ env.BASE_BRANCH }}",
+              "trigger_event": "${{ github.event_name }}"
+            }
