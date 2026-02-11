@@ -1,0 +1,46 @@
+name: Dispatch Docker Submodule Sync
+
+on:
+  push:
+    branches:
+      - dev
+      - stage
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: dispatch-docker-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: Notify docker repo to open/update submodule pin PR
+    runs-on: ubuntu-latest
+    env:
+      # Prefer a dedicated dispatch token, but allow reusing the shared ecosystem token
+      # to avoid mandatory secret renames across repos.
+      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN || secrets.WEB_APP_REPO_TOKEN }}
+
+    steps:
+      - name: Validate dispatch token
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
+            echo "ERROR: missing dispatch token. Provide DOCKER_REPO_DISPATCH_TOKEN (or fallback SUBMODULES_REPO_TOKEN / WEB_APP_REPO_TOKEN) as a repository secret." >&2
+            exit 1
+          fi
+
+      - name: Dispatch repository event
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
+          repository: belluga/belluga_now_docker
+          event-type: submodule-updated
+          client-payload: >-
+            {
+              "submodule": "laravel-app",
+              "sha": "${{ github.sha }}",
+              "lane": "${{ github.ref_name }}",
+              "source_repo": "${{ github.repository }}",
+              "source_branch": "${{ github.ref_name }}"
+            }
