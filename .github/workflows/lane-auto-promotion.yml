@@ -53,7 +53,7 @@ jobs:
           fi
 
           case "${head}->${base}" in
-            dev->stage|stage->main) ;;
+            "dev->stage"|"stage->main") ;;
             *)
               echo "ERROR: invalid lane promotion '${head}->${base}'." >&2
               exit 1
