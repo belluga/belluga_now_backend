@@ -9,9 +9,9 @@ use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
-
 Route::middleware('tenant')->group(function () {
+    Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
+
     Route::prefix('anonymous')
         ->group(function () {
             Route::post('/identities', [AnonymousIdentityController::class, 'store']);

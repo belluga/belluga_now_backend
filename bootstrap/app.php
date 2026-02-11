@@ -45,6 +45,17 @@ return Application::configure(basePath: dirname(__DIR__))
                 : '^(?!' . preg_quote($mainHost, '/') . '$).+';
 
             Route::domain($mainHost)->group(function () use ($registerProjectRoutes): void {
+                Route::prefix('api/v1/initialize')
+                    ->middleware('guest')
+                    ->group(base_path('routes/api/initialize.php'));
+
+                $registerProjectRoutes(
+                    'api/v1/initialize',
+                    'guest',
+                    base_path('routes/api/project_initialize.php'),
+                    'project_initialize'
+                );
+
                 Route::prefix('admin/api/v1')
                     ->middleware('landlord')
                     ->group(base_path('routes/api/landlord_api_v1.php'));
@@ -71,10 +82,6 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::domain('{tenant_domain}')
                 ->where(['tenant_domain' => $tenantDomainPattern])
                 ->group(function () use ($registerProjectRoutes): void {
-                    Route::prefix('api/v1/initialize')
-                        ->middleware('guest')
-                        ->group(base_path('routes/api/initialize.php'));
-
                     Route::prefix('admin/api/v1')
                         ->middleware(['tenant', 'landlord'])
                         ->group(base_path('routes/api/tenant_api_v1.php'));
@@ -86,13 +93,6 @@ return Application::configure(basePath: dirname(__DIR__))
                     Route::prefix('api/v1/accounts/{account_slug}')
                         ->middleware(['tenant'])
                         ->group(base_path('routes/api/account_api_v1.php'));
-
-                    $registerProjectRoutes(
-                        'api/v1/initialize',
-                        'guest',
-                        base_path('routes/api/project_initialize.php'),
-                        'project_initialize'
-                    );
 
                     $registerProjectRoutes(
                         'api/v1',
@@ -172,6 +172,6 @@ return Application::configure(basePath: dirname(__DIR__))
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
         });
         $exceptions->renderable(function (NoCurrentTenant $e) {
-            return response()->json(['message' => 'Tenant not found for this host.'], 400);
+            return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
         });
     })->create();

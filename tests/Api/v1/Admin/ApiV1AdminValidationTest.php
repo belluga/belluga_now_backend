@@ -36,8 +36,7 @@ class ApiV1AdminValidationTest extends TestCaseAuthenticated {
     }
 
     protected function initiate(): TestResponse {
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
+        $initializeUrl = "http://{$this->host}/api/v1/initialize";
         return $this->json(
             method: 'post',
             uri: $initializeUrl
