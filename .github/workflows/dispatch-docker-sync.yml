@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - dev
+      - stage
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +40,7 @@ jobs:
             {
               "submodule": "laravel-app",
               "sha": "${{ github.sha }}",
+              "lane": "${{ github.ref_name }}",
               "source_repo": "${{ github.repository }}",
               "source_branch": "${{ github.ref_name }}"
             }
