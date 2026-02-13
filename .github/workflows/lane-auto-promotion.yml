@@ -1,10 +1,6 @@
 name: Lane Auto Promotion PR
 
 on:
-  push:
-    branches:
-      - dev
-      - stage
   workflow_dispatch:
     inputs:
       head:
@@ -13,6 +9,10 @@ on:
         type: string
       base:
         description: "Target lane branch (stage|main)"
+        required: true
+        type: string
+      expected_sha:
+        description: "Exact source SHA to promote"
         required: true
         type: string
 
@@ -37,20 +37,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            head="${{ inputs.head }}"
-            base="${{ inputs.base }}"
-          else
-            head="${GITHUB_REF_NAME}"
-            case "$head" in
-              dev) base="stage" ;;
-              stage) base="main" ;;
-              *)
-                echo "ERROR: unsupported source lane '$head'" >&2
-                exit 1
-                ;;
-            esac
-          fi
+          head="${{ inputs.head }}"
+          base="${{ inputs.base }}"
+          expected_sha_raw="${{ inputs.expected_sha }}"
+          expected_sha="$(printf '%s' "${expected_sha_raw}" | tr '[:upper:]' '[:lower:]')"
 
           case "${head}->${base}" in
             "dev->stage"|"stage->main") ;;
@@ -60,8 +50,14 @@ jobs:
               ;;
           esac
 
+          if [[ ! "${expected_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: expected_sha must be a full 40-char git SHA (hex)." >&2
+            exit 1
+          fi
+
           echo "head=${head}" >> "$GITHUB_OUTPUT"
           echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "expected_sha=${expected_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Validate dispatch configuration
         id: config
@@ -90,6 +86,7 @@ jobs:
         env:
           HEAD_BRANCH: ${{ steps.lane.outputs.head }}
           BASE_BRANCH: ${{ steps.lane.outputs.base }}
+          EXPECTED_SHA: ${{ steps.lane.outputs.expected_sha }}
         with:
           token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
           repository: ${{ steps.config.outputs.target_repo }}
@@ -99,5 +96,6 @@ jobs:
               "source_repo": "${{ github.repository }}",
               "head": "${{ env.HEAD_BRANCH }}",
               "base": "${{ env.BASE_BRANCH }}",
+              "expected_sha": "${{ env.EXPECTED_SHA }}",
               "trigger_event": "${{ github.event_name }}"
             }
