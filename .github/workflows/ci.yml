@@ -60,8 +60,18 @@ jobs:
                 echo "ERROR: invalid Expected SHA lock '${EXPECTED_SHA}' in PR body." >&2
                 exit 1
               fi
-              if [[ "${PR_HEAD_SHA}" != "${EXPECTED_SHA}" ]]; then
-                echo "ERROR: PR head SHA ${PR_HEAD_SHA} drifted from expected lock ${EXPECTED_SHA}." >&2
+              git fetch origin "${PR_HEAD_SHA}" --quiet || true
+              git fetch origin "${EXPECTED_SHA}" --quiet || true
+              if ! git cat-file -e "${PR_HEAD_SHA}^{commit}" 2>/dev/null; then
+                echo "ERROR: unable to resolve PR head SHA ${PR_HEAD_SHA}." >&2
+                exit 1
+              fi
+              if ! git cat-file -e "${EXPECTED_SHA}^{commit}" 2>/dev/null; then
+                echo "ERROR: unable to resolve Expected SHA ${EXPECTED_SHA}." >&2
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "${EXPECTED_SHA}" "${PR_HEAD_SHA}"; then
+                echo "ERROR: PR head SHA ${PR_HEAD_SHA} does not contain expected lock ${EXPECTED_SHA}." >&2
                 exit 1
               fi
               ;;
@@ -75,8 +85,18 @@ jobs:
                 echo "ERROR: invalid Expected SHA lock '${EXPECTED_SHA}' in PR body." >&2
                 exit 1
               fi
-              if [[ "${PR_HEAD_SHA}" != "${EXPECTED_SHA}" ]]; then
-                echo "ERROR: PR head SHA ${PR_HEAD_SHA} drifted from expected lock ${EXPECTED_SHA}." >&2
+              git fetch origin "${PR_HEAD_SHA}" --quiet || true
+              git fetch origin "${EXPECTED_SHA}" --quiet || true
+              if ! git cat-file -e "${PR_HEAD_SHA}^{commit}" 2>/dev/null; then
+                echo "ERROR: unable to resolve PR head SHA ${PR_HEAD_SHA}." >&2
+                exit 1
+              fi
+              if ! git cat-file -e "${EXPECTED_SHA}^{commit}" 2>/dev/null; then
+                echo "ERROR: unable to resolve Expected SHA ${EXPECTED_SHA}." >&2
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "${EXPECTED_SHA}" "${PR_HEAD_SHA}"; then
+                echo "ERROR: PR head SHA ${PR_HEAD_SHA} does not contain expected lock ${EXPECTED_SHA}." >&2
                 exit 1
               fi
               ;;
@@ -214,3 +234,71 @@ jobs:
       - name: Stop MongoDB
         if: always()
         run: docker rm -f mongo-rs || true
+
+  notify_orchestrator:
+    name: Notify Docker Promotion Status
+    runs-on: ubuntu-latest
+    needs:
+      - lane_policy
+      - test
+    if: ${{ always() && github.event_name == 'pull_request' && (github.base_ref == 'stage' || github.base_ref == 'main') }}
+    env:
+      DOCKER_REPO_DISPATCH_TOKEN: ${{ secrets.DOCKER_REPO_DISPATCH_TOKEN || secrets.SUBMODULES_REPO_TOKEN || secrets.WEB_APP_REPO_TOKEN }}
+      DOCKER_SYNC_TARGET_REPO: ${{ vars.DOCKER_SYNC_TARGET_REPO }}
+      LANE_POLICY_RESULT: ${{ needs.lane_policy.result }}
+      TEST_RESULT: ${{ needs.test.result }}
+    steps:
+      - name: Validate dispatch configuration
+        run: |
+          set -euo pipefail
+
+          missing=()
+          if [[ -z "${DOCKER_REPO_DISPATCH_TOKEN:-}" ]]; then
+            missing+=("DOCKER_REPO_DISPATCH_TOKEN")
+          fi
+          if [[ -z "${DOCKER_SYNC_TARGET_REPO:-}" ]]; then
+            missing+=("DOCKER_SYNC_TARGET_REPO")
+          fi
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "ERROR: missing docker callback configuration (${missing[*]})." >&2
+            exit 1
+          fi
+
+      - name: Resolve callback payload
+        id: payload
+        run: |
+          set -euo pipefail
+
+          if [[ "${LANE_POLICY_RESULT}" == "success" && "${TEST_RESULT}" == "success" ]]; then
+            result="success"
+          else
+            result="failure"
+          fi
+
+          pr_number="$(jq -r '.pull_request.number // empty' "${GITHUB_EVENT_PATH}")"
+          pr_url="$(jq -r '.pull_request.html_url // empty' "${GITHUB_EVENT_PATH}")"
+          pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
+          expected_sha="$(printf '%s\n' "${pr_body}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+
+          echo "result=${result}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
+          echo "pr_url=${pr_url}" >> "$GITHUB_OUTPUT"
+          echo "expected_sha=${expected_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch source promotion status
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
+          repository: ${{ env.DOCKER_SYNC_TARGET_REPO }}
+          event-type: lane-promotion-source-pr-status
+          client-payload: >-
+            {
+              "source_repo": "${{ github.repository }}",
+              "head": "${{ github.head_ref }}",
+              "base": "${{ github.base_ref }}",
+              "source_pr_number": "${{ steps.payload.outputs.pr_number }}",
+              "source_pr_url": "${{ steps.payload.outputs.pr_url }}",
+              "expected_sha": "${{ steps.payload.outputs.expected_sha }}",
+              "result": "${{ steps.payload.outputs.result }}"
+            }
