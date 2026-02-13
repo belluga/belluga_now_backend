@@ -39,8 +39,11 @@ jobs:
 
           BASE_REF="${GITHUB_BASE_REF:-}"
           HEAD_REF="${GITHUB_HEAD_REF:-}"
+          PR_HEAD_SHA="$(jq -r '.pull_request.head.sha // empty' "${GITHUB_EVENT_PATH}")"
+          PR_BODY="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
+          EXPECTED_SHA="$(printf '%s\n' "${PR_BODY}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr '[:upper:]' '[:lower:]')"
 
-          if [[ -z "$BASE_REF" || -z "$HEAD_REF" ]]; then
+          if [[ -z "$BASE_REF" || -z "$HEAD_REF" || -z "$PR_HEAD_SHA" ]]; then
             echo "ERROR: missing pull request branch context (base/head)." >&2
             exit 1
           fi
@@ -48,9 +51,33 @@ jobs:
           case "$BASE_REF" in
             stage)
               [[ "$HEAD_REF" == "dev" ]] || { echo "ERROR: only 'dev' may target 'stage' (received '$HEAD_REF' -> '$BASE_REF')." >&2; exit 1; }
+              if [[ -z "${EXPECTED_SHA}" ]]; then
+                echo "ERROR: promotion PR must declare '- Expected SHA: <40-char-sha>' in body." >&2
+                exit 1
+              fi
+              if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "ERROR: invalid Expected SHA lock '${EXPECTED_SHA}' in PR body." >&2
+                exit 1
+              fi
+              if [[ "${PR_HEAD_SHA}" != "${EXPECTED_SHA}" ]]; then
+                echo "ERROR: PR head SHA ${PR_HEAD_SHA} drifted from expected lock ${EXPECTED_SHA}." >&2
+                exit 1
+              fi
               ;;
             main)
               [[ "$HEAD_REF" == "stage" ]] || { echo "ERROR: only 'stage' may target 'main' (received '$HEAD_REF' -> '$BASE_REF')." >&2; exit 1; }
+              if [[ -z "${EXPECTED_SHA}" ]]; then
+                echo "ERROR: promotion PR must declare '- Expected SHA: <40-char-sha>' in body." >&2
+                exit 1
+              fi
+              if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "ERROR: invalid Expected SHA lock '${EXPECTED_SHA}' in PR body." >&2
+                exit 1
+              fi
+              if [[ "${PR_HEAD_SHA}" != "${EXPECTED_SHA}" ]]; then
+                echo "ERROR: PR head SHA ${PR_HEAD_SHA} drifted from expected lock ${EXPECTED_SHA}." >&2
+                exit 1
+              fi
               ;;
             dev)
               echo "OK: '$HEAD_REF' -> '$BASE_REF' allowed for development integration."

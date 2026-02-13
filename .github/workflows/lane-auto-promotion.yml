@@ -39,7 +39,8 @@ jobs:
 
           head="${{ inputs.head }}"
           base="${{ inputs.base }}"
-          expected_sha="${{ inputs.expected_sha }}"
+          expected_sha_raw="${{ inputs.expected_sha }}"
+          expected_sha="$(printf '%s' "${expected_sha_raw}" | tr '[:upper:]' '[:lower:]')"
 
           case "${head}->${base}" in
             "dev->stage"|"stage->main") ;;
@@ -48,6 +49,11 @@ jobs:
               exit 1
               ;;
           esac
+
+          if [[ ! "${expected_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: expected_sha must be a full 40-char git SHA (hex)." >&2
+            exit 1
+          fi
 
           echo "head=${head}" >> "$GITHUB_OUTPUT"
           echo "base=${base}" >> "$GITHUB_OUTPUT"
