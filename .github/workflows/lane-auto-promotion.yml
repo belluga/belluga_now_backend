@@ -11,6 +11,10 @@ on:
         description: "Target lane branch (stage|main)"
         required: true
         type: string
+      expected_sha:
+        description: "Exact source SHA to promote"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -35,6 +39,7 @@ jobs:
 
           head="${{ inputs.head }}"
           base="${{ inputs.base }}"
+          expected_sha="${{ inputs.expected_sha }}"
 
           case "${head}->${base}" in
             "dev->stage"|"stage->main") ;;
@@ -46,6 +51,7 @@ jobs:
 
           echo "head=${head}" >> "$GITHUB_OUTPUT"
           echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "expected_sha=${expected_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Validate dispatch configuration
         id: config
@@ -74,6 +80,7 @@ jobs:
         env:
           HEAD_BRANCH: ${{ steps.lane.outputs.head }}
           BASE_BRANCH: ${{ steps.lane.outputs.base }}
+          EXPECTED_SHA: ${{ steps.lane.outputs.expected_sha }}
         with:
           token: ${{ env.DOCKER_REPO_DISPATCH_TOKEN }}
           repository: ${{ steps.config.outputs.target_repo }}
@@ -83,5 +90,6 @@ jobs:
               "source_repo": "${{ github.repository }}",
               "head": "${{ env.HEAD_BRANCH }}",
               "base": "${{ env.BASE_BRANCH }}",
+              "expected_sha": "${{ env.EXPECTED_SHA }}",
               "trigger_event": "${{ github.event_name }}"
             }
