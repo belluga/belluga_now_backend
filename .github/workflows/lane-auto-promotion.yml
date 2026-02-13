@@ -1,10 +1,6 @@
 name: Lane Auto Promotion PR
 
 on:
-  push:
-    branches:
-      - dev
-      - stage
   workflow_dispatch:
     inputs:
       head:
@@ -37,20 +33,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            head="${{ inputs.head }}"
-            base="${{ inputs.base }}"
-          else
-            head="${GITHUB_REF_NAME}"
-            case "$head" in
-              dev) base="stage" ;;
-              stage) base="main" ;;
-              *)
-                echo "ERROR: unsupported source lane '$head'" >&2
-                exit 1
-                ;;
-            esac
-          fi
+          head="${{ inputs.head }}"
+          base="${{ inputs.base }}"
 
           case "${head}->${base}" in
             "dev->stage"|"stage->main") ;;
