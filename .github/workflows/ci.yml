@@ -41,7 +41,7 @@ jobs:
           HEAD_REF="${GITHUB_HEAD_REF:-}"
           PR_HEAD_SHA="$(jq -r '.pull_request.head.sha // empty' "${GITHUB_EVENT_PATH}")"
           PR_BODY="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
-          EXPECTED_SHA="$(printf '%s\n' "${PR_BODY}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_SHA="$(printf '%s\n' "${PR_BODY}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
 
           if [[ -z "$BASE_REF" || -z "$HEAD_REF" || -z "$PR_HEAD_SHA" ]]; then
             echo "ERROR: missing pull request branch context (base/head)." >&2
