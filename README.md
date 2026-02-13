@@ -39,3 +39,5 @@ O sistema suporta diferentes escopos de permissões:
 ## Uso Básico
 
 ### Verificar Permissões no Controller
+
+Nota de simulação CI/CD (backend): alteração documental mínima para validar o fluxo integrado com flutter no mesmo ciclo.
