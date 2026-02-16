@@ -12,6 +12,7 @@ use App\Models\Tenants\TenantProfileType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use MongoDB\BSON\ObjectId;
 
 class AccountProfileQueryService extends AbstractQueryService
@@ -30,12 +31,35 @@ class AccountProfileQueryService extends AbstractQueryService
             $this->applyOwnershipFilter($query, $ownershipState);
         }
 
-        return $this->buildPaginator(
+        $paginator = $this->buildPaginator(
             $query,
             $this->withoutOwnershipState($queryParams),
             $includeArchived,
             $perPage
-        )->through(fn (AccountProfile $profile): array => $this->format($profile));
+        );
+
+        /** @var Collection<int, AccountProfile> $profiles */
+        $profiles = $paginator->getCollection()
+            ->filter(static fn ($item): bool => $item instanceof AccountProfile)
+            ->values();
+        $accountsById = $this->loadAccountsById($profiles);
+        $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(
+            array_keys($accountsById)
+        );
+
+        $paginator->setCollection(
+            $profiles
+                ->map(
+                    fn (AccountProfile $profile): array => $this->format(
+                        $profile,
+                        $accountsById[(string) $profile->account_id] ?? null,
+                        $userOperatedLookup
+                    )
+                )
+                ->values()
+        );
+
+        return $paginator;
     }
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
@@ -82,11 +106,17 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
+     * @param array<string, bool> $userOperatedLookup
      * @return array<string, mixed>
      */
-    private function format(AccountProfile $profile): array
+    private function format(
+        AccountProfile $profile,
+        ?Account $account = null,
+        array $userOperatedLookup = []
+    ): array
     {
-        $account = Account::query()->where('_id', $profile->account_id)->first();
+        $resolvedAccount = $account
+            ?? Account::query()->where('_id', $profile->account_id)->first();
 
         return [
             'id' => (string) $profile->_id,
@@ -100,13 +130,44 @@ class AccountProfileQueryService extends AbstractQueryService
             'content' => $profile->content,
             'taxonomy_terms' => $profile->taxonomy_terms ?? [],
             'location' => $this->formatLocation($profile->location),
-            'ownership_state' => $account
-                ? $this->ownershipStateService->deriveOwnershipState($account)
+            'ownership_state' => $resolvedAccount
+                ? $this->ownershipStateService->deriveOwnershipState(
+                    $resolvedAccount,
+                    $userOperatedLookup
+                )
                 : null,
             'created_at' => $profile->created_at?->toJSON(),
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+    }
+
+    /**
+     * @param Collection<int, AccountProfile> $profiles
+     * @return array<string, Account>
+     */
+    private function loadAccountsById(Collection $profiles): array
+    {
+        $accountIds = $profiles
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->account_id)
+            ->filter(static fn (string $id): bool => trim($id) !== '')
+            ->unique()
+            ->values()
+            ->all();
+        if ($accountIds === []) {
+            return [];
+        }
+
+        $accounts = Account::query()
+            ->whereIn('_id', $accountIds)
+            ->get();
+
+        $byId = [];
+        foreach ($accounts as $account) {
+            $byId[(string) $account->getKey()] = $account;
+        }
+
+        return $byId;
     }
 
     /**
