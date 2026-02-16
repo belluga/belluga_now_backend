@@ -69,6 +69,7 @@ class StaticProfileTypeRegistryManagementService
         return [
             'type' => $type,
             'label' => trim((string) ($payload['label'] ?? '')),
+            'map_category' => $this->normalizeMapCategory($payload['map_category'] ?? null, $type),
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
             'capabilities' => [
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
@@ -96,6 +97,9 @@ class StaticProfileTypeRegistryManagementService
             'label' => array_key_exists('label', $payload)
                 ? trim((string) $payload['label'])
                 : (string) ($existing->label ?? ''),
+            'map_category' => array_key_exists('map_category', $payload)
+                ? $this->normalizeMapCategory($payload['map_category'] ?? null, $type)
+                : $this->normalizeMapCategory($existing->map_category ?? null, $type),
             'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
                 ? $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? [])
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
@@ -137,6 +141,16 @@ class StaticProfileTypeRegistryManagementService
         return array_values(array_filter(array_unique($normalized), static fn (string $value): bool => $value !== ''));
     }
 
+    private function normalizeMapCategory(mixed $raw, string $type): string
+    {
+        $candidate = trim((string) $raw);
+        if ($candidate !== '') {
+            return $candidate;
+        }
+
+        return trim($type);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -145,6 +159,7 @@ class StaticProfileTypeRegistryManagementService
         return [
             'type' => (string) $model->type,
             'label' => (string) $model->label,
+            'map_category' => $this->normalizeMapCategory($model->map_category ?? null, (string) $model->type),
             'allowed_taxonomies' => array_values(array_filter(
                 is_array($model->allowed_taxonomies ?? null)
                     ? $model->allowed_taxonomies

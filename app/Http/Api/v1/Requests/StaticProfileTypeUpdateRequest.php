@@ -16,6 +16,7 @@ class StaticProfileTypeUpdateRequest extends FormRequest
     {
         return [
             'label' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'map_category' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
             'allowed_taxonomies' => ['sometimes', 'array'],
             'allowed_taxonomies.*' => ['string', 'max:' . InputConstraints::NAME_MAX],
             'capabilities' => ['sometimes', 'array'],

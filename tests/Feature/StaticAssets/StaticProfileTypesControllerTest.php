@@ -53,6 +53,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         StaticProfileType::create([
             'type' => 'poi',
             'label' => 'POI',
+            'map_category' => 'beach',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
                 'is_poi_enabled' => true,
@@ -67,6 +68,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.0.type', 'poi');
+        $response->assertJsonPath('data.0.map_category', 'beach');
     }
 
     public function testStaticProfileTypeCreate(): void
@@ -76,6 +78,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
             [
                 'type' => 'beach',
                 'label' => 'Beach',
+                'map_category' => 'beach',
                 'allowed_taxonomies' => ['vibe'],
                 'capabilities' => [
                     'is_poi_enabled' => true,
@@ -87,6 +90,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.type', 'beach');
+        $response->assertJsonPath('data.map_category', 'beach');
         $response->assertJsonPath('data.capabilities.has_content', true);
     }
 
@@ -107,6 +111,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         StaticProfileType::create([
             'type' => 'beach',
             'label' => 'Beach',
+            'map_category' => 'beach',
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_poi_enabled' => true,
@@ -131,6 +136,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         StaticProfileType::create([
             'type' => 'poi',
             'label' => 'POI',
+            'map_category' => 'poi',
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_poi_enabled' => true,
@@ -141,6 +147,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
             "{$this->base_tenant_api_admin}static_profile_types/poi",
             [
                 'label' => 'POI Atualizado',
+                'map_category' => 'historic',
                 'capabilities' => [
                     'has_bio' => true,
                 ],
@@ -150,6 +157,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.label', 'POI Atualizado');
+        $response->assertJsonPath('data.map_category', 'historic');
         $response->assertJsonPath('data.capabilities.has_bio', true);
     }
 
@@ -159,6 +167,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         StaticProfileType::create([
             'type' => 'poi',
             'label' => 'POI',
+            'map_category' => 'poi',
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_poi_enabled' => true,
