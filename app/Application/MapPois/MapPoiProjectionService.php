@@ -92,7 +92,9 @@ class MapPoiProjectionService
             return;
         }
 
-        $categories = $this->normalizeStringArray($asset->categories ?? []);
+        $mapCategory = $this->staticProfileTypeRegistryService->resolveMapCategory(
+            (string) $asset->profile_type
+        );
         $payload = [
             'ref_type' => 'static',
             'ref_id' => (string) $asset->_id,
@@ -100,7 +102,7 @@ class MapPoiProjectionService
             'ref_path' => $this->buildRefPath('static', $asset->slug ?? null),
             'name' => (string) ($asset->display_name ?? ''),
             'subtitle' => $asset->bio ?? null,
-            'category' => $categories[0] ?? 'static',
+            'category' => $mapCategory,
             'tags' => $this->normalizeStringArray($asset->tags ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($asset->taxonomy_terms ?? []),
             'taxonomy_terms_flat' => $this->flattenTaxonomyTerms($asset->taxonomy_terms ?? []),

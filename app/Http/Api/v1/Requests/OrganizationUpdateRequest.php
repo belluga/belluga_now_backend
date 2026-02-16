@@ -21,6 +21,12 @@ class OrganizationUpdateRequest extends FormRequest
     {
         return [
             'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'slug' => [
+                'sometimes',
+                'string',
+                'max:' . InputConstraints::NAME_MAX,
+                'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
+            ],
             'description' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
         ];
     }

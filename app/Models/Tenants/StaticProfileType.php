@@ -16,6 +16,7 @@ class StaticProfileType extends Model
     protected $fillable = [
         'type',
         'label',
+        'map_category',
         'allowed_taxonomies',
         'capabilities',
     ];

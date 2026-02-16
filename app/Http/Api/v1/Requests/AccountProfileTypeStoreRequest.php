@@ -15,7 +15,7 @@ class AccountProfileTypeStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'type' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'type' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'label' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
             'allowed_taxonomies' => ['sometimes', 'array'],
             'allowed_taxonomies.*' => ['string', 'max:' . InputConstraints::NAME_MAX],
@@ -23,6 +23,7 @@ class AccountProfileTypeStoreRequest extends FormRequest
             'capabilities.is_favoritable' => ['sometimes', 'boolean'],
             'capabilities.is_poi_enabled' => ['sometimes', 'boolean'],
             'capabilities.has_bio' => ['sometimes', 'boolean'],
+            'capabilities.has_content' => ['sometimes', 'boolean'],
             'capabilities.has_taxonomies' => ['sometimes', 'boolean'],
             'capabilities.has_avatar' => ['sometimes', 'boolean'],
             'capabilities.has_cover' => ['sometimes', 'boolean'],

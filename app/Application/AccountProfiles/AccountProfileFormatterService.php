@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Accounts\AccountOwnershipStateService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 
 class AccountProfileFormatterService
 {
     public function __construct(
-        private readonly AccountProfileOwnershipService $ownershipService
+        private readonly AccountOwnershipStateService $ownershipStateService
     ) {
     }
 
@@ -30,9 +31,12 @@ class AccountProfileFormatterService
             'avatar_url' => $profile->avatar_url,
             'cover_url' => $profile->cover_url,
             'bio' => $profile->bio,
+            'content' => $profile->content,
             'taxonomy_terms' => $profile->taxonomy_terms ?? [],
             'location' => $this->formatLocation($profile->location),
-            'ownership_state' => $account ? $this->ownershipService->deriveOwnershipState($account) : null,
+            'ownership_state' => $account
+                ? $this->ownershipStateService->deriveOwnershipState($account)
+                : null,
             'created_at' => $profile->created_at?->toJSON(),
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),

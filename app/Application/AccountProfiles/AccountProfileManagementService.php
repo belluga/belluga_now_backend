@@ -126,8 +126,20 @@ class AccountProfileManagementService
             $attributes['location'] = $this->formatLocation($attributes['location']);
         }
 
-        $profile->fill($attributes);
-        $profile->save();
+        try {
+            $profile->fill($attributes);
+            $profile->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'slug' => ['Account profile slug already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'account_profile' => ['Something went wrong when trying to update the account profile.'],
+            ]);
+        }
 
         $profile = $profile->fresh();
         UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);

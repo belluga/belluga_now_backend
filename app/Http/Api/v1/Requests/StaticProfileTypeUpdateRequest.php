@@ -15,7 +15,9 @@ class StaticProfileTypeUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'type' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'label' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'map_category' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
             'allowed_taxonomies' => ['sometimes', 'array'],
             'allowed_taxonomies.*' => ['string', 'max:' . InputConstraints::NAME_MAX],
             'capabilities' => ['sometimes', 'array'],

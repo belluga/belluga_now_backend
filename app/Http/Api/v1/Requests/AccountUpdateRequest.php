@@ -26,6 +26,12 @@ class AccountUpdateRequest extends FormRequest
     {
         return [
             'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'slug' => [
+                'sometimes',
+                'string',
+                'max:' . InputConstraints::NAME_MAX,
+                'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
+            ],
             'document' => 'sometimes|array',
             'document.type' => 'required_with:document.number|string|in:cpf,cnpj',
             'document.number' => 'required_with:document.type|string|max:' . InputConstraints::NAME_MAX,
@@ -44,7 +50,8 @@ class AccountUpdateRequest extends FormRequest
             'document.type.required' => 'O tipo do documento é obrigatório',
             'document.type.in' => 'O tipo do documento deve ser cpf ou cnpj',
             'document.number.required' => 'O número do documento é obrigatório',
-            'document.number.max' => 'O número do documento não pode ter mais que :max caracteres'
+            'document.number.max' => 'O número do documento não pode ter mais que :max caracteres',
+            'slug.regex' => 'O slug deve usar apenas letras minúsculas, números, hífen ou underscore.',
         ];
     }
 }

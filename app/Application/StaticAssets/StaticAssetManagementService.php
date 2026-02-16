@@ -133,8 +133,20 @@ class StaticAssetManagementService
             $attributes['location'] = $this->formatLocation($attributes['location']);
         }
 
-        $asset->fill($attributes);
-        $asset->save();
+        try {
+            $asset->fill($attributes);
+            $asset->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'slug' => ['Static asset slug already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'static_asset' => ['Something went wrong when trying to update the static asset.'],
+            ]);
+        }
 
         $asset = $asset->fresh();
         UpsertMapPoiFromStaticAssetJob::dispatch((string) $asset->_id);

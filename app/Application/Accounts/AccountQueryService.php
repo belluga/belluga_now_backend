@@ -13,6 +13,11 @@ use MongoDB\BSON\ObjectId;
 
 class AccountQueryService extends AbstractQueryService
 {
+    public function __construct(
+        private readonly AccountOwnershipStateService $ownershipStateService
+    ) {
+    }
+
     public function paginateForUser(
         AccountUser|LandlordUser $user,
         array $queryParams,
@@ -30,19 +35,20 @@ class AccountQueryService extends AbstractQueryService
             $query->whereRaw(['_id' => ['$in' => $accessIds]]);
         }
 
-        return $this->buildPaginator($query, $queryParams, $includeArchived, $perPage)
-            ->through(static function (Account $account): array {
-                return [
-                    'id' => (string) $account->_id,
-                    'name' => $account->name,
-                    'slug' => $account->slug,
-                    'document' => $account->document,
-                    'organization_id' => $account->organization_id ?? null,
-                    'created_at' => $account->created_at?->toJSON(),
-                    'updated_at' => $account->updated_at?->toJSON(),
-                    'deleted_at' => $account->deleted_at?->toJSON(),
-                ];
-            });
+        $ownershipState = $this->extractOwnershipState($queryParams);
+        if ($ownershipState !== null) {
+            $this->ownershipStateService->applyOwnershipFilterToAccountsQuery(
+                $query,
+                $ownershipState
+            );
+        }
+
+        return $this->buildPaginator(
+            $query,
+            $this->withoutOwnershipState($queryParams),
+            $includeArchived,
+            $perPage
+        )->through(fn (Account $account): array => $this->format($account));
     }
 
     public function findBySlugOrFail(string $slug, bool $onlyTrashed = false): Account
@@ -63,6 +69,7 @@ class AccountQueryService extends AbstractQueryService
             'slug' => $account->slug,
             'document' => $account->document,
             'organization_id' => $account->organization_id ?? null,
+            'ownership_state' => $this->ownershipStateService->deriveOwnershipState($account),
             'created_at' => $account->created_at?->toJSON(),
             'updated_at' => $account->updated_at?->toJSON(),
             'deleted_at' => $account->deleted_at?->toJSON(),
@@ -92,5 +99,39 @@ class AccountQueryService extends AbstractQueryService
     protected function extraSearchableFields(): array
     {
         return ['organization_id'];
+    }
+
+    private function extractOwnershipState(array $queryParams): ?string
+    {
+        $topLevel = $queryParams['ownership_state'] ?? null;
+        if (is_string($topLevel) && trim($topLevel) !== '') {
+            return trim($topLevel);
+        }
+
+        $filter = $queryParams['filter'] ?? null;
+        if (! is_array($filter)) {
+            return null;
+        }
+
+        $filterValue = $filter['ownership_state'] ?? null;
+        if (is_string($filterValue) && trim($filterValue) !== '') {
+            return trim($filterValue);
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function withoutOwnershipState(array $queryParams): array
+    {
+        unset($queryParams['ownership_state']);
+
+        if (isset($queryParams['filter']) && is_array($queryParams['filter'])) {
+            unset($queryParams['filter']['ownership_state']);
+        }
+
+        return $queryParams;
     }
 }
