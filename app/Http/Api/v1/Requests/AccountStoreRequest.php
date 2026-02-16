@@ -26,9 +26,9 @@ class AccountStoreRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
-            'document' => 'required|array',
-            'document.type' => 'required|string|in:cpf,cnpj',
-            'document.number' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'document' => 'sometimes|array',
+            'document.type' => 'required_with:document|string|in:cpf,cnpj',
+            'document.number' => 'required_with:document|string|max:' . InputConstraints::NAME_MAX,
             'ownership_state' => 'required|string|in:tenant_owned,unmanaged',
             'organization_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
         ];
@@ -43,11 +43,10 @@ class AccountStoreRequest extends FormRequest
     {
         return [
             'name.required' => 'O nome do tenant é obrigatório',
-            'document.required' => 'O documento é obrigatório',
             'document.array' => 'O documento deve ser um objeto',
-            'document.type.required' => 'O tipo do documento é obrigatório',
+            'document.type.required_with' => 'O tipo do documento é obrigatório quando documento for enviado',
             'document.type.in' => 'O tipo do documento deve ser cpf ou cnpj',
-            'document.number.required' => 'O número do documento é obrigatório',
+            'document.number.required_with' => 'O número do documento é obrigatório quando documento for enviado',
             'document.number.max' => 'O número do documento não pode ter mais que :max caracteres',
             'ownership_state.required' => 'O ownership_state é obrigatório',
             'ownership_state.in' => 'O ownership_state deve ser tenant_owned ou unmanaged',

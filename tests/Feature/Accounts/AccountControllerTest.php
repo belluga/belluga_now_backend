@@ -212,16 +212,20 @@ class AccountControllerTest extends TestCase
         $showResponse->assertJsonPath('data.ownership_state', 'user_owned');
     }
 
-    public function testStoreRejectsMissingDocument(): void
+    public function testStoreAllowsMissingDocument(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
 
+        $name = fake()->unique()->company();
         $response = $this->postJson($this->tenantAccountsAdminUrl, [
-            'name' => 'Account Missing Document',
+            'name' => $name,
             'ownership_state' => 'tenant_owned',
         ]);
 
-        $response->assertStatus(422);
+        $response->assertCreated();
+        $response->assertJsonPath('data.account.name', $name);
+
+        Account::where('name', $name)->first()?->forceDelete();
     }
 
     public function testStoreRejectsInvalidOwnershipState(): void
