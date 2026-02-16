@@ -52,7 +52,13 @@ class AccountOwnershipStateService
             : null;
     }
 
-    public function deriveOwnershipState(Account $account): string
+    /**
+     * @param array<string, bool>|null $userOperatedAccountLookup
+     */
+    public function deriveOwnershipState(
+        Account $account,
+        ?array $userOperatedAccountLookup = null
+    ): string
     {
         $storedState = $this->normalize(
             is_string($account->ownership_state ?? null)
@@ -65,7 +71,7 @@ class AccountOwnershipStateService
         }
 
         // Any account with an attached operator is not unmanaged.
-        if ($this->hasUserOperator($account)) {
+        if ($this->hasUserOperator($account, $userOperatedAccountLookup)) {
             return self::USER_OWNED;
         }
 
@@ -91,11 +97,53 @@ class AccountOwnershipStateService
         return (string) $account->organization_id === $tenantOrganizationId;
     }
 
-    public function hasUserOperator(Account $account): bool
+    /**
+     * @param array<string, bool>|null $userOperatedAccountLookup
+     */
+    public function hasUserOperator(
+        Account $account,
+        ?array $userOperatedAccountLookup = null
+    ): bool
     {
+        if ($userOperatedAccountLookup !== null) {
+            return array_key_exists((string) $account->_id, $userOperatedAccountLookup);
+        }
+
         return AccountUser::query()
             ->where('account_roles.account_id', (string) $account->_id)
             ->exists();
+    }
+
+    /**
+     * @param array<int, string>|null $candidateAccountIds
+     * @return array<string, bool>
+     */
+    public function userOperatedAccountIdLookup(?array $candidateAccountIds = null): array
+    {
+        $accountIds = $this->userOperatedAccountIds();
+
+        if ($candidateAccountIds !== null) {
+            $allowed = [];
+            foreach ($candidateAccountIds as $id) {
+                $normalized = trim((string) $id);
+                if ($normalized === '') {
+                    continue;
+                }
+                $allowed[$normalized] = true;
+            }
+
+            $accountIds = array_values(array_filter(
+                $accountIds,
+                static fn (string $id): bool => array_key_exists($id, $allowed)
+            ));
+        }
+
+        $lookup = [];
+        foreach ($accountIds as $accountId) {
+            $lookup[$accountId] = true;
+        }
+
+        return $lookup;
     }
 
     public function applyOwnershipFilterToAccountsQuery(

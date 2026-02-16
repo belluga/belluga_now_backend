@@ -48,6 +48,10 @@ class StaticProfileTypeRegistryManagementService
             ? trim((string) $payload['type'])
             : (string) ($model->type ?? '');
         $currentType = (string) ($model->type ?? '');
+        $currentMapCategory = $this->normalizeMapCategory(
+            $model->map_category,
+            $currentType
+        );
         if ($nextType !== $currentType) {
             if (StaticProfileType::query()->where('type', $nextType)->exists()) {
                 throw ValidationException::withMessages([
@@ -78,7 +82,11 @@ class StaticProfileTypeRegistryManagementService
             ]);
         }
 
-        if ($nextType !== $currentType) {
+        $nextMapCategory = (string) ($entry['map_category'] ?? $nextType);
+        $shouldSyncMapPoiCategory = $nextMapCategory !== $currentMapCategory;
+        $shouldSyncStaticAssets = $nextType !== $currentType;
+
+        if ($shouldSyncStaticAssets || $shouldSyncMapPoiCategory) {
             $assetIds = StaticAsset::query()
                 ->where('profile_type', $currentType)
                 ->get(['_id'])
@@ -86,24 +94,28 @@ class StaticProfileTypeRegistryManagementService
                 ->all();
 
             if ($assetIds !== []) {
-                StaticAsset::query()
-                    ->where('profile_type', $currentType)
-                    ->update(['profile_type' => $nextType]);
-
-                [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($assetIds);
-
-                if ($stringRefIds !== []) {
-                    MapPoi::query()
-                        ->where('ref_type', 'static')
-                        ->whereIn('ref_id', $stringRefIds)
-                        ->update(['category' => (string) ($entry['map_category'] ?? $nextType)]);
+                if ($shouldSyncStaticAssets) {
+                    StaticAsset::query()
+                        ->where('profile_type', $currentType)
+                        ->update(['profile_type' => $nextType]);
                 }
 
-                if ($objectRefIds !== []) {
-                    MapPoi::query()
-                        ->where('ref_type', 'static')
-                        ->whereIn('ref_id', $objectRefIds)
-                        ->update(['category' => (string) ($entry['map_category'] ?? $nextType)]);
+                if ($shouldSyncMapPoiCategory) {
+                    [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($assetIds);
+
+                    if ($stringRefIds !== []) {
+                        MapPoi::query()
+                            ->where('ref_type', 'static')
+                            ->whereIn('ref_id', $stringRefIds)
+                            ->update(['category' => $nextMapCategory]);
+                    }
+
+                    if ($objectRefIds !== []) {
+                        MapPoi::query()
+                            ->where('ref_type', 'static')
+                            ->whereIn('ref_id', $objectRefIds)
+                            ->update(['category' => $nextMapCategory]);
+                    }
                 }
             }
         }

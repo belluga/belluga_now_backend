@@ -255,6 +255,60 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
+    public function testStaticProfileTypeUpdatePropagatesMapCategoryWithoutTypeRename(): void
+    {
+        StaticProfileType::query()->delete();
+        StaticAsset::query()->delete();
+        MapPoi::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'map_category' => 'poi',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $asset = StaticAsset::create([
+            'profile_type' => 'poi',
+            'display_name' => 'Asset One',
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => (string) $asset->_id,
+            'name' => 'Asset One',
+            'category' => 'poi',
+            'is_active' => true,
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_profile_types/poi",
+            [
+                'map_category' => 'landmark',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.type', 'poi');
+        $response->assertJsonPath('data.map_category', 'landmark');
+
+        $this->assertSame(
+            'landmark',
+            (string) (
+                MapPoi::query()
+                    ->where('ref_type', 'static')
+                    ->where('ref_id', (string) $asset->_id)
+                    ->firstOrFail()
+                    ->category ?? ''
+            )
+        );
+    }
+
     public function testStaticProfileTypeUpdateRejectsDuplicateTypeRename(): void
     {
         StaticProfileType::query()->delete();
