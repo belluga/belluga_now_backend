@@ -31,6 +31,7 @@ class AccountProfileFormatterService
             'avatar_url' => $profile->avatar_url,
             'cover_url' => $profile->cover_url,
             'bio' => $profile->bio,
+            'content' => $profile->content,
             'taxonomy_terms' => $profile->taxonomy_terms ?? [],
             'location' => $this->formatLocation($profile->location),
             'ownership_state' => $account

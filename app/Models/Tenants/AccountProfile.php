@@ -25,6 +25,7 @@ class AccountProfile extends Model
         'taxonomy_terms',
         'location',
         'bio',
+        'content',
         'avatar_url',
         'cover_url',
         'is_active',

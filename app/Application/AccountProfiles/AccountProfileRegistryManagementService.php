@@ -135,6 +135,7 @@ class AccountProfileRegistryManagementService
                 'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
                 'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
+                'has_content' => (bool) ($capabilities['has_content'] ?? false),
                 'has_taxonomies' => (bool) ($capabilities['has_taxonomies'] ?? false),
                 'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
                 'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
@@ -171,6 +172,9 @@ class AccountProfileRegistryManagementService
                 'has_bio' => array_key_exists('has_bio', $capabilities)
                     ? (bool) $capabilities['has_bio']
                     : (bool) ($currentCapabilities['has_bio'] ?? false),
+                'has_content' => array_key_exists('has_content', $capabilities)
+                    ? (bool) $capabilities['has_content']
+                    : (bool) ($currentCapabilities['has_content'] ?? false),
                 'has_taxonomies' => array_key_exists('has_taxonomies', $capabilities)
                     ? (bool) $capabilities['has_taxonomies']
                     : (bool) ($currentCapabilities['has_taxonomies'] ?? false),
@@ -249,6 +253,7 @@ class AccountProfileRegistryManagementService
                 'is_favoritable' => (bool) ($model->capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),
                 'has_bio' => (bool) ($model->capabilities['has_bio'] ?? false),
+                'has_content' => (bool) ($model->capabilities['has_content'] ?? false),
                 'has_taxonomies' => (bool) ($model->capabilities['has_taxonomies'] ?? false),
                 'has_avatar' => (bool) ($model->capabilities['has_avatar'] ?? false),
                 'has_cover' => (bool) ($model->capabilities['has_cover'] ?? false),
