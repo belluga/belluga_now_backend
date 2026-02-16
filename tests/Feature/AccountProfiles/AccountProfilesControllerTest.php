@@ -523,6 +523,61 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('errors.profile_type'));
     }
 
+    public function testAccountProfileUpdateAllowsSlugChange(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile Slug',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+        $this->assertNotEmpty($profileId);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'slug' => 'profile-slug-custom',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.slug', 'profile-slug-custom');
+    }
+
+    public function testAccountProfileUpdateRejectsDuplicateSlug(): void
+    {
+        $primary = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Primary Slug',
+            'is_active' => true,
+        ])->fresh();
+
+        $otherAccount = Account::create([
+            'name' => 'Account Slug Other',
+            'document' => 'DOC-SLUG-OTHER',
+        ]);
+        $secondary = AccountProfile::create([
+            'account_id' => (string) $otherAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Secondary Slug',
+            'is_active' => true,
+        ])->fresh();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/" . (string) $primary->_id,
+            [
+                'slug' => (string) ($secondary->slug ?? ''),
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['slug']);
+    }
+
     public function testAccountProfileIndexFiltersByAccount(): void
     {
         $otherAccount = Account::create([

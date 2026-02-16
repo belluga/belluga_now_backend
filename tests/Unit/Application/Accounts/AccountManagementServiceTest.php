@@ -53,6 +53,7 @@ class AccountManagementServiceTest extends TestCase
 
         $result = $this->service->create([
             'name' => $name,
+            'ownership_state' => 'unmanaged',
             'document' => [
                 'type' => 'cpf',
                 'number' => fake()->unique()->numerify('###################'),
@@ -71,6 +72,7 @@ class AccountManagementServiceTest extends TestCase
     {
         $account = $this->service->create([
             'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
             'document' => ['type' => 'cpf', 'number' => fake()->unique()->numerify('###################')],
         ])['account'];
 

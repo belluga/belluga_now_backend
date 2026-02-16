@@ -21,6 +21,7 @@ class AccountProfile extends Model
         'account_id',
         'profile_type',
         'display_name',
+        'slug',
         'taxonomy_terms',
         'location',
         'bio',

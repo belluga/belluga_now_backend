@@ -309,10 +309,12 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
     protected function accountCreate(array $data): TestResponse
     {
+        $payload = ['ownership_state' => 'unmanaged', ...$data];
+
         return $this->json(
             method: 'post',
             uri: $this->base_api_url,
-            data: $data,
+            data: $payload,
             headers: $this->getHeaders(),
         );
     }

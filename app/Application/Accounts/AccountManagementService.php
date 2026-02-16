@@ -118,8 +118,20 @@ class AccountManagementService
      */
     public function update(Account $account, array $attributes): Account
     {
-        $account->fill($attributes);
-        $account->save();
+        try {
+            $account->fill($attributes);
+            $account->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'slug' => ['Account slug already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'account' => ['Something went wrong when trying to update the account.'],
+            ]);
+        }
 
         return $account->fresh();
     }

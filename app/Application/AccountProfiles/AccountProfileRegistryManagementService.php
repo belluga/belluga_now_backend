@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\MapPoi;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
+use MongoDB\Driver\Exception\BulkWriteException;
 
 class AccountProfileRegistryManagementService
 {
@@ -41,9 +45,65 @@ class AccountProfileRegistryManagementService
             abort(404, 'Profile type not found.');
         }
 
-        $entry = $this->mergeEntry($model, $payload, $type);
-        $model->fill($entry);
-        $model->save();
+        $nextType = array_key_exists('type', $payload)
+            ? trim((string) $payload['type'])
+            : (string) ($model->type ?? '');
+        $currentType = (string) ($model->type ?? '');
+
+        if ($nextType !== $currentType) {
+            if (TenantProfileType::query()->where('type', $nextType)->exists()) {
+                throw ValidationException::withMessages([
+                    'type' => ['Profile type already exists.'],
+                ]);
+            }
+        }
+
+        $entry = $this->mergeEntry($model, $payload, $nextType);
+
+        try {
+            $model->fill($entry);
+            $model->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'type' => ['Profile type already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'profile_type' => ['Something went wrong when trying to update the profile type.'],
+            ]);
+        }
+
+        if ($nextType !== $currentType) {
+            $profileIds = AccountProfile::query()
+                ->where('profile_type', $currentType)
+                ->get(['_id'])
+                ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
+                ->all();
+
+            if ($profileIds !== []) {
+                AccountProfile::query()
+                    ->where('profile_type', $currentType)
+                    ->update(['profile_type' => $nextType]);
+
+                [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($profileIds);
+
+                if ($stringRefIds !== []) {
+                    MapPoi::query()
+                        ->where('ref_type', 'account_profile')
+                        ->whereIn('ref_id', $stringRefIds)
+                        ->update(['category' => $nextType]);
+                }
+
+                if ($objectRefIds !== []) {
+                    MapPoi::query()
+                        ->where('ref_type', 'account_profile')
+                        ->whereIn('ref_id', $objectRefIds)
+                        ->update(['category' => $nextType]);
+                }
+            }
+        }
 
         return $this->toPayload($model);
     }
@@ -88,13 +148,13 @@ class AccountProfileRegistryManagementService
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function mergeEntry(TenantProfileType $existing, array $payload, string $type): array
+    private function mergeEntry(TenantProfileType $existing, array $payload, string $resolvedType): array
     {
         $capabilities = $payload['capabilities'] ?? [];
         $currentCapabilities = $existing->capabilities ?? [];
 
         return [
-            'type' => $type,
+            'type' => $resolvedType,
             'label' => array_key_exists('label', $payload)
                 ? trim((string) $payload['label'])
                 : (string) ($existing->label ?? ''),
@@ -140,6 +200,35 @@ class AccountProfileRegistryManagementService
         $normalized = array_map(static fn ($value): string => trim((string) $value), $raw);
 
         return array_values(array_filter(array_unique($normalized), static fn (string $value): bool => $value !== ''));
+    }
+
+    /**
+     * @param array<int, string> $rawIds
+     * @return array{0: array<int, string>, 1: array<int, ObjectId>}
+     */
+    private function splitMapPoiRefIds(array $rawIds): array
+    {
+        $stringIds = [];
+        $objectIds = [];
+
+        foreach ($rawIds as $rawId) {
+            $id = trim((string) $rawId);
+            if ($id === '') {
+                continue;
+            }
+
+            $stringIds[] = $id;
+
+            if (preg_match('/^[a-f0-9]{24}$/i', $id) === 1) {
+                try {
+                    $objectIds[] = new ObjectId($id);
+                } catch (\Throwable) {
+                    // Ignore invalid ObjectId conversions and keep string matching.
+                }
+            }
+        }
+
+        return [$stringIds, $objectIds];
     }
 
     /**

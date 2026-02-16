@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
+use App\Models\Tenants\MapPoi;
+use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
+use MongoDB\Driver\Exception\BulkWriteException;
 
 class StaticProfileTypeRegistryManagementService
 {
@@ -40,9 +44,69 @@ class StaticProfileTypeRegistryManagementService
             abort(404, 'Static profile type not found.');
         }
 
-        $entry = $this->mergeEntry($model, $payload, $type);
-        $model->fill($entry);
-        $model->save();
+        $nextType = array_key_exists('type', $payload)
+            ? trim((string) $payload['type'])
+            : (string) ($model->type ?? '');
+        $currentType = (string) ($model->type ?? '');
+        if ($nextType !== $currentType) {
+            if (StaticProfileType::query()->where('type', $nextType)->exists()) {
+                throw ValidationException::withMessages([
+                    'type' => ['Static profile type already exists.'],
+                ]);
+            }
+        }
+
+        $entry = $this->mergeEntry(
+            $model,
+            $payload,
+            $nextType,
+            $currentType,
+        );
+
+        try {
+            $model->fill($entry);
+            $model->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'type' => ['Static profile type already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'profile_type' => ['Something went wrong when trying to update the static profile type.'],
+            ]);
+        }
+
+        if ($nextType !== $currentType) {
+            $assetIds = StaticAsset::query()
+                ->where('profile_type', $currentType)
+                ->get(['_id'])
+                ->map(static fn (StaticAsset $asset): string => (string) $asset->getKey())
+                ->all();
+
+            if ($assetIds !== []) {
+                StaticAsset::query()
+                    ->where('profile_type', $currentType)
+                    ->update(['profile_type' => $nextType]);
+
+                [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($assetIds);
+
+                if ($stringRefIds !== []) {
+                    MapPoi::query()
+                        ->where('ref_type', 'static')
+                        ->whereIn('ref_id', $stringRefIds)
+                        ->update(['category' => (string) ($entry['map_category'] ?? $nextType)]);
+                }
+
+                if ($objectRefIds !== []) {
+                    MapPoi::query()
+                        ->where('ref_type', 'static')
+                        ->whereIn('ref_id', $objectRefIds)
+                        ->update(['category' => (string) ($entry['map_category'] ?? $nextType)]);
+                }
+            }
+        }
 
         return $this->toPayload($model);
     }
@@ -87,19 +151,30 @@ class StaticProfileTypeRegistryManagementService
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function mergeEntry(StaticProfileType $existing, array $payload, string $type): array
+    private function mergeEntry(
+        StaticProfileType $existing,
+        array $payload,
+        string $resolvedType,
+        string $previousType,
+    ): array
     {
         $capabilities = $payload['capabilities'] ?? [];
         $currentCapabilities = $existing->capabilities ?? [];
+        $currentMapCategory = trim((string) ($existing->map_category ?? ''));
+        $resolvedMapCategory = array_key_exists('map_category', $payload)
+            ? $this->normalizeMapCategory($payload['map_category'] ?? null, $resolvedType)
+            : (
+                $currentMapCategory === '' || $currentMapCategory === $previousType
+                    ? $this->normalizeMapCategory(null, $resolvedType)
+                    : $currentMapCategory
+            );
 
         return [
-            'type' => $type,
+            'type' => $resolvedType,
             'label' => array_key_exists('label', $payload)
                 ? trim((string) $payload['label'])
                 : (string) ($existing->label ?? ''),
-            'map_category' => array_key_exists('map_category', $payload)
-                ? $this->normalizeMapCategory($payload['map_category'] ?? null, $type)
-                : $this->normalizeMapCategory($existing->map_category ?? null, $type),
+            'map_category' => $resolvedMapCategory,
             'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
                 ? $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? [])
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
@@ -149,6 +224,35 @@ class StaticProfileTypeRegistryManagementService
         }
 
         return trim($type);
+    }
+
+    /**
+     * @param array<int, string> $rawIds
+     * @return array{0: array<int, string>, 1: array<int, ObjectId>}
+     */
+    private function splitMapPoiRefIds(array $rawIds): array
+    {
+        $stringIds = [];
+        $objectIds = [];
+
+        foreach ($rawIds as $rawId) {
+            $id = trim((string) $rawId);
+            if ($id === '') {
+                continue;
+            }
+
+            $stringIds[] = $id;
+
+            if (preg_match('/^[a-f0-9]{24}$/i', $id) === 1) {
+                try {
+                    $objectIds[] = new ObjectId($id);
+                } catch (\Throwable) {
+                    // Ignore invalid ObjectId conversions and keep string matching.
+                }
+            }
+        }
+
+        return [$stringIds, $objectIds];
     }
 
     /**

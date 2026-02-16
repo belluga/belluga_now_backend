@@ -22,6 +22,7 @@ class AccountProfileUpdateRequest extends FormRequest
         return [
             'profile_type' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'display_name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'slug' => 'sometimes|string|max:' . InputConstraints::NAME_MAX . '|regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             'location' => 'sometimes|array',
             'location.lat' => 'required_with:location.lng|numeric',
             'location.lng' => 'required_with:location.lat|numeric',
