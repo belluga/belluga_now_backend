@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Application\Accounts;
 
 use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -17,7 +16,8 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class AccountManagementService
 {
     public function __construct(
-        private readonly AccountQueryService $accountQueryService
+        private readonly AccountQueryService $accountQueryService,
+        private readonly AccountOwnershipStateService $ownershipStateService
     ) {
     }
 
@@ -44,7 +44,8 @@ class AccountManagementService
     {
         try {
             return DB::connection('tenant')->transaction(function () use ($payload): array {
-                $payload = $this->applyDefaultOrganization($payload);
+                $ownershipIntent = $this->resolveOwnershipIntent($payload);
+                $payload = $this->applyOwnershipIntent($payload, $ownershipIntent);
                 $account = Account::create($payload);
 
                 $role = $account->roleTemplates()->create([
@@ -73,19 +74,40 @@ class AccountManagementService
 
     /**
      * @param array<string, mixed> $payload
-     * @return array<string, mixed>
      */
-    private function applyDefaultOrganization(array $payload): array
+    private function resolveOwnershipIntent(array $payload): string
     {
-        $createdByType = $payload['created_by_type'] ?? null;
+        $rawValue = $payload['ownership_state'] ?? null;
+        $intent = is_string($rawValue)
+            ? $this->ownershipStateService->normalize($rawValue)
+            : null;
 
-        if (! empty($payload['organization_id']) || $createdByType !== 'landlord') {
-            return $payload;
+        if (
+            $intent === null ||
+            ! in_array($intent, AccountOwnershipStateService::allowedCreateIntents(), true)
+        ) {
+            throw ValidationException::withMessages([
+                'ownership_state' => [
+                    'ownership_state must be tenant_owned or unmanaged.',
+                ],
+            ]);
         }
 
-        $tenant = Tenant::current();
-        if ($tenant && ! empty($tenant->organization_id)) {
-            $payload['organization_id'] = (string) $tenant->organization_id;
+        return $intent;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function applyOwnershipIntent(array $payload, string $intent): array
+    {
+        unset($payload['ownership_state']);
+
+        $payload['ownership_state'] = $intent;
+
+        if ($intent === AccountOwnershipStateService::UNMANAGED) {
+            unset($payload['organization_id']);
         }
 
         return $payload;
@@ -149,5 +171,4 @@ class AccountManagementService
             }
         });
     }
-
 }

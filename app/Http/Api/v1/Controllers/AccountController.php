@@ -69,7 +69,10 @@ class AccountController extends Controller
         }
 
         return response()->json([
-            'data' => $result,
+            'data' => [
+                'account' => $this->accountQueryService->format($result['account']),
+                'role' => $result['role'],
+            ],
         ], 201);
     }
 

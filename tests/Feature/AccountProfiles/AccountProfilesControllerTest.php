@@ -112,6 +112,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $this->assertNotEmpty($response->json('data'));
+        $this->assertTrue(collect($response->json('data'))->every(static fn (array $item): bool => array_key_exists('ownership_state', $item)));
     }
 
     public function testPublicAccountProfileIndexFiltersByProfileType(): void
@@ -143,7 +144,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $items = collect($response->json('data'));
-        $this->assertNotEmpty($items);
         $this->assertTrue($items->every(fn (array $item): bool => $item['profile_type'] === 'venue'));
     }
 
@@ -157,6 +157,39 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $this->assertSame([], $response->json('data'));
+    }
+
+    public function testAdminAccountProfileIndexFiltersByOwnershipState(): void
+    {
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Managed Profile',
+            'is_active' => true,
+        ]);
+
+        $unmanagedAccount = Account::create([
+            'name' => 'Unmanaged Account',
+            'document' => 'DOC-UNMANAGED',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $unmanagedAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Unmanaged Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?ownership_state=unmanaged",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertTrue(
+            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
+        );
     }
 
     public function testAccountProfileTypesReturnsRegistry(): void

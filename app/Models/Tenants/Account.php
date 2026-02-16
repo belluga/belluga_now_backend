@@ -25,6 +25,7 @@ class Account extends Model
     protected $fillable = [
         'name',
         'document',
+        'ownership_state',
         'organization_id',
         'created_by',
         'created_by_type',

@@ -85,12 +85,131 @@ class AccountControllerTest extends TestCase
                 'type' => 'cpf',
                 'number' => $documentNumber,
             ],
+            'ownership_state' => 'tenant_owned',
         ]);
 
         $response->assertCreated();
         $response->assertJsonPath('data.account.name', $name);
+        $response->assertJsonPath('data.account.ownership_state', 'tenant_owned');
 
         Account::where('name', $name)->first()?->forceDelete();
+    }
+
+    public function testStoreAllowsDuplicateDocumentAcrossAccounts(): void
+    {
+        $firstName = fake()->unique()->company();
+        $secondName = fake()->unique()->company();
+        $documentNumber = fake()->unique()->numerify('###################');
+
+        $firstResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $firstName,
+            'document' => [
+                'type' => 'cpf',
+                'number' => $documentNumber,
+            ],
+            'ownership_state' => 'tenant_owned',
+        ]);
+
+        $firstResponse->assertCreated();
+        $firstResponse->assertJsonPath('data.account.name', $firstName);
+
+        $secondResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $secondName,
+            'document' => [
+                'type' => 'cpf',
+                'number' => $documentNumber,
+            ],
+            'ownership_state' => 'tenant_owned',
+        ]);
+
+        $secondResponse->assertCreated();
+        $secondResponse->assertJsonPath('data.account.name', $secondName);
+
+        Account::where('name', $firstName)->first()?->forceDelete();
+        Account::where('name', $secondName)->first()?->forceDelete();
+    }
+
+    public function testStoreCreatesUnmanagedAccountWithoutOrganization(): void
+    {
+        $name = fake()->unique()->company();
+        $documentNumber = fake()->unique()->numerify('###################');
+
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $name,
+            'document' => [
+                'type' => 'cpf',
+                'number' => $documentNumber,
+            ],
+            'ownership_state' => 'unmanaged',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.account.name', $name);
+        $response->assertJsonPath('data.account.ownership_state', 'unmanaged');
+        $this->assertNull($response->json('data.account.organization_id'));
+
+        Account::where('name', $name)->first()?->forceDelete();
+    }
+
+    public function testStoreCreatesTenantOwnedAccountWithoutTenantOrganizationContext(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
+        $tenant->organization_id = null;
+        $tenant->save();
+
+        $name = fake()->unique()->company();
+        $documentNumber = fake()->unique()->numerify('###################');
+
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $name,
+            'document' => [
+                'type' => 'cpf',
+                'number' => $documentNumber,
+            ],
+            'ownership_state' => 'tenant_owned',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.account.name', $name);
+        $response->assertJsonPath('data.account.ownership_state', 'tenant_owned');
+
+        Account::where('name', $name)->first()?->forceDelete();
+    }
+
+    public function testUnmanagedAccountWithOperatorIsReturnedAsUserOwned(): void
+    {
+        $name = fake()->unique()->company();
+        $documentNumber = fake()->unique()->numerify('###################');
+
+        $createResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $name,
+            'document' => [
+                'type' => 'cpf',
+                'number' => $documentNumber,
+            ],
+            'ownership_state' => 'unmanaged',
+        ]);
+
+        $createResponse->assertCreated();
+        $accountSlug = $createResponse->json('data.account.slug');
+        $account = Account::query()->where('slug', $accountSlug)->firstOrFail();
+        $role = $account->roleTemplates()->firstOrFail();
+
+        $account->makeCurrent();
+        $this->userService->create(
+            $account,
+            [
+                'name' => 'Managed User',
+                'email' => fake()->unique()->safeEmail(),
+                'password' => 'Secret!234',
+            ],
+            (string) $role->_id
+        );
+
+        $showResponse = $this->getJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
+
+        $showResponse->assertOk();
+        $showResponse->assertJsonPath('data.ownership_state', 'user_owned');
     }
 
     public function testStoreRejectsMissingDocument(): void
@@ -99,6 +218,23 @@ class AccountControllerTest extends TestCase
 
         $response = $this->postJson($this->tenantAccountsAdminUrl, [
             'name' => 'Account Missing Document',
+            'ownership_state' => 'tenant_owned',
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function testStoreRejectsInvalidOwnershipState(): void
+    {
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
+
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => 'Account Invalid Ownership',
+            'document' => [
+                'type' => 'cpf',
+                'number' => fake()->unique()->numerify('###################'),
+            ],
+            'ownership_state' => 'user_owned',
         ]);
 
         $response->assertStatus(422);
@@ -114,6 +250,7 @@ class AccountControllerTest extends TestCase
                 'type' => 'cpf',
                 'number' => fake()->unique()->numerify('###################'),
             ],
+            'ownership_state' => 'tenant_owned',
         ]);
 
         $response->assertStatus(403);
@@ -127,6 +264,11 @@ class AccountControllerTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $response->json('total'));
         $ids = collect($response->json('data'))->pluck('id');
         $this->assertTrue($ids->contains((string) $this->account->_id));
+        $this->assertTrue(
+            collect($response->json('data'))->every(
+                static fn (array $item): bool => array_key_exists('ownership_state', $item)
+            )
+        );
     }
 
     public function testIndexForbiddenWithoutViewAbility(): void
