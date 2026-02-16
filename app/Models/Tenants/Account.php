@@ -24,7 +24,9 @@ class Account extends Model
 
     protected $fillable = [
         'name',
+        'slug',
         'document',
+        'ownership_state',
         'organization_id',
         'created_by',
         'created_by_type',
@@ -56,7 +58,8 @@ class Account extends Model
     {
         return SlugOptions::create()
             ->generateSlugsFrom('name')
-            ->saveSlugsTo('slug');
+            ->saveSlugsTo('slug')
+            ->doNotGenerateSlugsOnUpdate();
     }
 
     public function forget(): static

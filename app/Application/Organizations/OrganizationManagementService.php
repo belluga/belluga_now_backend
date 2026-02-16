@@ -38,8 +38,20 @@ class OrganizationManagementService
      */
     public function update(Organization $organization, array $attributes): Organization
     {
-        $organization->fill($attributes);
-        $organization->save();
+        try {
+            $organization->fill($attributes);
+            $organization->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'slug' => ['Organization slug already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'organization' => ['Something went wrong when trying to update the organization.'],
+            ]);
+        }
 
         return $organization->fresh();
     }

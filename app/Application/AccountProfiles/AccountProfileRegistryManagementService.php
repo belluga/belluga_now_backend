@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\MapPoi;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
+use MongoDB\Driver\Exception\BulkWriteException;
 
 class AccountProfileRegistryManagementService
 {
@@ -41,9 +45,65 @@ class AccountProfileRegistryManagementService
             abort(404, 'Profile type not found.');
         }
 
-        $entry = $this->mergeEntry($model, $payload, $type);
-        $model->fill($entry);
-        $model->save();
+        $nextType = array_key_exists('type', $payload)
+            ? trim((string) $payload['type'])
+            : (string) ($model->type ?? '');
+        $currentType = (string) ($model->type ?? '');
+
+        if ($nextType !== $currentType) {
+            if (TenantProfileType::query()->where('type', $nextType)->exists()) {
+                throw ValidationException::withMessages([
+                    'type' => ['Profile type already exists.'],
+                ]);
+            }
+        }
+
+        $entry = $this->mergeEntry($model, $payload, $nextType);
+
+        try {
+            $model->fill($entry);
+            $model->save();
+        } catch (BulkWriteException $exception) {
+            if (str_contains($exception->getMessage(), 'E11000')) {
+                throw ValidationException::withMessages([
+                    'type' => ['Profile type already exists.'],
+                ]);
+            }
+
+            throw ValidationException::withMessages([
+                'profile_type' => ['Something went wrong when trying to update the profile type.'],
+            ]);
+        }
+
+        if ($nextType !== $currentType) {
+            $profileIds = AccountProfile::query()
+                ->where('profile_type', $currentType)
+                ->get(['_id'])
+                ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
+                ->all();
+
+            if ($profileIds !== []) {
+                AccountProfile::query()
+                    ->where('profile_type', $currentType)
+                    ->update(['profile_type' => $nextType]);
+
+                [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($profileIds);
+
+                if ($stringRefIds !== []) {
+                    MapPoi::query()
+                        ->where('ref_type', 'account_profile')
+                        ->whereIn('ref_id', $stringRefIds)
+                        ->update(['category' => $nextType]);
+                }
+
+                if ($objectRefIds !== []) {
+                    MapPoi::query()
+                        ->where('ref_type', 'account_profile')
+                        ->whereIn('ref_id', $objectRefIds)
+                        ->update(['category' => $nextType]);
+                }
+            }
+        }
 
         return $this->toPayload($model);
     }
@@ -75,6 +135,7 @@ class AccountProfileRegistryManagementService
                 'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
                 'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
+                'has_content' => (bool) ($capabilities['has_content'] ?? false),
                 'has_taxonomies' => (bool) ($capabilities['has_taxonomies'] ?? false),
                 'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
                 'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
@@ -88,13 +149,13 @@ class AccountProfileRegistryManagementService
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function mergeEntry(TenantProfileType $existing, array $payload, string $type): array
+    private function mergeEntry(TenantProfileType $existing, array $payload, string $resolvedType): array
     {
         $capabilities = $payload['capabilities'] ?? [];
         $currentCapabilities = $existing->capabilities ?? [];
 
         return [
-            'type' => $type,
+            'type' => $resolvedType,
             'label' => array_key_exists('label', $payload)
                 ? trim((string) $payload['label'])
                 : (string) ($existing->label ?? ''),
@@ -111,6 +172,9 @@ class AccountProfileRegistryManagementService
                 'has_bio' => array_key_exists('has_bio', $capabilities)
                     ? (bool) $capabilities['has_bio']
                     : (bool) ($currentCapabilities['has_bio'] ?? false),
+                'has_content' => array_key_exists('has_content', $capabilities)
+                    ? (bool) $capabilities['has_content']
+                    : (bool) ($currentCapabilities['has_content'] ?? false),
                 'has_taxonomies' => array_key_exists('has_taxonomies', $capabilities)
                     ? (bool) $capabilities['has_taxonomies']
                     : (bool) ($currentCapabilities['has_taxonomies'] ?? false),
@@ -143,6 +207,35 @@ class AccountProfileRegistryManagementService
     }
 
     /**
+     * @param array<int, string> $rawIds
+     * @return array{0: array<int, string>, 1: array<int, ObjectId>}
+     */
+    private function splitMapPoiRefIds(array $rawIds): array
+    {
+        $stringIds = [];
+        $objectIds = [];
+
+        foreach ($rawIds as $rawId) {
+            $id = trim((string) $rawId);
+            if ($id === '') {
+                continue;
+            }
+
+            $stringIds[] = $id;
+
+            if (preg_match('/^[a-f0-9]{24}$/i', $id) === 1) {
+                try {
+                    $objectIds[] = new ObjectId($id);
+                } catch (\Throwable) {
+                    // Ignore invalid ObjectId conversions and keep string matching.
+                }
+            }
+        }
+
+        return [$stringIds, $objectIds];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function toPayload(TenantProfileType $model): array
@@ -160,6 +253,7 @@ class AccountProfileRegistryManagementService
                 'is_favoritable' => (bool) ($model->capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),
                 'has_bio' => (bool) ($model->capabilities['has_bio'] ?? false),
+                'has_content' => (bool) ($model->capabilities['has_content'] ?? false),
                 'has_taxonomies' => (bool) ($model->capabilities['has_taxonomies'] ?? false),
                 'has_avatar' => (bool) ($model->capabilities['has_avatar'] ?? false),
                 'has_cover' => (bool) ($model->capabilities['has_cover'] ?? false),

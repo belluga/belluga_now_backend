@@ -17,6 +17,7 @@ class StaticProfileTypeRegistrySeeder
             [
                 'type' => 'poi',
                 'label' => 'POI',
+                'map_category' => 'poi',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_poi_enabled' => true,

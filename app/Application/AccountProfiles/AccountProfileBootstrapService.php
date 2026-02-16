@@ -31,6 +31,7 @@ class AccountProfileBootstrapService
 
         $result = $this->accountService->create([
             'name' => $displayName,
+            'ownership_state' => 'unmanaged',
             'document' => [
                 'type' => 'cpf',
                 'number' => $documentNumber,

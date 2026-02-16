@@ -31,6 +31,7 @@ class AccountProfileRegistryService
                         'is_favoritable' => (bool) ($type->capabilities['is_favoritable'] ?? false),
                         'is_poi_enabled' => (bool) ($type->capabilities['is_poi_enabled'] ?? false),
                         'has_bio' => (bool) ($type->capabilities['has_bio'] ?? false),
+                        'has_content' => (bool) ($type->capabilities['has_content'] ?? false),
                         'has_taxonomies' => (bool) ($type->capabilities['has_taxonomies'] ?? false),
                         'has_avatar' => (bool) ($type->capabilities['has_avatar'] ?? false),
                         'has_cover' => (bool) ($type->capabilities['has_cover'] ?? false),

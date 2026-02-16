@@ -17,9 +17,12 @@ class StaticProfileTypeRegistryService
             ->orderBy('type')
             ->get()
             ->map(static function (StaticProfileType $type): array {
+                $typeKey = trim((string) ($type->type ?? ''));
+                $mapCategory = trim((string) ($type->map_category ?? ''));
                 return [
-                    'type' => $type->type,
+                    'type' => $typeKey,
                     'label' => $type->label,
+                    'map_category' => $mapCategory !== '' ? $mapCategory : $typeKey,
                     'allowed_taxonomies' => array_values(array_filter(
                         is_array($type->allowed_taxonomies ?? null)
                             ? $type->allowed_taxonomies
@@ -60,5 +63,17 @@ class StaticProfileTypeRegistryService
         $capabilities = $definition['capabilities'] ?? [];
 
         return (bool) ($capabilities['is_poi_enabled'] ?? false);
+    }
+
+    public function resolveMapCategory(string $profileType): string
+    {
+        $definition = $this->typeDefinition($profileType);
+        $mapCategory = trim((string) ($definition['map_category'] ?? ''));
+        if ($mapCategory !== '') {
+            return $mapCategory;
+        }
+
+        $fallback = trim($profileType);
+        return $fallback !== '' ? $fallback : 'static';
     }
 }

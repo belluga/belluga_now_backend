@@ -22,6 +22,7 @@ class AccountProfileUpdateRequest extends FormRequest
         return [
             'profile_type' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'display_name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'slug' => 'sometimes|string|max:' . InputConstraints::NAME_MAX . '|regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             'location' => 'sometimes|array',
             'location.lat' => 'required_with:location.lng|numeric',
             'location.lng' => 'required_with:location.lat|numeric',
@@ -29,6 +30,7 @@ class AccountProfileUpdateRequest extends FormRequest
             'taxonomy_terms.*.type' => 'required_with:taxonomy_terms|string|max:' . InputConstraints::NAME_MAX,
             'taxonomy_terms.*.value' => 'required_with:taxonomy_terms|string|max:' . InputConstraints::NAME_MAX,
             'bio' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'content' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:' . InputConstraints::IMAGE_MAX_KB,
             'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:' . InputConstraints::IMAGE_MAX_KB,
             'avatar_url' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,

@@ -203,6 +203,7 @@ class MapPoisControllerTest extends TestCaseTenant
         StaticProfileType::create([
             'type' => 'poi',
             'label' => 'POI',
+            'map_category' => 'beach',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
                 'is_poi_enabled' => true,
@@ -237,6 +238,13 @@ class MapPoisControllerTest extends TestCaseTenant
                 ->where('ref_type', 'static')
                 ->where('ref_id', (string) $asset->_id)
                 ->exists()
+        );
+        $this->assertSame(
+            'beach',
+            MapPoi::query()
+                ->where('ref_type', 'static')
+                ->where('ref_id', (string) $asset->_id)
+                ->first()?->category
         );
     }
 
