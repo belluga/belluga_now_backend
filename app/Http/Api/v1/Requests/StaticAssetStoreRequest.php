@@ -27,7 +27,7 @@ class StaticAssetStoreRequest extends FormRequest
             'tags.*' => 'string|max:' . InputConstraints::NAME_MAX,
             'categories' => 'sometimes|array|max:' . InputConstraints::METADATA_MAX_ITEMS,
             'categories.*' => 'string|max:' . InputConstraints::NAME_MAX,
-            'bio' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'bio' => 'sometimes|nullable|string|max:' . InputConstraints::DESCRIPTION_MAX,
             'content' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
             'is_active' => 'sometimes|boolean',
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:' . InputConstraints::IMAGE_MAX_KB,
