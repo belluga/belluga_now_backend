@@ -104,24 +104,27 @@ final class ExternalImageProxyService
         $buffer = '';
         $bytesRead = 0;
         $chunkSize = 8192;
-        $emptyReadCount = 0;
         $startedAt = microtime(true);
+        $lastByteAt = $startedAt;
 
         while (!$stream->eof()) {
             $chunk = $stream->read($chunkSize);
             if ($chunk === '') {
                 // In streamed mode, some transports can yield an empty read before EOF
                 // (slow/chunked upstream). Keep reading until EOF or a small timeout.
-                $emptyReadCount++;
-                if ($emptyReadCount >= 100 || (microtime(true) - $startedAt) > self::TIMEOUT_SECONDS) {
+                $now = microtime(true);
+                // Time since last received bytes must not exceed the configured timeout.
+                // This avoids rejecting valid slow/chunked upstreams due to a short pause,
+                // while still preventing indefinite hangs if the upstream stalls.
+                if (($now - $lastByteAt) > self::TIMEOUT_SECONDS || ($now - $startedAt) > self::TIMEOUT_SECONDS) {
                     throw ValidationException::withMessages([
                         'url' => 'Nao foi possivel baixar a imagem da URL informada.',
                     ]);
                 }
-                usleep(10_000);
+                usleep(50_000);
                 continue;
             }
-            $emptyReadCount = 0;
+            $lastByteAt = microtime(true);
             $bytesRead += strlen($chunk);
             if ($bytesRead > self::MAX_BYTES) {
                 throw ValidationException::withMessages([
