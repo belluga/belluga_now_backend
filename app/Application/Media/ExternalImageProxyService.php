@@ -104,12 +104,24 @@ final class ExternalImageProxyService
         $buffer = '';
         $bytesRead = 0;
         $chunkSize = 8192;
+        $emptyReadCount = 0;
+        $startedAt = microtime(true);
 
         while (!$stream->eof()) {
             $chunk = $stream->read($chunkSize);
             if ($chunk === '') {
-                break;
+                // In streamed mode, some transports can yield an empty read before EOF
+                // (slow/chunked upstream). Keep reading until EOF or a small timeout.
+                $emptyReadCount++;
+                if ($emptyReadCount >= 100 || (microtime(true) - $startedAt) > self::TIMEOUT_SECONDS) {
+                    throw ValidationException::withMessages([
+                        'url' => 'Nao foi possivel baixar a imagem da URL informada.',
+                    ]);
+                }
+                usleep(10_000);
+                continue;
             }
+            $emptyReadCount = 0;
             $bytesRead += strlen($chunk);
             if ($bytesRead > self::MAX_BYTES) {
                 throw ValidationException::withMessages([
