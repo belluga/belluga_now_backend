@@ -54,6 +54,7 @@
             <directory>tests/Api/v1/Tenants/Account</directory>
             <directory>tests/Api/v1/Tenants/Branding</directory>
             <directory>tests/Api/v1/Tenants/Auth</directory>
+            <directory>tests/Api/v1/Tenants/Media</directory>
         </testsuite>
         <testsuite name="Api-v1-Account">
             <directory>tests/Api/v1/Accounts/Roles</directory>

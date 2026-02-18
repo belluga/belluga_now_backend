@@ -154,6 +154,30 @@ final class ExternalImageProxyTest extends TestCaseTenant
         $this->assertSame($pngBytes, $response->getContent());
     }
 
+    public function test_rejects_oversized_body_without_content_length(): void
+    {
+        $this->bindDnsResolver(['93.184.216.34']);
+
+        $oversized = str_repeat('a', (15 * 1024 * 1024) + 1);
+
+        Http::fake([
+            'https://example.com/*' => Http::response($oversized, 200, [
+                'Content-Type' => 'image/png',
+            ]),
+        ]);
+
+        $response = $this->json(
+            method: 'post',
+            uri: "{$this->base_tenant_api_admin}media/external-image",
+            data: ['url' => 'https://example.com/image.png'],
+            headers: $this->headerFor($this->landlord->user_superadmin),
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['url']);
+        $this->assertStringContainsString('Maximo 15MB', (string) $response->getContent());
+    }
+
     private function bindDnsResolver(array $ips): void
     {
         $this->app->instance(

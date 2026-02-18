@@ -31,6 +31,10 @@ final class ExternalImageProxyService
             $response = Http::timeout(self::TIMEOUT_SECONDS)
                 ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
                 ->withoutRedirecting()
+                ->withOptions([
+                    // Enforce the size limit while reading, not after buffering the full body.
+                    'stream' => true,
+                ])
                 ->withHeaders([
                     'Accept' => 'image/*',
                     'User-Agent' => 'BellugaNowExternalImageProxy/1.0',
@@ -62,15 +66,10 @@ final class ExternalImageProxyService
                 }
             }
 
-            $body = $response->body();
-            if (!is_string($body) || $body === '') {
+            $body = $this->readResponseBodyWithLimit($response);
+            if ($body === '') {
                 throw ValidationException::withMessages([
                     'url' => 'Nao foi possivel baixar a imagem da URL informada.',
-                ]);
-            }
-            if (strlen($body) > self::MAX_BYTES) {
-                throw ValidationException::withMessages([
-                    'url' => 'Imagem muito grande para processamento. Maximo 15MB.',
                 ]);
             }
 
@@ -95,6 +94,32 @@ final class ExternalImageProxyService
         throw ValidationException::withMessages([
             'url' => 'Muitos redirects ao baixar a imagem.',
         ]);
+    }
+
+    private function readResponseBodyWithLimit(\Illuminate\Http\Client\Response $response): string
+    {
+        $psrResponse = $response->toPsrResponse();
+        $stream = $psrResponse->getBody();
+
+        $buffer = '';
+        $bytesRead = 0;
+        $chunkSize = 8192;
+
+        while (!$stream->eof()) {
+            $chunk = $stream->read($chunkSize);
+            if ($chunk === '') {
+                break;
+            }
+            $bytesRead += strlen($chunk);
+            if ($bytesRead > self::MAX_BYTES) {
+                throw ValidationException::withMessages([
+                    'url' => 'Imagem muito grande para processamento. Maximo 15MB.',
+                ]);
+            }
+            $buffer .= $chunk;
+        }
+
+        return $buffer;
     }
 
     private function validateAndNormalizeUrl(string $url): string
@@ -171,4 +196,3 @@ final class ExternalImageProxyService
         return trim($parts[0]);
     }
 }
-
