@@ -35,13 +35,18 @@ jobs:
 
       - name: Enforce branch promotion lanes
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
 
-          BASE_REF="${GITHUB_BASE_REF:-}"
-          HEAD_REF="${GITHUB_HEAD_REF:-}"
-          PR_HEAD_SHA="$(jq -r '.pull_request.head.sha // empty' "${GITHUB_EVENT_PATH}")"
-          PR_BODY="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
+          BASE_REF="${BASE_REF:-}"
+          HEAD_REF="${HEAD_REF:-}"
+          PR_HEAD_SHA="${PR_HEAD_SHA:-}"
+          PR_BODY="${PR_BODY:-}"
           EXPECTED_SHA="$(printf '%s\n' "${PR_BODY}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
 
           if [[ -z "$BASE_REF" || -z "$HEAD_REF" || -z "$PR_HEAD_SHA" ]]; then
