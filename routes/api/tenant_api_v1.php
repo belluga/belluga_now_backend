@@ -14,6 +14,7 @@ use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Api\v1\Controllers\StaticProfileTypesController;
 use App\Http\Api\v1\Controllers\TaxonomiesController;
 use App\Http\Api\v1\Controllers\TaxonomyTermsController;
+use App\Http\Api\v1\Controllers\ExternalImageProxyController;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
@@ -232,6 +233,9 @@ Route::prefix('static_assets')
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
             });
     });
+
+Route::post('/media/external-image', [ExternalImageProxyController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create,account-users:update']);
 
 Route::prefix('roles')->group(function () {
     Route::get('/', [TenantRolesController::class, 'index'])
