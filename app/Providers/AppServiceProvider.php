@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Application\Push\PushAudienceEligibilityService;
+use App\Application\Media\ExternalImageDnsResolverContract;
+use App\Application\Media\SystemExternalImageDnsResolver;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
@@ -43,6 +45,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             PushAudienceEligibilityContract::class,
             PushAudienceEligibilityService::class
+        );
+
+        $this->app->bind(
+            ExternalImageDnsResolverContract::class,
+            SystemExternalImageDnsResolver::class
         );
 
         $this->app->when(ProfileControllerLandlord::class)
