@@ -3,9 +3,7 @@ name: Dispatch Docker Submodule Sync
 on:
   push:
     branches:
-      - dev
       - stage
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +14,7 @@ jobs:
   dispatch:
     name: Notify docker repo to open/update submodule pin PR
     runs-on: ubuntu-latest
+    if: ${{ github.ref_name == 'stage' }}
     env:
       # Prefer a dedicated dispatch token, but allow reusing the shared ecosystem token
       # to avoid mandatory secret renames across repos.
@@ -66,7 +65,8 @@ jobs:
             {
               "submodule": "${{ steps.config.outputs.submodule }}",
               "sha": "${{ github.sha }}",
-              "lane": "${{ github.ref_name }}",
+              "target_branch": "bot/next-version",
+              "base_branch": "dev",
               "source_repo": "${{ github.repository }}",
-              "source_branch": "${{ github.ref_name }}"
+              "source_branch": "stage"
             }
