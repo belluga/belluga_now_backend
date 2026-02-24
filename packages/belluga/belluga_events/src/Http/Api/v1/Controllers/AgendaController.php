@@ -20,7 +20,9 @@ class AgendaController extends Controller
     public function index(AgendaIndexRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $payload = $this->eventQueryService->fetchAgenda($request->validated(), $request->user());
+        $user = $request->user();
+        $userId = $user ? (string) $user->getAuthIdentifier() : null;
+        $payload = $this->eventQueryService->fetchAgenda($request->validated(), $userId);
 
         return response()->json([
             'tenant_id' => (string) $tenant->_id,

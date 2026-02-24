@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Integration\Events\AccountProfileResolverAdapter;
+use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
+use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\TenantExecutionContextAdapter;
+use App\Integration\Events\TenantRadiusSettingsAdapter;
+use App\Listeners\EventsPackage\SyncMapPoiOnEventCreated;
+use App\Listeners\EventsPackage\SyncMapPoiOnEventDeleted;
+use App\Listeners\EventsPackage\SyncMapPoiOnEventUpdated;
 use App\Application\Push\PushAudienceEligibilityService;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Application\Media\SystemExternalImageDnsResolver;
@@ -16,7 +24,16 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
 use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
+use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventProjectionSyncContract;
+use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\TenantExecutionContextContract;
+use Belluga\Events\Domain\Events\EventCreated;
+use Belluga\Events\Domain\Events\EventDeleted;
+use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use App\Application\Tenants\TenantDomainResolverService;
@@ -52,6 +69,31 @@ class AppServiceProvider extends ServiceProvider
             SystemExternalImageDnsResolver::class
         );
 
+        $this->app->bind(
+            EventTaxonomyValidationContract::class,
+            EventTaxonomyValidationAdapter::class
+        );
+
+        $this->app->bind(
+            EventProfileResolverContract::class,
+            AccountProfileResolverAdapter::class
+        );
+
+        $this->app->bind(
+            EventProjectionSyncContract::class,
+            EventMapPoiProjectionSyncAdapter::class
+        );
+
+        $this->app->bind(
+            EventRadiusSettingsContract::class,
+            TenantRadiusSettingsAdapter::class
+        );
+
+        $this->app->bind(
+            TenantExecutionContextContract::class,
+            TenantExecutionContextAdapter::class
+        );
+
         $this->app->when(ProfileControllerLandlord::class)
             ->needs(UpdateProfileRequestContract::class)
             ->give(function ($app) {
@@ -84,5 +126,9 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        Event::listen(EventCreated::class, SyncMapPoiOnEventCreated::class);
+        Event::listen(EventUpdated::class, SyncMapPoiOnEventUpdated::class);
+        Event::listen(EventDeleted::class, SyncMapPoiOnEventDeleted::class);
     }
 }

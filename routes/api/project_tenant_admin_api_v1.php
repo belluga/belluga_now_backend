@@ -15,8 +15,8 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
             ->middleware('abilities:events:update');
         Route::delete('/events/{event_id}', [EventsController::class, 'destroy'])
             ->middleware('abilities:events:delete');
-        Route::get('/events/{event_id}', [EventsController::class, 'show'])
-            ->middleware('abilities:events:read');
         Route::get('/events/stream', [EventStreamController::class, 'stream'])
+            ->middleware('abilities:events:read');
+        Route::get('/events/{event_id}', [EventsController::class, 'show'])
             ->middleware('abilities:events:read');
     });

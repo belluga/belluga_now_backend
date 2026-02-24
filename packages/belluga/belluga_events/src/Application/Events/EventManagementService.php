@@ -4,19 +4,22 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use App\Application\Taxonomies\TaxonomyValidationService;
-use App\Models\Tenants\AccountProfile;
+use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Domain\Events\EventCreated;
+use Belluga\Events\Domain\Events\EventDeleted;
+use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
-use App\Jobs\MapPois\DeleteMapPoiByRefJob;
-use App\Jobs\MapPois\UpsertMapPoiFromEventJob;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class EventManagementService
 {
     public function __construct(
-        private readonly TaxonomyValidationService $taxonomyValidationService,
+        private readonly EventTaxonomyValidationContract $taxonomyValidationService,
+        private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly Dispatcher $events,
     ) {
     }
 
@@ -28,7 +31,7 @@ class EventManagementService
         $normalized = $this->normalizePayload($payload, null);
 
         $event = Event::create($normalized)->fresh();
-        UpsertMapPoiFromEventJob::dispatch((string) $event->_id);
+        $this->events->dispatch(new EventCreated((string) $event->_id));
 
         return $event;
     }
@@ -44,7 +47,7 @@ class EventManagementService
         $event->save();
 
         $event = $event->fresh();
-        UpsertMapPoiFromEventJob::dispatch((string) $event->_id);
+        $this->events->dispatch(new EventUpdated((string) $event->_id));
 
         return $event;
     }
@@ -52,7 +55,7 @@ class EventManagementService
     public function delete(Event $event): void
     {
         $event->delete();
-        DeleteMapPoiByRefJob::dispatch('event', (string) $event->_id);
+        $this->events->dispatch(new EventDeleted((string) $event->_id));
     }
 
     /**
@@ -178,39 +181,7 @@ class EventManagementService
             ]);
         }
 
-        $profile = AccountProfile::query()->where('_id', $id)->first();
-
-        if (! $profile) {
-            throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile not found.'],
-            ]);
-        }
-
-        $location = $profile->location ?? null;
-        if (! is_array($location) || ! isset($location['type'], $location['coordinates'])) {
-            throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile must include a location.'],
-            ]);
-        }
-        if (! is_array($location['coordinates']) || count($location['coordinates']) < 2) {
-            throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile must include valid coordinates.'],
-            ]);
-        }
-
-        return [
-            'account_id' => (string) $profile->account_id,
-            'account_profile_id' => (string) $profile->_id,
-            'venue' => [
-                'id' => (string) $profile->_id,
-                'display_name' => $profile->display_name,
-                'tagline' => null,
-                'hero_image_url' => $profile->cover_url ?? null,
-                'logo_url' => $profile->avatar_url ?? null,
-                'taxonomy_terms' => $profile->taxonomy_terms ?? [],
-            ],
-            'location' => $location,
-        ];
+        return $this->eventProfileResolver->resolveVenueByProfileId((string) $id);
     }
 
     /**
@@ -230,48 +201,7 @@ class EventManagementService
             return [];
         }
 
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', array_values($ids))
-            ->get();
-
-        $missing = array_diff($ids, $profiles->pluck('_id')->map(fn ($id) => (string) $id)->all());
-        if ($missing !== []) {
-            throw ValidationException::withMessages([
-                'artist_ids' => ['Some artists were not found.'],
-            ]);
-        }
-
-        $invalid = $profiles->filter(fn (AccountProfile $profile): bool => $profile->profile_type !== 'artist');
-        if ($invalid->isNotEmpty()) {
-            throw ValidationException::withMessages([
-                'artist_ids' => ['All artists must be account profiles of type artist.'],
-            ]);
-        }
-
-        return $profiles->map(function (AccountProfile $profile): array {
-            $taxonomy = $profile->taxonomy_terms ?? [];
-            $genres = [];
-            if (is_array($taxonomy)) {
-                foreach ($taxonomy as $term) {
-                    if (! is_array($term)) {
-                        continue;
-                    }
-                    $type = $term['type'] ?? '';
-                    if (in_array($type, ['music_genre', 'genre'], true)) {
-                        $genres[] = (string) ($term['value'] ?? '');
-                    }
-                }
-            }
-
-            return [
-                'id' => (string) $profile->_id,
-                'display_name' => $profile->display_name,
-                'avatar_url' => $profile->avatar_url ?? null,
-                'highlight' => false,
-                'genres' => array_values(array_filter($genres, static fn ($item): bool => $item !== '')),
-                'taxonomy_terms' => $profile->taxonomy_terms ?? [],
-            ];
-        })->all();
+        return $this->eventProfileResolver->resolveArtistsByProfileIds(array_values($ids));
     }
 
     private function normalizePublishAt(mixed $value): ?Carbon

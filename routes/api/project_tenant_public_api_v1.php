@@ -13,8 +13,8 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
         Route::get('/agenda', [AgendaController::class, 'index']);
         Route::get('/events', [EventsController::class, 'index']);
-        Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/events/stream', [EventStreamController::class, 'stream']);
+        Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
         Route::get('/map/pois', [MapPoisController::class, 'index']);
         Route::get('/map/near', [MapPoisController::class, 'near']);

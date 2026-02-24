@@ -18,9 +18,12 @@ class EventStreamController extends Controller
 
     public function stream(EventStreamRequest $request): StreamedResponse
     {
+        $user = $request->user();
+        $userId = $user ? (string) $user->getAuthIdentifier() : null;
+
         $deltas = $this->eventQueryService->buildStreamDeltas(
             $request->validated(),
-            $request->user(),
+            $userId,
             $request->header('Last-Event-ID')
         );
 

@@ -8,6 +8,7 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Jobs\PublishScheduledEventsJob;
+use App\Jobs\MapPois\DeleteMapPoiByRefJob;
 use App\Jobs\MapPois\UpsertMapPoiFromEventJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\LandlordUser;
@@ -20,6 +21,7 @@ use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -106,6 +108,16 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.venue_id', (string) $this->venue->_id);
         $response->assertJsonPath('data.publication.status', 'published');
         $this->assertSame($payload['type']['slug'], $response->json('data.type.slug'));
+    }
+
+    public function testEventCreateDispatchesMapProjectionSyncJobViaLifecycleEvent(): void
+    {
+        Queue::fake();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        Queue::assertPushed(UpsertMapPoiFromEventJob::class);
     }
 
     public function testEventCreateRejectsUnknownTaxonomy(): void
@@ -229,6 +241,19 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.publication.status', 'ended');
     }
 
+    public function testEventUpdateDispatchesMapProjectionSyncJobViaLifecycleEvent(): void
+    {
+        Queue::fake();
+        $event = $this->createEvent();
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
+            'title' => 'Updated Via Queue Assertion',
+        ]);
+
+        $response->assertStatus(200);
+        Queue::assertPushed(UpsertMapPoiFromEventJob::class);
+    }
+
     public function testEventUpdateReturns404WhenMissing(): void
     {
         $response = $this->patchJson("{$this->accountEventsBase}/missing-event", [
@@ -248,6 +273,17 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $deleted = Event::withTrashed()->find($event->_id);
         $this->assertNotNull($deleted?->deleted_at);
+    }
+
+    public function testEventDeleteDispatchesMapProjectionDeleteJobViaLifecycleEvent(): void
+    {
+        Queue::fake();
+        $event = $this->createEvent();
+
+        $response = $this->deleteJson("{$this->accountEventsBase}/{$event->_id}");
+
+        $response->assertStatus(200);
+        Queue::assertPushed(DeleteMapPoiByRefJob::class);
     }
 
     public function testPublishScheduledEventsJobPromotesReadyEvents(): void

@@ -12,7 +12,6 @@ use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\Account;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -30,8 +29,8 @@ class EventsController extends Controller
     {
         $perPage = (int) ($request->get('page_size') ?? 15);
         $perPage = $perPage > 0 ? $perPage : 15;
-        $accountContext = $this->resolveAccountFromRoute($request);
-        $accountId = $accountContext ? (string) $accountContext->_id : (string) ($request->get('account_id') ?? '');
+        $accountContextId = $this->resolveAccountFromRoute($request);
+        $accountId = $accountContextId ?? (string) ($request->get('account_id') ?? '');
         $accountProfileId = (string) ($request->get('account_profile_id') ?? '');
         $isAdmin = $this->isAdminContext($request);
 
@@ -40,7 +39,7 @@ class EventsController extends Controller
             $request->boolean('archived'),
             $perPage,
             $isAdmin,
-            $accountContext,
+            $accountContextId,
             $accountId,
             $accountProfileId
         );
@@ -51,10 +50,10 @@ class EventsController extends Controller
     public function store(EventStoreRequest $request): JsonResponse
     {
         $payload = $request->validated();
-        $account = $this->resolveAccountFromRoute($request);
+        $accountIdFromRoute = $this->resolveAccountFromRoute($request);
 
-        if ($account) {
-            $payload['account_id'] = (string) $account->_id;
+        if ($accountIdFromRoute) {
+            $payload['account_id'] = $accountIdFromRoute;
         } else {
             $accountId = $payload['account_id'] ?? null;
             $accountProfileId = $payload['account_profile_id'] ?? null;
@@ -82,8 +81,8 @@ class EventsController extends Controller
             abort(404, 'Event not found.');
         }
 
-        $account = $this->resolveAccountFromRoute($request);
-        if ($account && ! $this->eventQueryService->eventBelongsToAccount($event, $account)) {
+        $accountId = $this->resolveAccountFromRoute($request);
+        if ($accountId && ! $this->eventQueryService->eventBelongsToAccount($event, $accountId)) {
             abort(404, 'Event not found.');
         }
 
@@ -103,8 +102,8 @@ class EventsController extends Controller
             abort(404, 'Event not found.');
         }
 
-        $account = $this->resolveAccountFromRoute(request());
-        if ($account && ! $this->eventQueryService->eventBelongsToAccount($event, $account)) {
+        $accountId = $this->resolveAccountFromRoute(request());
+        if ($accountId && ! $this->eventQueryService->eventBelongsToAccount($event, $accountId)) {
             abort(404, 'Event not found.');
         }
 
@@ -122,8 +121,8 @@ class EventsController extends Controller
             abort(404, 'Event not found.');
         }
 
-        $account = $this->resolveAccountFromRoute($request);
-        if ($account && ! $this->eventQueryService->eventBelongsToAccount($event, $account)) {
+        $accountId = $this->resolveAccountFromRoute($request);
+        if ($accountId && ! $this->eventQueryService->eventBelongsToAccount($event, $accountId)) {
             abort(404, 'Event not found.');
         }
 
@@ -135,7 +134,7 @@ class EventsController extends Controller
 
         return response()->json([
             'tenant_id' => (string) $tenant->_id,
-            'data' => $this->eventQueryService->formatEvent($event, $request->user()),
+            'data' => $this->eventQueryService->formatEvent($event, $this->resolveAuthenticatedUserId($request)),
         ]);
     }
 
@@ -148,13 +147,22 @@ class EventsController extends Controller
         return str_starts_with($request->path(), 'admin/api/v1');
     }
 
-    private function resolveAccountFromRoute(Request $request): ?Account
+    private function resolveAccountFromRoute(Request $request): ?string
     {
         $accountSlug = $request->route('account_slug');
         if (! $accountSlug) {
             return null;
         }
 
-        return $this->accountQueryService->findBySlugOrFail((string) $accountSlug);
+        $account = $this->accountQueryService->findBySlugOrFail((string) $accountSlug);
+
+        return (string) $account->_id;
+    }
+
+    private function resolveAuthenticatedUserId(Request $request): ?string
+    {
+        $user = $request->user();
+
+        return $user ? (string) $user->getAuthIdentifier() : null;
     }
 }

@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\AccountUser;
-use App\Models\Tenants\Account;
+use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Models\Tenants\Event;
-use App\Models\Tenants\TenantSettings;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -19,17 +17,20 @@ use MongoDB\Laravel\Eloquent\Collection;
 
 class EventQueryService
 {
-    private const DEFAULT_RADIUS_MIN_KM = 1.0;
-    private const DEFAULT_RADIUS_KM = 5.0;
-    private const DEFAULT_RADIUS_MAX_KM = 50.0;
     private const DEFAULT_PAGE_SIZE = 10;
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
+
+    public function __construct(
+        private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventRadiusSettingsContract $eventRadiusSettings,
+    ) {
+    }
 
     /**
      * @param array<string, mixed> $queryParams
      * @return array{items: array<int, array<string, mixed>>, has_more: bool}
      */
-    public function fetchAgenda(array $queryParams, ?AccountUser $user): array
+    public function fetchAgenda(array $queryParams, ?string $userId): array
     {
         $page = max(1, (int) ($queryParams['page'] ?? 1));
         $pageSize = (int) ($queryParams['page_size'] ?? $queryParams['per_page'] ?? self::DEFAULT_PAGE_SIZE);
@@ -38,17 +39,17 @@ class EventQueryService
         $limit = $pageSize + 1;
 
         $filters = $this->normalizeFilters($queryParams);
-        $raw = $this->runAgendaQuery($filters, $user, $skip, $limit, true);
+        $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, true);
 
         if ($filters['use_geo'] && $raw === []) {
-            $raw = $this->runAgendaQuery($filters, $user, $skip, $limit, false);
+            $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, false);
         }
 
         $hasMore = count($raw) > $pageSize;
         $pageSlice = array_slice($raw, 0, $pageSize);
 
         return [
-            'items' => array_map(fn ($event) => $this->formatEvent($event, $user), $pageSlice),
+            'items' => array_map(fn ($event) => $this->formatEvent($event, $userId), $pageSlice),
             'has_more' => $hasMore,
         ];
     }
@@ -61,7 +62,7 @@ class EventQueryService
         bool $includeArchived,
         int $perPage,
         bool $isAdminContext,
-        ?Account $accountContext = null,
+        ?string $accountContextId = null,
         ?string $accountId = null,
         ?string $accountProfileId = null
     ): LengthAwarePaginator {
@@ -71,8 +72,8 @@ class EventQueryService
             $query->onlyTrashed();
         }
 
-        if ($accountContext) {
-            $this->applyAccountFiltersToQuery($query, (string) $accountContext->_id, '');
+        if ($accountContextId) {
+            $this->applyAccountFiltersToQuery($query, $accountContextId, '');
         } elseif ($accountId || $accountProfileId) {
             $this->applyAccountFiltersToQuery(
                 $query,
@@ -152,10 +153,8 @@ class EventQueryService
         return $payload;
     }
 
-    public function eventBelongsToAccount(Event $event, Account $account): bool
+    public function eventBelongsToAccount(Event $event, string $accountId): bool
     {
-        $accountId = (string) $account->_id;
-
         if ((string) ($event->account_id ?? '') === $accountId) {
             return true;
         }
@@ -167,10 +166,7 @@ class EventQueryService
             return false;
         }
 
-        return AccountProfile::query()
-            ->where('_id', (string) $profileId)
-            ->where('account_id', $accountId)
-            ->exists();
+        return $this->eventProfileResolver->accountOwnsProfile($accountId, (string) $profileId);
     }
 
     public function assertPublicVisible(Event $event): void
@@ -197,7 +193,7 @@ class EventQueryService
      * @param array<string, mixed> $queryParams
      * @return array<int, array{event_id: string, type: string, updated_at: string}>
      */
-    public function buildStreamDeltas(array $queryParams, ?AccountUser $user, ?string $lastEventId): array
+    public function buildStreamDeltas(array $queryParams, ?string $userId, ?string $lastEventId): array
     {
         $since = $this->parseSince($lastEventId);
         if (! $since) {
@@ -205,7 +201,7 @@ class EventQueryService
         }
 
         $filters = $this->normalizeFilters($queryParams);
-        $raw = $this->runStreamQuery($filters, $user, $since, true);
+        $raw = $this->runStreamQuery($filters, $userId, $since, true);
 
         return array_values(array_filter(array_map(function ($event) use ($since): ?array {
             $payload = $this->formatStreamDelta($event, $since);
@@ -248,9 +244,9 @@ class EventQueryService
      * @param array<string, mixed> $filters
      * @return array<int, mixed>
      */
-    private function runAgendaQuery(array $filters, ?AccountUser $user, int $skip, int $limit, bool $useGeo): array
+    private function runAgendaQuery(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
     {
-        $pipeline = $this->buildAgendaPipeline($filters, $user, $skip, $limit, $useGeo);
+        $pipeline = $this->buildAgendaPipeline($filters, $userId, $skip, $limit, $useGeo);
 
         /** @var Collection<int, Event> $events */
         $events = Event::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -262,9 +258,9 @@ class EventQueryService
      * @param array<string, mixed> $filters
      * @return array<int, mixed>
      */
-    private function runStreamQuery(array $filters, ?AccountUser $user, Carbon $since, bool $useGeo): array
+    private function runStreamQuery(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
     {
-        $pipeline = $this->buildStreamPipeline($filters, $user, $since, $useGeo);
+        $pipeline = $this->buildStreamPipeline($filters, $userId, $since, $useGeo);
 
         /** @var Collection<int, Event> $events */
         $events = Event::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -276,7 +272,7 @@ class EventQueryService
      * @param array<string, mixed> $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildAgendaPipeline(array $filters, ?AccountUser $user, int $skip, int $limit, bool $useGeo): array
+    private function buildAgendaPipeline(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
     {
         $now = new UTCDateTime(Carbon::now());
         $pipeline = [];
@@ -314,7 +310,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $user);
+        $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $userId);
 
         $pipeline[] = [
             '$addFields' => [
@@ -348,7 +344,7 @@ class EventQueryService
      * @param array<string, mixed> $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildStreamPipeline(array $filters, ?AccountUser $user, Carbon $since, bool $useGeo): array
+    private function buildStreamPipeline(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
     {
         $sinceUtc = new UTCDateTime($since);
         $now = new UTCDateTime(Carbon::now());
@@ -389,7 +385,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $user);
+        $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $userId);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1]];
 
@@ -518,15 +514,15 @@ class EventQueryService
     /**
      * @param array<int, array<string, mixed>> $pipeline
      */
-    private function applyConfirmedFilter(array &$pipeline, bool $confirmedOnly, ?AccountUser $user): void
+    private function applyConfirmedFilter(array &$pipeline, bool $confirmedOnly, ?string $userId): void
     {
-        if (! $confirmedOnly || ! $user) {
+        if (! $confirmedOnly || ! $userId) {
             return;
         }
 
         $pipeline[] = [
             '$match' => [
-                'confirmed_user_ids' => (string) $user->_id,
+                'confirmed_user_ids' => $userId,
             ],
         ];
     }
@@ -573,12 +569,7 @@ class EventQueryService
      */
     private function resolveAccountProfileIds(string $accountId): array
     {
-        return AccountProfile::query()
-            ->where('account_id', $accountId)
-            ->pluck('_id')
-            ->map(static fn ($id): string => (string) $id)
-            ->values()
-            ->all();
+        return $this->eventProfileResolver->listProfileIdsForAccount($accountId);
     }
 
     /**
@@ -679,30 +670,7 @@ class EventQueryService
      */
     private function resolveRadiusSettings(): array
     {
-        $settings = TenantSettings::current();
-        $mapUi = $settings?->getAttribute('map_ui') ?? [];
-        $radius = is_array($mapUi) ? ($mapUi['radius'] ?? []) : [];
-        $radius = is_array($radius) ? $radius : [];
-
-        $min = isset($radius['min_km']) ? (float) $radius['min_km'] : self::DEFAULT_RADIUS_MIN_KM;
-        $default = isset($radius['default_km']) ? (float) $radius['default_km'] : self::DEFAULT_RADIUS_KM;
-        $max = isset($radius['max_km']) ? (float) $radius['max_km'] : self::DEFAULT_RADIUS_MAX_KM;
-
-        if ($min <= 0) {
-            $min = self::DEFAULT_RADIUS_MIN_KM;
-        }
-        if ($max <= 0) {
-            $max = self::DEFAULT_RADIUS_MAX_KM;
-        }
-        if ($default <= 0) {
-            $default = self::DEFAULT_RADIUS_KM;
-        }
-
-        return [
-            'min_km' => $min,
-            'default_km' => min(max($default, $min), $max),
-            'max_km' => $max,
-        ];
+        return $this->eventRadiusSettings->resolveRadiusSettings();
     }
 
     private function parseSince(?string $value): ?Carbon
@@ -722,7 +690,7 @@ class EventQueryService
      * @param mixed $event
      * @return array<string, mixed>
      */
-    public function formatEvent(mixed $event, ?AccountUser $user = null): array
+    public function formatEvent(mixed $event, ?string $userId = null): array
     {
         $type = $this->normalizeArray($event->type ?? null);
         $venue = $this->normalizeArray($event->venue ?? null);
@@ -765,7 +733,7 @@ class EventQueryService
 
         $confirmedIds = $this->normalizeArray($event->confirmed_user_ids ?? []);
         $confirmedIds = array_values(array_filter(array_map(static fn ($id): string => (string) $id, $confirmedIds)));
-        $isConfirmed = $user ? in_array((string) $user->_id, $confirmedIds, true) : false;
+        $isConfirmed = $userId ? in_array($userId, $confirmedIds, true) : false;
 
         return [
             'id' => isset($event->_id) ? (string) $event->_id : '',
