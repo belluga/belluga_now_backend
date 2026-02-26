@@ -5,30 +5,36 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class TenantPushEnableController
 {
+    public function __construct(
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {
+    }
+
     public function __invoke(Request $request): JsonResponse
     {
         $settings = TenantPushSettings::current();
-        if (! $settings) {
+        $push = $this->pushSettings->currentPushConfig();
+        if (! $settings || ! is_array($push)) {
             return $this->notConfiguredResponse();
         }
 
         $firebase = $settings->firebase ?? null;
-        $push = $settings->push ?? null;
-        if (! $this->hasFirebaseConfig($firebase) || ! is_array($push)) {
+        if (! $this->hasFirebaseConfig($firebase)) {
             return $this->notConfiguredResponse();
         }
 
-        $push['enabled'] = true;
-        $settings->fill(['push' => $push]);
-        $settings->save();
+        $updated = $this->pushSettings->patchPushConfig($request->user(), [
+            'enabled' => true,
+        ]);
 
         return response()->json([
-            'data' => is_array($settings->push ?? null) ? $settings->push : [],
+            'data' => $updated,
         ]);
     }
 

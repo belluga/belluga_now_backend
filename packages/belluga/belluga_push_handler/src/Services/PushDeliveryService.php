@@ -7,7 +7,6 @@ namespace Belluga\PushHandler\Services;
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Carbon\Carbon;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
@@ -16,7 +15,8 @@ class PushDeliveryService
 {
     public function __construct(
         private readonly FcmClientContract $fcmClient,
-        private readonly TelemetryDeliveryService $telemetryDelivery
+        private readonly TelemetryDeliveryService $telemetryDelivery,
+        private readonly PushSettingsKernelBridge $pushSettings
     ) {
     }
 
@@ -105,7 +105,7 @@ class PushDeliveryService
             ]);
         }
 
-        $maxTtlDays = TenantPushSettings::current()?->getPushMaxTtlDays() ?? 30;
+        $maxTtlDays = $this->pushSettings->resolveMaxTtlDays(30);
         $fcmMaxDays = (int) config('belluga_push_handler.fcm.max_ttl_days', 28);
         $maxAllowedDays = min($maxTtlDays, $fcmMaxDays);
         $maxAllowedMinutes = $maxAllowedDays * 24 * 60;

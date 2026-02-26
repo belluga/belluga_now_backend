@@ -1324,6 +1324,33 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('data.max_ttl_days', 7);
     }
 
+    public function testTenantPushSettingsPatchIsVisibleInKernelValuesEndpoint(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $payload = [
+            'throttles' => [
+                'per_minute' => 120,
+            ],
+            'max_ttl_days' => 21,
+        ];
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $patch = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $patch->assertOk();
+        $patch->assertJsonPath('data.max_ttl_days', 21);
+        $patch->assertJsonPath('data.throttles.per_minute', 120);
+
+        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues->assertOk();
+        $kernelValues->assertJsonPath('data.push.max_ttl_days', 21);
+        $kernelValues->assertJsonPath('data.push.throttles.per_minute', 120);
+    }
+
     public function testTenantFirebaseSettingsUpdateRequiresTenantAccess(): void
     {
         $tenant = Tenant::query()->firstOrFail();
