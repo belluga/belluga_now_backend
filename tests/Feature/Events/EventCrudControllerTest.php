@@ -117,7 +117,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
         $response->assertStatus(201);
-        Queue::assertPushed(UpsertMapPoiFromEventJob::class);
+        $eventId = (string) $response->json('data.id');
+        Queue::assertPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($eventId): bool {
+            return (string) $this->readPrivateProperty($job, 'eventId') === $eventId;
+        });
     }
 
     public function testEventCreateRejectsUnknownTaxonomy(): void
@@ -245,13 +248,16 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         Queue::fake();
         $event = $this->createEvent();
+        $eventId = (string) $event->_id;
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
             'title' => 'Updated Via Queue Assertion',
         ]);
 
         $response->assertStatus(200);
-        Queue::assertPushed(UpsertMapPoiFromEventJob::class);
+        Queue::assertPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($eventId): bool {
+            return (string) $this->readPrivateProperty($job, 'eventId') === $eventId;
+        });
     }
 
     public function testEventUpdateReturns404WhenMissing(): void
@@ -279,11 +285,15 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         Queue::fake();
         $event = $this->createEvent();
+        $eventId = (string) $event->_id;
 
         $response = $this->deleteJson("{$this->accountEventsBase}/{$event->_id}");
 
         $response->assertStatus(200);
-        Queue::assertPushed(DeleteMapPoiByRefJob::class);
+        Queue::assertPushed(DeleteMapPoiByRefJob::class, function (DeleteMapPoiByRefJob $job) use ($eventId): bool {
+            return (string) $this->readPrivateProperty($job, 'refType') === 'event'
+                && (string) $this->readPrivateProperty($job, 'refId') === $eventId;
+        });
     }
 
     public function testPublishScheduledEventsJobPromotesReadyEvents(): void
@@ -532,6 +542,14 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
             'is_active' => true,
         ], $overrides));
+    }
+
+    private function readPrivateProperty(object $object, string $property): mixed
+    {
+        $reflection = new \ReflectionProperty($object, $property);
+        $reflection->setAccessible(true);
+
+        return $reflection->getValue($object);
     }
 
     private function initializeSystem(): void

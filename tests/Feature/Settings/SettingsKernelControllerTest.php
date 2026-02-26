@@ -17,7 +17,9 @@ use App\Models\Tenants\AccountUser;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\Driver\Exception\Exception as MongoDriverException;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -52,7 +54,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
         $tenant->makeCurrent();
 
         TenantSettings::query()->delete();
@@ -346,6 +348,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testTenantScopeRejectsSecondSettingsDocument(): void
     {
+        $thrown = null;
+
         try {
             TenantSettings::query()->create([
                 '_id' => 'settings_secondary',
@@ -353,12 +357,11 @@ class SettingsKernelControllerTest extends TestCaseTenant
                     'mode' => 'legacy',
                 ],
             ]);
-
-            $this->fail('Expected second tenant settings document insertion to fail.');
-        } catch (\Throwable) {
-            $this->assertTrue(true);
+        } catch (QueryException|MongoDriverException $throwable) {
+            $thrown = $throwable;
         }
 
+        $this->assertNotNull($thrown, 'Expected second tenant settings document insertion to fail.');
         $this->assertSame(1, TenantSettings::query()->count());
     }
 
@@ -372,6 +375,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
             ],
         ]);
 
+        $thrown = null;
+
         try {
             LandlordSettings::query()->create([
                 '_id' => 'settings_secondary',
@@ -379,12 +384,11 @@ class SettingsKernelControllerTest extends TestCaseTenant
                     'mode' => 'legacy',
                 ],
             ]);
-
-            $this->fail('Expected second landlord settings document insertion to fail.');
-        } catch (\Throwable) {
-            $this->assertTrue(true);
+        } catch (QueryException|MongoDriverException $throwable) {
+            $thrown = $throwable;
         }
 
+        $this->assertNotNull($thrown, 'Expected second landlord settings document insertion to fail.');
         $this->assertSame(1, LandlordSettings::query()->count());
     }
 
@@ -693,9 +697,17 @@ class SettingsKernelControllerTest extends TestCaseTenant
             pwaIcon: [
                 'icon192_uri' => '/pwa/icon192.png',
             ],
-            tenantDomains: [$this->tenant->slug . '.test'],
+            tenantDomains: [$this->tenant->subdomain . '.test'],
         );
 
         $service->initialize($payload);
+
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->first();
+        if ($tenant) {
+            $this->landlord->tenant_primary->slug = $tenant->slug;
+            $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
+            $this->landlord->tenant_primary->id = (string) $tenant->_id;
+            $this->landlord->tenant_primary->role_admin->id = (string) ($tenant->roleTemplates()->first()?->_id ?? '');
+        }
     }
 }
