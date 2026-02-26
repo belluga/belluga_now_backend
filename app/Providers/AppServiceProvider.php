@@ -157,13 +157,62 @@ class AppServiceProvider extends ServiceProvider
             groupLabel: 'Core',
             ability: 'account-users:view',
             fields: [
-                'radius.min_km' => ['type' => 'number', 'nullable' => false, 'label' => 'Radius Min (KM)', 'order' => 10],
-                'radius.default_km' => ['type' => 'number', 'nullable' => false, 'label' => 'Radius Default (KM)', 'order' => 20],
-                'radius.max_km' => ['type' => 'number', 'nullable' => false, 'label' => 'Radius Max (KM)', 'order' => 30],
-                'poi_time_window_days.past' => ['type' => 'integer', 'nullable' => false, 'label' => 'POI Past Window (days)', 'order' => 40],
-                'poi_time_window_days.future' => ['type' => 'integer', 'nullable' => false, 'label' => 'POI Future Window (days)', 'order' => 50],
+                'radius.min_km' => [
+                    'type' => 'number',
+                    'nullable' => false,
+                    'label' => 'Radius Min (KM)',
+                    'label_i18n_key' => 'settings.map_ui.radius.min_km.label',
+                    'group' => 'radius',
+                    'group_label' => 'Radius',
+                    'group_label_i18n_key' => 'settings.map_ui.group.radius.label',
+                    'order' => 10,
+                ],
+                'radius.default_km' => [
+                    'type' => 'number',
+                    'nullable' => false,
+                    'label' => 'Radius Default (KM)',
+                    'label_i18n_key' => 'settings.map_ui.radius.default_km.label',
+                    'group' => 'radius',
+                    'group_label' => 'Radius',
+                    'group_label_i18n_key' => 'settings.map_ui.group.radius.label',
+                    'order' => 20,
+                ],
+                'radius.max_km' => [
+                    'type' => 'number',
+                    'nullable' => false,
+                    'label' => 'Radius Max (KM)',
+                    'label_i18n_key' => 'settings.map_ui.radius.max_km.label',
+                    'group' => 'radius',
+                    'group_label' => 'Radius',
+                    'group_label_i18n_key' => 'settings.map_ui.group.radius.label',
+                    'order' => 30,
+                ],
+                'poi_time_window_days.past' => [
+                    'type' => 'integer',
+                    'nullable' => false,
+                    'label' => 'POI Past Window (days)',
+                    'label_i18n_key' => 'settings.map_ui.poi_time_window_days.past.label',
+                    'group' => 'poi_time_window_days',
+                    'group_label' => 'POI Time Window',
+                    'group_label_i18n_key' => 'settings.map_ui.group.poi_time_window_days.label',
+                    'order' => 40,
+                ],
+                'poi_time_window_days.future' => [
+                    'type' => 'integer',
+                    'nullable' => false,
+                    'label' => 'POI Future Window (days)',
+                    'label_i18n_key' => 'settings.map_ui.poi_time_window_days.future.label',
+                    'group' => 'poi_time_window_days',
+                    'group_label' => 'POI Time Window',
+                    'group_label_i18n_key' => 'settings.map_ui.group.poi_time_window_days.label',
+                    'order' => 50,
+                ],
             ],
             order: 10,
+            labelI18nKey: 'settings.map_ui.namespace.label',
+            description: 'Map and POI defaults.',
+            descriptionI18nKey: 'settings.map_ui.namespace.description',
+            icon: 'map',
         ));
 
         $registry->register(new SettingsNamespaceDefinition(
@@ -173,14 +222,47 @@ class AppServiceProvider extends ServiceProvider
             groupLabel: 'Core',
             ability: 'events:read',
             fields: [
+                'mode' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'Mode',
+                    'label_i18n_key' => 'settings.events.mode.label',
+                    'options' => [
+                        ['value' => 'basic', 'label' => 'Basic', 'label_i18n_key' => 'settings.events.mode.option.basic'],
+                        ['value' => 'advanced', 'label' => 'Advanced', 'label_i18n_key' => 'settings.events.mode.option.advanced'],
+                    ],
+                    'default' => 'basic',
+                    'order' => 5,
+                ],
                 'default_duration_hours' => [
                     'type' => 'integer',
                     'nullable' => false,
                     'label' => 'Default Event Duration (hours)',
+                    'label_i18n_key' => 'settings.events.default_duration_hours.label',
                     'order' => 10,
+                ],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'label' => 'Stock Enabled',
+                    'label_i18n_key' => 'settings.events.stock_enabled.label',
+                    'visible_if' => [
+                        'groups' => [
+                            [
+                                'rules' => [
+                                    ['field_id' => 'events.mode', 'operator' => 'equals', 'value' => 'advanced'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'order' => 20,
                 ],
             ],
             order: 20,
+            labelI18nKey: 'settings.events.namespace.label',
+            description: 'Event defaults and publication behavior.',
+            descriptionI18nKey: 'settings.events.namespace.description',
+            icon: 'event',
         ));
     }
 }

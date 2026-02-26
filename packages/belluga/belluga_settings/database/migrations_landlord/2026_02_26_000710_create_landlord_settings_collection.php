@@ -31,11 +31,13 @@ return new class extends Migration
         if ($count === 1) {
             $existing = $collection->findOne([]);
             if (! $existing) {
+                $this->enforceRootIdValidator($connectionName);
                 return;
             }
 
             $existingId = (string) ($existing['_id'] ?? '');
             if ($existingId === SettingsDocument::ROOT_ID) {
+                $this->enforceRootIdValidator($connectionName);
                 return;
             }
 
@@ -50,11 +52,36 @@ return new class extends Migration
 
             $collection->deleteOne(['_id' => $existing['_id']]);
         }
+
+        $this->enforceRootIdValidator($connectionName);
     }
 
     public function down(): void
     {
         $connectionName = (string) config('multitenancy.landlord_database_connection_name', 'landlord');
         Schema::connection($connectionName)->dropIfExists('settings');
+    }
+
+    private function enforceRootIdValidator(string $connectionName): void
+    {
+        $validator = [
+            '$expr' => [
+                '$eq' => ['$_id', SettingsDocument::ROOT_ID],
+            ],
+        ];
+
+        try {
+            DB::connection($connectionName)->getMongoDB()->command([
+                'collMod' => 'settings',
+                'validator' => $validator,
+                'validationLevel' => 'strict',
+                'validationAction' => 'error',
+            ]);
+        } catch (\Throwable $throwable) {
+            throw new RuntimeException(
+                sprintf('Settings migration failed while enforcing singleton validator on [%s] connection.', $connectionName),
+                previous: $throwable
+            );
+        }
     }
 };

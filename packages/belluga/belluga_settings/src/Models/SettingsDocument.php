@@ -30,13 +30,6 @@ abstract class SettingsDocument extends Model
 
     public static function current(): ?self
     {
-        $root = static::query()->where('_id', self::ROOT_ID)->first();
-
-        if ($root) {
-            return $root;
-        }
-
-        // Transitional fallback while old records are migrated.
-        return static::query()->first();
+        return static::query()->where('_id', self::ROOT_ID)->first();
     }
 }

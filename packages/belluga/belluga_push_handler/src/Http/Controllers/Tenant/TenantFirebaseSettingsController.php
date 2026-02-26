@@ -20,9 +20,12 @@ class TenantFirebaseSettingsController
 
     public function update(TenantFirebaseSettingsRequest $request): JsonResponse
     {
-        $firebase = $request->validated()['firebase'] ?? [];
+        $incoming = $request->validated();
 
         $settings = TenantPushSettings::current();
+        $firebase = is_array($settings?->firebase ?? null) ? $settings->firebase : [];
+        $firebase = array_replace($firebase, $incoming);
+
         if (! $settings) {
             $settings = TenantPushSettings::create(['firebase' => $firebase]);
         } else {

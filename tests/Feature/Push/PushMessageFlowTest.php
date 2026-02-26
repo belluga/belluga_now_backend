@@ -1278,10 +1278,8 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($visitor, ['push-settings:update']);
 
         $payload = [
-            'push' => [
-                'throttles' => [],
-                'max_ttl_days' => 30,
-            ],
+            'throttles' => [],
+            'max_ttl_days' => 30,
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
@@ -1303,7 +1301,7 @@ class PushMessageFlowTest extends TestCase
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
-            'push',
+            'payload',
         ]);
     }
 
@@ -1317,9 +1315,7 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $payload = [
-            'push' => [
-                'throttles' => [],
-            ],
+            'throttles' => [],
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
@@ -1343,13 +1339,11 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($visitor, ['push-settings:update']);
 
         $payload = [
-            'firebase' => [
-                'apiKey' => 'key',
-                'appId' => 'app',
-                'projectId' => 'project',
-                'messagingSenderId' => 'sender',
-                'storageBucket' => 'bucket',
-            ],
+            'apiKey' => 'key',
+            'appId' => 'app',
+            'projectId' => 'project',
+            'messagingSenderId' => 'sender',
+            'storageBucket' => 'bucket',
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
@@ -1371,7 +1365,7 @@ class PushMessageFlowTest extends TestCase
         $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
-            'firebase',
+            'payload',
         ]);
     }
 
@@ -1425,13 +1419,7 @@ class PushMessageFlowTest extends TestCase
                     'label' => 'Invite Updated',
                 ],
             ],
-            'firebase' => [
-                'apiKey' => 'key',
-                'appId' => 'app',
-                'projectId' => 'project',
-                'messagingSenderId' => 'sender',
-                'storageBucket' => 'bucket',
-            ],
+            'firebase' => true,
             'telemetry' => [
                 [
                     'type' => 'mixpanel',
@@ -1439,24 +1427,7 @@ class PushMessageFlowTest extends TestCase
                     'events' => ['invite_received'],
                 ],
             ],
-            'push' => [
-                'message_routes' => [
-                    [
-                        'key' => 'agenda.search',
-                        'path' => '/agenda/search',
-                    ],
-                ],
-                'message_types' => [
-                    [
-                        'key' => 'invite_received',
-                        'label' => 'Invite Updated',
-                    ],
-                ],
-                'types' => ['invite_received'],
-                'enabled' => true,
-                'max_ttl_days' => 30,
-                'throttles' => [],
-            ],
+            'push' => true,
         ];
 
         $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
@@ -1466,10 +1437,7 @@ class PushMessageFlowTest extends TestCase
             'telemetry',
             'push_message_routes',
             'push_message_types',
-            'push.message_routes',
-            'push.message_types',
-            'push.types',
-            'push.enabled',
+            'push',
         ]);
     }
 
@@ -2526,13 +2494,11 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $payload = [
-            'firebase' => [
-                'apiKey' => 'key',
-                'appId' => 'app',
-                'projectId' => 'project',
-                'messagingSenderId' => 'sender',
-                'storageBucket' => 'bucket',
-            ],
+            'apiKey' => 'key',
+            'appId' => 'app',
+            'projectId' => 'project',
+            'messagingSenderId' => 'sender',
+            'storageBucket' => 'bucket',
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);

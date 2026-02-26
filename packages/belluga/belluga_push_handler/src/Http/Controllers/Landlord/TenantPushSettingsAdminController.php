@@ -30,12 +30,17 @@ class TenantPushSettingsAdminController
 
         $settings = TenantPushSettings::current();
         $pushConfig = $settings?->getPushConfig() ?? [];
-        $incomingPush = $request->validated()['push'] ?? [];
-        $maxTtlDays = $incomingPush['max_ttl_days'] ?? $pushConfig['max_ttl_days'] ?? 7;
-        unset($incomingPush['max_ttl_days']);
+        $incoming = $request->validated();
 
-        $pushConfig = array_replace($pushConfig, $incomingPush);
-        $pushConfig['max_ttl_days'] = $maxTtlDays;
+        if (array_key_exists('throttles', $incoming)) {
+            $pushConfig['throttles'] = $incoming['throttles'];
+        }
+
+        if (array_key_exists('max_ttl_days', $incoming)) {
+            $pushConfig['max_ttl_days'] = $incoming['max_ttl_days'];
+        } elseif (! array_key_exists('max_ttl_days', $pushConfig)) {
+            $pushConfig['max_ttl_days'] = 7;
+        }
 
         $payload = [
             'push' => $pushConfig,

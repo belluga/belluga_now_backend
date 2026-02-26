@@ -21,6 +21,10 @@ class SettingsSchemaValidator implements SettingsSchemaValidatorContract
             ]);
         }
 
+        if (array_key_exists($definition->namespace, $payload)) {
+            $errors[$definition->namespace][] = 'Envelope payload is not supported. Send a direct object payload.';
+        }
+
         foreach ($payload as $rawPath => $value) {
             if (! is_string($rawPath) || trim($rawPath) === '') {
                 $errors['payload'][] = 'Patch keys must be non-empty strings.';

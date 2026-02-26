@@ -40,7 +40,7 @@ class TenantPushMessageTypesRequest extends FormRequest
     {
         $validator->after(function (Validator $validator): void {
             $routes = $this->currentRouteKeys();
-            $types = $this->input('message_types');
+            $types = $this->all();
             if (! is_array($types)) {
                 return;
             }

@@ -97,6 +97,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertStatus(200);
 
         $response->assertJsonPath('data.schema_version', '1.0.0');
+        $response->assertJsonPath('data.schema_version_policy.additive_changes', 'no_version_bump_required');
+        $response->assertJsonPath('data.schema_version_policy.breaking_changes', 'version_bump_required');
 
         $namespaces = array_column($response->json('data.namespaces') ?? [], 'namespace');
         $this->assertContains('map_ui', $namespaces);
@@ -147,6 +149,39 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.default_duration_hours', 6);
+    }
+
+    public function testPatchNamespaceRejectsEnvelopePayloadForm(): void
+    {
+        $response = $this->patchJson("{$this->base_api_tenant}settings/values/events", [
+            'events' => [
+                'default_duration_hours' => 6,
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['events']);
+    }
+
+    public function testSchemaExposesNavigationNodesAndConditionalMetadata(): void
+    {
+        $response = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $response->assertStatus(200);
+
+        $namespaces = $response->json('data.namespaces') ?? [];
+        $events = collect($namespaces)->firstWhere('namespace', 'events');
+        $mapUi = collect($namespaces)->firstWhere('namespace', 'map_ui');
+
+        $this->assertIsArray($events);
+        $this->assertIsArray($mapUi);
+        $this->assertNotEmpty($events['nodes'] ?? []);
+        $this->assertNotEmpty($mapUi['nodes'] ?? []);
+
+        $eventsFields = $events['fields'] ?? [];
+        $stock = collect($eventsFields)->firstWhere('path', 'stock_enabled');
+        $this->assertIsArray($stock);
+        $this->assertSame('settings.events.stock_enabled.label', $stock['label_i18n_key'] ?? null);
+        $this->assertIsArray($stock['visible_if'] ?? null);
     }
 
     public function testAbilityFilteringHidesNamespacesAndBlocksPatch(): void

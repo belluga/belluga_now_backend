@@ -10,6 +10,7 @@ use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
+use Belluga\Settings\Validation\ConditionExpressionEvaluator;
 use Tests\TestCase;
 
 class SettingsPackageBindingsTest extends TestCase
@@ -21,6 +22,7 @@ class SettingsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(SettingsSchemaValidatorContract::class, $this->app->make(SettingsSchemaValidatorContract::class));
         $this->assertInstanceOf(SettingsMergePolicyContract::class, $this->app->make(SettingsMergePolicyContract::class));
         $this->assertInstanceOf(TenantScopeContextAdapter::class, $this->app->make(TenantScopeContextContract::class));
+        $this->assertInstanceOf(ConditionExpressionEvaluator::class, $this->app->make(ConditionExpressionEvaluator::class));
     }
 
     public function testCoreAndPushNamespacesAreRegistered(): void

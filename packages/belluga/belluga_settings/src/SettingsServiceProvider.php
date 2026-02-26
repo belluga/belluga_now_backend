@@ -11,6 +11,7 @@ use Belluga\Settings\Contracts\SettingsStoreContract;
 use Belluga\Settings\Merge\NamespacePatchMergePolicy;
 use Belluga\Settings\Registry\InMemorySettingsRegistry;
 use Belluga\Settings\Stores\MongoSettingsStore;
+use Belluga\Settings\Validation\ConditionExpressionEvaluator;
 use Belluga\Settings\Validation\SettingsSchemaValidator;
 use Illuminate\Support\ServiceProvider;
 
@@ -24,6 +25,7 @@ class SettingsServiceProvider extends ServiceProvider
         $this->app->singleton(SettingsMergePolicyContract::class, NamespacePatchMergePolicy::class);
         $this->app->singleton(SettingsSchemaValidatorContract::class, SettingsSchemaValidator::class);
         $this->app->singleton(SettingsStoreContract::class, MongoSettingsStore::class);
+        $this->app->singleton(ConditionExpressionEvaluator::class, ConditionExpressionEvaluator::class);
     }
 
     public function boot(): void

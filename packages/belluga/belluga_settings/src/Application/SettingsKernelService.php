@@ -32,6 +32,7 @@ class SettingsKernelService
 
         return [
             'schema_version' => (string) config('belluga_settings.schema_version', '1.0.0'),
+            'schema_version_policy' => (array) config('belluga_settings.schema_version_policy', []),
             'namespaces' => $schema,
         ];
     }
@@ -66,8 +67,7 @@ class SettingsKernelService
             throw new AuthorizationException('Not authorized for this settings namespace.');
         }
 
-        $expandedPayload = $this->expandNamespaceEnvelope($namespace, $payload);
-        $changes = $this->validator->validatePatch($definition, $expandedPayload);
+        $changes = $this->validator->validatePatch($definition, $payload);
 
         if ($changes === []) {
             return $this->store->getNamespaceValue($scope, $namespace);
@@ -112,33 +112,5 @@ class SettingsKernelService
         }
 
         return (bool) $user->tokenCan($ability);
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     * @return array<string, mixed>
-     */
-    private function expandNamespaceEnvelope(string $namespace, array $payload): array
-    {
-        if (! array_key_exists($namespace, $payload)) {
-            return $payload;
-        }
-
-        $namespaced = $payload[$namespace];
-        if (! is_array($namespaced)) {
-            return $payload;
-        }
-
-        $expanded = $payload;
-        unset($expanded[$namespace]);
-
-        foreach ($namespaced as $key => $value) {
-            if (! is_string($key) || trim($key) === '') {
-                continue;
-            }
-            $expanded[$key] = $value;
-        }
-
-        return $expanded;
     }
 }

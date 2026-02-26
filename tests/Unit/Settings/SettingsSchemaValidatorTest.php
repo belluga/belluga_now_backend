@@ -80,4 +80,26 @@ class SettingsSchemaValidatorTest extends TestCase
             'default_duration_hours' => '5',
         ]);
     }
+
+    #[Test]
+    public function it_rejects_envelope_payload_form(): void
+    {
+        $validator = new SettingsSchemaValidator();
+        $definition = new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'default_duration_hours' => ['type' => 'integer', 'nullable' => false],
+            ],
+        );
+
+        $this->expectException(ValidationException::class);
+
+        $validator->validatePatch($definition, [
+            'events' => ['default_duration_hours' => 4],
+        ]);
+    }
 }

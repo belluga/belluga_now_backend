@@ -57,11 +57,42 @@ class PushHandlerServiceProvider extends ServiceProvider
             groupLabel: 'Notifications',
             ability: $ability,
             fields: [
-                'enabled' => ['type' => 'boolean', 'nullable' => false, 'label' => 'Enabled', 'order' => 10],
-                'throttles' => ['type' => 'object', 'nullable' => true, 'label' => 'Throttles', 'order' => 20],
-                'max_ttl_days' => ['type' => 'integer', 'nullable' => false, 'label' => 'Max TTL Days', 'order' => 30],
+                'enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'label' => 'Enabled',
+                    'label_i18n_key' => 'settings.push.enabled.label',
+                    'order' => 10,
+                ],
+                'throttles' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'label' => 'Throttles',
+                    'label_i18n_key' => 'settings.push.throttles.label',
+                    'order' => 20,
+                ],
+                'max_ttl_days' => [
+                    'type' => 'integer',
+                    'nullable' => false,
+                    'label' => 'Max TTL Days',
+                    'label_i18n_key' => 'settings.push.max_ttl_days.label',
+                    'enabled_if' => [
+                        'groups' => [
+                            [
+                                'rules' => [
+                                    ['field_id' => 'push.enabled', 'operator' => 'equals', 'value' => true],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'order' => 30,
+                ],
             ],
             order: 100,
+            labelI18nKey: 'settings.push.namespace.label',
+            description: 'Push delivery and throttling defaults.',
+            descriptionI18nKey: 'settings.push.namespace.description',
+            icon: 'notifications',
         ));
     }
 }
