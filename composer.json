@@ -35,6 +35,10 @@
         },
         {
             "type": "path",
+            "url": "packages/belluga/belluga_settings"
+        },
+        {
+            "type": "path",
             "url": "packages/belluga/belluga_push_handler"
         }
     ],
@@ -42,6 +46,7 @@
         "psr-4": {
             "App\\": "app/",
             "Belluga\\Events\\": "packages/belluga/belluga_events/src/",
+            "Belluga\\Settings\\": "packages/belluga/belluga_settings/src/",
             "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"

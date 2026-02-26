@@ -4,15 +4,10 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Models\Tenants;
 
-use MongoDB\Laravel\Eloquent\Model;
-use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
+use Belluga\Settings\Models\Tenants\TenantSettings as PackageTenantSettings;
 
-class TenantPushSettings extends Model
+class TenantPushSettings extends PackageTenantSettings
 {
-    use UsesTenantConnection;
-
-    protected $table = 'settings';
-
     protected $hidden = [
         'firebase_credentials_id',
     ];
@@ -123,6 +118,9 @@ class TenantPushSettings extends Model
 
     public static function current(): ?self
     {
-        return static::query()->first();
+        /** @var self|null $current */
+        $current = parent::current();
+
+        return $current;
     }
 }

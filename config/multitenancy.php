@@ -68,6 +68,7 @@ return [
     'tenant_migration_paths' => [
         'database/migrations/tenants',
         'packages/belluga/belluga_events/database/migrations',
+        'packages/belluga/belluga_settings/database/migrations',
         'packages/belluga/belluga_push_handler/database/migrations',
     ],
 

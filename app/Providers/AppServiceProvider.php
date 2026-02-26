@@ -9,6 +9,7 @@ use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
+use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventCreated;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventDeleted;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventUpdated;
@@ -33,6 +34,9 @@ use Belluga\Events\Domain\Events\EventCreated;
 use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Belluga\Settings\Contracts\SettingsRegistryContract;
+use Belluga\Settings\Contracts\TenantScopeContextContract;
+use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -94,6 +98,11 @@ class AppServiceProvider extends ServiceProvider
             TenantExecutionContextAdapter::class
         );
 
+        $this->app->bind(
+            TenantScopeContextContract::class,
+            TenantScopeContextAdapter::class
+        );
+
         $this->app->when(ProfileControllerLandlord::class)
             ->needs(UpdateProfileRequestContract::class)
             ->give(function ($app) {
@@ -126,9 +135,52 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+        $this->registerCoreSettingsNamespaces();
 
         Event::listen(EventCreated::class, SyncMapPoiOnEventCreated::class);
         Event::listen(EventUpdated::class, SyncMapPoiOnEventUpdated::class);
         Event::listen(EventDeleted::class, SyncMapPoiOnEventDeleted::class);
+    }
+
+    private function registerCoreSettingsNamespaces(): void
+    {
+        if (! $this->app->bound(SettingsRegistryContract::class)) {
+            return;
+        }
+
+        $registry = $this->app->make(SettingsRegistryContract::class);
+
+        $registry->register(new SettingsNamespaceDefinition(
+            namespace: 'map_ui',
+            scope: 'tenant',
+            label: 'Map UI',
+            groupLabel: 'Core',
+            ability: 'account-users:view',
+            fields: [
+                'radius.min_km' => ['type' => 'number', 'nullable' => false, 'label' => 'Radius Min (KM)', 'order' => 10],
+                'radius.default_km' => ['type' => 'number', 'nullable' => false, 'label' => 'Radius Default (KM)', 'order' => 20],
+                'radius.max_km' => ['type' => 'number', 'nullable' => false, 'label' => 'Radius Max (KM)', 'order' => 30],
+                'poi_time_window_days.past' => ['type' => 'integer', 'nullable' => false, 'label' => 'POI Past Window (days)', 'order' => 40],
+                'poi_time_window_days.future' => ['type' => 'integer', 'nullable' => false, 'label' => 'POI Future Window (days)', 'order' => 50],
+            ],
+            order: 10,
+        ));
+
+        $registry->register(new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: 'events:read',
+            fields: [
+                'default_duration_hours' => [
+                    'type' => 'integer',
+                    'nullable' => false,
+                    'label' => 'Default Event Duration (hours)',
+                    'order' => 10,
+                ],
+            ],
+            order: 20,
+        ));
     }
 }

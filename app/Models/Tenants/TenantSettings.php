@@ -4,15 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
-use MongoDB\Laravel\Eloquent\Model;
-use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
+use Belluga\Settings\Models\Tenants\TenantSettings as PackageTenantSettings;
 
-class TenantSettings extends Model
+class TenantSettings extends PackageTenantSettings
 {
-    use UsesTenantConnection;
-
-    protected $table = 'settings';
-
     protected $fillable = [
         'map_ui',
         'events',
@@ -38,7 +33,10 @@ class TenantSettings extends Model
 
     public static function current(): ?self
     {
-        return static::query()->first();
+        /** @var self|null $current */
+        $current = parent::current();
+
+        return $current;
     }
 
     /**

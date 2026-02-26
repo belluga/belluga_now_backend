@@ -1,0 +1,22 @@
+{
+  "name": "belluga/settings",
+  "description": "Schema-driven settings kernel package with tenant and landlord scopes.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\Settings\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\Settings\\SettingsServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}
