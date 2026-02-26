@@ -25,6 +25,16 @@ class PublishScheduledEventsJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public int $tries = 5;
+
+    /**
+     * @return array<int, int>
+     */
+    public function backoff(): array
+    {
+        return [5, 10, 20, 40];
+    }
+
     public function handle(
         TenantExecutionContextContract $tenantExecutionContext,
         EventOccurrenceSyncService $occurrenceSyncService,

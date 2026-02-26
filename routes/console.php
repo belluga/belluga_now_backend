@@ -4,6 +4,8 @@ use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
+use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -38,3 +40,17 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 })->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
 
 Schedule::job(new PublishScheduledEventsJob())->hourly();
+
+Schedule::call(static function (): void {
+    app(EventAsyncOperationsMonitorService::class)->evaluate();
+})
+    ->name('events:async:monitor')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::call(static function (): void {
+    app(EventOccurrenceReconciliationService::class)->reconcileAllTenants();
+})
+    ->name('events:occurrences:reconcile')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

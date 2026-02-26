@@ -20,8 +20,18 @@ class UpsertMapPoiFromEventJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public int $tries = 5;
+
     public function __construct(private readonly string $eventId)
     {
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function backoff(): array
+    {
+        return [5, 10, 20, 40];
     }
 
     public function handle(MapPoiProjectionService $projectionService): void

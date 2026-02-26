@@ -12,7 +12,9 @@ use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
+use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
@@ -57,6 +59,10 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             TenantExecutionContextAdapter::class,
             $this->app->make(TenantExecutionContextContract::class)
+        );
+        $this->assertInstanceOf(
+            QueueEventAsyncMetricsProvider::class,
+            $this->app->make(EventAsyncQueueMetricsProviderContract::class)
         );
     }
 }

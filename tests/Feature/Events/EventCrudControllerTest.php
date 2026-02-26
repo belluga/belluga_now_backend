@@ -17,6 +17,7 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\MapPoi;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
@@ -526,6 +527,47 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
+    public function testEventOccurrenceReconciliationSyncsMirroredFieldsFromEvent(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Initial Title',
+        ]);
+        $eventId = (string) $event->_id;
+
+        EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->update([
+                'title' => 'Stale Occurrence Title',
+            ]);
+
+        $event->title = 'Canonical Event Title';
+        $event->save();
+
+        app(EventOccurrenceReconciliationService::class)->reconcileAllTenants();
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $occurrence = EventOccurrence::query()->where('event_id', $eventId)->first();
+        $this->assertNotNull($occurrence);
+        $this->assertSame('Canonical Event Title', (string) $occurrence->title);
+    }
+
+    public function testEventOccurrenceReconciliationSoftDeletesOccurrencesForDeletedEvents(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Deleted Event',
+        ]);
+        $eventId = (string) $event->_id;
+
+        Event::query()->where('_id', $event->_id)->firstOrFail()->delete();
+
+        app(EventOccurrenceReconciliationService::class)->reconcileAllTenants();
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $occurrence = EventOccurrence::withTrashed()->where('event_id', $eventId)->first();
+        $this->assertNotNull($occurrence);
+        $this->assertNotNull($occurrence->deleted_at);
+    }
+
     public function testTenantAdminCreateRequiresOnBehalfAccount(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -719,10 +761,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
-            'confirmed_user_ids' => [],
-            'received_invites' => [],
-            'sent_invites' => [],
-            'friends_going' => [],
             'publication' => [
                 'status' => 'published',
                 'publish_at' => $now->copy()->subMinute(),

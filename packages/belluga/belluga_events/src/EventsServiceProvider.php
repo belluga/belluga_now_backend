@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Belluga\Events;
 
+use Belluga\Events\Application\Operations\EventDlqAlertService;
+use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MultipleOccurrencesCapabilityHandler;
+use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilityRegistryContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
@@ -15,6 +18,8 @@ use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 
@@ -29,6 +34,8 @@ class EventsServiceProvider extends ServiceProvider
             return $registry;
         });
 
+        $this->app->bind(EventAsyncQueueMetricsProviderContract::class, QueueEventAsyncMetricsProvider::class);
+
         $this->ensureHostBinding(EventTaxonomyValidationContract::class);
         $this->ensureHostBinding(EventProfileResolverContract::class);
         $this->ensureHostBinding(EventAccountResolverContract::class);
@@ -42,6 +49,10 @@ class EventsServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+
+        Queue::failing(function (JobFailed $event): void {
+            $this->app->make(EventDlqAlertService::class)->handle($event);
+        });
     }
 
     private function ensureHostBinding(string $abstract): void

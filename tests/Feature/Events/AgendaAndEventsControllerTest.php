@@ -134,26 +134,6 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Past Event', $items[0]['title']);
     }
 
-    public function testAgendaConfirmedOnlyFiltersByConfirmedUser(): void
-    {
-        $this->createEvent([
-            'title' => 'Confirmed Event',
-            'confirmed_user_ids' => [(string) $this->user->_id],
-        ]);
-
-        $this->createEvent([
-            'title' => 'Unconfirmed Event',
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}agenda?confirmed_only=1&page=1&page_size=10");
-
-        $response->assertStatus(200);
-        $items = $response->json('items');
-        $this->assertCount(1, $items);
-        $this->assertSame('Confirmed Event', $items[0]['title']);
-        $this->assertTrue($items[0]['is_confirmed']);
-    }
-
     public function testAgendaSearchMatchesArtistsAndVenue(): void
     {
         $this->createEvent([
@@ -331,10 +311,6 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
-            'confirmed_user_ids' => [],
-            'received_invites' => [],
-            'sent_invites' => [],
-            'friends_going' => [],
             'publication' => [
                 'status' => 'published',
                 'publish_at' => $now->copy()->subMinute(),

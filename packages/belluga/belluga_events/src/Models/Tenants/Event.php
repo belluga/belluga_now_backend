@@ -33,10 +33,6 @@ class Event extends Model
         'categories',
         'taxonomy_terms',
         'capabilities',
-        'confirmed_user_ids',
-        'received_invites',
-        'sent_invites',
-        'friends_going',
         'publication',
         'is_active',
     ];

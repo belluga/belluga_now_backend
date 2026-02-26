@@ -238,7 +238,6 @@ class EventQueryService
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
             'past_only' => filter_var($queryParams['past_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
-            'confirmed_only' => filter_var($queryParams['confirmed_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'origin_lat' => $originLat,
             'origin_lng' => $originLng,
             'max_distance_meters' => $useGeo ? $this->resolveMaxDistanceMeters($queryParams) : null,
@@ -316,7 +315,6 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $userId);
 
         $pipeline[] = [
             '$addFields' => [
@@ -389,7 +387,6 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $userId);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
 
@@ -513,22 +510,6 @@ class EventQueryService
         if ($termMatches !== []) {
             $pipeline[] = ['$match' => ['$or' => $termMatches]];
         }
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $pipeline
-     */
-    private function applyConfirmedFilter(array &$pipeline, bool $confirmedOnly, ?string $userId): void
-    {
-        if (! $confirmedOnly || ! $userId) {
-            return;
-        }
-
-        $pipeline[] = [
-            '$match' => [
-                'confirmed_user_ids' => $userId,
-            ],
-        ];
     }
 
     /**
@@ -707,9 +688,6 @@ class EventQueryService
             $lat = (float) $coordinates[1];
         }
 
-        $confirmedIds = $this->normalizeArray($event->confirmed_user_ids ?? []);
-        $confirmedIds = array_values(array_filter(array_map(static fn ($id): string => (string) $id, $confirmedIds)));
-        $isConfirmed = $userId ? in_array($userId, $confirmedIds, true) : false;
         $occurrences = $this->resolveEventOccurrences($event);
         $capabilities = $this->resolveEventCapabilities($event);
 
@@ -746,11 +724,6 @@ class EventQueryService
             'occurrences' => $occurrences,
             'artists' => $artists,
             'capabilities' => $capabilities,
-            'is_confirmed' => $isConfirmed,
-            'total_confirmed' => count($confirmedIds),
-            'received_invites' => $this->normalizeArray($event->received_invites ?? []),
-            'sent_invites' => $this->normalizeArray($event->sent_invites ?? []),
-            'friends_going' => $this->normalizeArray($event->friends_going ?? []),
             'tags' => array_values(array_map('strval', $tags)),
             'taxonomy_terms' => $taxonomyTerms,
         ];
