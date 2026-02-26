@@ -11,7 +11,9 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantSettings;
+use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCaseTenant;
@@ -50,6 +52,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         Event::query()->delete();
+        EventOccurrence::query()->delete();
 
         [$this->account] = $this->seedAccountWithRole([
             'account-users:view',
@@ -215,7 +218,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);
-        $response->assertJsonPath('data.id', (string) $event->_id);
+        $response->assertJsonPath('data.event_id', (string) $event->_id);
     }
 
     public function testEventDetailReturns404WhenMissing(): void
@@ -227,6 +230,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     public function testEventStreamReturnsDeltas(): void
     {
         $event = $this->createEvent(['title' => 'Stream Event']);
+        $occurrence = EventOccurrence::query()->where('event_id', (string) $event->_id)->first();
+        $this->assertNotNull($occurrence);
         $since = Carbon::now()->subMinute()->toISOString();
 
         $response = $this->get(
@@ -240,8 +245,9 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $content = $response->streamedContent();
 
-        $this->assertStringContainsString('event.created', $content);
+        $this->assertStringContainsString('occurrence.created', $content);
         $this->assertStringContainsString((string) $event->_id, $content);
+        $this->assertStringContainsString((string) $occurrence->_id, $content);
     }
 
     public function testAgendaRequiresAuth(): void
@@ -277,7 +283,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     {
         $now = Carbon::now();
 
-        return Event::create(array_merge([
+        $event = Event::create(array_merge([
             'title' => 'Test Event',
             'content' => 'Event content',
             'type' => [
@@ -329,8 +335,21 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'received_invites' => [],
             'sent_invites' => [],
             'friends_going' => [],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subMinute(),
+            ],
             'is_active' => true,
         ], $overrides));
+
+        $occurrences = [[
+            'date_time_start' => Carbon::instance($event->date_time_start),
+            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
+        ]];
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+
+        return $event->fresh();
     }
 
     private function initializeSystem(): void

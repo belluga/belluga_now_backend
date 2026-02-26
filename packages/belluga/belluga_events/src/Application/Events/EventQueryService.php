@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
-use Illuminate\Pagination\LengthAwarePaginator;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\UTCDateTime;
@@ -20,9 +22,13 @@ class EventQueryService
     private const DEFAULT_PAGE_SIZE = 10;
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
 
+    /** @var array<string, mixed>|null */
+    private ?array $tenantCapabilitiesCache = null;
+
     public function __construct(
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventRadiusSettingsContract $eventRadiusSettings,
+        private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
     ) {
     }
 
@@ -130,7 +136,7 @@ class EventQueryService
         $publication = $event->publication ?? null;
         $publication = is_array($publication) ? $publication : (array) $publication;
         $publishAt = $publication['publish_at'] ?? null;
-        if ($publishAt instanceof \MongoDB\BSON\UTCDateTime) {
+        if ($publishAt instanceof UTCDateTime) {
             $publishAt = $publishAt->toDateTime();
         }
         if ($publishAt instanceof \DateTimeInterface) {
@@ -180,7 +186,7 @@ class EventQueryService
             abort(404, 'Event not found.');
         }
 
-        if ($publishAt instanceof \MongoDB\BSON\UTCDateTime) {
+        if ($publishAt instanceof UTCDateTime) {
             $publishAt = $publishAt->toDateTime();
         }
 
@@ -191,7 +197,7 @@ class EventQueryService
 
     /**
      * @param array<string, mixed> $queryParams
-     * @return array<int, array{event_id: string, type: string, updated_at: string}>
+     * @return array<int, array{event_id: string, occurrence_id: string, type: string, updated_at: string}>
      */
     public function buildStreamDeltas(array $queryParams, ?string $userId, ?string $lastEventId): array
     {
@@ -248,8 +254,8 @@ class EventQueryService
     {
         $pipeline = $this->buildAgendaPipeline($filters, $userId, $skip, $limit, $useGeo);
 
-        /** @var Collection<int, Event> $events */
-        $events = Event::raw(fn ($collection) => $collection->aggregate($pipeline));
+        /** @var Collection<int, EventOccurrence> $events */
+        $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
 
         return $events->all();
     }
@@ -262,8 +268,8 @@ class EventQueryService
     {
         $pipeline = $this->buildStreamPipeline($filters, $userId, $since, $useGeo);
 
-        /** @var Collection<int, Event> $events */
-        $events = Event::raw(fn ($collection) => $collection->aggregate($pipeline));
+        /** @var Collection<int, EventOccurrence> $events */
+        $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
 
         return $events->all();
     }
@@ -279,6 +285,7 @@ class EventQueryService
 
         $baseMatch = [
             'deleted_at' => null,
+            'is_event_published' => true,
         ];
 
         if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
@@ -291,7 +298,7 @@ class EventQueryService
                 'spherical' => true,
                 'query' => [
                     ...$baseMatch,
-                    'geo_location' => ['$ne' => null],
+                    'venue_geo' => ['$ne' => null],
                 ],
             ];
 
@@ -305,7 +312,6 @@ class EventQueryService
         }
 
         $this->applyAccountFilter($pipeline, $filters['account_id'] ?? null, $filters['account_profile_id'] ?? null);
-        $this->applyPublicationFilter($pipeline, $now);
         $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
@@ -316,9 +322,9 @@ class EventQueryService
             '$addFields' => [
                 'effective_end' => [
                     '$ifNull' => [
-                        '$date_time_end',
+                        '$ends_at',
                         [
-                            '$add' => ['$date_time_start', self::DEFAULT_EVENT_DURATION_MS],
+                            '$add' => ['$starts_at', self::DEFAULT_EVENT_DURATION_MS],
                         ],
                     ],
                 ],
@@ -327,10 +333,10 @@ class EventQueryService
 
         if ($filters['past_only']) {
             $pipeline[] = ['$match' => ['$expr' => ['$lte' => ['$effective_end', $now]]]];
-            $sort = ['date_time_start' => -1];
+            $sort = ['starts_at' => -1, '_id' => -1];
         } else {
             $pipeline[] = ['$match' => ['$expr' => ['$gt' => ['$effective_end', $now]]]];
-            $sort = ['date_time_start' => 1];
+            $sort = ['starts_at' => 1, '_id' => 1];
         }
 
         $pipeline[] = ['$sort' => $sort];
@@ -347,7 +353,6 @@ class EventQueryService
     private function buildStreamPipeline(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
     {
         $sinceUtc = new UTCDateTime($since);
-        $now = new UTCDateTime(Carbon::now());
         $pipeline = [];
 
         $baseMatch = [
@@ -366,7 +371,7 @@ class EventQueryService
                 'distanceField' => 'distance_meters',
                 'spherical' => true,
                 'query' => [
-                    'geo_location' => ['$ne' => null],
+                    'venue_geo' => ['$ne' => null],
                 ],
             ];
 
@@ -380,14 +385,13 @@ class EventQueryService
         $pipeline[] = ['$match' => $baseMatch];
 
         $this->applyAccountFilter($pipeline, $filters['account_id'] ?? null, $filters['account_profile_id'] ?? null);
-        $this->applyPublicationFilter($pipeline, $now);
         $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
         $this->applyConfirmedFilter($pipeline, $filters['confirmed_only'], $userId);
 
-        $pipeline[] = ['$sort' => ['updated_at' => 1]];
+        $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
 
         return $pipeline;
     }
@@ -573,34 +577,6 @@ class EventQueryService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $pipeline
-     */
-    private function applyPublicationFilter(array &$pipeline, UTCDateTime $now): void
-    {
-        $pipeline[] = [
-            '$addFields' => [
-                'publication_status' => [
-                    '$ifNull' => ['$publication.status', 'published'],
-                ],
-                'publish_at_effective' => [
-                    '$ifNull' => ['$publication.publish_at', '$created_at'],
-                ],
-            ],
-        ];
-
-        $pipeline[] = [
-            '$match' => [
-                '$expr' => [
-                    '$and' => [
-                        ['$eq' => ['$publication_status', 'published']],
-                        ['$lte' => ['$publish_at_effective', $now]],
-                    ],
-                ],
-            ],
-        ];
-    }
-
-    /**
      * @param array<int, mixed> $items
      * @return array<int, string>
      */
@@ -722,7 +698,7 @@ class EventQueryService
             'taxonomy_terms' => $venue['taxonomy_terms'] ?? [],
         ];
 
-        $geo = $this->normalizeArray($event->geo_location ?? null);
+        $geo = $this->normalizeArray($event->venue_geo ?? $event->geo_location ?? null);
         $coordinates = $geo['coordinates'] ?? null;
         $lat = null;
         $lng = null;
@@ -734,9 +710,22 @@ class EventQueryService
         $confirmedIds = $this->normalizeArray($event->confirmed_user_ids ?? []);
         $confirmedIds = array_values(array_filter(array_map(static fn ($id): string => (string) $id, $confirmedIds)));
         $isConfirmed = $userId ? in_array($userId, $confirmedIds, true) : false;
+        $occurrences = $this->resolveEventOccurrences($event);
+        $capabilities = $this->resolveEventCapabilities($event);
+
+        $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
+        $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
+        $occurrenceId = $isOccurrence && isset($event->_id) ? (string) $event->_id : null;
+        $startAt = $isOccurrence
+            ? $this->formatDate($event->starts_at ?? null)
+            : $this->formatDate($event->date_time_start ?? null);
+        $endAt = $isOccurrence
+            ? $this->formatDate($event->ends_at ?? null)
+            : $this->formatDate($event->date_time_end ?? null);
 
         return [
-            'id' => isset($event->_id) ? (string) $event->_id : '',
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
             'slug' => (string) ($event->slug ?? ''),
             'type' => [
                 'id' => isset($type['id']) ? (string) $type['id'] : '',
@@ -752,9 +741,11 @@ class EventQueryService
             'latitude' => $lat,
             'longitude' => $lng,
             'thumb' => $thumb === [] ? null : $thumb,
-            'date_time_start' => $this->formatDate($event->date_time_start ?? null),
-            'date_time_end' => $this->formatDate($event->date_time_end ?? null),
+            'date_time_start' => $startAt,
+            'date_time_end' => $endAt,
+            'occurrences' => $occurrences,
             'artists' => $artists,
+            'capabilities' => $capabilities,
             'is_confirmed' => $isConfirmed,
             'total_confirmed' => count($confirmedIds),
             'received_invites' => $this->normalizeArray($event->received_invites ?? []),
@@ -767,29 +758,31 @@ class EventQueryService
 
     /**
      * @param mixed $event
-     * @return array{event_id: string, type: string, updated_at: string}
+     * @return array{event_id: string, occurrence_id: string, type: string, updated_at: string}
      */
     private function formatStreamDelta(mixed $event, Carbon $since): array
     {
         $updatedAt = $this->formatDate($event->updated_at ?? null);
         $deletedAt = $this->formatDate($event->deleted_at ?? null);
         $createdAt = $this->formatDate($event->created_at ?? null);
+        $isPublished = (bool) ($event->is_event_published ?? false);
 
         $type = null;
-        if ($deletedAt !== null) {
-            $type = 'event.deleted';
+        if ($deletedAt !== null || ! $isPublished) {
+            $type = 'occurrence.deleted';
         } elseif ($createdAt !== null) {
             $created = Carbon::parse($createdAt);
             if ($created->greaterThan($since)) {
-                $type = 'event.created';
+                $type = 'occurrence.created';
             } else {
-                $type = 'event.updated';
+                $type = 'occurrence.updated';
             }
         }
 
         return [
-            'event_id' => isset($event->_id) ? (string) $event->_id : '',
-            'type' => $type ?? 'event.updated',
+            'event_id' => (string) ($event->event_id ?? ''),
+            'occurrence_id' => isset($event->_id) ? (string) $event->_id : '',
+            'type' => $type ?? 'occurrence.updated',
             'updated_at' => $updatedAt ?? $deletedAt ?? $createdAt ?? Carbon::now()->toISOString(),
         ];
     }
@@ -824,6 +817,13 @@ class EventQueryService
         if ($value instanceof \DateTimeInterface) {
             return $value->format(DATE_ATOM);
         }
+        if (is_string($value) && $value !== '') {
+            try {
+                return Carbon::parse($value)->format(DATE_ATOM);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
 
         return null;
     }
@@ -831,6 +831,84 @@ class EventQueryService
     private function looksLikeObjectId(string $value): bool
     {
         return (bool) preg_match('/^[a-f0-9]{24}$/i', $value);
+    }
+
+    /**
+     * @param mixed $event
+     * @return array<int, array{date_time_start: string|null, date_time_end: string|null}>
+     */
+    private function resolveEventOccurrences(mixed $event): array
+    {
+        if (isset($event->event_id) && (string) $event->event_id !== '') {
+            $start = $this->formatDate($event->starts_at ?? null);
+            if ($start === null) {
+                return [];
+            }
+
+            return [[
+                'date_time_start' => $start,
+                'date_time_end' => $this->formatDate($event->ends_at ?? null),
+            ]];
+        }
+
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        if ($eventId !== '') {
+            $documents = EventOccurrence::query()
+                ->where('event_id', $eventId)
+                ->orderBy('starts_at')
+                ->get();
+
+            if ($documents->isNotEmpty()) {
+                return $documents->map(function (EventOccurrence $occurrence): array {
+                    return [
+                        'date_time_start' => $this->formatDate($occurrence->starts_at ?? null),
+                        'date_time_end' => $this->formatDate($occurrence->ends_at ?? null),
+                    ];
+                })->filter(static fn (array $item): bool => $item['date_time_start'] !== null)->values()->all();
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param mixed $event
+     * @return array<string, mixed>
+     */
+    private function resolveEventCapabilities(mixed $event): array
+    {
+        $raw = $this->normalizeArray($event->capabilities ?? []);
+        $multipleOccurrences = $this->normalizeArray($raw['multiple_occurrences'] ?? []);
+        $eventEnabled = (bool) ($multipleOccurrences['enabled'] ?? false);
+
+        $tenantCapabilities = $this->resolveTenantCapabilities();
+        $tenantMultiple = $this->normalizeArray($tenantCapabilities['multiple_occurrences'] ?? []);
+        $tenantAvailable = (bool) ($tenantMultiple['allow_multiple'] ?? false);
+
+        if (! $tenantAvailable) {
+            return [];
+        }
+
+        return [
+            'multiple_occurrences' => [
+                'enabled' => $eventEnabled,
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveTenantCapabilities(): array
+    {
+        if ($this->tenantCapabilitiesCache !== null) {
+            return $this->tenantCapabilitiesCache;
+        }
+
+        $raw = $this->eventCapabilitySettings->resolveTenantCapabilities();
+        $this->tenantCapabilitiesCache = is_array($raw) ? $raw : [];
+
+        return $this->tenantCapabilitiesCache;
     }
 
     private function applyAccountFiltersToQuery($query, string $accountId, string $accountProfileId): void

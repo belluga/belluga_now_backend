@@ -17,8 +17,10 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\MapPoi;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Queue;
@@ -63,6 +65,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         Event::query()->delete();
+        EventOccurrence::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
 
@@ -108,6 +111,29 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.venue_id', (string) $this->venue->_id);
         $response->assertJsonPath('data.publication.status', 'published');
         $this->assertSame($payload['type']['slug'], $response->json('data.type.slug'));
+
+        $eventId = (string) $response->json('data.event_id');
+        $this->assertTrue(
+            EventOccurrence::query()
+                ->where('event_id', $eventId)
+                ->where('occurrence_index', 0)
+                ->exists()
+        );
+    }
+
+    public function testEventCreateRejectsLegacySingleDatePayloadWithoutOccurrences(): void
+    {
+        $now = Carbon::now();
+        $payload = $this->makeEventPayload([
+            'occurrences' => null,
+            'date_time_start' => $now->copy()->addDay()->toISOString(),
+            'date_time_end' => $now->copy()->addDay()->addHours(2)->toISOString(),
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences', 'date_time_start', 'date_time_end']);
     }
 
     public function testEventCreateDispatchesMapProjectionSyncJobViaLifecycleEvent(): void
@@ -117,7 +143,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
         $response->assertStatus(201);
-        $eventId = (string) $response->json('data.id');
+        $eventId = (string) $response->json('data.event_id');
         Queue::assertPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($eventId): bool {
             return (string) $this->readPrivateProperty($job, 'eventId') === $eventId;
         });
@@ -232,7 +258,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
         $createResponse->assertStatus(201);
-        $eventId = $createResponse->json('data.id');
+        $eventId = $createResponse->json('data.event_id');
         $this->assertNotEmpty($eventId);
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Updated Title',
@@ -260,6 +286,156 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
+    public function testEventCreateRejectsMultipleOccurrencesWhenCapabilityIsNotEffective(): void
+    {
+        $payload = $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(2),
+            'capabilities' => [
+                'multiple_occurrences' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function testEventCreateAllowsMultipleOccurrencesWhenTenantSettingsEnableIt(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => true,
+            'capabilities.multiple_occurrences.max_occurrences' => 2,
+        ])->assertStatus(200);
+
+        $payload = $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(2),
+            'capabilities' => [
+                'multiple_occurrences' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $this->assertCount(2, $response->json('data.occurrences'));
+        $response->assertJsonPath('data.capabilities.multiple_occurrences.enabled', true);
+        $eventId = (string) $response->json('data.event_id');
+        $this->assertSame(
+            2,
+            EventOccurrence::query()->where('event_id', $eventId)->count()
+        );
+    }
+
+    public function testEventCreateRejectsAboveTenantMaxOccurrences(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => true,
+            'capabilities.multiple_occurrences.max_occurrences' => 2,
+        ])->assertStatus(200);
+
+        $payload = $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(3),
+            'capabilities' => [
+                'multiple_occurrences' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function testEventCreateTreatsZeroTenantMaxAsNullLimit(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => true,
+            'capabilities.multiple_occurrences.max_occurrences' => 0,
+        ])->assertStatus(200);
+
+        $payload = $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(3),
+            'capabilities' => [
+                'multiple_occurrences' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $this->assertCount(3, $response->json('data.occurrences'));
+    }
+
+    public function testEventUpdateWithoutScheduleMutationKeepsStoredOccurrencesWhenTenantDisablesCapability(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => true,
+        ])->assertStatus(200);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(2),
+            'capabilities' => [
+                'multiple_occurrences' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => false,
+        ])->assertStatus(200);
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'Renamed without touching schedule',
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertCount(2, $response->json('data.occurrences'));
+        $this->assertNull($response->json('data.capabilities.multiple_occurrences'));
+    }
+
+    public function testEventUpdateWithScheduleMutationRejectsMultipleOccurrencesWhenCapabilityNotEffective(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => true,
+        ])->assertStatus(200);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(2),
+            'capabilities' => [
+                'multiple_occurrences' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+
+        $this->patchEventsSettings([
+            'capabilities.multiple_occurrences.allow_multiple' => false,
+        ])->assertStatus(200);
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => $this->makeOccurrences(2),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
     public function testEventUpdateReturns404WhenMissing(): void
     {
         $response = $this->patchJson("{$this->accountEventsBase}/missing-event", [
@@ -279,6 +455,8 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $deleted = Event::withTrashed()->find($event->_id);
         $this->assertNotNull($deleted?->deleted_at);
+        $occurrence = EventOccurrence::withTrashed()->where('event_id', (string) $event->_id)->first();
+        $this->assertNotNull($occurrence?->deleted_at);
     }
 
     public function testEventDeleteDispatchesMapProjectionDeleteJobViaLifecycleEvent(): void
@@ -326,6 +504,13 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame('published', $readyPublication['status'] ?? null);
         $this->assertSame('publish_scheduled', $futurePublication['status'] ?? null);
+
+        $readyOccurrence = EventOccurrence::query()->where('event_id', (string) $ready->_id)->first();
+        $futureOccurrence = EventOccurrence::query()->where('event_id', (string) $future->_id)->first();
+        $this->assertNotNull($readyOccurrence);
+        $this->assertNotNull($futureOccurrence);
+        $this->assertTrue((bool) ($readyOccurrence->is_event_published ?? false));
+        $this->assertFalse((bool) ($futureOccurrence->is_event_published ?? false));
 
         $this->assertTrue(
             MapPoi::query()
@@ -468,8 +653,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 'slug' => 'show',
                 'description' => 'Show desc',
             ],
-            'date_time_start' => $now->copy()->addDay()->toISOString(),
-            'date_time_end' => $now->copy()->addDay()->addHours(2)->toISOString(),
+            'occurrences' => [[
+                'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
+                'date_time_end' => $now->copy()->addDay()->setHour(22)->setMinute(0)->setSecond(0)->toISOString(),
+            ]],
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
@@ -484,7 +671,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $now = Carbon::now();
 
-        return Event::create(array_merge([
+        $event = Event::create(array_merge([
             'account_id' => (string) $this->venue->account_id,
             'account_profile_id' => (string) $this->venue->_id,
             'title' => 'Stored Event',
@@ -542,6 +729,39 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
             'is_active' => true,
         ], $overrides));
+
+        $occurrences = [[
+            'date_time_start' => Carbon::instance($event->date_time_start),
+            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
+        ]];
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+
+        return $event->fresh();
+    }
+
+    /**
+     * @return array<int, array{date_time_start: string, date_time_end: string}>
+     */
+    private function makeOccurrences(int $count): array
+    {
+        $now = Carbon::now()->addDay();
+        $occurrences = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $start = $now->copy()->addDays($index)->setHour(20)->setMinute(0)->setSecond(0);
+            $occurrences[] = [
+                'date_time_start' => $start->toISOString(),
+                'date_time_end' => $start->copy()->addHours(2)->toISOString(),
+            ];
+        }
+
+        return $occurrences;
+    }
+
+    private function patchEventsSettings(array $payload): \Illuminate\Testing\TestResponse
+    {
+        return $this->patchJson("{$this->base_api_tenant}settings/values/events", $payload);
     }
 
     private function readPrivateProperty(object $object, string $property): mixed

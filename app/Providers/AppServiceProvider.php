@@ -8,6 +8,7 @@ use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
@@ -28,6 +29,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -90,6 +92,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             EventAccountResolverContract::class,
             AccountSlugResolverAdapter::class
+        );
+
+        $this->app->bind(
+            EventCapabilitySettingsContract::class,
+            TenantCapabilitySettingsAdapter::class
         );
 
         $this->app->bind(
@@ -270,6 +277,41 @@ class AppServiceProvider extends ServiceProvider
                         ],
                     ],
                     'order' => 20,
+                ],
+                'capabilities.multiple_occurrences.allow_multiple' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'label' => 'Allow Multiple Occurrences',
+                    'label_i18n_key' => 'settings.events.capabilities.multiple_occurrences.allow_multiple.label',
+                    'default' => false,
+                    'group' => 'capabilities.multiple_occurrences',
+                    'group_label' => 'Multiple Occurrences',
+                    'group_label_i18n_key' => 'settings.events.group.capabilities.multiple_occurrences.label',
+                    'order' => 30,
+                ],
+                'capabilities.multiple_occurrences.max_occurrences' => [
+                    'type' => 'integer',
+                    'nullable' => true,
+                    'label' => 'Maximum Occurrences',
+                    'label_i18n_key' => 'settings.events.capabilities.multiple_occurrences.max_occurrences.label',
+                    'default' => null,
+                    'group' => 'capabilities.multiple_occurrences',
+                    'group_label' => 'Multiple Occurrences',
+                    'group_label_i18n_key' => 'settings.events.group.capabilities.multiple_occurrences.label',
+                    'visible_if' => [
+                        'groups' => [
+                            [
+                                'rules' => [
+                                    [
+                                        'field_id' => 'events.capabilities.multiple_occurrences.allow_multiple',
+                                        'operator' => 'equals',
+                                        'value' => true,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'order' => 40,
                 ],
             ],
             order: 20,

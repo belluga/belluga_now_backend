@@ -35,8 +35,12 @@ class EventStoreRequest extends FormRequest
             'type.description' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
             'type.icon' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'type.color' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
-            'date_time_start' => 'required|date',
-            'date_time_end' => 'sometimes|date',
+            'date_time_start' => 'prohibited',
+            'date_time_end' => 'prohibited',
+            'occurrences' => 'required|array|min:1',
+            'occurrences.*' => 'array',
+            'occurrences.*.date_time_start' => 'required|date',
+            'occurrences.*.date_time_end' => 'sometimes|date',
             'tags' => 'sometimes|array',
             'tags.*' => 'string|max:' . InputConstraints::NAME_MAX,
             'categories' => 'sometimes|array',
@@ -55,6 +59,9 @@ class EventStoreRequest extends FormRequest
                 Rule::in(['published', 'publish_scheduled', 'draft', 'ended']),
             ],
             'publication.publish_at' => 'sometimes|date',
+            'capabilities' => 'sometimes|array',
+            'capabilities.multiple_occurrences' => 'sometimes|array',
+            'capabilities.multiple_occurrences.enabled' => 'sometimes|boolean',
         ];
     }
 }
