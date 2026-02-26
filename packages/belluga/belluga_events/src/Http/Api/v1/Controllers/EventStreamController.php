@@ -6,7 +6,7 @@ namespace Belluga\Events\Http\Api\v1\Controllers;
 
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Http\Api\v1\Requests\EventStreamRequest;
-use App\Http\Controllers\Controller;
+use Illuminate\Routing\Controller;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class EventStreamController extends Controller

@@ -1,10 +1,10 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
-use App\Jobs\PublishScheduledEventsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;

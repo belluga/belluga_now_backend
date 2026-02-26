@@ -1,12 +1,12 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountProfilesController;
-use App\Http\Api\v1\Controllers\AgendaController;
-use App\Http\Api\v1\Controllers\EventStreamController;
-use App\Http\Api\v1\Controllers\EventsController;
 use App\Http\Api\v1\Controllers\MapPoisController;
 use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Middleware\CheckTenantAccess;
+use Belluga\Events\Http\Api\v1\Controllers\AgendaController;
+use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
+use Belluga\Events\Http\Api\v1\Controllers\EventsController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])

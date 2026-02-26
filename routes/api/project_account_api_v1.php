@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Api\v1\Controllers\EventsController;
+use Belluga\Events\Http\Api\v1\Controllers\EventsController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', 'account'])

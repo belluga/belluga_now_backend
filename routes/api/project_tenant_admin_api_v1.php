@@ -1,8 +1,8 @@
 <?php
 
-use App\Http\Api\v1\Controllers\EventStreamController;
-use App\Http\Api\v1\Controllers\EventsController;
 use App\Http\Middleware\CheckTenantAccess;
+use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
+use Belluga\Events\Http\Api\v1\Controllers\EventsController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Http\Api\v1\Requests;
 
-use App\Support\Validation\InputConstraints;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 

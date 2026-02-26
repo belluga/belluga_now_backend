@@ -6,14 +6,14 @@ namespace Belluga\Events\Http\Api\v1\Controllers;
 
 use Belluga\Events\Application\Events\EventManagementService;
 use Belluga\Events\Application\Events\EventQueryService;
-use App\Application\Accounts\AccountQueryService;
+use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
-use App\Http\Controllers\Controller;
-use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
 use Illuminate\Validation\ValidationException;
 
 class EventsController extends Controller
@@ -21,7 +21,8 @@ class EventsController extends Controller
     public function __construct(
         private readonly EventQueryService $eventQueryService,
         private readonly EventManagementService $eventManagementService,
-        private readonly AccountQueryService $accountQueryService
+        private readonly EventAccountResolverContract $accountResolver,
+        private readonly EventTenantContextContract $tenantContext
     ) {
     }
 
@@ -130,10 +131,8 @@ class EventsController extends Controller
             $this->eventQueryService->assertPublicVisible($event);
         }
 
-        $tenant = Tenant::resolve();
-
         return response()->json([
-            'tenant_id' => (string) $tenant->_id,
+            'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
             'data' => $this->eventQueryService->formatEvent($event, $this->resolveAuthenticatedUserId($request)),
         ]);
     }
@@ -154,9 +153,7 @@ class EventsController extends Controller
             return null;
         }
 
-        $account = $this->accountQueryService->findBySlugOrFail((string) $accountSlug);
-
-        return (string) $account->_id;
+        return $this->accountResolver->resolveAccountIdBySlug((string) $accountSlug);
     }
 
     private function resolveAuthenticatedUserId(Request $request): ?string

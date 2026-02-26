@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
+use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
 use App\Integration\Settings\TenantScopeContextAdapter;
@@ -25,9 +27,11 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
 use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
+use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Domain\Events\EventCreated;
@@ -81,6 +85,16 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             EventProfileResolverContract::class,
             AccountProfileResolverAdapter::class
+        );
+
+        $this->app->bind(
+            EventAccountResolverContract::class,
+            AccountSlugResolverAdapter::class
+        );
+
+        $this->app->bind(
+            EventTenantContextContract::class,
+            TenantContextAdapter::class
         );
 
         $this->app->bind(

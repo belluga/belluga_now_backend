@@ -7,10 +7,10 @@ namespace App\Application\MapPois;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\StaticAssets\StaticProfileTypeRegistryService;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\Event;
 use App\Models\Tenants\MapPoi;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantSettings;
+use Belluga\Events\Models\Tenants\Event;
 use Illuminate\Support\Carbon;
 
 class MapPoiProjectionService
