@@ -118,5 +118,195 @@ class SettingsNamespaceDefinitionTest extends TestCase
             ],
         );
     }
-}
 
+    #[Test]
+    public function it_rejects_invalid_condition_operator(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'mode' => ['type' => 'string', 'nullable' => false],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'visible_if' => [
+                        'groups' => [
+                            [
+                                'rules' => [
+                                    ['field_id' => 'events.mode', 'operator' => 'invalid_op', 'value' => 'advanced'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        );
+    }
+
+    #[Test]
+    public function it_rejects_comparable_operator_on_non_comparable_type(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'mode' => ['type' => 'string', 'nullable' => false],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'visible_if' => [
+                        'groups' => [
+                            [
+                                'rules' => [
+                                    ['field_id' => 'events.mode', 'operator' => 'gt', 'value' => 'advanced'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        );
+    }
+
+    #[Test]
+    public function it_rejects_condition_expression_above_group_limit(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $groups = [];
+        for ($i = 0; $i < 11; $i++) {
+            $groups[] = [
+                'rules' => [
+                    ['field_id' => 'events.mode', 'operator' => 'equals', 'value' => 'advanced'],
+                ],
+            ];
+        }
+
+        new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'mode' => ['type' => 'string', 'nullable' => false],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'visible_if' => [
+                        'groups' => $groups,
+                    ],
+                ],
+            ],
+        );
+    }
+
+    #[Test]
+    public function it_rejects_condition_expression_above_rules_per_group_limit(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $rules = [];
+        for ($i = 0; $i < 11; $i++) {
+            $rules[] = ['field_id' => 'events.mode', 'operator' => 'equals', 'value' => 'advanced'];
+        }
+
+        new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'mode' => ['type' => 'string', 'nullable' => false],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'visible_if' => [
+                        'groups' => [
+                            ['rules' => $rules],
+                        ],
+                    ],
+                ],
+            ],
+        );
+    }
+
+    #[Test]
+    public function it_rejects_condition_expression_above_total_rule_limit(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $groups = [];
+        for ($g = 0; $g < 6; $g++) {
+            $rules = [];
+            for ($r = 0; $r < 9; $r++) {
+                $rules[] = ['field_id' => 'events.mode', 'operator' => 'equals', 'value' => 'advanced'];
+            }
+            $groups[] = ['rules' => $rules];
+        }
+
+        new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'mode' => ['type' => 'string', 'nullable' => false],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'visible_if' => [
+                        'groups' => $groups,
+                    ],
+                ],
+            ],
+        );
+    }
+
+    #[Test]
+    public function it_rejects_condition_expression_above_payload_size_limit(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new SettingsNamespaceDefinition(
+            namespace: 'events',
+            scope: 'tenant',
+            label: 'Events',
+            groupLabel: 'Core',
+            ability: null,
+            fields: [
+                'mode' => ['type' => 'string', 'nullable' => false],
+                'stock_enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'visible_if' => [
+                        'groups' => [
+                            [
+                                'rules' => [
+                                    [
+                                        'field_id' => 'events.mode',
+                                        'operator' => 'equals',
+                                        'value' => str_repeat('x', 17000),
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        );
+    }
+}
