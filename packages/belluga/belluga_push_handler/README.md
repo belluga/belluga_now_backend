@@ -4,7 +4,7 @@
 **Status:** Foundation package (in-repo until extraction).
 
 ## Purpose
-This package provides the Laravel backend capabilities for push messaging and telemetry delivery:
+This package provides the Laravel backend capabilities for push messaging:
 - Push message CRUD and secure payload fetch
 - Device token registration/unregistration
 - Audience evaluation and delivery lifecycle metrics
@@ -25,6 +25,7 @@ The host application retains control of **route paths** via config while the pac
 
 **Responsibilities owned by the host app**
 - Route path strings (prefixes and endpoints).
+- Core telemetry ownership (settings + delivery pipeline + trackers).
 - Tenant settings hub (push extends this, host owns the base).
 - Account plans/quotas (via the policy contract).
 - Any external providers (FCM client implementation).
@@ -114,9 +115,6 @@ Endpoints:
 - `POST /{tenant.settings_prefix}/{tenant.settings_push}/disable` — disable push
 - `GET /{tenant.settings_prefix}/firebase` — firebase settings
 - `PATCH /{tenant.settings_prefix}/firebase` — update firebase settings
-- `GET /{tenant.settings_prefix}/telemetry` — list telemetry integrations
-- `POST /{tenant.settings_prefix}/telemetry` — add/update telemetry integration
-- `DELETE /{tenant.settings_prefix}/telemetry/{type}` — remove telemetry integration
 - `GET /{tenant.settings_prefix}/{tenant.settings_push}/route_types` — list push route types
 - `PATCH /{tenant.settings_prefix}/{tenant.settings_push}/route_types` — replace push route types
 - `GET /{tenant.settings_prefix}/{tenant.settings_push}/message_types` — list push message types
@@ -140,25 +138,21 @@ Use the tenant endpoints below to configure and enable push in order.
 2) **Set firebase settings**
 ```json
 {
-  "firebase": {
-    "apiKey": "AIzaSy...example",
-    "appId": "1:XXXXXXXXXXXX:android:f73db77742a1b07f2302f7",
-    "projectId": "string",
-    "messagingSenderId": "XXXXXXXXXXXX",
-    "storageBucket": "string.firebasestorage.app"
-  }
+  "apiKey": "AIzaSy...example",
+  "appId": "1:XXXXXXXXXXXX:android:f73db77742a1b07f2302f7",
+  "projectId": "string",
+  "messagingSenderId": "XXXXXXXXXXXX",
+  "storageBucket": "string.firebasestorage.app"
 }
 ```
 
 3) **Set push settings**
 ```json
 {
-  "push": {
-    "max_ttl_days": 30,
-    "throttles": {
-      "max_per_minute": 60,
-      "max_per_hour": 600
-    }
+  "max_ttl_days": 30,
+  "throttles": {
+    "max_per_minute": 60,
+    "max_per_hour": 600
   }
 }
 ```
@@ -273,16 +267,7 @@ Note: `option_source` is method-based (`type: "method"` + `name`), resolved by t
 }
 ```
 
-7) **(Optional) Add telemetry integration**
-```json
-{
-  "type": "mixpanel",
-  "token": "mixpanel-token",
-  "events": ["push.sent", "push.opened"]
-}
-```
-
-8) **Enable push**
+7) **Enable push**
 No body required.
 
 8) **Manual validation checklist**
@@ -293,13 +278,14 @@ No body required.
 - Send an invite payload and confirm the invite list updates without a backend refetch.
 
 Notes:
-- `/settings/push` manages push-only fields; use `/settings/firebase` and `/settings/telemetry` for those domains.
+- `/settings/push` manages push-only fields; use `/settings/firebase` for FCM config.
+- Telemetry routes (`/settings/telemetry`) are provided by core API, not by `belluga_push_handler`.
 - `/settings/push` does not accept `push_message_routes` or `push_message_types`; use the dedicated endpoints above.
+- `settings.firebase` and `settings.push` are canonical kernel-backed namespaces for this package.
 - `push.message_routes` and `push.message_types` are stored under `push` in the settings document.
 - `/settings/push` does not accept `push.enabled`; use `/settings/push/enable` or `/settings/push/disable`.
 - `/settings/push` does not accept `push.types` (types come from `message_types`).
-- Use `push.max_ttl_days` instead of top-level `max_ttl_days`.
-- Telemetry types are unique; `POST /settings/telemetry` upserts by `type`.
+- Use top-level `max_ttl_days` and `throttles` payload keys on `PATCH /settings/push`.
 - `PATCH /settings/push/route_types` and `PATCH /settings/push/message_types` accept raw arrays of objects (no root key).
 - Deletes use `DELETE /settings/push/route_types` or `/message_types` with `{ "keys": ["..."] }`.
 
@@ -311,6 +297,8 @@ Mounted under:
 Endpoints:
 - `GET /{tenant_settings_path}` — show tenant push settings
 - `PATCH /{tenant_settings_path}` — update tenant push settings
+- `GET /{tenant_settings_firebase_path}` — show tenant firebase settings
+- `PATCH /{tenant_settings_firebase_path}` — update tenant firebase settings
 
 Auth/middleware:
 - `auth:sanctum` + `landlord` + `abilities:push-settings:update`
@@ -363,7 +351,7 @@ If future landlord persistence is added:
 
 ## Request/Response Expectations (Summary)
 This package follows the backend schema defined in:
-`foundation_documentation/todos/active/TODO-v1-telemetry-and-push-backend.md`
+`foundation_documentation/todos/completed/TODO-v1-telemetry-and-push.md`
 
 Key behavior:
 - `ok=false` on `/data` when inactive/expired/not found

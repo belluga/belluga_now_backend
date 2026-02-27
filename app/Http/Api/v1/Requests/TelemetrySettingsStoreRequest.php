@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Belluga\PushHandler\Http\Requests;
+namespace App\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class TenantTelemetryStoreRequest extends FormRequest
+class TelemetrySettingsStoreRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -16,8 +16,8 @@ class TenantTelemetryStoreRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
-            'type' => ['required', 'string', Rule::in(['mixpanel', 'firebase', 'webhook'])],
+        $rules = [
+            'type' => ['required', 'string', Rule::in(['mixpanel', 'webhook'])],
             'track_all' => ['sometimes', 'boolean'],
             'events' => [
                 'array',
@@ -25,7 +25,14 @@ class TenantTelemetryStoreRequest extends FormRequest
             ],
             'events.*' => ['string'],
             'token' => ['required_if:type,mixpanel', 'string'],
-            'url' => ['required_if:type,webhook', 'string'],
+            'url' => ['required_if:type,webhook', 'url'],
         ];
+
+        $availableEvents = config('telemetry.available_events', []);
+        if (is_array($availableEvents) && $availableEvents !== []) {
+            $rules['events.*'][] = Rule::in($availableEvents);
+        }
+
+        return $rules;
     }
 }

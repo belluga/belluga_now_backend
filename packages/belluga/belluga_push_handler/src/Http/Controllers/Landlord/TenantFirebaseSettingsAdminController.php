@@ -6,22 +6,28 @@ namespace Belluga\PushHandler\Http\Controllers\Landlord;
 
 use App\Models\Landlord\Tenant;
 use Belluga\PushHandler\Http\Requests\TenantFirebaseSettingsRequest;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
 
 class TenantFirebaseSettingsAdminController
 {
+    public function __construct(
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {
+    }
+
     public function show(string $tenant_slug): JsonResponse
     {
         $tenant = Tenant::query()->where('slug', $tenant_slug)->firstOrFail();
         $tenant->makeCurrent();
 
-        $settings = TenantPushSettings::current();
-        $firebase = is_array($settings?->firebase ?? null) ? $settings->firebase : [];
+        try {
+            $firebase = $this->pushSettings->currentFirebaseConfig();
 
-        $tenant->forgetCurrent();
-
-        return response()->json(['data' => $firebase]);
+            return response()->json(['data' => $firebase]);
+        } finally {
+            $tenant->forgetCurrent();
+        }
     }
 
     public function update(TenantFirebaseSettingsRequest $request, string $tenant_slug): JsonResponse
@@ -29,20 +35,13 @@ class TenantFirebaseSettingsAdminController
         $tenant = Tenant::query()->where('slug', $tenant_slug)->firstOrFail();
         $tenant->makeCurrent();
 
-        $incoming = $request->validated();
-        $settings = TenantPushSettings::current();
-        $firebase = is_array($settings?->firebase ?? null) ? $settings->firebase : [];
-        $firebase = array_replace($firebase, $incoming);
+        try {
+            $incoming = $request->validated();
+            $firebase = $this->pushSettings->patchFirebaseConfig($request->user(), $incoming);
 
-        if (! $settings) {
-            $settings = TenantPushSettings::create(['firebase' => $firebase]);
-        } else {
-            $settings->fill(['firebase' => $firebase]);
-            $settings->save();
+            return response()->json(['data' => $firebase]);
+        } finally {
+            $tenant->forgetCurrent();
         }
-
-        $tenant->forgetCurrent();
-
-        return response()->json(['data' => $settings->firebase ?? []]);
     }
 }

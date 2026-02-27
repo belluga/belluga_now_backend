@@ -87,12 +87,78 @@ class PushHandlerServiceProvider extends ServiceProvider
                     ],
                     'order' => 30,
                 ],
+                'message_routes' => [
+                    'type' => 'array',
+                    'nullable' => false,
+                    'label' => 'Message Routes',
+                    'label_i18n_key' => 'settings.push.message_routes.label',
+                    'default' => [],
+                    'order' => 40,
+                ],
+                'message_types' => [
+                    'type' => 'array',
+                    'nullable' => false,
+                    'label' => 'Message Types',
+                    'label_i18n_key' => 'settings.push.message_types.label',
+                    'default' => [],
+                    'order' => 50,
+                ],
             ],
             order: 100,
             labelI18nKey: 'settings.push.namespace.label',
             description: 'Push delivery and throttling defaults.',
             descriptionI18nKey: 'settings.push.namespace.description',
             icon: 'notifications',
+        ));
+
+        $registry->register(new SettingsNamespaceDefinition(
+            namespace: 'firebase',
+            scope: 'tenant',
+            label: 'Firebase',
+            groupLabel: 'Notifications',
+            ability: $ability,
+            fields: [
+                'apiKey' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'API Key',
+                    'label_i18n_key' => 'settings.firebase.api_key.label',
+                    'order' => 10,
+                ],
+                'appId' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'App ID',
+                    'label_i18n_key' => 'settings.firebase.app_id.label',
+                    'order' => 20,
+                ],
+                'projectId' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'Project ID',
+                    'label_i18n_key' => 'settings.firebase.project_id.label',
+                    'order' => 30,
+                ],
+                'messagingSenderId' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'Messaging Sender ID',
+                    'label_i18n_key' => 'settings.firebase.messaging_sender_id.label',
+                    'order' => 40,
+                ],
+                'storageBucket' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'Storage Bucket',
+                    'label_i18n_key' => 'settings.firebase.storage_bucket.label',
+                    'order' => 50,
+                ],
+            ],
+            order: 110,
+            labelI18nKey: 'settings.firebase.namespace.label',
+            description: 'Firebase client settings used by FCM-enabled push flows.',
+            descriptionI18nKey: 'settings.firebase.namespace.description',
+            icon: 'cloud',
         ));
     }
 }

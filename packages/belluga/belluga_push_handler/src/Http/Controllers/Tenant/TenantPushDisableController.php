@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,8 +17,8 @@ class TenantPushDisableController
 
     public function __invoke(Request $request): JsonResponse
     {
-        $settings = TenantPushSettings::current();
-        if (! $settings) {
+        $push = $this->pushSettings->currentPushConfig();
+        if ($push === []) {
             return response()->json([
                 'message' => 'Push settings are not configured.',
             ], 404);

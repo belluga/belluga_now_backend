@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
 use Belluga\PushHandler\Http\Requests\TenantPushMessageTypesRequest;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class TenantPushMessageTypesController
 {
+    public function __construct(
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {
+    }
+
     public function show(): JsonResponse
     {
-        $types = TenantPushSettings::current()?->getPushMessageTypes() ?? [];
+        $types = $this->pushSettings->currentMessageTypes();
 
         return response()->json([
             'data' => is_array($types) ? $types : [],
@@ -23,28 +28,15 @@ class TenantPushMessageTypesController
     public function update(TenantPushMessageTypesRequest $request): JsonResponse
     {
         $payload = $request->validated();
-        $settings = TenantPushSettings::current();
         $types = $this->mergeTypes(
-            $settings?->getPushMessageTypes() ?? [],
+            $this->pushSettings->currentMessageTypes(),
             $payload
         );
 
-        if (! $settings) {
-            $settings = TenantPushSettings::create([
-                'push' => [
-                    'message_types' => $types,
-                    'max_ttl_days' => 7,
-                ],
-            ]);
-        } else {
-            $push = $settings->getPushConfig();
-            $push['message_types'] = $types;
-            $settings->fill(['push' => $push]);
-            $settings->save();
-        }
+        $updatedTypes = $this->pushSettings->patchMessageTypes($request->user(), $types);
 
         return response()->json([
-            'data' => $settings->getPushMessageTypes(),
+            'data' => $updatedTypes,
         ]);
     }
 
@@ -55,8 +47,7 @@ class TenantPushMessageTypesController
             'keys.*' => ['required', 'string', 'distinct'],
         ]);
 
-        $settings = TenantPushSettings::current();
-        $types = $this->indexTypes($settings?->getPushMessageTypes() ?? []);
+        $types = $this->indexTypes($this->pushSettings->currentMessageTypes());
         foreach ($payload['keys'] as $key) {
             if (! isset($types[$key])) {
                 continue;
@@ -64,22 +55,10 @@ class TenantPushMessageTypesController
             $types[$key]['active'] = false;
         }
 
-        if (! $settings) {
-            $settings = TenantPushSettings::create([
-                'push' => [
-                    'message_types' => array_values($types),
-                    'max_ttl_days' => 7,
-                ],
-            ]);
-        } else {
-            $push = $settings->getPushConfig();
-            $push['message_types'] = array_values($types);
-            $settings->fill(['push' => $push]);
-            $settings->save();
-        }
+        $updatedTypes = $this->pushSettings->patchMessageTypes($request->user(), array_values($types));
 
         return response()->json([
-            'data' => $settings->getPushMessageTypes(),
+            'data' => $updatedTypes,
         ]);
     }
 

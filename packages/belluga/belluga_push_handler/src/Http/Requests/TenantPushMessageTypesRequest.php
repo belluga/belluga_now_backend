@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Requests;
 
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -72,7 +72,7 @@ class TenantPushMessageTypesRequest extends FormRequest
      */
     private function currentRouteKeys(): array
     {
-        $routes = TenantPushSettings::current()?->getPushMessageRoutes() ?? [];
+        $routes = app(PushSettingsKernelBridge::class)->currentMessageRoutes();
         if (! is_array($routes)) {
             return [];
         }

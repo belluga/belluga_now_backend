@@ -6,7 +6,6 @@ namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
 use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\PushCredentialService;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
@@ -21,10 +20,10 @@ class TenantPushStatusController
 
     public function show(): JsonResponse
     {
-        $settings = TenantPushSettings::current();
         $push = $this->pushSettings->currentPushConfig();
+        $firebase = $this->pushSettings->currentFirebaseConfig();
 
-        if (! $settings || ! $this->isConfigured($settings, $push)) {
+        if (! $this->isConfigured($push, $firebase)) {
             return response()->json(['status' => 'not_configured']);
         }
 
@@ -49,29 +48,14 @@ class TenantPushStatusController
 
     /**
      * @param array<string, mixed> $push
+     * @param array<string, mixed> $firebase
      */
-    private function isConfigured(TenantPushSettings $settings, array $push): bool
+    private function isConfigured(array $push, array $firebase): bool
     {
         if (! ($push['enabled'] ?? false)) {
             return false;
         }
 
-        $firebase = $settings->getAttribute('firebase') ?? [];
-        $requiredKeys = [
-            'apiKey',
-            'appId',
-            'projectId',
-            'messagingSenderId',
-            'storageBucket',
-        ];
-
-        foreach ($requiredKeys as $key) {
-            $value = $firebase[$key] ?? null;
-            if (! is_string($value) || $value === '') {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->pushSettings->hasRequiredFirebaseConfig($firebase);
     }
 }

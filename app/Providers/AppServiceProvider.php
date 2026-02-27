@@ -19,6 +19,8 @@ use App\Listeners\EventsPackage\SyncMapPoiOnEventCreated;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventDeleted;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventUpdated;
 use App\Application\Push\PushAudienceEligibilityService;
+use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Application\Media\SystemExternalImageDnsResolver;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
@@ -76,6 +78,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             PushAudienceEligibilityContract::class,
             PushAudienceEligibilityService::class
+        );
+
+        $this->app->bind(
+            TelemetryEmitterContract::class,
+            TelemetryEmitter::class
         );
 
         $this->app->bind(
@@ -334,6 +341,37 @@ class AppServiceProvider extends ServiceProvider
             description: 'Event defaults and publication behavior.',
             descriptionI18nKey: 'settings.events.namespace.description',
             icon: 'event',
+        ));
+
+        $registry->register(new SettingsNamespaceDefinition(
+            namespace: 'telemetry',
+            scope: 'tenant',
+            label: 'Telemetry',
+            groupLabel: 'Core',
+            ability: 'telemetry-settings:update',
+            fields: [
+                'location_freshness_minutes' => [
+                    'type' => 'integer',
+                    'nullable' => false,
+                    'label' => 'Location Freshness (minutes)',
+                    'label_i18n_key' => 'settings.telemetry.location_freshness_minutes.label',
+                    'default' => (int) config('telemetry.location_freshness_minutes', 5),
+                    'order' => 10,
+                ],
+                'trackers' => [
+                    'type' => 'array',
+                    'nullable' => false,
+                    'label' => 'Trackers',
+                    'label_i18n_key' => 'settings.telemetry.trackers.label',
+                    'default' => [],
+                    'order' => 20,
+                ],
+            ],
+            order: 30,
+            labelI18nKey: 'settings.telemetry.namespace.label',
+            description: 'Telemetry tracker configuration for analytics/event sinks.',
+            descriptionI18nKey: 'settings.telemetry.namespace.description',
+            icon: 'analytics',
         ));
     }
 }

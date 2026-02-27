@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,14 +17,13 @@ class TenantPushEnableController
 
     public function __invoke(Request $request): JsonResponse
     {
-        $settings = TenantPushSettings::current();
         $push = $this->pushSettings->currentPushConfig();
-        if (! $settings || ! is_array($push)) {
+        if ($push === []) {
             return $this->notConfiguredResponse();
         }
 
-        $firebase = $settings->firebase ?? null;
-        if (! $this->hasFirebaseConfig($firebase)) {
+        $firebase = $this->pushSettings->currentFirebaseConfig();
+        if (! $this->pushSettings->hasRequiredFirebaseConfig($firebase)) {
             return $this->notConfiguredResponse();
         }
 
@@ -47,21 +45,5 @@ class TenantPushEnableController
                 'push' => ['Push config is required before enabling push.'],
             ],
         ], 422);
-    }
-
-    private function hasFirebaseConfig(mixed $firebase): bool
-    {
-        if (! is_array($firebase)) {
-            return false;
-        }
-
-        $required = ['apiKey', 'appId', 'projectId', 'messagingSenderId', 'storageBucket'];
-        foreach ($required as $key) {
-            if (! isset($firebase[$key]) || ! is_string($firebase[$key]) || $firebase[$key] === '') {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

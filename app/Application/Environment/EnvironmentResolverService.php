@@ -4,16 +4,23 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\Telemetry\TelemetrySettingsKernelBridge;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Support\Str;
-use App\Application\AccountProfiles\AccountProfileRegistryService;
 
 class EnvironmentResolverService
 {
+    public function __construct(
+        private readonly TelemetrySettingsKernelBridge $telemetrySettings,
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
@@ -50,8 +57,10 @@ class EnvironmentResolverService
     private function tenantEnvironment(Tenant $tenant, ?string $requestRoot, ?string $requestHost): array
     {
         $landlord = Landlord::singleton();
-        $pushSettings = TenantPushSettings::current();
         $settings = TenantSettings::current();
+        $telemetry = $this->telemetrySettings->currentTelemetryConfig();
+        $firebase = $this->pushSettings->currentFirebaseConfig();
+        $push = $this->pushSettings->currentPushConfig();
         $profileTypes = (new AccountProfileRegistryService())->registry();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
@@ -89,9 +98,12 @@ class EnvironmentResolverService
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => $this->resolveTelemetryPayload($pushSettings),
-            'firebase' => $pushSettings?->getAttribute('firebase') ?? [],
-            'push' => $pushSettings?->getAttribute('push') ?? [],
+            'telemetry' => [
+                'location_freshness_minutes' => $telemetry['location_freshness_minutes'],
+                'trackers' => $telemetry['trackers'],
+            ],
+            'firebase' => $firebase,
+            'push' => $push,
             'profile_types' => $profileTypes,
             'settings' => [
                 'map_ui' => $settings?->getAttribute('map_ui') ?? [],
@@ -119,7 +131,10 @@ class EnvironmentResolverService
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => $this->resolveTelemetryPayload(null),
+            'telemetry' => [
+                'location_freshness_minutes' => $this->defaultTelemetryLocationFreshnessMinutes(),
+                'trackers' => [],
+            ],
         ];
     }
 
@@ -223,63 +238,9 @@ class EnvironmentResolverService
         return $origin;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function resolveTelemetryPayload(?TenantPushSettings $pushSettings): array
+    private function defaultTelemetryLocationFreshnessMinutes(): int
     {
-        $defaultMinutes = (int) config('belluga_push_handler.telemetry.location_freshness_minutes', 5);
-        $defaultMinutes = $defaultMinutes > 0 ? $defaultMinutes : 5;
-        $trackers = [];
-        $locationOverride = null;
-
-        if ($pushSettings) {
-            $rawTelemetry = $pushSettings->getAttribute('telemetry');
-            if ($rawTelemetry instanceof \MongoDB\Model\BSONDocument || $rawTelemetry instanceof \MongoDB\Model\BSONArray) {
-                $rawTelemetry = $rawTelemetry->getArrayCopy();
-            } elseif ($rawTelemetry instanceof \Traversable) {
-                $rawTelemetry = iterator_to_array($rawTelemetry);
-            } elseif (is_object($rawTelemetry)) {
-                $rawTelemetry = (array) $rawTelemetry;
-            }
-
-            if (is_array($rawTelemetry)) {
-                if (array_key_exists('trackers', $rawTelemetry) ||
-                    array_key_exists('location_freshness_minutes', $rawTelemetry)) {
-                    $trackersRaw = $rawTelemetry['trackers'] ?? [];
-                    $trackers = is_array($trackersRaw) ? $trackersRaw : [];
-                    $locationOverride = $rawTelemetry['location_freshness_minutes'] ?? null;
-                } else {
-                    $trackers = $rawTelemetry;
-                }
-            }
-        }
-
-        if ($locationOverride === null && $pushSettings) {
-            $raw = $pushSettings->getAttribute('telemetry_context');
-            if ($raw instanceof \MongoDB\Model\BSONDocument || $raw instanceof \MongoDB\Model\BSONArray) {
-                $raw = $raw->getArrayCopy();
-            } elseif ($raw instanceof \Traversable) {
-                $raw = iterator_to_array($raw);
-            } elseif (is_object($raw)) {
-                $raw = (array) $raw;
-            }
-
-            $context = is_array($raw) ? $raw : [];
-            $locationOverride = $context['location_freshness_minutes'] ?? null;
-        }
-
-        $minutes = $defaultMinutes;
-        if (is_numeric($locationOverride)) {
-            $candidate = (int) $locationOverride;
-            if ($candidate > 0) {
-                $minutes = $candidate;
-            }
-        }
-
-        return [
-            'trackers' => $trackers,
-            'location_freshness_minutes' => $minutes,
-        ];
+        $minutes = (int) config('telemetry.location_freshness_minutes', 5);
+        return $minutes > 0 ? $minutes : 5;
     }
 }

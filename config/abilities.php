@@ -41,6 +41,7 @@ return [
         'push-messages:delete',
         'push-messages:send',
         'push-settings:update',
+        'telemetry-settings:update',
         'tenant-push-messages:read',
         'tenant-push-messages:create',
         'tenant-push-messages:update',

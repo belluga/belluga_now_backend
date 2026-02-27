@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
 use Belluga\PushHandler\Http\Requests\TenantPushMessageRoutesRequest;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class TenantPushRouteTypesController
 {
+    public function __construct(
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {
+    }
+
     public function show(): JsonResponse
     {
-        $routes = TenantPushSettings::current()?->getPushMessageRoutes() ?? [];
+        $routes = $this->pushSettings->currentMessageRoutes();
 
         return response()->json([
             'data' => is_array($routes) ? $routes : [],
@@ -23,28 +28,15 @@ class TenantPushRouteTypesController
     public function update(TenantPushMessageRoutesRequest $request): JsonResponse
     {
         $payload = $request->validated();
-        $settings = TenantPushSettings::current();
         $routes = $this->mergeRoutes(
-            $settings?->getPushMessageRoutes() ?? [],
+            $this->pushSettings->currentMessageRoutes(),
             $payload
         );
 
-        if (! $settings) {
-            $settings = TenantPushSettings::create([
-                'push' => [
-                    'message_routes' => $routes,
-                    'max_ttl_days' => 7,
-                ],
-            ]);
-        } else {
-            $push = $settings->getPushConfig();
-            $push['message_routes'] = $routes;
-            $settings->fill(['push' => $push]);
-            $settings->save();
-        }
+        $updatedRoutes = $this->pushSettings->patchMessageRoutes($request->user(), $routes);
 
         return response()->json([
-            'data' => $settings->getPushMessageRoutes(),
+            'data' => $updatedRoutes,
         ]);
     }
 
@@ -55,8 +47,7 @@ class TenantPushRouteTypesController
             'keys.*' => ['required', 'string', 'distinct'],
         ]);
 
-        $settings = TenantPushSettings::current();
-        $routes = $this->indexRoutes($settings?->getPushMessageRoutes() ?? []);
+        $routes = $this->indexRoutes($this->pushSettings->currentMessageRoutes());
         foreach ($payload['keys'] as $key) {
             if (! isset($routes[$key])) {
                 continue;
@@ -64,22 +55,10 @@ class TenantPushRouteTypesController
             $routes[$key]['active'] = false;
         }
 
-        if (! $settings) {
-            $settings = TenantPushSettings::create([
-                'push' => [
-                    'message_routes' => array_values($routes),
-                    'max_ttl_days' => 7,
-                ],
-            ]);
-        } else {
-            $push = $settings->getPushConfig();
-            $push['message_routes'] = array_values($routes);
-            $settings->fill(['push' => $push]);
-            $settings->save();
-        }
+        $updatedRoutes = $this->pushSettings->patchMessageRoutes($request->user(), array_values($routes));
 
         return response()->json([
-            'data' => $settings->getPushMessageRoutes(),
+            'data' => $updatedRoutes,
         ]);
     }
 
