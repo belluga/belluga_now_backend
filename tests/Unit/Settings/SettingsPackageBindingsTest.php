@@ -32,5 +32,7 @@ class SettingsPackageBindingsTest extends TestCase
         $this->assertNotNull($registry->find('map_ui', 'tenant'));
         $this->assertNotNull($registry->find('events', 'tenant'));
         $this->assertNotNull($registry->find('push', 'tenant'));
+        $this->assertNotNull($registry->find('firebase', 'tenant'));
+        $this->assertNotNull($registry->find('telemetry', 'tenant'));
     }
 }

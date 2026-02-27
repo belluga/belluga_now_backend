@@ -79,12 +79,17 @@ class SettingsKernelControllerTest extends TestCaseTenant
                 'throttles' => ['daily' => 100],
                 'max_ttl_days' => 7,
             ],
+            'telemetry' => [
+                'location_freshness_minutes' => 5,
+                'trackers' => [],
+            ],
         ]);
 
         [$this->account] = $this->seedAccountWithRole([
             'account-users:view',
             'events:read',
             'push-settings:update',
+            'telemetry-settings:update',
         ]);
 
         $this->userService = $this->app->make(AccountUserService::class);
@@ -92,12 +97,14 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'account-users:view',
             'events:read',
             'push-settings:update',
+            'telemetry-settings:update',
         ]);
 
         Sanctum::actingAs($this->user, [
             'account-users:view',
             'events:read',
             'push-settings:update',
+            'telemetry-settings:update',
         ]);
     }
 
@@ -114,6 +121,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('map_ui', $namespaces);
         $this->assertContains('events', $namespaces);
         $this->assertContains('push', $namespaces);
+        $this->assertContains('telemetry', $namespaces);
     }
 
     public function testSettingsValuesEndpointReturnsNamespaceValues(): void
@@ -124,6 +132,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.map_ui.radius.default_km', 5);
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
+        $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
     }
 
     public function testPatchNamespaceAppliesPartialMergeByFieldPresence(): void

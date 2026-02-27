@@ -3,7 +3,7 @@
 namespace Tests\Api\v1\Tenants\Branding;
 
 use App\Models\Landlord\Tenant;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Tests\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
 
@@ -17,6 +17,8 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
     public function testEnvironmentApiReturnsTenantPayload(): void
     {
+        $this->currentTenant()->makeCurrent();
+
         $response = $this->get("{$this->base_api_tenant}environment");
 
         $response->assertStatus(200);
@@ -37,11 +39,11 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
     public function testEnvironmentApiFallsBackToSubdomainWhenNoDomains(): void
     {
-        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->first();
-        $this->assertNotNull($tenant);
+        $tenant = $this->currentTenant();
         $tenant->domains()->delete();
         $tenant->domains = [];
         $tenant->save();
+        $tenant->makeCurrent();
 
         $response = $this->get("{$this->base_api_tenant}environment");
 
@@ -52,34 +54,37 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         );
     }
 
-    public function testEnvironmentApiNormalizesLegacyTelemetry(): void
+    public function testEnvironmentApiUsesTelemetryFromSettingsKernel(): void
     {
-        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
+        $tenant = $this->currentTenant();
         $tenant->makeCurrent();
 
-        TenantPushSettings::query()->delete();
-        TenantPushSettings::create([
-            'push' => [
-                'max_ttl_days' => 30,
-                'message_types' => [
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'telemetry' => [
+                'location_freshness_minutes' => 7,
+                'trackers' => [
                     [
-                        'key' => 'invite_received',
-                        'label' => 'Invite Received',
+                        'type' => 'mixpanel',
+                        'token' => 'kernel-token',
+                        'events' => ['invite_received'],
                     ],
                 ],
-            ],
-            'telemetry' => [
-                'mixpanel_token' => 'legacy-token',
-                'enabled_events' => ['invite_received'],
             ],
         ]);
 
         $response = $this->get("{$this->base_api_tenant}environment");
 
         $response->assertStatus(200);
+        $response->assertJsonPath('telemetry.location_freshness_minutes', 7);
         $response->assertJsonPath('telemetry.trackers.0.type', 'mixpanel');
-        $response->assertJsonPath('telemetry.trackers.0.token', 'legacy-token');
+        $response->assertJsonPath('telemetry.trackers.0.token', 'kernel-token');
         $response->assertJsonPath('telemetry.trackers.0.events.0', 'invite_received');
+    }
+
+    private function currentTenant(): Tenant
+    {
+        return Tenant::query()->firstOrFail();
     }
 
 }
