@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Belluga\Events;
 
 use Belluga\Events\Application\Operations\EventDlqAlertService;
+use Belluga\Events\Application\Operations\PackageEventAsyncJobSignatures;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MultipleOccurrencesCapabilityHandler;
+use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilityRegistryContract;
@@ -36,6 +38,7 @@ class EventsServiceProvider extends ServiceProvider
         });
 
         $this->app->bind(EventAsyncQueueMetricsProviderContract::class, QueueEventAsyncMetricsProvider::class);
+        $this->app->singletonIf(EventAsyncJobSignaturesContract::class, PackageEventAsyncJobSignatures::class);
 
         $this->ensureHostBinding(EventTaxonomyValidationContract::class);
         $this->ensureHostBinding(EventProfileResolverContract::class);

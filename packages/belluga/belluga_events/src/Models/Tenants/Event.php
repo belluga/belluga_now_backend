@@ -21,6 +21,8 @@ class Event extends Model
         'type',
         'title',
         'content',
+        'location',
+        'place_ref',
         'venue',
         'geo_location',
         'thumb',

@@ -152,18 +152,17 @@ class EventManagementService
             $normalized['publication'] = $this->resolvePublicationPayload($publication, $existing);
         }
 
-        $venueId = $payload['venue_id'] ?? null;
         $artistIds = $payload['artist_ids'] ?? null;
         $resolvedVenueForParties = null;
         $resolvedArtistsForParties = null;
 
-        $venueSourceTouched = $venueId !== null || $existing === null;
-        if ($venueSourceTouched) {
-            $resolvedVenue = $this->resolveVenuePayload($venueId, $existing);
-            $normalized['venue'] = $resolvedVenue['venue'];
-            $normalized['geo_location'] = $resolvedVenue['location'];
-            $this->assertVenueBelongsToAccountContext($payload, $resolvedVenue);
-            $resolvedVenueForParties = $resolvedVenue['venue'];
+        $resolvedLocation = $this->resolveLocationAndPlacePayload($payload, $existing);
+        if ($resolvedLocation['touched']) {
+            $normalized['location'] = $resolvedLocation['location'];
+            $normalized['place_ref'] = $resolvedLocation['place_ref'];
+            $normalized['geo_location'] = $resolvedLocation['geo_location'];
+            $normalized['venue'] = $resolvedLocation['venue'];
+            $resolvedVenueForParties = $resolvedLocation['venue'];
         }
 
         $artistsSourceTouched = $artistIds !== null || $existing === null;
@@ -185,7 +184,7 @@ class EventManagementService
             is_array($resolvedArtistsForParties)
                 ? $resolvedArtistsForParties
                 : $this->normalizeArray($existing?->artists ?? []),
-            $venueSourceTouched,
+            $resolvedLocation['touched'],
             $artistsSourceTouched
         );
 
@@ -460,19 +459,219 @@ class EventManagementService
     }
 
     /**
-     * @return array{venue: array<string, mixed>, location: array<string, mixed>}
+     * @param array<string, mixed> $payload
+     * @return array{
+     *   touched: bool,
+     *   location: array<string, mixed>,
+     *   place_ref: array<string, mixed>|null,
+     *   geo_location: array<string, mixed>|null,
+     *   venue: array<string, mixed>
+     * }
      */
-    private function resolveVenuePayload(?string $venueId, ?Event $existing): array
+    private function resolveLocationAndPlacePayload(array $payload, ?Event $existing): array
     {
-        $id = $venueId ?? ($existing?->venue['id'] ?? null);
+        $touched = array_key_exists('location', $payload) || array_key_exists('place_ref', $payload) || $existing === null;
 
-        if (! $id) {
+        if (! $touched) {
+            return [
+                'touched' => false,
+                'location' => $this->normalizeArray($existing?->location ?? []),
+                'place_ref' => $this->normalizeNullableArray($existing?->place_ref ?? null),
+                'geo_location' => $this->normalizeGeoLocation($existing?->geo_location ?? null, null),
+                'venue' => $this->normalizeArray($existing?->venue ?? []),
+            ];
+        }
+
+        $locationPayload = array_key_exists('location', $payload)
+            ? $payload['location']
+            : ($existing?->location ?? null);
+        if (! is_array($locationPayload)) {
             throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile is required.'],
+                'location' => ['location payload is required.'],
             ]);
         }
 
-        return $this->eventProfileResolver->resolveVenueByProfileId((string) $id);
+        $mode = trim((string) ($locationPayload['mode'] ?? ''));
+        if (! in_array($mode, ['physical', 'online', 'hybrid'], true)) {
+            throw ValidationException::withMessages([
+                'location.mode' => ['location.mode must be one of physical, online or hybrid.'],
+            ]);
+        }
+
+        $placeRefSource = array_key_exists('place_ref', $payload)
+            ? $payload['place_ref']
+            : ($existing?->place_ref ?? null);
+        $placeRef = $this->normalizePlaceRef($placeRefSource);
+        if (in_array($mode, ['physical', 'hybrid'], true) && $placeRef === null) {
+            throw ValidationException::withMessages([
+                'place_ref' => ['place_ref is required when location.mode is physical or hybrid.'],
+            ]);
+        }
+
+        $onlinePayload = null;
+        if (in_array($mode, ['online', 'hybrid'], true)) {
+            $onlineSource = $locationPayload['online'] ?? null;
+            if (! is_array($onlineSource)) {
+                throw ValidationException::withMessages([
+                    'location.online' => ['location.online is required when location.mode is online or hybrid.'],
+                ]);
+            }
+            $onlinePayload = $this->normalizeOnlineLocation($onlineSource);
+        }
+
+        $venue = [];
+        $geoLocation = $this->normalizeGeoLocation($locationPayload['geo'] ?? null, 'location.geo');
+
+        if (is_array($placeRef) && ($placeRef['type'] ?? null) === 'venue') {
+            $resolvedVenue = $this->eventProfileResolver->resolveVenueByProfileId((string) $placeRef['id']);
+            $this->assertVenueBelongsToAccountContext($payload, $resolvedVenue);
+            $venue = $this->normalizeArray($resolvedVenue['venue'] ?? []);
+            $geoLocation = $this->normalizeGeoLocation($resolvedVenue['location'] ?? null, 'place_ref.id');
+        }
+
+        if (in_array($mode, ['physical', 'hybrid'], true) && $geoLocation === null) {
+            throw ValidationException::withMessages([
+                'location.geo' => ['A physical location with valid coordinates is required.'],
+            ]);
+        }
+
+        $location = [
+            'mode' => $mode,
+        ];
+        if ($geoLocation !== null) {
+            $location['geo'] = $geoLocation;
+        }
+        if ($onlinePayload !== null) {
+            $location['online'] = $onlinePayload;
+        }
+
+        return [
+            'touched' => true,
+            'location' => $location,
+            'place_ref' => $placeRef,
+            'geo_location' => $geoLocation,
+            'venue' => $venue,
+        ];
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>|null
+     */
+    private function normalizePlaceRef(mixed $value): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_array($value)) {
+            throw ValidationException::withMessages([
+                'place_ref' => ['place_ref payload must be an object.'],
+            ]);
+        }
+
+        $type = trim((string) ($value['type'] ?? ''));
+        $id = trim((string) ($value['id'] ?? ''));
+        if ($type === '' || $id === '') {
+            throw ValidationException::withMessages([
+                'place_ref' => ['place_ref.type and place_ref.id are required.'],
+            ]);
+        }
+
+        $normalized = [
+            'type' => $type,
+            'id' => $id,
+        ];
+
+        if (isset($value['metadata']) && is_array($value['metadata']) && $value['metadata'] !== []) {
+            $normalized['metadata'] = $value['metadata'];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>|null
+     */
+    private function normalizeNullableArray(mixed $value): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_array($value)) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param array<string, mixed> $value
+     * @return array<string, mixed>
+     */
+    private function normalizeOnlineLocation(array $value): array
+    {
+        $url = trim((string) ($value['url'] ?? ''));
+        if ($url === '') {
+            throw ValidationException::withMessages([
+                'location.online.url' => ['location.online.url is required for online/hybrid events.'],
+            ]);
+        }
+
+        $normalized = [
+            'url' => $url,
+        ];
+
+        if (isset($value['platform']) && trim((string) $value['platform']) !== '') {
+            $normalized['platform'] = trim((string) $value['platform']);
+        }
+        if (isset($value['label']) && trim((string) $value['label']) !== '') {
+            $normalized['label'] = trim((string) $value['label']);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param mixed $value
+     * @return array{type: string, coordinates: array{0: float, 1: float}}|null
+     */
+    private function normalizeGeoLocation(mixed $value, ?string $field): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_array($value)) {
+            if ($field !== null) {
+                throw ValidationException::withMessages([
+                    $field => ['Geo location payload must be an object.'],
+                ]);
+            }
+
+            return null;
+        }
+
+        $coordinates = $value['coordinates'] ?? null;
+        if (! is_array($coordinates) || count($coordinates) < 2) {
+            if ($field !== null) {
+                throw ValidationException::withMessages([
+                    $field => ['Geo coordinates are required.'],
+                ]);
+            }
+
+            return null;
+        }
+
+        return [
+            'type' => 'Point',
+            'coordinates' => [
+                (float) $coordinates[0],
+                (float) $coordinates[1],
+            ],
+        ];
     }
 
     /**
@@ -492,7 +691,7 @@ class EventManagementService
         $venueId = isset($resolvedVenue['venue']['id']) ? (string) $resolvedVenue['venue']['id'] : '';
         if ($venueId === '' || ! $this->eventProfileResolver->accountOwnsProfile($accountContextId, $venueId)) {
             throw ValidationException::withMessages([
-                'venue_id' => ['Venue must belong to the target account context.'],
+                'place_ref.id' => ['Venue must belong to the target account context.'],
             ]);
         }
     }

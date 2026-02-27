@@ -46,11 +46,7 @@ class EventQueryService
         $limit = $pageSize + 1;
 
         $filters = $this->normalizeFilters($queryParams);
-        $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, true);
-
-        if ($filters['use_geo'] && $raw === []) {
-            $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, false);
-        }
+        $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $filters['use_geo']);
 
         $hasMore = count($raw) > $pageSize;
         $pageSlice = array_slice($raw, 0, $pageSize);
@@ -86,7 +82,8 @@ class EventQueryService
             $query->where(function ($builder) use ($search): void {
                 $builder->where('title', 'like', '%' . $search . '%')
                     ->orWhere('content', 'like', '%' . $search . '%')
-                    ->orWhere('venue.display_name', 'like', '%' . $search . '%');
+                    ->orWhere('venue.display_name', 'like', '%' . $search . '%')
+                    ->orWhere('place_ref.metadata.display_name', 'like', '%' . $search . '%');
             });
         }
 
@@ -140,7 +137,6 @@ class EventQueryService
             'status' => $publication['status'] ?? 'draft',
             'publish_at' => $publishAt,
         ];
-        $payload['venue_id'] = $payload['venue']['id'] ?? null;
         $payload['artist_ids'] = array_values(array_filter(array_map(
             static fn ($artist): ?string => is_array($artist) ? (string) ($artist['id'] ?? '') : null,
             $payload['artists'] ?? []
@@ -330,7 +326,7 @@ class EventQueryService
                 'spherical' => true,
                 'query' => [
                     ...$baseMatch,
-                    'venue_geo' => ['$ne' => null],
+                    'geo_location' => ['$ne' => null],
                 ],
             ];
 
@@ -401,7 +397,7 @@ class EventQueryService
                 'distanceField' => 'distance_meters',
                 'spherical' => true,
                 'query' => [
-                    'venue_geo' => ['$ne' => null],
+                    'geo_location' => ['$ne' => null],
                 ],
             ];
 
@@ -442,6 +438,7 @@ class EventQueryService
                     ['content' => ['$regex' => $pattern]],
                     ['artists.display_name' => ['$regex' => $pattern]],
                     ['venue.display_name' => ['$regex' => $pattern]],
+                    ['place_ref.metadata.display_name' => ['$regex' => $pattern]],
                 ],
             ],
         ];
@@ -644,6 +641,8 @@ class EventQueryService
     public function formatEvent(mixed $event, ?string $userId = null): array
     {
         $type = $this->normalizeArray($event->type ?? null);
+        $location = $this->normalizeArray($event->location ?? []);
+        $placeRef = $this->normalizeArray($event->place_ref ?? null);
         $venue = $this->normalizeArray($event->venue ?? null);
         $thumb = $this->normalizeArray($event->thumb ?? null);
         $artists = $this->normalizeArray($event->artists ?? []);
@@ -673,7 +672,7 @@ class EventQueryService
             'taxonomy_terms' => $venue['taxonomy_terms'] ?? [],
         ];
 
-        $geo = $this->normalizeArray($event->venue_geo ?? $event->geo_location ?? null);
+        $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
         $coordinates = $geo['coordinates'] ?? null;
         $lat = null;
         $lng = null;
@@ -711,6 +710,8 @@ class EventQueryService
             ],
             'title' => (string) ($event->title ?? ''),
             'content' => (string) ($event->content ?? ''),
+            'location' => $location === [] ? null : $location,
+            'place_ref' => $placeRef === [] ? null : $placeRef,
             'venue' => $venuePayload,
             'latitude' => $lat,
             'longitude' => $lng,

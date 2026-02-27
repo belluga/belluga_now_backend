@@ -109,7 +109,8 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.title', $payload['title']);
-        $response->assertJsonPath('data.venue_id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.place_ref.id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.location.mode', 'physical');
         $response->assertJsonPath('data.publication.status', 'published');
         $this->assertSame($payload['type']['slug'], $response->json('data.type.slug'));
 
@@ -254,12 +255,81 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $payload = $this->makeEventPayload([
-            'venue_id' => (string) $venue->_id,
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => (string) $venue->_id,
+            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(422);
+    }
+
+    public function testEventCreateOnlineAllowsMissingPlaceRef(): void
+    {
+        $payload = $this->makeEventPayload([
+            'location' => [
+                'mode' => 'online',
+                'online' => [
+                    'url' => 'https://meet.example.org/events-room',
+                    'platform' => 'jitsi',
+                ],
+            ],
+            'place_ref' => null,
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.location.mode', 'online');
+        $response->assertJsonPath('data.place_ref', null);
+    }
+
+    public function testEventCreateOnlineRequiresOnlinePayload(): void
+    {
+        $payload = $this->makeEventPayload([
+            'location' => [
+                'mode' => 'online',
+            ],
+            'place_ref' => null,
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['location.online']);
+    }
+
+    public function testEventCreateHybridRequiresBothPlaceRefAndOnlinePayload(): void
+    {
+        $missingPlaceRef = $this->makeEventPayload([
+            'location' => [
+                'mode' => 'hybrid',
+                'online' => [
+                    'url' => 'https://meet.example.org/events-room',
+                ],
+            ],
+            'place_ref' => null,
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $missingPlaceRef);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['place_ref']);
+
+        $missingOnline = $this->makeEventPayload([
+            'location' => [
+                'mode' => 'hybrid',
+            ],
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $missingOnline);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['location.online']);
     }
 
     public function testEventCreateForbiddenWithoutAbility(): void
@@ -878,7 +948,13 @@ class EventCrudControllerTest extends TestCaseTenant
         return array_merge([
             'title' => 'Sample Event',
             'content' => 'Event content',
-            'venue_id' => (string) $this->venue->_id,
+            'location' => [
+                'mode' => 'physical',
+            ],
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => (string) $this->venue->_id,
+            ],
             'artist_ids' => [(string) $this->artist->_id],
             'type' => [
                 'id' => 'type-1',
@@ -907,6 +983,20 @@ class EventCrudControllerTest extends TestCaseTenant
         $event = Event::create(array_merge([
             'title' => 'Stored Event',
             'content' => 'Event content',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => (string) $this->venue->_id,
+                'metadata' => [
+                    'display_name' => $this->venue->display_name,
+                ],
+            ],
             'type' => [
                 'id' => 'type-1',
                 'name' => 'Show',

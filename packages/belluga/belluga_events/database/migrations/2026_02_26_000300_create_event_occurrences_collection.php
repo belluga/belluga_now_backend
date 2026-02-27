@@ -13,9 +13,10 @@ return new class extends Migration
             $collection->index(['deleted_at' => 1, 'is_event_published' => 1, 'starts_at' => 1, '_id' => 1]);
             $collection->index(['event_id' => 1, 'starts_at' => 1]);
             $collection->index(['updated_at' => 1, '_id' => 1]);
-            $collection->index(['venue_geo' => '2dsphere']);
+            $collection->index(['geo_location' => '2dsphere']);
             $collection->index(['deleted_at' => 1, '_id' => 1]);
-            $collection->index(['venue.id' => 1, 'starts_at' => 1, '_id' => 1]);
+            $collection->index(['place_ref.type' => 1, 'place_ref.id' => 1, 'starts_at' => 1, '_id' => 1]);
+            $collection->index(['location.mode' => 1, 'starts_at' => 1, '_id' => 1]);
             $collection->index(['categories' => 1, 'starts_at' => 1, '_id' => 1]);
             $collection->index(['tags' => 1, 'starts_at' => 1, '_id' => 1]);
             $collection->index(['taxonomy_terms.type' => 1, 'taxonomy_terms.value' => 1, 'starts_at' => 1, '_id' => 1]);

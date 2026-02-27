@@ -4,19 +4,16 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Operations;
 
+use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Illuminate\Support\Facades\DB;
 
 class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderContract
 {
-    /**
-     * @var array<int, string>
-     */
-    private const EVENT_JOB_SIGNATURES = [
-        'Belluga\\Events\\Jobs\\PublishScheduledEventsJob',
-        'App\\Jobs\\MapPois\\UpsertMapPoiFromEventJob',
-        'App\\Jobs\\MapPois\\DeleteMapPoiByRefJob',
-    ];
+    public function __construct(
+        private readonly EventAsyncJobSignaturesContract $jobSignatures
+    ) {
+    }
 
     public function pendingAgesInSeconds(): array
     {
@@ -124,7 +121,10 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
             return false;
         }
 
-        foreach (self::EVENT_JOB_SIGNATURES as $signature) {
+        foreach ($this->jobSignatures->signatures() as $signature) {
+            if ($signature === '') {
+                continue;
+            }
             if (
                 str_contains($payload, $signature)
                 || str_contains($payload, str_replace('\\', '\\\\', $signature))
@@ -136,4 +136,3 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
         return false;
     }
 }
-

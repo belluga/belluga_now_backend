@@ -16,19 +16,19 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
         if (! $profile) {
             throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile not found.'],
+                'place_ref.id' => ['Venue account profile not found.'],
             ]);
         }
 
         $location = $profile->location ?? null;
         if (! is_array($location) || ! isset($location['type'], $location['coordinates'])) {
             throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile must include a location.'],
+                'place_ref.id' => ['Venue account profile must include a location.'],
             ]);
         }
         if (! is_array($location['coordinates']) || count($location['coordinates']) < 2) {
             throw ValidationException::withMessages([
-                'venue_id' => ['Venue account profile must include valid coordinates.'],
+                'place_ref.id' => ['Venue account profile must include valid coordinates.'],
             ]);
         }
 

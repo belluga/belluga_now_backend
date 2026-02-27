@@ -124,7 +124,10 @@ class MapPoiProjectionService
 
     public function upsertFromEvent(Event $event): void
     {
-        $location = $this->normalizeLocation($event->geo_location ?? null);
+        $locationPayload = is_array($event->location ?? null)
+            ? $event->location
+            : (array) ($event->location ?? []);
+        $location = $this->normalizeLocation($locationPayload['geo'] ?? $event->geo_location ?? null);
         if (! $location) {
             $this->deleteByRef('event', (string) $event->_id);
             return;
@@ -150,6 +153,13 @@ class MapPoiProjectionService
         }
 
         $categories = $this->normalizeStringArray($event->categories ?? []);
+        $venue = is_array($event->venue ?? null)
+            ? $event->venue
+            : (array) ($event->venue ?? []);
+        $placeRef = is_array($event->place_ref ?? null)
+            ? $event->place_ref
+            : (array) ($event->place_ref ?? []);
+        $placeMetadata = is_array($placeRef['metadata'] ?? null) ? $placeRef['metadata'] : [];
         $thumb = is_array($event->thumb ?? null) ? $event->thumb : (array) ($event->thumb ?? []);
         $thumbData = is_array($thumb['data'] ?? null) ? $thumb['data'] : [];
         $coverUrl = $thumbData['url'] ?? null;
@@ -159,7 +169,7 @@ class MapPoiProjectionService
             'ref_slug' => $event->slug ?? null,
             'ref_path' => $this->buildRefPath('event', $event->slug ?? null),
             'name' => (string) ($event->title ?? ''),
-            'subtitle' => $event->venue['display_name'] ?? null,
+            'subtitle' => $placeMetadata['display_name'] ?? ($venue['display_name'] ?? null),
             'category' => $categories[0] ?? 'event',
             'tags' => $this->normalizeStringArray($event->tags ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($event->taxonomy_terms ?? []),

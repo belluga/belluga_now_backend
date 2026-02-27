@@ -4,19 +4,16 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Operations;
 
+use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Log;
 
 class EventDlqAlertService
 {
-    /**
-     * @var array<int, string>
-     */
-    private const EVENT_JOB_SIGNATURES = [
-        'Belluga\\Events\\',
-        'App\\Jobs\\MapPois\\UpsertMapPoiFromEventJob',
-        'App\\Jobs\\MapPois\\DeleteMapPoiByRefJob',
-    ];
+    public function __construct(
+        private readonly EventAsyncJobSignaturesContract $jobSignatures
+    ) {
+    }
 
     public function handle(JobFailed $event): void
     {
@@ -65,7 +62,10 @@ class EventDlqAlertService
             return false;
         }
 
-        foreach (self::EVENT_JOB_SIGNATURES as $signature) {
+        foreach ($this->jobSignatures->signatures() as $signature) {
+            if ($signature === '') {
+                continue;
+            }
             if (str_contains($jobClass, $signature)) {
                 return true;
             }
@@ -74,4 +74,3 @@ class EventDlqAlertService
         return false;
     }
 }
-

@@ -10,6 +10,7 @@ use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
 use App\Integration\Events\EventParties\ArtistEventPartyMapper;
 use App\Integration\Events\EventParties\VenueEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\HostEventAsyncJobSignaturesAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
@@ -33,6 +34,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
@@ -108,6 +110,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             EventCapabilitySettingsContract::class,
             TenantCapabilitySettingsAdapter::class
+        );
+
+        $this->app->bind(
+            EventAsyncJobSignaturesContract::class,
+            HostEventAsyncJobSignaturesAdapter::class
         );
 
         $this->app->singleton(

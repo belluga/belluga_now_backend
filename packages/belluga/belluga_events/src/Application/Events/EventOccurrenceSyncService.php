@@ -19,6 +19,7 @@ class EventOccurrenceSyncService
         $eventId = (string) $event->_id;
         $now = Carbon::now();
         $publication = $this->normalizePublication($event->publication ?? [], $event->created_at);
+        $geoLocation = $this->resolveEventGeoLocation($event);
 
         $activeIndexes = [];
         foreach ($occurrences as $index => $occurrence) {
@@ -34,9 +35,10 @@ class EventOccurrenceSyncService
                 'content' => (string) ($event->content ?? ''),
                 'type' => $this->normalizeArray($event->type ?? []),
                 'thumb' => $this->normalizeArray($event->thumb ?? null),
+                'location' => $this->normalizeArray($event->location ?? []),
+                'place_ref' => $this->normalizeArray($event->place_ref ?? null),
                 'venue' => $this->normalizeArray($event->venue ?? null),
-                'geo_location' => $this->normalizeArray($event->geo_location ?? null),
-                'venue_geo' => $this->normalizeArray($event->geo_location ?? null),
+                'geo_location' => $geoLocation,
                 'artists' => $this->normalizeArray($event->artists ?? []),
                 'tags' => $this->normalizeArray($event->tags ?? []),
                 'categories' => $this->normalizeArray($event->categories ?? []),
@@ -128,6 +130,18 @@ class EventOccurrenceSyncService
         }
 
         return [];
+    }
+
+    private function resolveEventGeoLocation(Event $event): array
+    {
+        $location = $this->normalizeArray($event->location ?? []);
+        $geo = $this->normalizeArray($location['geo'] ?? null);
+
+        if ($geo !== []) {
+            return $geo;
+        }
+
+        return $this->normalizeArray($event->geo_location ?? null);
     }
 
     /**

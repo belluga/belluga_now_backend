@@ -8,12 +8,14 @@ use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\HostEventAsyncJobSignaturesAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
@@ -69,6 +71,10 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             QueueEventAsyncMetricsProvider::class,
             $this->app->make(EventAsyncQueueMetricsProviderContract::class)
+        );
+        $this->assertInstanceOf(
+            HostEventAsyncJobSignaturesAdapter::class,
+            $this->app->make(EventAsyncJobSignaturesContract::class)
         );
     }
 }

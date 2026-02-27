@@ -153,7 +153,9 @@ Response item (minimum):
 - `slug`
 - `type`
 - `title`, `content`
-- `venue`, `artists`
+- `location`, `place_ref`
+- `venue` (resolved projection when `place_ref.type=venue`)
+- `artists`
 - `latitude`, `longitude`
 - `date_time_start`, `date_time_end`
 - `occurrences[]`
@@ -200,12 +202,15 @@ Reconnect policy:
 Required:
 - `title`
 - `content`
-- `venue_id`
+- `location.mode`
 - `type` (`name`, `slug`; optional: `id`, `description`, `icon`, `color`)
 - `occurrences[]` (at least 1)
 - `publication.status`
 
 Optional:
+- `location.geo` (`Point`, coordinates)
+- `location.online` (required for `online|hybrid`)
+- `place_ref` (`{type,id,metadata?}`; required for `physical|hybrid`)
 - `artist_ids[]`
 - `tags[]`
 - `categories[]`
@@ -218,6 +223,12 @@ Optional:
 Prohibited:
 - `date_time_start`
 - `date_time_end`
+- `venue_id`
+
+Location mode rules:
+- `physical`: requires `place_ref`; geographic basis comes from resolved place or `location.geo`.
+- `online`: requires `location.online`; `place_ref` is optional.
+- `hybrid`: requires both `place_ref` and `location.online`.
 
 ### Update (`PATCH /events/{event_id}`)
 
@@ -226,6 +237,10 @@ Partial update by field presence.
 Important schedule rule:
 - `occurrences` omitted: schedule is preserved from stored occurrences
 - `occurrences` present: full schedule mutation validated and re-synced
+
+Geo filtering rule (`agenda` + `stream`):
+- when geo filters are sent (`origin_lat`, `origin_lng`), only events with valid geographic basis are returned.
+- no fallback from geo query to non-geo query.
 
 Delete:
 - soft delete only
@@ -334,8 +349,8 @@ Important index families:
 - agenda ordering/pagination (`deleted_at`, `is_event_published`, `starts_at`, `_id`)
 - stream deltas (`updated_at`, `_id`) + soft-delete path
 - event timeline/sync (`event_id`, `starts_at`)
-- filtering (`venue.id`, `categories`, `tags`, typed taxonomy terms)
-- geo (`venue_geo` 2dsphere)
+- filtering (`place_ref.type/id`, `categories`, `tags`, typed taxonomy terms)
+- geo (`geo_location` 2dsphere)
 - occurrence identity (`event_id`, `occurrence_index`, unique)
 
 Tenant migration model:

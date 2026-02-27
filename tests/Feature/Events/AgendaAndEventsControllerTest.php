@@ -162,10 +162,17 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertCount(1, $response->json('items'));
     }
 
-    public function testAgendaGeoFallbackReturnsUnfilteredList(): void
+    public function testAgendaGeoFiltersExcludeEventsOutsideDistance(): void
     {
         $this->createEvent([
             'title' => 'Remote Event',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [100.0, 40.0],
+                ],
+            ],
             'geo_location' => [
                 'type' => 'Point',
                 'coordinates' => [100.0, 40.0],
@@ -178,8 +185,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $items = $response->json('items');
-        $this->assertCount(1, $items);
-        $this->assertSame('Remote Event', $items[0]['title']);
+        $this->assertCount(0, $items);
     }
 
     public function testEventDetailResolvesSlugAndId(): void
@@ -341,6 +347,20 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $event = Event::create(array_merge([
             'title' => 'Test Event',
             'content' => 'Event content',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => 'venue-1',
+                'metadata' => [
+                    'display_name' => 'Venue Name',
+                ],
+            ],
             'type' => [
                 'id' => 'type-1',
                 'name' => 'Show',
