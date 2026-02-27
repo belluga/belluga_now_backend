@@ -16,6 +16,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class PublishScheduledEventsJob implements ShouldQueue
@@ -55,18 +56,20 @@ class PublishScheduledEventsJob implements ShouldQueue
             foreach ($scheduledEvents as $scheduledEvent) {
                 $eventId = (string) $scheduledEvent->_id;
 
-                $published = $this->runTenantTransaction(function () use ($eventId, $now, $occurrenceSyncService): bool {
+                /** @var array{published: bool, from_status?: string, to_status?: string, publish_at?: mixed, mirrored_occurrences?: int} $result */
+                $result = $this->runTenantTransaction(function () use ($eventId, $now, $occurrenceSyncService): array {
                     $event = Event::query()->where('_id', $eventId)->first();
                     if (! $event) {
-                        return false;
+                        return ['published' => false];
                     }
 
                     $publication = is_array($event->publication ?? null)
                         ? $event->publication
                         : (array) ($event->publication ?? []);
+                    $fromStatus = (string) ($publication['status'] ?? 'draft');
 
-                    if (($publication['status'] ?? null) !== 'publish_scheduled') {
-                        return false;
+                    if ($fromStatus !== 'publish_scheduled') {
+                        return ['published' => false];
                     }
 
                     $publishAt = $publication['publish_at'] ?? null;
@@ -75,7 +78,7 @@ class PublishScheduledEventsJob implements ShouldQueue
                         : ($publishAt instanceof \DateTimeInterface ? Carbon::instance($publishAt) : (is_string($publishAt) ? Carbon::parse($publishAt) : null));
 
                     if ($publishAtCarbon !== null && $publishAtCarbon->greaterThan($now)) {
-                        return false;
+                        return ['published' => false];
                     }
 
                     $publication['status'] = 'published';
@@ -86,13 +89,26 @@ class PublishScheduledEventsJob implements ShouldQueue
                     $event->publication = $publication;
                     $event->save();
 
-                    $occurrenceSyncService->mirrorPublicationByEventId($eventId, $publication);
+                    $mirrored = $occurrenceSyncService->mirrorPublicationByEventId($eventId, $publication);
 
-                    return true;
+                    return [
+                        'published' => true,
+                        'from_status' => $fromStatus,
+                        'to_status' => 'published',
+                        'publish_at' => $publication['publish_at'] ?? null,
+                        'mirrored_occurrences' => (int) $mirrored,
+                    ];
                 });
 
-                if ($published) {
+                if (($result['published'] ?? false) === true) {
                     $events->dispatch(new EventUpdated($eventId));
+                    Log::info('events_publication_transition_applied', [
+                        'event_id' => $eventId,
+                        'from_status' => (string) ($result['from_status'] ?? 'publish_scheduled'),
+                        'to_status' => (string) ($result['to_status'] ?? 'published'),
+                        'publish_at' => $this->formatDate($result['publish_at'] ?? null),
+                        'mirrored_occurrence_count' => (int) ($result['mirrored_occurrences'] ?? 0),
+                    ]);
                 }
             }
         });
@@ -137,5 +153,26 @@ class PublishScheduledEventsJob implements ShouldQueue
             || str_contains($message, 'replica set')
             || str_contains($message, 'mongos')
             || str_contains($message, 'starttransaction');
+    }
+
+    private function formatDate(mixed $value): ?string
+    {
+        if ($value instanceof Carbon) {
+            return $value->toISOString();
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return Carbon::instance($value)->toISOString();
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return Carbon::parse($value)->toISOString();
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }

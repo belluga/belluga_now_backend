@@ -12,6 +12,7 @@ use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilityRegistryContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
+use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -40,6 +41,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->ensureHostBinding(EventProfileResolverContract::class);
         $this->ensureHostBinding(EventAccountResolverContract::class);
         $this->ensureHostBinding(EventCapabilitySettingsContract::class);
+        $this->ensureHostBinding(EventPartyMapperRegistryContract::class);
         $this->ensureHostBinding(EventTenantContextContract::class);
         $this->ensureHostBinding(EventProjectionSyncContract::class);
         $this->ensureHostBinding(EventRadiusSettingsContract::class);

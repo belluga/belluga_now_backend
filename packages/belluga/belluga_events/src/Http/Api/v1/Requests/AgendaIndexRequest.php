@@ -24,8 +24,6 @@ class AgendaIndexRequest extends FormRequest
             'page_size' => 'sometimes|integer|min:1',
             'past_only' => 'sometimes|boolean',
             'search' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
-            'account_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
-            'account_profile_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
             'categories' => 'sometimes|array',
             'categories.*' => 'string|max:' . InputConstraints::NAME_MAX,
             'tags' => 'sometimes|array',

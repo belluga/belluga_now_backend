@@ -230,6 +230,81 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringContainsString((string) $occurrence->_id, $content);
     }
 
+    public function testEventStreamReconnectUsesLastEventIdWithoutReplay(): void
+    {
+        $this->createEvent(['title' => 'Reconnect Event']);
+
+        $initialResponse = $this->get(
+            "{$this->base_api_tenant}events/stream",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $initialResponse->assertStatus(200);
+        $initialContent = $initialResponse->streamedContent();
+        $this->assertStringContainsString('event:', $initialContent);
+
+        $matched = preg_match_all('/^id:\\s*(.+)$/m', $initialContent, $cursorMatches);
+        $this->assertGreaterThan(0, $matched);
+        $cursor = trim((string) ($cursorMatches[1][count($cursorMatches[1]) - 1] ?? ''));
+        $this->assertNotSame('', $cursor);
+        $cursor = Carbon::parse($cursor)->addSecond()->toISOString();
+
+        $reconnectResponse = $this->get(
+            "{$this->base_api_tenant}events/stream",
+            [
+                'Last-Event-ID' => $cursor,
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $reconnectResponse->assertStatus(200);
+        $this->assertStringNotContainsString('event:', $reconnectResponse->streamedContent());
+    }
+
+    public function testEventStreamReturnsEmptyPayloadForInvalidLastEventId(): void
+    {
+        $this->createEvent(['title' => 'Invalid Cursor Event']);
+
+        $response = $this->get(
+            "{$this->base_api_tenant}events/stream",
+            [
+                'Last-Event-ID' => 'not-a-valid-date',
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $response->assertStatus(200);
+        $this->assertStringNotContainsString('event:', $response->streamedContent());
+    }
+
+    public function testEventStreamReturnsDeletedDeltaForFutureScheduledPublication(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Future Scheduled Event',
+            'publication' => [
+                'status' => 'publish_scheduled',
+                'publish_at' => Carbon::now()->addDay(),
+            ],
+        ]);
+
+        $response = $this->get(
+            "{$this->base_api_tenant}events/stream",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $response->assertStatus(200);
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString('occurrence.deleted', $content);
+        $this->assertStringContainsString((string) $event->_id, $content);
+    }
+
     public function testAgendaRequiresAuth(): void
     {
         auth('sanctum')->forgetUser();

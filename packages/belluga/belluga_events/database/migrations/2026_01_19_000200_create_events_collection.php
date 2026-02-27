@@ -16,6 +16,9 @@ return new class extends Migration
             $collection->index(['date_time_start' => 1]);
             $collection->index(['updated_at' => -1]);
             $collection->index(['geo_location' => '2dsphere']);
+            $collection->index(['publication.status' => 1, 'publication.publish_at' => 1, '_id' => 1]);
+            $collection->index(['publication.status' => 1, 'date_time_start' => -1, '_id' => 1]);
+            $collection->index(['venue.id' => 1, 'date_time_start' => -1, '_id' => 1]);
         });
     }
 

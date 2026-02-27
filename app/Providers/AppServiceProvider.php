@@ -7,6 +7,8 @@ namespace App\Providers;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
+use App\Integration\Events\EventParties\ArtistEventPartyMapper;
+use App\Integration\Events\EventParties\VenueEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
@@ -30,6 +32,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
+use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -39,6 +42,7 @@ use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Domain\Events\EventCreated;
 use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
+use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
@@ -97,6 +101,17 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             EventCapabilitySettingsContract::class,
             TenantCapabilitySettingsAdapter::class
+        );
+
+        $this->app->singleton(
+            EventPartyMapperRegistryContract::class,
+            static function () {
+                $registry = new InMemoryEventPartyMapperRegistry();
+                $registry->register(new VenueEventPartyMapper());
+                $registry->register(new ArtistEventPartyMapper());
+
+                return $registry;
+            }
         );
 
         $this->app->bind(

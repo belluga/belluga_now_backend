@@ -8,8 +8,6 @@ interface EventProfileResolverContract
 {
     /**
      * @return array{
-     *   account_id: string,
-     *   account_profile_id: string,
      *   venue: array<string, mixed>,
      *   location: array<string, mixed>
      * }

@@ -21,8 +21,6 @@ class EventStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'account_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
-            'account_profile_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
             'title' => 'required|string|max:' . InputConstraints::NAME_MAX,
             'content' => 'required|string|max:' . InputConstraints::DESCRIPTION_MAX,
             'venue_id' => 'required|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
@@ -62,6 +60,13 @@ class EventStoreRequest extends FormRequest
             'capabilities' => 'sometimes|array',
             'capabilities.multiple_occurrences' => 'sometimes|array',
             'capabilities.multiple_occurrences.enabled' => 'sometimes|boolean',
+            'event_parties' => 'sometimes|array',
+            'event_parties.*' => 'array',
+            'event_parties.*.party_type' => 'required_with:event_parties|string|max:' . InputConstraints::NAME_MAX,
+            'event_parties.*.party_ref_id' => 'required_with:event_parties|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'event_parties.*.permissions' => 'sometimes|array',
+            'event_parties.*.permissions.can_edit' => 'sometimes|boolean',
+            'event_parties.*.metadata' => 'sometimes|array',
         ];
     }
 }

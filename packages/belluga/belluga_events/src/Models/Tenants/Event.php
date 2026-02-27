@@ -17,8 +17,6 @@ class Event extends Model
     protected $table = 'events';
 
     protected $fillable = [
-        'account_id',
-        'account_profile_id',
         'slug',
         'type',
         'title',
@@ -33,6 +31,8 @@ class Event extends Model
         'categories',
         'taxonomy_terms',
         'capabilities',
+        'created_by',
+        'event_parties',
         'publication',
         'is_active',
     ];

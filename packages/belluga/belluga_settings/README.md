@@ -309,6 +309,22 @@ php artisan tenants:artisan "migrate --database=tenant --path=packages/belluga/b
 php artisan migrate --database=landlord --path=packages/belluga/belluga_settings/database/migrations_landlord
 ```
 
+### Multitenancy Classification (Required)
+
+Before adding migration files, classify scope explicitly:
+- `tenant`
+- `landlord`
+- `mixed`
+
+Current classification for `belluga_settings`:
+- `mixed` (tenant + landlord).
+
+Rules for this package:
+- Tenant migrations stay in `packages/belluga/belluga_settings/database/migrations` and must be listed in `config/multitenancy.php` `tenant_migration_paths`.
+- Landlord migrations stay in `packages/belluga/belluga_settings/database/migrations_landlord` and run only with landlord connection/path.
+- Never cross-run migration directories between tenant and landlord flows.
+- Namespace scope (`tenant` vs `landlord`) must remain consistent with where data is stored and migrated.
+
 ---
 
 ## Example: Register a Namespace

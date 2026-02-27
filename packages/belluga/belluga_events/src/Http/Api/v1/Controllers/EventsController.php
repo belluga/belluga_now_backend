@@ -14,7 +14,6 @@ use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
-use Illuminate\Validation\ValidationException;
 
 class EventsController extends Controller
 {
@@ -31,8 +30,6 @@ class EventsController extends Controller
         $perPage = (int) ($request->get('page_size') ?? 15);
         $perPage = $perPage > 0 ? $perPage : 15;
         $accountContextId = $this->resolveAccountFromRoute($request);
-        $accountId = $accountContextId ?? (string) ($request->get('account_id') ?? '');
-        $accountProfileId = (string) ($request->get('account_profile_id') ?? '');
         $isAdmin = $this->isAdminContext($request);
 
         $paginator = $this->eventQueryService->paginateManagement(
@@ -40,9 +37,7 @@ class EventsController extends Controller
             $request->boolean('archived'),
             $perPage,
             $isAdmin,
-            $accountContextId,
-            $accountId,
-            $accountProfileId
+            $accountContextId
         );
 
         return response()->json($paginator->toArray());
@@ -51,18 +46,11 @@ class EventsController extends Controller
     public function store(EventStoreRequest $request): JsonResponse
     {
         $payload = $request->validated();
+        $payload['_created_by'] = $this->resolveActorPrincipal($request);
         $accountIdFromRoute = $this->resolveAccountFromRoute($request);
 
         if ($accountIdFromRoute) {
-            $payload['account_id'] = $accountIdFromRoute;
-        } else {
-            $accountId = $payload['account_id'] ?? null;
-            $accountProfileId = $payload['account_profile_id'] ?? null;
-            if (! $accountId && ! $accountProfileId) {
-                throw ValidationException::withMessages([
-                    'account_id' => ['Account or account profile is required when creating on behalf.'],
-                ]);
-            }
+            $payload['_account_context_id'] = $accountIdFromRoute;
         }
 
         $event = $this->eventManagementService->create($payload);
@@ -83,7 +71,7 @@ class EventsController extends Controller
         }
 
         $accountId = $this->resolveAccountFromRoute($request);
-        if ($accountId && ! $this->eventQueryService->eventBelongsToAccount($event, $accountId)) {
+        if ($accountId && ! $this->eventQueryService->eventEditableByAccount($event, $accountId, $this->resolveAuthenticatedUserId($request))) {
             abort(404, 'Event not found.');
         }
 
@@ -94,17 +82,17 @@ class EventsController extends Controller
         ]);
     }
 
-    public function destroy(string $event_id): JsonResponse
+    public function destroy(Request $request, string $event_id): JsonResponse
     {
-        $eventId = (string) (request()->route('event_id') ?? $event_id);
+        $eventId = (string) ($request->route('event_id') ?? $event_id);
         $event = $this->eventQueryService->findByIdOrSlug($eventId);
 
         if (! $event) {
             abort(404, 'Event not found.');
         }
 
-        $accountId = $this->resolveAccountFromRoute(request());
-        if ($accountId && ! $this->eventQueryService->eventBelongsToAccount($event, $accountId)) {
+        $accountId = $this->resolveAccountFromRoute($request);
+        if ($accountId && ! $this->eventQueryService->eventEditableByAccount($event, $accountId, $this->resolveAuthenticatedUserId($request))) {
             abort(404, 'Event not found.');
         }
 
@@ -161,5 +149,40 @@ class EventsController extends Controller
         $user = $request->user();
 
         return $user ? (string) $user->getAuthIdentifier() : null;
+    }
+
+    /**
+     * @return array{type: string, id: string}
+     */
+    private function resolveActorPrincipal(Request $request): array
+    {
+        $user = $request->user();
+        $actorId = $user ? (string) $user->getAuthIdentifier() : '';
+
+        if ($actorId === '') {
+            return [
+                'type' => 'system',
+                'id' => 'system',
+            ];
+        }
+
+        if ($request->route('account_slug')) {
+            return [
+                'type' => 'account_user',
+                'id' => $actorId,
+            ];
+        }
+
+        if (str_starts_with($request->path(), 'admin/api/v1')) {
+            return [
+                'type' => 'landlord_user',
+                'id' => $actorId,
+            ];
+        }
+
+        return [
+            'type' => 'user',
+            'id' => $actorId,
+        ];
     }
 }

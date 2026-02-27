@@ -33,8 +33,6 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         }
 
         return [
-            'account_id' => (string) $profile->account_id,
-            'account_profile_id' => (string) $profile->_id,
             'venue' => [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
@@ -109,8 +107,9 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     {
         return AccountProfile::query()
             ->where('account_id', $accountId)
-            ->pluck('_id')
-            ->map(static fn ($id): string => (string) $id)
+            ->get()
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+            ->filter(static fn (string $id): bool => $id !== '')
             ->values()
             ->all();
     }

@@ -12,6 +12,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\UTCDateTime;
@@ -68,9 +69,7 @@ class EventQueryService
         bool $includeArchived,
         int $perPage,
         bool $isAdminContext,
-        ?string $accountContextId = null,
-        ?string $accountId = null,
-        ?string $accountProfileId = null
+        ?string $accountContextId = null
     ): LengthAwarePaginator {
         $query = Event::query();
 
@@ -79,13 +78,7 @@ class EventQueryService
         }
 
         if ($accountContextId) {
-            $this->applyAccountFiltersToQuery($query, $accountContextId, '');
-        } elseif ($accountId || $accountProfileId) {
-            $this->applyAccountFiltersToQuery(
-                $query,
-                (string) ($accountId ?? ''),
-                (string) ($accountProfileId ?? '')
-            );
+            $this->applyAccountFiltersToQuery($query, $accountContextId);
         }
 
         $search = trim((string) ($queryParams['search'] ?? ''));
@@ -161,18 +154,42 @@ class EventQueryService
 
     public function eventBelongsToAccount(Event $event, string $accountId): bool
     {
-        if ((string) ($event->account_id ?? '') === $accountId) {
-            return true;
-        }
-
-        $profileId = $event->account_profile_id
-            ?? ($event->venue['id'] ?? null);
-
-        if (! $profileId) {
+        $profileIds = $this->resolveAccountProfileIds($accountId);
+        if ($profileIds === []) {
             return false;
         }
 
-        return $this->eventProfileResolver->accountOwnsProfile($accountId, (string) $profileId);
+        $parties = $this->normalizeEventParties($event->event_parties ?? []);
+        foreach ($parties as $party) {
+            if (in_array($party['party_ref_id'], $profileIds, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function eventEditableByAccount(Event $event, string $accountId, ?string $actorUserId = null): bool
+    {
+        if ($actorUserId !== null && $this->isAccountOwner($event, $actorUserId)) {
+            return true;
+        }
+
+        $profileIds = $this->resolveAccountProfileIds($accountId);
+        if ($profileIds === []) {
+            return false;
+        }
+
+        $parties = $this->normalizeEventParties($event->event_parties ?? []);
+        foreach ($parties as $party) {
+            if (! in_array($party['party_ref_id'], $profileIds, true)) {
+                continue;
+            }
+            if ((bool) ($party['permissions']['can_edit'] ?? false)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function assertPublicVisible(Event $event): void
@@ -201,19 +218,37 @@ class EventQueryService
      */
     public function buildStreamDeltas(array $queryParams, ?string $userId, ?string $lastEventId): array
     {
+        $startedAt = microtime(true);
         $since = $this->parseSince($lastEventId);
         if (! $since) {
+            Log::info('events_stream_deltas_skipped_invalid_cursor', [
+                'last_event_id' => $lastEventId,
+                'duration_ms' => $this->durationMs($startedAt),
+            ]);
+
             return [];
         }
 
         $filters = $this->normalizeFilters($queryParams);
         $raw = $this->runStreamQuery($filters, $userId, $since, true);
-
-        return array_values(array_filter(array_map(function ($event) use ($since): ?array {
+        $deltas = array_values(array_filter(array_map(function ($event) use ($since): ?array {
             $payload = $this->formatStreamDelta($event, $since);
 
             return $payload['type'] ? $payload : null;
         }, $raw)));
+
+        Log::info('events_stream_deltas_built', [
+            'delta_count' => count($deltas),
+            'duration_ms' => $this->durationMs($startedAt),
+            'since' => $since->toISOString(),
+            'use_geo' => (bool) ($filters['use_geo'] ?? false),
+            'search_applied' => (string) ($filters['search'] ?? '') !== '',
+            'category_filter_count' => count($filters['categories'] ?? []),
+            'tag_filter_count' => count($filters['tags'] ?? []),
+            'taxonomy_filter_count' => count($filters['taxonomy'] ?? []),
+        ]);
+
+        return $deltas;
     }
 
     /**
@@ -232,8 +267,6 @@ class EventQueryService
 
         return [
             'search' => trim((string) ($queryParams['search'] ?? '')),
-            'account_id' => isset($queryParams['account_id']) ? (string) $queryParams['account_id'] : null,
-            'account_profile_id' => isset($queryParams['account_profile_id']) ? (string) $queryParams['account_profile_id'] : null,
             'categories' => $this->normalizeStringArray($queryParams['categories'] ?? []),
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
@@ -310,7 +343,6 @@ class EventQueryService
             $pipeline[] = ['$match' => $baseMatch];
         }
 
-        $this->applyAccountFilter($pipeline, $filters['account_id'] ?? null, $filters['account_profile_id'] ?? null);
         $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
@@ -382,7 +414,6 @@ class EventQueryService
 
         $pipeline[] = ['$match' => $baseMatch];
 
-        $this->applyAccountFilter($pipeline, $filters['account_id'] ?? null, $filters['account_profile_id'] ?? null);
         $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
@@ -510,43 +541,6 @@ class EventQueryService
         if ($termMatches !== []) {
             $pipeline[] = ['$match' => ['$or' => $termMatches]];
         }
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $pipeline
-     */
-    private function applyAccountFilter(array &$pipeline, ?string $accountId, ?string $accountProfileId): void
-    {
-        if ($accountProfileId !== null && $accountProfileId !== '') {
-            $pipeline[] = [
-                '$match' => [
-                    '$or' => [
-                        ['account_profile_id' => $accountProfileId],
-                        ['venue.id' => $accountProfileId],
-                    ],
-                ],
-            ];
-
-            return;
-        }
-
-        if ($accountId === null || $accountId === '') {
-            return;
-        }
-
-        $profileIds = $this->resolveAccountProfileIds($accountId);
-
-        $match = [
-            '$or' => [
-                ['account_id' => $accountId],
-            ],
-        ];
-
-        if ($profileIds !== []) {
-            $match['$or'][] = ['venue.id' => ['$in' => $profileIds]];
-        }
-
-        $pipeline[] = ['$match' => $match];
     }
 
     /**
@@ -690,6 +684,8 @@ class EventQueryService
 
         $occurrences = $this->resolveEventOccurrences($event);
         $capabilities = $this->resolveEventCapabilities($event);
+        $createdBy = $this->normalizeArray($event->created_by ?? []);
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
 
         $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
@@ -723,6 +719,11 @@ class EventQueryService
             'date_time_end' => $endAt,
             'occurrences' => $occurrences,
             'artists' => $artists,
+            'created_by' => [
+                'type' => isset($createdBy['type']) ? (string) $createdBy['type'] : '',
+                'id' => isset($createdBy['id']) ? (string) $createdBy['id'] : '',
+            ],
+            'event_parties' => $eventParties,
             'capabilities' => $capabilities,
             'tags' => array_values(array_map('strval', $tags)),
             'taxonomy_terms' => $taxonomyTerms,
@@ -884,29 +885,80 @@ class EventQueryService
         return $this->tenantCapabilitiesCache;
     }
 
-    private function applyAccountFiltersToQuery($query, string $accountId, string $accountProfileId): void
+    private function isAccountOwner(Event $event, string $actorUserId): bool
     {
-        if ($accountProfileId !== '') {
-            $query->where(function ($builder) use ($accountProfileId): void {
-                $builder->where('account_profile_id', $accountProfileId)
-                    ->orWhere('venue.id', $accountProfileId);
-            });
+        $createdBy = $this->normalizeArray($event->created_by ?? []);
+        $createdByType = (string) ($createdBy['type'] ?? '');
+        $createdById = (string) ($createdBy['id'] ?? '');
 
-            return;
-        }
+        return $createdByType === 'account_user' && $createdById !== '' && $createdById === $actorUserId;
+    }
 
+    private function applyAccountFiltersToQuery($query, string $accountId): void
+    {
         if ($accountId === '') {
             return;
         }
 
         $profileIds = $this->resolveAccountProfileIds($accountId);
+        if ($profileIds === []) {
+            $query->where('_id', '__no_match__');
+            return;
+        }
 
-        $query->where(function ($builder) use ($accountId, $profileIds): void {
-            $builder->where('account_id', $accountId);
-            if ($profileIds !== []) {
-                $builder->orWhereIn('venue.id', $profileIds);
-            }
+        $query->where(function ($builder) use ($profileIds): void {
+            $builder->whereIn('event_parties.party_ref_id', $profileIds);
         });
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, array{
+     *   party_type: string,
+     *   party_ref_id: string,
+     *   permissions: array{can_edit: bool},
+     *   metadata?: array<string, mixed>
+     * }>
+     */
+    private function normalizeEventParties(mixed $value): array
+    {
+        $rows = $this->normalizeArray($value);
+        $normalized = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $partyType = trim((string) ($row['party_type'] ?? ''));
+            $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
+            if ($partyType === '' || $partyRefId === '') {
+                continue;
+            }
+
+            $permissions = isset($row['permissions']) && is_array($row['permissions'])
+                ? $row['permissions']
+                : [];
+            $metadata = isset($row['metadata']) && is_array($row['metadata'])
+                ? $row['metadata']
+                : null;
+
+            $item = [
+                'party_type' => $partyType,
+                'party_ref_id' => $partyRefId,
+                'permissions' => [
+                    'can_edit' => (bool) ($permissions['can_edit'] ?? false),
+                ],
+            ];
+
+            if ($metadata !== null && $metadata !== []) {
+                $item['metadata'] = $metadata;
+            }
+
+            $normalized[] = $item;
+        }
+
+        return $normalized;
     }
 
     private function applyPublicPublicationFilter($query): void
@@ -922,5 +974,10 @@ class EventQueryService
             $builder->whereNull('publication.publish_at')
                 ->orWhere('publication.publish_at', '<=', $now);
         });
+    }
+
+    private function durationMs(float $startedAt): int
+    {
+        return (int) round((microtime(true) - $startedAt) * 1000);
     }
 }

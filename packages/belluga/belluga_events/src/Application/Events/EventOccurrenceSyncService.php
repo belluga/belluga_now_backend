@@ -30,8 +30,6 @@ class EventOccurrenceSyncService
                 'event_id' => $eventId,
                 'occurrence_index' => $index,
                 'slug' => (string) ($event->slug ?? ''),
-                'account_id' => (string) ($event->account_id ?? ''),
-                'account_profile_id' => (string) ($event->account_profile_id ?? ''),
                 'title' => (string) ($event->title ?? ''),
                 'content' => (string) ($event->content ?? ''),
                 'type' => $this->normalizeArray($event->type ?? []),
@@ -44,6 +42,8 @@ class EventOccurrenceSyncService
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'taxonomy_terms' => $eventTaxonomyTerms,
                 'capabilities' => $this->normalizeArray($event->capabilities ?? []),
+                'created_by' => $this->normalizeArray($event->created_by ?? []),
+                'event_parties' => $this->normalizeArray($event->event_parties ?? []),
                 'publication' => $publication,
                 'is_event_published' => $this->isEffectivelyPublished($publication, $now),
                 'is_active' => (bool) ($event->is_active ?? true),
@@ -82,11 +82,11 @@ class EventOccurrenceSyncService
     /**
      * @param array<string, mixed> $publication
      */
-    public function mirrorPublicationByEventId(string $eventId, array $publication): void
+    public function mirrorPublicationByEventId(string $eventId, array $publication): int
     {
         $now = Carbon::now();
 
-        EventOccurrence::query()->where('event_id', $eventId)->update([
+        return EventOccurrence::query()->where('event_id', $eventId)->update([
             'publication' => $publication,
             'is_event_published' => $this->isEffectivelyPublished($publication, $now),
             'updated_from_event_at' => $now,

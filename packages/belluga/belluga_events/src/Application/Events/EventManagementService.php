@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Domain\Events\EventCreated;
 use Belluga\Events\Domain\Events\EventDeleted;
@@ -14,6 +15,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
 use RuntimeException;
@@ -23,6 +25,7 @@ class EventManagementService
     public function __construct(
         private readonly EventTaxonomyValidationContract $taxonomyValidationService,
         private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventPartyMapperRegistryContract $eventPartyMappers,
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrenceSyncService $eventOccurrenceSyncService,
         private readonly Dispatcher $events,
@@ -34,6 +37,7 @@ class EventManagementService
      */
     public function create(array $payload): Event
     {
+        $startedAt = microtime(true);
         $normalized = $this->normalizePayloadAndSchedule($payload, null);
 
         /** @var Event $event */
@@ -45,6 +49,7 @@ class EventManagementService
         });
 
         $this->events->dispatch(new EventCreated((string) $event->_id));
+        $this->logWriteCompleted('create', $event, count($normalized['schedule']['occurrences']), $startedAt);
 
         return $event;
     }
@@ -54,6 +59,7 @@ class EventManagementService
      */
     public function update(Event $event, array $payload): Event
     {
+        $startedAt = microtime(true);
         $normalized = $this->normalizePayloadAndSchedule($payload, $event);
 
         /** @var Event $updated */
@@ -68,12 +74,14 @@ class EventManagementService
         });
 
         $this->events->dispatch(new EventUpdated((string) $updated->_id));
+        $this->logWriteCompleted('update', $updated, count($normalized['schedule']['occurrences']), $startedAt);
 
         return $updated;
     }
 
     public function delete(Event $event): void
     {
+        $startedAt = microtime(true);
         $eventId = (string) $event->_id;
 
         $this->runTenantTransaction(function () use ($event, $eventId): null {
@@ -84,6 +92,7 @@ class EventManagementService
         });
 
         $this->events->dispatch(new EventDeleted($eventId));
+        $this->logDeleteCompleted($event, $eventId, $startedAt);
     }
 
     /**
@@ -145,32 +154,40 @@ class EventManagementService
 
         $venueId = $payload['venue_id'] ?? null;
         $artistIds = $payload['artist_ids'] ?? null;
+        $resolvedVenueForParties = null;
+        $resolvedArtistsForParties = null;
 
-        if ($venueId !== null || $existing === null) {
+        $venueSourceTouched = $venueId !== null || $existing === null;
+        if ($venueSourceTouched) {
             $resolvedVenue = $this->resolveVenuePayload($venueId, $existing);
             $normalized['venue'] = $resolvedVenue['venue'];
             $normalized['geo_location'] = $resolvedVenue['location'];
-            $normalized['account_id'] = $resolvedVenue['account_id'];
-            $normalized['account_profile_id'] = $resolvedVenue['account_profile_id'];
-
-            $expectedAccountId = $payload['account_id'] ?? null;
-            if ($expectedAccountId && $expectedAccountId !== $resolvedVenue['account_id']) {
-                throw ValidationException::withMessages([
-                    'account_id' => ['Account must match the venue account.'],
-                ]);
-            }
-
-            $expectedProfileId = $payload['account_profile_id'] ?? null;
-            if ($expectedProfileId && $expectedProfileId !== $resolvedVenue['account_profile_id']) {
-                throw ValidationException::withMessages([
-                    'account_profile_id' => ['Account profile must match the venue profile.'],
-                ]);
-            }
+            $this->assertVenueBelongsToAccountContext($payload, $resolvedVenue);
+            $resolvedVenueForParties = $resolvedVenue['venue'];
         }
 
-        if ($artistIds !== null || $existing === null) {
+        $artistsSourceTouched = $artistIds !== null || $existing === null;
+        if ($artistsSourceTouched) {
             $normalized['artists'] = $this->resolveArtistPayloads($artistIds, $existing);
+            $resolvedArtistsForParties = $normalized['artists'];
         }
+
+        if ($existing === null) {
+            $normalized['created_by'] = $this->resolveCreatedByPrincipal($payload);
+        }
+
+        $normalized['event_parties'] = $this->resolveEventParties(
+            $payload,
+            $existing,
+            is_array($resolvedVenueForParties)
+                ? $resolvedVenueForParties
+                : $this->normalizeArray($existing?->venue ?? []),
+            is_array($resolvedArtistsForParties)
+                ? $resolvedArtistsForParties
+                : $this->normalizeArray($existing?->artists ?? []),
+            $venueSourceTouched,
+            $artistsSourceTouched
+        );
 
         return [
             'payload' => $normalized,
@@ -443,7 +460,7 @@ class EventManagementService
     }
 
     /**
-     * @return array{venue: array<string, mixed>, location: array<string, mixed>, account_id: string, account_profile_id: string}
+     * @return array{venue: array<string, mixed>, location: array<string, mixed>}
      */
     private function resolveVenuePayload(?string $venueId, ?Event $existing): array
     {
@@ -456,6 +473,316 @@ class EventManagementService
         }
 
         return $this->eventProfileResolver->resolveVenueByProfileId((string) $id);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @param array{venue: array<string, mixed>, location: array<string, mixed>} $resolvedVenue
+     */
+    private function assertVenueBelongsToAccountContext(array $payload, array $resolvedVenue): void
+    {
+        $accountContextId = isset($payload['_account_context_id'])
+            ? (string) $payload['_account_context_id']
+            : '';
+
+        if ($accountContextId === '') {
+            return;
+        }
+
+        $venueId = isset($resolvedVenue['venue']['id']) ? (string) $resolvedVenue['venue']['id'] : '';
+        if ($venueId === '' || ! $this->eventProfileResolver->accountOwnsProfile($accountContextId, $venueId)) {
+            throw ValidationException::withMessages([
+                'venue_id' => ['Venue must belong to the target account context.'],
+            ]);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $venue
+     * @param array<int, array<string, mixed>> $artists
+     * @return array<int, array{
+     *   party_type: string,
+     *   party_ref_id: string,
+     *   permissions: array{can_edit: bool},
+     *   metadata?: array<string, mixed>
+     * }>
+     */
+    private function resolveEventParties(
+        array $payload,
+        ?Event $existing,
+        array $venue,
+        array $artists,
+        bool $venueSourceTouched,
+        bool $artistsSourceTouched
+    ): array
+    {
+        $existingRows = $this->normalizeEventPartiesMap($existing?->event_parties ?? []);
+        $resolved = $existingRows;
+
+        if ($venueSourceTouched) {
+            foreach ($resolved as $key => $row) {
+                if (($row['party_type'] ?? null) === 'venue') {
+                    unset($resolved[$key]);
+                }
+            }
+        }
+
+        if ($artistsSourceTouched) {
+            foreach ($resolved as $key => $row) {
+                if (($row['party_type'] ?? null) === 'artist') {
+                    unset($resolved[$key]);
+                }
+            }
+        }
+
+        $venueRefId = isset($venue['id']) ? trim((string) $venue['id']) : '';
+        if ($venueRefId !== '') {
+            $key = $this->eventPartyKey('venue', $venueRefId);
+            $resolved[$key] = $this->buildEventPartyRow(
+                'venue',
+                $venueRefId,
+                $venue,
+                $existingRows[$key] ?? null,
+                null,
+                null,
+                'event_parties'
+            );
+        }
+
+        foreach ($artists as $artist) {
+            if (! is_array($artist)) {
+                continue;
+            }
+
+            $artistRefId = isset($artist['id']) ? trim((string) $artist['id']) : '';
+            if ($artistRefId === '') {
+                continue;
+            }
+
+            $key = $this->eventPartyKey('artist', $artistRefId);
+            $resolved[$key] = $this->buildEventPartyRow(
+                'artist',
+                $artistRefId,
+                $artist,
+                $existingRows[$key] ?? null,
+                null,
+                null,
+                'event_parties'
+            );
+        }
+
+        if (array_key_exists('event_parties', $payload)) {
+            $incomingRows = $payload['event_parties'];
+            if (! is_array($incomingRows)) {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['event_parties must be an array.'],
+                ]);
+            }
+
+            foreach ($incomingRows as $index => $incomingRow) {
+                if (! is_array($incomingRow)) {
+                    throw ValidationException::withMessages([
+                        "event_parties.{$index}" => ['event party payload must be an object.'],
+                    ]);
+                }
+
+                $partyType = trim((string) ($incomingRow['party_type'] ?? ''));
+                $partyRefId = trim((string) ($incomingRow['party_ref_id'] ?? ''));
+
+                if ($partyType === '' || $partyRefId === '') {
+                    throw ValidationException::withMessages([
+                        "event_parties.{$index}" => ['party_type and party_ref_id are required.'],
+                    ]);
+                }
+
+                $metadataOverride = isset($incomingRow['metadata']) && is_array($incomingRow['metadata'])
+                    ? $incomingRow['metadata']
+                    : null;
+                $overrideCanEdit = null;
+                if (isset($incomingRow['permissions']) && is_array($incomingRow['permissions']) && array_key_exists('can_edit', $incomingRow['permissions'])) {
+                    $overrideCanEdit = (bool) $incomingRow['permissions']['can_edit'];
+                }
+
+                $key = $this->eventPartyKey($partyType, $partyRefId);
+                $resolved[$key] = $this->buildEventPartyRow(
+                    $partyType,
+                    $partyRefId,
+                    $metadataOverride ?? [],
+                    $resolved[$key] ?? ($existingRows[$key] ?? null),
+                    $overrideCanEdit,
+                    $metadataOverride,
+                    "event_parties.{$index}.party_type"
+                );
+            }
+        }
+
+        return array_values($resolved);
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @param array{
+     *   party_type: string,
+     *   party_ref_id: string,
+     *   permissions: array{can_edit: bool},
+     *   metadata?: array<string, mixed>
+     * }|null $existingRow
+     * @param array<string, mixed>|null $metadataOverride
+     * @return array{
+     *   party_type: string,
+     *   party_ref_id: string,
+     *   permissions: array{can_edit: bool},
+     *   metadata?: array<string, mixed>
+     * }
+     */
+    private function buildEventPartyRow(
+        string $partyType,
+        string $partyRefId,
+        array $source,
+        ?array $existingRow,
+        ?bool $overrideCanEdit,
+        ?array $metadataOverride,
+        string $validationField
+    ): array {
+        $mapper = $this->eventPartyMappers->find($partyType);
+        if (! $mapper) {
+            throw ValidationException::withMessages([
+                $validationField => ["Unknown party_type [{$partyType}]."],
+            ]);
+        }
+
+        $existingCanEdit = null;
+        if (
+            is_array($existingRow)
+            && isset($existingRow['permissions'])
+            && is_array($existingRow['permissions'])
+            && array_key_exists('can_edit', $existingRow['permissions'])
+        ) {
+            $existingCanEdit = (bool) $existingRow['permissions']['can_edit'];
+        }
+
+        $canEdit = $overrideCanEdit ?? $existingCanEdit ?? $mapper->defaultCanEdit();
+
+        $metadata = $metadataOverride ?? $mapper->mapMetadata($source);
+        $metadata = is_array($metadata) ? $metadata : [];
+
+        $row = [
+            'party_type' => $partyType,
+            'party_ref_id' => $partyRefId,
+            'permissions' => [
+                'can_edit' => $canEdit,
+            ],
+        ];
+
+        if ($metadata !== []) {
+            $row['metadata'] = $metadata;
+        }
+
+        return $row;
+    }
+
+    private function eventPartyKey(string $partyType, string $partyRefId): string
+    {
+        return "{$partyType}:{$partyRefId}";
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, array{
+     *   party_type: string,
+     *   party_ref_id: string,
+     *   permissions: array{can_edit: bool},
+     *   metadata?: array<string, mixed>
+     * }>
+     */
+    private function normalizeEventPartiesMap(mixed $value): array
+    {
+        $rows = $this->normalizeArray($value);
+        $normalized = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $partyType = trim((string) ($row['party_type'] ?? ''));
+            $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
+            if ($partyType === '' || $partyRefId === '') {
+                continue;
+            }
+
+            $permissions = isset($row['permissions']) && is_array($row['permissions'])
+                ? $row['permissions']
+                : [];
+            $metadata = isset($row['metadata']) && is_array($row['metadata'])
+                ? $row['metadata']
+                : null;
+
+            $normalizedRow = [
+                'party_type' => $partyType,
+                'party_ref_id' => $partyRefId,
+                'permissions' => [
+                    'can_edit' => (bool) ($permissions['can_edit'] ?? false),
+                ],
+            ];
+
+            if ($metadata !== null && $metadata !== []) {
+                $normalizedRow['metadata'] = $metadata;
+            }
+
+            $normalized[$this->eventPartyKey($partyType, $partyRefId)] = $normalizedRow;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array{type: string, id: string}
+     */
+    private function resolveCreatedByPrincipal(array $payload): array
+    {
+        $principal = $this->normalizeArray($payload['_created_by'] ?? []);
+        $type = trim((string) ($principal['type'] ?? ''));
+        $id = trim((string) ($principal['id'] ?? ''));
+
+        if ($type === '' || $id === '') {
+            return [
+                'type' => 'system',
+                'id' => 'system',
+            ];
+        }
+
+        return [
+            'type' => $type,
+            'id' => $id,
+        ];
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, mixed>|array<string, mixed>
+     */
+    private function normalizeArray(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        if (is_object($value)) {
+            return (array) $value;
+        }
+
+        return [];
     }
 
     /**
@@ -539,5 +866,67 @@ class EventManagementService
             || str_contains($message, 'replica set')
             || str_contains($message, 'mongos')
             || str_contains($message, 'starttransaction');
+    }
+
+    private function logWriteCompleted(string $operation, Event $event, int $occurrenceCount, float $startedAt): void
+    {
+        $publication = is_array($event->publication ?? null)
+            ? $event->publication
+            : (array) ($event->publication ?? []);
+
+        Log::info('events_write_completed', [
+            'operation' => $operation,
+            'event_id' => (string) ($event->_id ?? ''),
+            'occurrence_count' => max(0, $occurrenceCount),
+            'publication_status' => (string) ($publication['status'] ?? 'draft'),
+            'publication_publish_at' => $this->formatDate($publication['publish_at'] ?? null),
+            'duration_ms' => $this->durationMs($startedAt),
+        ]);
+    }
+
+    private function logDeleteCompleted(Event $event, string $eventId, float $startedAt): void
+    {
+        $publication = is_array($event->publication ?? null)
+            ? $event->publication
+            : (array) ($event->publication ?? []);
+
+        $occurrenceCount = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->count();
+
+        Log::info('events_write_completed', [
+            'operation' => 'delete',
+            'event_id' => $eventId,
+            'occurrence_count' => max(0, (int) $occurrenceCount),
+            'publication_status' => (string) ($publication['status'] ?? 'draft'),
+            'publication_publish_at' => $this->formatDate($publication['publish_at'] ?? null),
+            'duration_ms' => $this->durationMs($startedAt),
+        ]);
+    }
+
+    private function durationMs(float $startedAt): int
+    {
+        return (int) round((microtime(true) - $startedAt) * 1000);
+    }
+
+    private function formatDate(mixed $value): ?string
+    {
+        if ($value instanceof UTCDateTime) {
+            return $value->toDateTime()->format(DATE_ATOM);
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format(DATE_ATOM);
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return Carbon::parse($value)->format(DATE_ATOM);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }

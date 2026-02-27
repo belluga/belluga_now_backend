@@ -340,6 +340,27 @@ tenant provisioning, for example:
 ],
 ```
 
+## Multitenancy Classification (Required)
+
+Before adding any migration, classify scope explicitly:
+- `tenant`
+- `landlord`
+- `mixed`
+
+Current classification for `belluga_push_handler`:
+- `tenant` for package-owned collections/migrations.
+
+Rules for this package:
+- Keep package migrations in `packages/belluga/belluga_push_handler/database/migrations`.
+- Ensure this path is listed in `config/multitenancy.php` `tenant_migration_paths`.
+- Execute via tenant migration flow (`tenants:artisan ... --path=packages/belluga/belluga_push_handler/database/migrations`).
+- Do not persist `tenant_id` in tenant-scoped collections (tenant DB is isolated by Spatie context).
+
+If future landlord persistence is added:
+- Create dedicated `database/migrations_landlord` for landlord-only structures.
+- Run landlord migrations only on landlord connection/path.
+- Never cross-run tenant and landlord migration directories.
+
 ## Request/Response Expectations (Summary)
 This package follows the backend schema defined in:
 `foundation_documentation/todos/active/TODO-v1-telemetry-and-push-backend.md`

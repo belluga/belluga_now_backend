@@ -122,6 +122,27 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
+    public function testEventCreatePersistsCreatedByAndDefaultEventParties(): void
+    {
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.created_by.type', 'account_user');
+        $response->assertJsonPath('data.created_by.id', (string) $this->user->_id);
+
+        $parties = collect($response->json('data.event_parties') ?? []);
+        $venueParty = $parties->firstWhere('party_type', 'venue');
+        $artistParty = $parties->firstWhere('party_type', 'artist');
+
+        $this->assertNotNull($venueParty);
+        $this->assertSame((string) $this->venue->_id, (string) ($venueParty['party_ref_id'] ?? ''));
+        $this->assertTrue((bool) data_get($venueParty, 'permissions.can_edit', false));
+
+        $this->assertNotNull($artistParty);
+        $this->assertSame((string) $this->artist->_id, (string) ($artistParty['party_ref_id'] ?? ''));
+        $this->assertTrue((bool) data_get($artistParty, 'permissions.can_edit', false));
+    }
+
     public function testEventCreateRejectsLegacySingleDatePayloadWithoutOccurrences(): void
     {
         $now = Carbon::now();
@@ -200,6 +221,24 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(422);
+    }
+
+    public function testEventCreateRejectsUnknownEventPartyType(): void
+    {
+        $payload = $this->makeEventPayload([
+            'event_parties' => [
+                [
+                    'party_type' => 'unknown_party',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['event_parties.0.party_type']);
     }
 
     public function testEventCreateRejectsVenueWithoutLocation(): void
@@ -527,6 +566,44 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
+    public function testPublishScheduledEventsJobEmitsStreamDeltaAfterPublicationTransition(): void
+    {
+        $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
+        Carbon::setTestNow($baseline);
+
+        try {
+            $event = $this->createEvent([
+                'title' => 'Scheduled Stream Transition Event',
+                'publication' => [
+                    'status' => 'publish_scheduled',
+                    'publish_at' => $baseline->copy()->subMinute(),
+                ],
+            ]);
+
+            $cursor = $baseline->copy()->addSecond()->toISOString();
+
+            Carbon::setTestNow($baseline->copy()->addMinutes(5));
+            app()->call([new PublishScheduledEventsJob(), 'handle']);
+
+            Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+            $response = $this->get(
+                "{$this->base_api_tenant}events/stream",
+                [
+                    'Last-Event-ID' => $cursor,
+                    'Accept' => 'text/event-stream',
+                ]
+            );
+
+            $response->assertStatus(200);
+            $content = $response->streamedContent();
+            $this->assertStringContainsString('occurrence.updated', $content);
+            $this->assertStringContainsString((string) $event->_id, $content);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function testEventOccurrenceReconciliationSyncsMirroredFieldsFromEvent(): void
     {
         $event = $this->createEvent([
@@ -568,7 +645,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($occurrence->deleted_at);
     }
 
-    public function testTenantAdminCreateRequiresOnBehalfAccount(): void
+    public function testTenantAdminCreateUsesVenueWithoutOnBehalfAccountParams(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:create']);
@@ -577,7 +654,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response = $this->postJson($this->tenantAdminEventsBase, $payload);
 
-        $response->assertStatus(422);
+        $response->assertStatus(201);
     }
 
     public function testTenantAdminCreateOnBehalfIsScopedToTargetAccount(): void
@@ -585,9 +662,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:create', 'events:read']);
 
-        $payload = $this->makeEventPayload([
-            'account_id' => (string) $this->account->_id,
-        ]);
+        $payload = $this->makeEventPayload();
 
         $response = $this->postJson($this->tenantAdminEventsBase, $payload);
         $response->assertStatus(201);
@@ -635,6 +710,122 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $response->assertStatus(404);
+    }
+
+    public function testAccountUserCanManageEventWhenEventPartyCanEditIsTrue(): void
+    {
+        $event = $this->createEvent();
+
+        $otherAccount = Account::create([
+            'name' => 'Editable Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $otherVenue = $this->createAccountProfile('venue', 'Editable Venue', $otherAccount);
+
+        $event->event_parties = [
+            [
+                'party_type' => 'venue',
+                'party_ref_id' => (string) $otherVenue->_id,
+                'permissions' => ['can_edit' => true],
+            ],
+        ];
+        $event->save();
+
+        $role = $otherAccount->roleTemplates()->create([
+            'name' => 'Editable Role',
+            'permissions' => ['*'],
+        ]);
+
+        $otherUser = $this->userService->create($otherAccount, [
+            'name' => 'Editable User',
+            'email' => uniqid('editable-user', true) . '@example.org',
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
+
+        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+
+        $otherBase = "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}";
+        $response = $this->patchJson($otherBase, [
+            'title' => 'Updated By Shared Party',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.title', 'Updated By Shared Party');
+    }
+
+    public function testAccountMemberCannotManageEventWhenEventPartyCanEditIsFalse(): void
+    {
+        $event = $this->createEvent();
+
+        $event->event_parties = [
+            [
+                'party_type' => 'venue',
+                'party_ref_id' => (string) $this->venue->_id,
+                'permissions' => ['can_edit' => false],
+            ],
+        ];
+        $event->save();
+
+        $otherUser = $this->createAccountUser(['*']);
+        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
+            'title' => 'Should Not Update',
+        ]);
+
+        $response->assertStatus(404);
+    }
+
+    public function testEventOwnerCanManageEventWhenPartyCanEditIsFalse(): void
+    {
+        $event = $this->createEvent();
+
+        $event->event_parties = [
+            [
+                'party_type' => 'venue',
+                'party_ref_id' => (string) $this->venue->_id,
+                'permissions' => ['can_edit' => false],
+            ],
+        ];
+        $event->save();
+
+        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
+            'title' => 'Updated By Owner Override',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.title', 'Updated By Owner Override');
+    }
+
+    public function testEventOwnerCanManageEventWithoutMatchingEventParty(): void
+    {
+        $event = $this->createEvent();
+
+        $otherAccount = Account::create([
+            'name' => 'Detached Ownership Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $otherVenue = $this->createAccountProfile('venue', 'Detached Ownership Venue', $otherAccount);
+
+        $event->event_parties = [
+            [
+                'party_type' => 'venue',
+                'party_ref_id' => (string) $otherVenue->_id,
+                'permissions' => ['can_edit' => false],
+            ],
+        ];
+        $event->save();
+
+        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
+            'title' => 'Updated By Owner Without Matching Party',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.title', 'Updated By Owner Without Matching Party');
     }
 
     private function createAccountUser(array $permissions): AccountUser
@@ -714,8 +905,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $now = Carbon::now();
 
         $event = Event::create(array_merge([
-            'account_id' => (string) $this->venue->account_id,
-            'account_profile_id' => (string) $this->venue->_id,
             'title' => 'Stored Event',
             'content' => 'Event content',
             'type' => [
@@ -761,6 +950,22 @@ class EventCrudControllerTest extends TestCaseTenant
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
+            'created_by' => [
+                'type' => 'account_user',
+                'id' => (string) $this->user->_id,
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
             'publication' => [
                 'status' => 'published',
                 'publish_at' => $now->copy()->subMinute(),
