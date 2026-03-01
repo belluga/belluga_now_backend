@@ -35,6 +35,7 @@ class TicketHoldService
         int $holdMinutes,
         string $paymentProfile,
         string $checkoutMode,
+        array $promotionSnapshot = [],
         ?string $queueEntryId = null,
     ): TicketHold {
         /** @var TicketHold|null $existing */
@@ -47,7 +48,7 @@ class TicketHoldService
             return $existing;
         }
 
-        $snapshot = $this->buildSnapshot($lines, $checkoutMode);
+        $snapshot = $this->buildSnapshot($lines, $checkoutMode, $promotionSnapshot);
 
         /** @var TicketHold $hold */
         $hold = TicketHold::query()->create([
@@ -201,21 +202,29 @@ class TicketHoldService
      * @param array<int, array<string, mixed>> $lines
      * @return array<string, mixed>
      */
-    private function buildSnapshot(array $lines, string $checkoutMode): array
+    private function buildSnapshot(array $lines, string $checkoutMode, array $promotionSnapshot): array
     {
         $currency = 'BRL';
         $gross = 0;
+        $discount = 0;
+        $fee = 0;
 
         foreach ($lines as $line) {
             $currency = (string) ($line['currency'] ?? $currency);
-            $gross += (int) ($line['unit_price'] ?? 0) * (int) ($line['quantity'] ?? 0);
+            $gross += (int) ($line['base_line_amount'] ?? ((int) ($line['base_unit_price'] ?? $line['unit_price'] ?? 0) * (int) ($line['quantity'] ?? 0)));
+            $discount += (int) ($line['discount_amount'] ?? 0);
+            $fee += (int) ($line['fee_amount'] ?? 0);
         }
 
         $snapshot = [
             'checkout_mode' => $checkoutMode,
             'currency' => $currency,
             'gross_amount' => $gross,
+            'discount_amount' => $discount,
+            'fee_amount' => $fee,
+            'buyer_total' => max(0, $gross - $discount + $fee),
             'lines' => $lines,
+            'promotion_snapshot' => $promotionSnapshot,
         ];
 
         $snapshot['snapshot_hash'] = SnapshotHasher::hash($snapshot);

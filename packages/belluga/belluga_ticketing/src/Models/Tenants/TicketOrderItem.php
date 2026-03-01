@@ -20,6 +20,7 @@ class TicketOrderItem extends Model
         'ticket_product_id',
         'status',
         'quantity',
+        'base_unit_price',
         'unit_price',
         'currency',
         'discount_amount',
@@ -30,6 +31,7 @@ class TicketOrderItem extends Model
 
     protected $casts = [
         'quantity' => 'integer',
+        'base_unit_price' => 'integer',
         'unit_price' => 'integer',
         'discount_amount' => 'integer',
         'fee_amount' => 'integer',

@@ -7,6 +7,7 @@ namespace Belluga\Ticketing\Application\Checkout;
 use Belluga\Ticketing\Application\Async\TicketOutboxEmitter;
 use Belluga\Ticketing\Application\Holds\TicketHoldService;
 use Belluga\Ticketing\Application\Inventory\InventoryMutationService;
+use Belluga\Ticketing\Application\Promotions\TicketPromotionQuotaService;
 use Belluga\Ticketing\Application\Transactions\TenantTransactionRunner;
 use Belluga\Ticketing\Contracts\CheckoutOrchestratorContract;
 use Belluga\Ticketing\Models\Tenants\TicketHold;
@@ -25,6 +26,7 @@ class TicketCheckoutService
         private readonly CheckoutPayloadAssembler $payloadAssembler,
         private readonly CheckoutOrchestratorContract $checkoutOrchestrator,
         private readonly InventoryMutationService $inventory,
+        private readonly TicketPromotionQuotaService $promotionQuota,
         private readonly TenantTransactionRunner $transactions,
         private readonly TicketOutboxEmitter $outbox,
     ) {
@@ -98,6 +100,7 @@ class TicketCheckoutService
                 'checkout_mode' => 'paid',
                 'checkout_payload_snapshot' => $checkoutPayload,
                 'checkout_snapshot_hash' => (string) ($checkoutPayload['snapshot_hash'] ?? ''),
+                'promotion_snapshot' => is_array($checkoutPayload['promotion_snapshot'] ?? null) ? $checkoutPayload['promotion_snapshot'] : [],
                 'financial_snapshot' => $this->payloadAssembler->buildFinancialSnapshot($checkoutPayload),
                 'idempotency_key' => $idempotencyKey,
             ]);
@@ -129,10 +132,20 @@ class TicketCheckoutService
                 'checkout_mode' => 'free',
                 'checkout_payload_snapshot' => $checkoutPayload,
                 'checkout_snapshot_hash' => (string) ($checkoutPayload['snapshot_hash'] ?? ''),
+                'promotion_snapshot' => is_array($checkoutPayload['promotion_snapshot'] ?? null) ? $checkoutPayload['promotion_snapshot'] : [],
                 'financial_snapshot' => $financialSnapshot,
                 'idempotency_key' => $idempotencyKey,
                 'confirmed_at' => Carbon::now(),
             ]);
+
+            $this->promotionQuota->consumeForOrder(
+                orderId: (string) $order->getAttribute('_id'),
+                eventId: (string) ($freshHold->event_id ?? ''),
+                occurrenceId: (string) ($freshHold->occurrence_id ?? ''),
+                principalId: $principalId,
+                principalType: 'user',
+                promotionSnapshot: is_array($checkoutPayload['promotion_snapshot'] ?? null) ? $checkoutPayload['promotion_snapshot'] : [],
+            );
 
             $lines = is_array($freshHold->lines ?? null) ? $freshHold->lines : [];
             $purchaseOnlyReservationLines = $this->buildPurchaseOnlyReservationLines(
@@ -159,11 +172,14 @@ class TicketCheckoutService
                     'ticket_product_id' => (string) ($line['ticket_product_id'] ?? ''),
                     'status' => 'confirmed',
                     'quantity' => $quantity,
-                    'unit_price' => (int) ($line['unit_price'] ?? 0),
+                    'base_unit_price' => (int) ($line['base_unit_price'] ?? $line['unit_price'] ?? 0),
+                    'unit_price' => $quantity > 0
+                        ? (int) floor((int) ($line['final_line_amount'] ?? $lineTotal) / $quantity)
+                        : (int) ($line['final_line_amount'] ?? $lineTotal),
                     'currency' => (string) ($line['currency'] ?? 'BRL'),
-                    'discount_amount' => 0,
-                    'fee_amount' => 0,
-                    'line_total' => $lineTotal,
+                    'discount_amount' => (int) ($line['discount_amount'] ?? 0),
+                    'fee_amount' => (int) ($line['fee_amount'] ?? 0),
+                    'line_total' => (int) ($line['final_line_amount'] ?? $lineTotal),
                     'snapshot' => $line,
                 ]);
 
@@ -181,7 +197,7 @@ class TicketCheckoutService
                         'lifecycle_state' => 'issued',
                         'principal_id' => $principalId,
                         'principal_type' => 'user',
-                        'participant_binding_scope' => 'ticket_unit',
+                        'participant_binding_scope' => (string) ($line['participant_binding_scope'] ?? 'ticket_unit'),
                         'admission_code_hash' => $hash,
                         'issued_at' => Carbon::now(),
                         'version' => 1,
@@ -355,6 +371,7 @@ class TicketCheckoutService
             'checkout_mode' => (string) ($order->checkout_mode ?? 'free'),
             'confirmed_at' => optional($order->confirmed_at)->toISOString(),
             'checkout_snapshot_hash' => (string) ($order->checkout_snapshot_hash ?? ''),
+            'promotion_snapshot' => is_array($order->promotion_snapshot ?? null) ? $order->promotion_snapshot : [],
             'financial_snapshot' => is_array($order->financial_snapshot ?? null) ? $order->financial_snapshot : [],
             'units' => $units,
         ];

@@ -107,6 +107,7 @@ class InventoryMutationService
                 'unit_price' => $unitPrice,
                 'currency' => $currency,
                 'is_unlimited' => $product->isUnlimited(),
+                'participant_binding_scope' => (string) ($product->participant_binding_scope ?? 'ticket_unit'),
             ];
         }
 

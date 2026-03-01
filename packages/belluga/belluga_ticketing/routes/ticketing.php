@@ -7,9 +7,11 @@ use Belluga\Ticketing\Http\Api\v1\Controllers\TicketAdmissionController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketCartController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketCheckoutController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketOfferController;
+use Belluga\Ticketing\Http\Api\v1\Controllers\TicketPromotionAdminController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketProductAdminController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketRealtimeStreamController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketTokenController;
+use Belluga\Ticketing\Http\Api\v1\Controllers\TicketTransferReissueController;
 use Belluga\Ticketing\Http\Api\v1\Controllers\TicketValidationController;
 use Illuminate\Support\Facades\Route;
 
@@ -30,6 +32,10 @@ Route::prefix('api/v1')
         Route::get('/checkout/cart', [TicketCartController::class, 'show']);
         Route::post('/checkout/confirm', [TicketCheckoutController::class, 'confirm']);
         Route::post('/events/{event_id}/occurrences/{occurrence_id}/validation', [TicketValidationController::class, 'validateOccurrence']);
+        Route::post('/events/{event_id}/occurrences/{occurrence_id}/ticket_units/{ticket_unit_id}/transfer', [TicketTransferReissueController::class, 'transfer'])
+            ->middleware('abilities:events:update');
+        Route::post('/events/{event_id}/occurrences/{occurrence_id}/ticket_units/{ticket_unit_id}/reissue', [TicketTransferReissueController::class, 'reissue'])
+            ->middleware('abilities:events:update');
         Route::get('/ticketing/streams/queue/{scope_type}/{scope_id}', [TicketRealtimeStreamController::class, 'queue']);
         Route::get('/ticketing/streams/hold/{hold_id}', [TicketRealtimeStreamController::class, 'hold']);
     });
@@ -40,5 +46,9 @@ Route::prefix('admin/api/v1')
         Route::get('/events/{event_id}/occurrences/{occurrence_id}/ticket_products', [TicketProductAdminController::class, 'index'])
             ->middleware('abilities:events:read');
         Route::post('/events/{event_id}/occurrences/{occurrence_id}/ticket_products', [TicketProductAdminController::class, 'store'])
+            ->middleware('abilities:events:update');
+        Route::get('/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions', [TicketPromotionAdminController::class, 'index'])
+            ->middleware('abilities:events:read');
+        Route::post('/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions', [TicketPromotionAdminController::class, 'store'])
             ->middleware('abilities:events:update');
     });

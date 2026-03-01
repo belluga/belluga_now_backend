@@ -67,6 +67,20 @@ class TicketingRuntimeSettingsService
         return in_array($mode, ['free', 'paid'], true) ? $mode : 'free';
     }
 
+    public function promotionsEnabled(): bool
+    {
+        $promotions = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_promotions');
+
+        return (bool) ($promotions['enabled'] ?? false);
+    }
+
+    public function allowTransferReissue(): bool
+    {
+        $lifecycle = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_lifecycle');
+
+        return (bool) ($lifecycle['allow_transfer_reissue'] ?? false);
+    }
+
     private function clampInt(mixed $value, int $min, int $max): int
     {
         $number = is_numeric($value) ? (int) $value : $min;

@@ -7,6 +7,7 @@ namespace Belluga\Ticketing\Application\Admission;
 use Belluga\Ticketing\Application\Guards\OccurrenceWriteGuardService;
 use Belluga\Ticketing\Application\Holds\TicketHoldService;
 use Belluga\Ticketing\Application\Inventory\InventoryMutationService;
+use Belluga\Ticketing\Application\Promotions\TicketPromotionResolverService;
 use Belluga\Ticketing\Application\Queue\TicketQueueService;
 use Belluga\Ticketing\Application\Settings\TicketingRuntimeSettingsService;
 use Belluga\Ticketing\Application\Transactions\TenantTransactionRunner;
@@ -22,6 +23,7 @@ class TicketAdmissionService
         private readonly InventoryMutationService $inventory,
         private readonly TicketHoldService $holds,
         private readonly TicketQueueService $queue,
+        private readonly TicketPromotionResolverService $promotions,
         private readonly TenantTransactionRunner $transactions,
     ) {
     }
@@ -117,6 +119,16 @@ class TicketAdmissionService
         }
 
         $lines = $this->inventory->hydrateLines($items, $eventId, $occurrenceId);
+        $promotionCodes = $this->settings->promotionsEnabled()
+            ? $this->normalizePromotionCodes($payload['promotion_codes'] ?? [])
+            : [];
+        $promotionResolution = $this->promotions->resolve(
+            eventId: $eventId,
+            occurrenceId: $occurrenceId,
+            lines: $lines,
+            promotionCodes: $promotionCodes,
+        );
+        $lines = $promotionResolution['lines'];
         $requested = array_sum(array_map(static fn (array $line): int => (int) ($line['quantity'] ?? 0), $lines));
 
         if ($requested > $this->settings->maxPerPrincipal()) {
@@ -163,6 +175,7 @@ class TicketAdmissionService
                 $holdMinutes,
                 $paymentProfile,
                 $checkoutMode,
+                $promotionResolution,
             ): TicketHold {
                 $this->inventory->reserveLines($lines);
 
@@ -178,6 +191,7 @@ class TicketAdmissionService
                     holdMinutes: $holdMinutes,
                     paymentProfile: $paymentProfile,
                     checkoutMode: $checkoutMode,
+                    promotionSnapshot: $promotionResolution['snapshot'],
                 );
             });
         } catch (TicketingDomainException $exception) {
@@ -315,6 +329,7 @@ class TicketAdmissionService
                         paymentProfile: 'free',
                         checkoutMode: 'free',
                         queueEntryId: (string) $entry->getAttribute('_id'),
+                        promotionSnapshot: $this->promotionSnapshotFromLines($lines),
                     );
 
                     $this->queue->markAdmitted($entry, (string) $hold->getAttribute('_id'));
@@ -390,6 +405,67 @@ class TicketAdmissionService
     private function resolvePaymentProfile(string $checkoutMode): string
     {
         return $checkoutMode === 'free' ? 'free' : 'instant';
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $lines
+     * @return array<string, mixed>
+     */
+    private function promotionSnapshotFromLines(array $lines): array
+    {
+        $applied = [];
+        $totals = [
+            'discount_amount' => 0,
+            'fee_amount' => 0,
+        ];
+
+        foreach ($lines as $line) {
+            $totals['discount_amount'] += (int) ($line['discount_amount'] ?? 0);
+            $totals['fee_amount'] += (int) ($line['fee_amount'] ?? 0);
+
+            $lineApplied = is_array($line['applied_promotions'] ?? null) ? $line['applied_promotions'] : [];
+            foreach ($lineApplied as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+                $promotionId = (string) ($item['promotion_id'] ?? '');
+                if ($promotionId === '') {
+                    continue;
+                }
+                $applied[$promotionId] = $item;
+            }
+        }
+
+        return [
+            'version' => 1,
+            'requested_codes' => [],
+            'applied' => array_values($applied),
+            'rejected' => [],
+            'totals' => $totals,
+        ];
+    }
+
+    /**
+     * @param mixed $rawCodes
+     * @return array<int, string>
+     */
+    private function normalizePromotionCodes(mixed $rawCodes): array
+    {
+        if (! is_array($rawCodes)) {
+            return [];
+        }
+
+        $codes = [];
+        foreach ($rawCodes as $rawCode) {
+            $code = trim((string) $rawCode);
+            if ($code === '') {
+                continue;
+            }
+
+            $codes[] = $code;
+        }
+
+        return array_values(array_unique($codes));
     }
 
     private function guardHttpStatus(string $code): int

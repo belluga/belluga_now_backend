@@ -24,6 +24,7 @@ class TicketOrder extends Model
         'checkout_mode',
         'checkout_payload_snapshot',
         'checkout_snapshot_hash',
+        'promotion_snapshot',
         'financial_snapshot',
         'idempotency_key',
         'failure_code',

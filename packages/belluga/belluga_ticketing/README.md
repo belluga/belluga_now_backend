@@ -7,6 +7,12 @@ This package owns ticketing-domain runtime concerns for Events integration.
 - `belluga_ticketing` owns inventory, holds, queue admission, order snapshots, ticket-unit lifecycle, and admission validation.
 - Payment provider mechanics remain Checkout-owned through contract integration (`CheckoutOrchestratorContract`).
 
+## Terminology Boundary (Canonical)
+- `event_parties` are part of event composition (artists, artisans, hosts, venue, organizers) and belong to **Events** domain.
+- Attendees/students are audience/attendance identities and belong to **Ticketing/Participation** domain.
+- Ticketing does not persist or resolve `event_parties` for eligibility.
+- Events does not use `event_parties` as attendee/student entitlement model.
+
 ## Host Integration Contracts
 Host app must bind:
 - `OccurrenceReadContract`
@@ -34,7 +40,8 @@ Registered tenant namespaces:
 - `ticketing_seating` (VNext toggle)
 - `ticketing_validation`
 - `ticketing_security`
-- `ticketing_lifecycle`
+- `ticketing_lifecycle` (`allow_transfer_reissue`)
+- `ticketing_promotions` (`enabled`)
 - `checkout_core` (`mode=free|paid`)
 - `checkout_ticketing` (`enabled`)
 - `participation_presence`
@@ -42,14 +49,20 @@ Registered tenant namespaces:
 
 ## API Surface (v1)
 - `GET /api/v1/events/{event_id}/occurrences/{occurrence_id}/offer`
+- `GET /api/v1/occurrences/{occurrence_id}/offer`
 - `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/admission`
+- `POST /api/v1/occurrences/{occurrence_id}/admission`
 - `POST /api/v1/admission/tokens/refresh`
 - `GET /api/v1/checkout/cart?hold_token=...`
 - `POST /api/v1/checkout/confirm`
 - `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/validation`
+- `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_units/{ticket_unit_id}/transfer`
+- `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_units/{ticket_unit_id}/reissue`
 - Admin:
   - `GET /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_products`
   - `POST /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_products`
+  - `GET /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions`
+  - `POST /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions`
 
 ## Hold/Queue/Capacity Rules
 - Hold protection is always applied for limited inventory.
@@ -68,6 +81,24 @@ Registered tenant namespaces:
 - `financial_snapshot` is frozen at confirmation.
 - Snapshot hash is deterministic (`snapshot_hash`) and replay-safe.
 
+## Promotions Capability (`ticketing_promotions`)
+- Canonical types: `percent_discount`, `fixed_discount`, `service_charge`, `bundle_price_override`.
+- Scopes: `event`, `occurrence`, `ticket_product`.
+- Conflict precedence: `ticket_product > occurrence > event` when promotions of the same type overlap.
+- Modes: `stackable`, `exclusive`.
+- Quotas: `global_uses_limit` and optional `max_uses_per_principal`.
+- `promotion_snapshot` is immutable at order confirmation and persisted in `ticket_orders`.
+- Quota consumption is transactional in free-confirm flow to prevent oversubscription.
+
+## Transfer/Reissue Capability (`ticketing_lifecycle`)
+- Disabled by default and controlled by `allow_transfer_reissue`.
+- Operations are manual and admin-gated (`tenant-admin|account-admin` via route auth + abilities).
+- Reissue/transfer are atomic: source unit moves to terminal state (`reissued|transferred`), replacement unit is issued.
+- Audit chain is append-only in `ticket_unit_audit_events` with actor, reason, source, targets, and idempotency key.
+- Group participant binding is respected:
+  - `ticket_unit` -> affects a single unit.
+  - `combo_unit|passport_unit` -> affects all issued units in the same binding scope.
+
 ## Outbox and Async Side Effects
 - Outbox events are persisted in `ticket_outbox_events`.
 - Scheduler job `ProcessTicketOutboxJob` processes pending events.
@@ -81,6 +112,8 @@ Event creation supports `template_id` lookup through `EventTemplateReadContract`
 
 ## Tenant Collections (MIG-01)
 - `ticket_products`
+- `ticket_promotions`
+- `ticket_promotion_redemptions`
 - `ticket_event_templates`
 - `ticket_inventory_states`
 - `ticket_holds`
@@ -89,6 +122,7 @@ Event creation supports `template_id` lookup through `EventTemplateReadContract`
 - `ticket_order_items`
 - `ticket_units`
 - `ticket_checkin_logs`
+- `ticket_unit_audit_events`
 - `ticket_outbox_events`
 
 ## Deferred to VNext

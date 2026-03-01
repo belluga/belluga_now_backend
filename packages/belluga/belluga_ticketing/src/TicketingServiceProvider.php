@@ -12,10 +12,13 @@ use Belluga\Ticketing\Application\Guards\OccurrenceWriteGuardService;
 use Belluga\Ticketing\Application\Holds\TicketHoldService;
 use Belluga\Ticketing\Application\Inventory\InventoryMutationService;
 use Belluga\Ticketing\Application\Lifecycle\TicketUnitLifecycleService;
+use Belluga\Ticketing\Application\Promotions\TicketPromotionQuotaService;
+use Belluga\Ticketing\Application\Promotions\TicketPromotionResolverService;
 use Belluga\Ticketing\Application\Queue\TicketQueueService;
 use Belluga\Ticketing\Application\Realtime\TicketRealtimeStreamService;
 use Belluga\Ticketing\Application\Security\TicketingCommandRateLimiter;
 use Belluga\Ticketing\Application\Settings\TicketingRuntimeSettingsService;
+use Belluga\Ticketing\Application\TransferReissue\TicketTransferReissueService;
 use Belluga\Ticketing\Application\Transactions\TenantTransactionRunner;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
@@ -39,11 +42,14 @@ class TicketingServiceProvider extends ServiceProvider
         $this->app->singleton(TicketRealtimeStreamService::class);
         $this->app->singleton(TicketingCommandRateLimiter::class);
         $this->app->singleton(TicketOutboxEmitter::class);
+        $this->app->singleton(TicketPromotionResolverService::class);
+        $this->app->singleton(TicketPromotionQuotaService::class);
         $this->app->singleton(TicketHoldService::class);
         $this->app->singleton(CheckoutPayloadAssembler::class);
         $this->app->singleton(TicketAdmissionService::class);
         $this->app->singleton(TicketCheckoutService::class);
         $this->app->singleton(TicketUnitLifecycleService::class);
+        $this->app->singleton(TicketTransferReissueService::class);
 
         $this->ensureHostBinding(OccurrenceReadContract::class);
         $this->ensureHostBinding(OccurrencePublicationContract::class);
@@ -246,6 +252,28 @@ class TicketingServiceProvider extends ServiceProvider
             description: 'Lifecycle capability toggles for transfer and reissue.',
             descriptionI18nKey: 'settings.ticketing_lifecycle.namespace.description',
             icon: 'autorenew',
+        ));
+
+        $registry->register(new SettingsNamespaceDefinition(
+            namespace: 'ticketing_promotions',
+            scope: 'tenant',
+            label: 'Ticketing Promotions',
+            groupLabel: 'Ticketing',
+            ability: $ability,
+            fields: [
+                'enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'label' => 'Enabled',
+                    'default' => false,
+                    'order' => 10,
+                ],
+            ],
+            order: 175,
+            labelI18nKey: 'settings.ticketing_promotions.namespace.label',
+            description: 'Promotions capability toggle and controls.',
+            descriptionI18nKey: 'settings.ticketing_promotions.namespace.description',
+            icon: 'local_offer',
         ));
 
         $registry->register(new SettingsNamespaceDefinition(

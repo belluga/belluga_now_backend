@@ -25,7 +25,25 @@ Implemented and locked:
 - pilot capability `multiple_occurrences`
 
 Deferred (still pending):
-- final capability block (ticketing capabilities: inventory, qr_checkin, combo, limits, participant/student binding, pricing fees)
+- final capability block (ticketing capabilities: inventory, qr_checkin, combo, limits, attendee/student binding, pricing fees)
+
+---
+
+## Terminology Boundary (Canonical)
+
+### Event Parties (`event_parties`)
+- Represents entities that are part of composing the event itself.
+- Examples: artists, artisans, hosts, venues, organizers.
+- Domain ownership: **Events**.
+- Purpose: content composition + ACL/edit permissions.
+
+### Attendees / Students (Attendance Binding)
+- Represents people who will attend/consume access to the event or occurrence.
+- Examples: students, ticket holders, invited attendees.
+- Domain ownership: **Ticketing/Participation** (not Events).
+- Purpose: eligibility, entitlement, access validation, and presence/check-in.
+
+Rule: `event_parties` must never be reused as attendee/student binding.
 
 ---
 

@@ -14,6 +14,7 @@ use Belluga\Ticketing\Application\Guards\OccurrenceWriteGuardService;
 use Belluga\Ticketing\Application\Admission\TicketAdmissionService;
 use Belluga\Ticketing\Application\Checkout\TicketCheckoutService;
 use Belluga\Ticketing\Application\Lifecycle\TicketUnitLifecycleService;
+use Belluga\Ticketing\Application\TransferReissue\TicketTransferReissueService;
 use Belluga\Ticketing\Contracts\CheckoutOrchestratorContract;
 use Belluga\Ticketing\Contracts\EventTemplateReadContract;
 use Belluga\Ticketing\Contracts\OccurrencePublicationContract;
@@ -34,6 +35,7 @@ class TicketingPackageBindingsTest extends TestCase
         $this->assertInstanceOf(TicketAdmissionService::class, $this->app->make(TicketAdmissionService::class));
         $this->assertInstanceOf(TicketCheckoutService::class, $this->app->make(TicketCheckoutService::class));
         $this->assertInstanceOf(TicketUnitLifecycleService::class, $this->app->make(TicketUnitLifecycleService::class));
+        $this->assertInstanceOf(TicketTransferReissueService::class, $this->app->make(TicketTransferReissueService::class));
     }
 
     public function testTicketingNamespacesAreRegisteredInSettingsRegistry(): void
@@ -46,6 +48,7 @@ class TicketingPackageBindingsTest extends TestCase
         $this->assertNotNull($registry->find('ticketing_validation', 'tenant'));
         $this->assertNotNull($registry->find('ticketing_security', 'tenant'));
         $this->assertNotNull($registry->find('ticketing_lifecycle', 'tenant'));
+        $this->assertNotNull($registry->find('ticketing_promotions', 'tenant'));
         $this->assertNotNull($registry->find('checkout_core', 'tenant'));
         $this->assertNotNull($registry->find('checkout_ticketing', 'tenant'));
         $this->assertNotNull($registry->find('participation_presence', 'tenant'));
