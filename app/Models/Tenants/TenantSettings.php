@@ -10,6 +10,8 @@ class TenantSettings extends PackageTenantSettings
 {
     protected $fillable = [
         'map_ui',
+        'map_ingest',
+        'map_security',
         'events',
     ];
 
@@ -27,6 +29,24 @@ class TenantSettings extends PackageTenantSettings
      * @return array<string, mixed>
      */
     public function getEventsAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    public function getMapIngestAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    public function getMapSecurityAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

@@ -6,15 +6,17 @@ namespace App\Providers;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
-use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
 use App\Integration\Events\EventParties\ArtistEventPartyMapper;
 use App\Integration\Events\EventParties\VenueEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
-use App\Integration\Events\HostEventAsyncJobSignaturesAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
+use App\Integration\MapPois\MapPoiRegistryAdapter;
+use App\Integration\MapPois\MapPoiSettingsAdapter;
+use App\Integration\MapPois\MapPoiSourceReaderAdapter;
+use App\Integration\MapPois\MapPoiTenantContextAdapter;
 use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Integration\Push\PushAccountContextAdapter;
 use App\Integration\Push\PushTelemetryEmitterAdapter;
@@ -25,9 +27,6 @@ use App\Integration\Ticketing\EventTemplateReadAdapter;
 use App\Integration\Ticketing\OccurrencePublicationAdapter;
 use App\Integration\Ticketing\OccurrenceReadAdapter;
 use App\Integration\Ticketing\TenantTicketingPolicyAdapter;
-use App\Listeners\EventsPackage\SyncMapPoiOnEventCreated;
-use App\Listeners\EventsPackage\SyncMapPoiOnEventDeleted;
-use App\Listeners\EventsPackage\SyncMapPoiOnEventUpdated;
 use App\Application\Push\PushAudienceEligibilityService;
 use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
 use App\Application\Telemetry\TelemetryEmitter;
@@ -52,9 +51,12 @@ use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
-use Belluga\Events\Domain\Events\EventCreated;
-use Belluga\Events\Domain\Events\EventDeleted;
-use Belluga\Events\Domain\Events\EventUpdated;
+use Belluga\MapPois\Contracts\MapPoiRegistryContract;
+use Belluga\MapPois\Contracts\MapPoiSettingsContract;
+use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
+use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
+use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
+use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
@@ -69,7 +71,6 @@ use Belluga\Ticketing\Contracts\EventTemplateReadContract;
 use Belluga\Ticketing\Contracts\OccurrencePublicationContract;
 use Belluga\Ticketing\Contracts\OccurrenceReadContract;
 use Belluga\Ticketing\Contracts\TicketingPolicyContract;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use App\Application\Tenants\TenantDomainResolverService;
@@ -152,7 +153,7 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->bind(
             EventAsyncJobSignaturesContract::class,
-            HostEventAsyncJobSignaturesAdapter::class
+            MapPoiEventAsyncJobSignaturesAdapter::class
         );
 
         $this->app->singleton(
@@ -173,12 +174,32 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->bind(
             EventProjectionSyncContract::class,
-            EventMapPoiProjectionSyncAdapter::class
+            MapPoiEventProjectionSyncAdapter::class
         );
 
         $this->app->bind(
             EventRadiusSettingsContract::class,
             TenantRadiusSettingsAdapter::class
+        );
+
+        $this->app->bind(
+            MapPoiSourceReaderContract::class,
+            MapPoiSourceReaderAdapter::class
+        );
+
+        $this->app->bind(
+            MapPoiRegistryContract::class,
+            MapPoiRegistryAdapter::class
+        );
+
+        $this->app->bind(
+            MapPoiSettingsContract::class,
+            MapPoiSettingsAdapter::class
+        );
+
+        $this->app->bind(
+            MapPoiTenantContextContract::class,
+            MapPoiTenantContextAdapter::class
         );
 
         $this->app->bind(
@@ -249,10 +270,6 @@ class AppServiceProvider extends ServiceProvider
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
         $this->registerCoreSettingsNamespaces();
-
-        Event::listen(EventCreated::class, SyncMapPoiOnEventCreated::class);
-        Event::listen(EventUpdated::class, SyncMapPoiOnEventUpdated::class);
-        Event::listen(EventDeleted::class, SyncMapPoiOnEventDeleted::class);
     }
 
     private function registerCoreSettingsNamespaces(): void
@@ -262,71 +279,6 @@ class AppServiceProvider extends ServiceProvider
         }
 
         $registry = $this->app->make(SettingsRegistryContract::class);
-
-        $registry->register(new SettingsNamespaceDefinition(
-            namespace: 'map_ui',
-            scope: 'tenant',
-            label: 'Map UI',
-            groupLabel: 'Core',
-            ability: 'account-users:view',
-            fields: [
-                'radius.min_km' => [
-                    'type' => 'number',
-                    'nullable' => false,
-                    'label' => 'Radius Min (KM)',
-                    'label_i18n_key' => 'settings.map_ui.radius.min_km.label',
-                    'group' => 'radius',
-                    'group_label' => 'Radius',
-                    'group_label_i18n_key' => 'settings.map_ui.group.radius.label',
-                    'order' => 10,
-                ],
-                'radius.default_km' => [
-                    'type' => 'number',
-                    'nullable' => false,
-                    'label' => 'Radius Default (KM)',
-                    'label_i18n_key' => 'settings.map_ui.radius.default_km.label',
-                    'group' => 'radius',
-                    'group_label' => 'Radius',
-                    'group_label_i18n_key' => 'settings.map_ui.group.radius.label',
-                    'order' => 20,
-                ],
-                'radius.max_km' => [
-                    'type' => 'number',
-                    'nullable' => false,
-                    'label' => 'Radius Max (KM)',
-                    'label_i18n_key' => 'settings.map_ui.radius.max_km.label',
-                    'group' => 'radius',
-                    'group_label' => 'Radius',
-                    'group_label_i18n_key' => 'settings.map_ui.group.radius.label',
-                    'order' => 30,
-                ],
-                'poi_time_window_days.past' => [
-                    'type' => 'integer',
-                    'nullable' => false,
-                    'label' => 'POI Past Window (days)',
-                    'label_i18n_key' => 'settings.map_ui.poi_time_window_days.past.label',
-                    'group' => 'poi_time_window_days',
-                    'group_label' => 'POI Time Window',
-                    'group_label_i18n_key' => 'settings.map_ui.group.poi_time_window_days.label',
-                    'order' => 40,
-                ],
-                'poi_time_window_days.future' => [
-                    'type' => 'integer',
-                    'nullable' => false,
-                    'label' => 'POI Future Window (days)',
-                    'label_i18n_key' => 'settings.map_ui.poi_time_window_days.future.label',
-                    'group' => 'poi_time_window_days',
-                    'group_label' => 'POI Time Window',
-                    'group_label_i18n_key' => 'settings.map_ui.group.poi_time_window_days.label',
-                    'order' => 50,
-                ],
-            ],
-            order: 10,
-            labelI18nKey: 'settings.map_ui.namespace.label',
-            description: 'Map and POI defaults.',
-            descriptionI18nKey: 'settings.map_ui.namespace.description',
-            icon: 'map',
-        ));
 
         $registry->register(new SettingsNamespaceDefinition(
             namespace: 'events',

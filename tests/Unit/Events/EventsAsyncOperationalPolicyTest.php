@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Events;
 
-use App\Jobs\MapPois\DeleteMapPoiByRefJob;
-use App\Jobs\MapPois\UpsertMapPoiFromEventJob;
+use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Tests\TestCase;
 

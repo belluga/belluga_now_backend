@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountProfilesController;
-use App\Http\Api\v1\Controllers\MapPoisController;
 use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Events\Http\Api\v1\Controllers\AgendaController;
@@ -16,8 +15,5 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::get('/events/stream', [EventStreamController::class, 'stream']);
         Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
-        Route::get('/map/pois', [MapPoisController::class, 'index']);
-        Route::get('/map/near', [MapPoisController::class, 'near']);
-        Route::get('/map/filters', [MapPoisController::class, 'filters']);
         Route::get('/static_assets/{asset_ref}', [StaticAssetsController::class, 'showPublic']);
     });

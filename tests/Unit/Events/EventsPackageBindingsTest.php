@@ -6,9 +6,9 @@ namespace Tests\Unit\Events;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
-use App\Integration\Events\EventMapPoiProjectionSyncAdapter;
+use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
-use App\Integration\Events\HostEventAsyncJobSignaturesAdapter;
+use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
@@ -57,7 +57,7 @@ class EventsPackageBindingsTest extends TestCase
             $this->app->make(EventTenantContextContract::class)
         );
         $this->assertInstanceOf(
-            EventMapPoiProjectionSyncAdapter::class,
+            MapPoiEventProjectionSyncAdapter::class,
             $this->app->make(EventProjectionSyncContract::class)
         );
         $this->assertInstanceOf(
@@ -73,7 +73,7 @@ class EventsPackageBindingsTest extends TestCase
             $this->app->make(EventAsyncQueueMetricsProviderContract::class)
         );
         $this->assertInstanceOf(
-            HostEventAsyncJobSignaturesAdapter::class,
+            MapPoiEventAsyncJobSignaturesAdapter::class,
             $this->app->make(EventAsyncJobSignaturesContract::class)
         );
     }

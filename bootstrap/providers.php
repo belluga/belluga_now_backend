@@ -7,4 +7,5 @@ return [
     Belluga\Settings\SettingsServiceProvider::class,
     Belluga\PushHandler\PushHandlerServiceProvider::class,
     Belluga\Ticketing\TicketingServiceProvider::class,
+    Belluga\MapPois\MapPoisServiceProvider::class,
 ];

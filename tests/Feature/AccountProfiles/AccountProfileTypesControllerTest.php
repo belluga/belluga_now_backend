@@ -6,7 +6,7 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\MapPoi;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\TenantProfileType;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;

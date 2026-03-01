@@ -10,7 +10,7 @@ use App\Application\StaticAssets\StaticAssetManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Models\Tenants\MapPoi;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
