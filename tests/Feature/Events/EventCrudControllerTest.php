@@ -7,6 +7,7 @@ namespace Tests\Feature\Events;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\MapPois\MapPoiProjectionService;
 use App\Jobs\MapPois\DeleteMapPoiByRefJob;
 use App\Jobs\MapPois\UpsertMapPoiFromEventJob;
 use App\Models\Landlord\Tenant;
@@ -485,6 +486,223 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function testEventCreateExposesMapPoiCapabilityByDefaultWhenTenantAllowsIt(): void
+    {
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.map_poi.enabled', true);
+    }
+
+    public function testEventCreateHidesMapPoiCapabilityWhenTenantDisablesIt(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => false,
+        ])->assertStatus(200);
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $this->assertNull($response->json('data.capabilities.map_poi'));
+
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => true,
+        ])->assertStatus(200);
+    }
+
+    public function testEventCreateOnlineSupportsRangeDiscoveryScopeForMapPoiProjection(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => true,
+        ])->assertStatus(200);
+
+        $payload = $this->makeEventPayload([
+            'location' => [
+                'mode' => 'online',
+                'online' => [
+                    'url' => 'https://meet.example.org/events-room',
+                    'platform' => 'jitsi',
+                ],
+            ],
+            'place_ref' => null,
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                    'discovery_scope' => [
+                        'type' => 'range',
+                        'center' => [
+                            'type' => 'Point',
+                            'coordinates' => [-39.99, -20.01],
+                        ],
+                        'radius_meters' => 8000,
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.map_poi.enabled', true);
+        $response->assertJsonPath('data.capabilities.map_poi.discovery_scope.type', 'range');
+        $eventId = (string) $response->json('data.event_id');
+        $event = Event::query()->find($eventId);
+        $this->assertNotNull($event);
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+
+        $poi = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+
+        $this->assertNotNull($poi);
+        $this->assertTrue((bool) ($poi->is_active ?? false));
+        $this->assertSame('range', data_get($poi->discovery_scope, 'type'));
+        $this->assertEquals(-39.99, (float) data_get($poi->location, 'coordinates.0'));
+        $this->assertEquals(-20.01, (float) data_get($poi->location, 'coordinates.1'));
+    }
+
+    public function testEventMapPoiProjectionSoftHidesWhenOccurrencesBecomeStale(): void
+    {
+        $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
+        Carbon::setTestNow($baseline);
+
+        try {
+            $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+                'occurrences' => [[
+                    'date_time_start' => $baseline->copy()->addHour()->toISOString(),
+                ]],
+            ]));
+            $createResponse->assertStatus(201);
+
+            $eventId = (string) $createResponse->json('data.event_id');
+            $event = Event::query()->find($eventId);
+            $this->assertNotNull($event);
+            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+            $this->assertTrue(
+                MapPoi::query()
+                    ->where('ref_type', 'event')
+                    ->where('ref_id', $eventId)
+                    ->where('is_active', true)
+                    ->exists()
+            );
+
+            Carbon::setTestNow($baseline->copy()->addHours(8));
+
+            $updateResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+                'occurrences' => [[
+                    'date_time_start' => $baseline->copy()->subHours(5)->toISOString(),
+                ]],
+            ]);
+            $updateResponse->assertStatus(200);
+            $updated = Event::query()->find($eventId);
+            $this->assertNotNull($updated);
+            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($updated);
+
+            $poi = MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', $eventId)
+                ->first();
+
+            $this->assertNotNull($poi);
+            $this->assertFalse((bool) ($poi->is_active ?? true));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function testEventMapPoiCapabilityDisableAndReenableIsNonDestructive(): void
+    {
+        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $createResponse->assertStatus(201);
+        $eventId = (string) $createResponse->json('data.event_id');
+        $created = Event::query()->find($eventId);
+        $this->assertNotNull($created);
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($created);
+
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', $eventId)
+                ->where('is_active', true)
+                ->exists()
+        );
+
+        $disableResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => false,
+                ],
+            ],
+        ]);
+        $disableResponse->assertStatus(200);
+        $disabledEvent = Event::query()->find($eventId);
+        $this->assertNotNull($disabledEvent);
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($disabledEvent);
+
+        $disabledPoi = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+        $this->assertNotNull($disabledPoi);
+        $this->assertFalse((bool) ($disabledPoi->is_active ?? true));
+
+        $enableResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+        $enableResponse->assertStatus(200);
+        $enabledEvent = Event::query()->find($eventId);
+        $this->assertNotNull($enabledEvent);
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($enabledEvent);
+
+        $reenabledPoi = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+        $this->assertNotNull($reenabledPoi);
+        $this->assertTrue((bool) ($reenabledPoi->is_active ?? false));
+    }
+
+    public function testEventMapPoiProjectionIgnoresStaleCheckpointWrite(): void
+    {
+        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $createResponse->assertStatus(201);
+
+        $eventId = (string) $createResponse->json('data.event_id');
+        $event = Event::query()->find($eventId);
+        $this->assertNotNull($event);
+
+        $projectionService = $this->app->make(MapPoiProjectionService::class);
+        $projectionService->upsertFromEvent($event);
+
+        $poi = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+        $this->assertNotNull($poi);
+
+        $lockedCheckpoint = (int) Carbon::now()->addDay()->valueOf();
+        $poi->fill([
+            'source_checkpoint' => $lockedCheckpoint,
+            'name' => 'Locked POI Name',
+        ]);
+        $poi->save();
+
+        $projectionService->upsertFromEvent($event->fresh());
+
+        $freshPoi = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+        $this->assertNotNull($freshPoi);
+        $this->assertSame($lockedCheckpoint, (int) ($freshPoi->source_checkpoint ?? 0));
+        $this->assertSame('Locked POI Name', (string) ($freshPoi->name ?? ''));
     }
 
     public function testEventCreateAllowsMultipleOccurrencesWhenTenantSettingsEnableIt(): void

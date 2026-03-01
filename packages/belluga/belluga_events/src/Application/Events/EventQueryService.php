@@ -863,21 +863,39 @@ class EventQueryService
     {
         $raw = $this->normalizeArray($event->capabilities ?? []);
         $multipleOccurrences = $this->normalizeArray($raw['multiple_occurrences'] ?? []);
-        $eventEnabled = (bool) ($multipleOccurrences['enabled'] ?? false);
+        $multipleEventEnabled = (bool) ($multipleOccurrences['enabled'] ?? false);
+
+        $mapPoi = $this->normalizeArray($raw['map_poi'] ?? []);
+        $mapPoiEventEnabled = (bool) ($mapPoi['enabled'] ?? true);
+        $mapPoiDiscoveryScope = $this->normalizeArray($mapPoi['discovery_scope'] ?? null);
+        if ($mapPoiDiscoveryScope === []) {
+            $mapPoiDiscoveryScope = null;
+        }
 
         $tenantCapabilities = $this->resolveTenantCapabilities();
         $tenantMultiple = $this->normalizeArray($tenantCapabilities['multiple_occurrences'] ?? []);
-        $tenantAvailable = (bool) ($tenantMultiple['allow_multiple'] ?? false);
+        $tenantMultipleAvailable = (bool) ($tenantMultiple['allow_multiple'] ?? false);
 
-        if (! $tenantAvailable) {
-            return [];
+        $tenantMapPoi = $this->normalizeArray($tenantCapabilities['map_poi'] ?? []);
+        $tenantMapPoiAvailable = (bool) ($tenantMapPoi['available'] ?? true);
+
+        $capabilities = [];
+        if ($tenantMultipleAvailable) {
+            $capabilities['multiple_occurrences'] = [
+                'enabled' => $multipleEventEnabled,
+            ];
         }
 
-        return [
-            'multiple_occurrences' => [
-                'enabled' => $eventEnabled,
-            ],
-        ];
+        if ($tenantMapPoiAvailable) {
+            $capabilities['map_poi'] = [
+                'enabled' => $mapPoiEventEnabled,
+            ];
+            if ($mapPoiDiscoveryScope !== null) {
+                $capabilities['map_poi']['discovery_scope'] = $mapPoiDiscoveryScope;
+            }
+        }
+
+        return $capabilities;
     }
 
     /**

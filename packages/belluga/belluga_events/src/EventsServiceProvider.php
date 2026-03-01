@@ -8,6 +8,7 @@ use Belluga\Events\Application\Operations\EventDlqAlertService;
 use Belluga\Events\Application\Operations\PackageEventAsyncJobSignatures;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
+use Belluga\Events\Capabilities\MapPoiCapabilityHandler;
 use Belluga\Events\Capabilities\MultipleOccurrencesCapabilityHandler;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
@@ -33,6 +34,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->app->singleton(EventCapabilityRegistryContract::class, static function () {
             $registry = new InMemoryEventCapabilityRegistry();
             $registry->register(new MultipleOccurrencesCapabilityHandler());
+            $registry->register(new MapPoiCapabilityHandler());
 
             return $registry;
         });

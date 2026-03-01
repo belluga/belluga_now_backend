@@ -231,8 +231,14 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
         $eventsFields = $events['fields'] ?? [];
         $stock = collect($eventsFields)->firstWhere('path', 'stock_enabled');
+        $mapPoiAvailability = collect($eventsFields)->firstWhere('path', 'capabilities.map_poi.available');
         $this->assertIsArray($stock);
+        $this->assertIsArray($mapPoiAvailability);
         $this->assertSame('settings.events.stock_enabled.label', $stock['label_i18n_key'] ?? null);
+        $this->assertSame(
+            'settings.events.capabilities.map_poi.available.label',
+            $mapPoiAvailability['label_i18n_key'] ?? null
+        );
         $this->assertIsArray($stock['visible_if'] ?? null);
     }
 

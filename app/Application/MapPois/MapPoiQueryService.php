@@ -417,12 +417,37 @@ class MapPoiQueryService
             return [];
         }
 
-        return [
+        $locationWithin = [
             'location' => [
                 '$geoWithin' => [
                     '$box' => [
                         [(float) $swLng, (float) $swLat],
                         [(float) $neLng, (float) $neLat],
+                    ],
+                ],
+            ],
+        ];
+
+        $boxPolygon = [
+            'type' => 'Polygon',
+            'coordinates' => [[
+                [(float) $swLng, (float) $swLat],
+                [(float) $neLng, (float) $swLat],
+                [(float) $neLng, (float) $neLat],
+                [(float) $swLng, (float) $neLat],
+                [(float) $swLng, (float) $swLat],
+            ]],
+        ];
+
+        return [
+            '$or' => [
+                $locationWithin,
+                [
+                    'discovery_scope.type' => 'polygon',
+                    'discovery_scope.polygon' => [
+                        '$geoIntersects' => [
+                            '$geometry' => $boxPolygon,
+                        ],
                     ],
                 ],
             ],
@@ -522,6 +547,7 @@ class MapPoiQueryService
             'ref_id' => (string) ($payloadData['ref_id'] ?? ''),
             'category' => (string) ($payloadData['category'] ?? ''),
             'location' => $location,
+            'is_happening_now' => (bool) ($payloadData['is_happening_now'] ?? false),
             'priority' => (int) ($payloadData['priority'] ?? 0),
             'updated_at' => $this->formatDate($payloadData['updated_at'] ?? null),
         ];
@@ -553,6 +579,7 @@ class MapPoiQueryService
             'category' => (string) ($payloadData['category'] ?? ''),
             'location' => $location,
             'distance_meters' => $distance,
+            'is_happening_now' => (bool) ($payloadData['is_happening_now'] ?? false),
             'updated_at' => $this->formatDate($payloadData['updated_at'] ?? null),
             'time_start' => $this->formatDate($payloadData['time_start'] ?? null),
             'time_end' => $this->formatDate($payloadData['time_end'] ?? null),
@@ -561,7 +588,34 @@ class MapPoiQueryService
             'badge' => $payloadData['badge'] ?? null,
             'tags' => $this->normalizeStringArray($payloadData['tags'] ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($payloadData['taxonomy_terms'] ?? []),
+            'occurrence_facets' => $this->formatOccurrenceFacets($payloadData['occurrence_facets'] ?? []),
         ];
+    }
+
+    /**
+     * @param array<int, mixed> $facets
+     * @return array<int, array<string, mixed>>
+     */
+    private function formatOccurrenceFacets(array $facets): array
+    {
+        $normalized = [];
+
+        foreach ($facets as $facet) {
+            if (! is_array($facet)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'occurrence_id' => (string) ($facet['occurrence_id'] ?? ''),
+                'occurrence_slug' => isset($facet['occurrence_slug']) ? (string) $facet['occurrence_slug'] : null,
+                'starts_at' => (string) ($facet['starts_at'] ?? ''),
+                'ends_at' => isset($facet['ends_at']) ? (string) $facet['ends_at'] : null,
+                'effective_end' => isset($facet['effective_end']) ? (string) $facet['effective_end'] : null,
+                'is_happening_now' => (bool) ($facet['is_happening_now'] ?? false),
+            ];
+        }
+
+        return $normalized;
     }
 
     /**

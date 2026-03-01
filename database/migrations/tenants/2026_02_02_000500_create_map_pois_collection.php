@@ -13,13 +13,11 @@ return new class extends Migration
     {
         Schema::create('map_pois', function (Blueprint $collection) {
             $collection->unique(['ref_type' => 1, 'ref_id' => 1]);
+            $collection->unique(['projection_key' => 1]);
             $collection->index(['location' => '2dsphere']);
-            $collection->index(['is_active' => 1, 'category' => 1]);
-            $collection->index(['taxonomy_terms_flat' => 1]);
-            $collection->index(['tags' => 1]);
-            $collection->index(['active_window_start_at' => 1]);
-            $collection->index(['active_window_end_at' => 1]);
-            $collection->index(['updated_at' => -1]);
+            $collection->index(['is_active' => 1, 'updated_at' => -1, '_id' => 1]);
+            $collection->index(['active_window_start_at' => 1, 'active_window_end_at' => 1, '_id' => 1]);
+            $collection->index(['category' => 1, 'updated_at' => -1, '_id' => 1]);
         });
     }
 

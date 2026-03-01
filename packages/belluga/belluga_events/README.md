@@ -23,6 +23,7 @@ Implemented and locked:
 - ACL/event-parties foundation (`created_by`, `event_parties`, `can_edit`)
 - settings-kernel integration for capability gating (`events` namespace)
 - pilot capability `multiple_occurrences`
+- capability `map_poi` (tenant/event gate + geometry contract + projection semantics)
 
 Deferred (still pending):
 - final capability block (ticketing capabilities: inventory, qr_checkin, combo, limits, attendee/student binding, pricing fees)
@@ -312,6 +313,11 @@ Tenant capability settings come from settings-kernel namespace `events`:
 
 Event-level usage:
 - `capabilities.multiple_occurrences.enabled` (bool)
+- `capabilities.map_poi.enabled` (bool, default `true`)
+- `capabilities.map_poi.discovery_scope` (optional)
+  - `type=point`: requires `point:{type:Point,coordinates:[lng,lat]}`
+  - `type=range|circle`: requires `center:{type:Point,coordinates:[lng,lat]}` + `radius_meters`
+  - `type=polygon`: requires `polygon:{type:Polygon,coordinates:[...]}`
 
 Normalization:
 - tenant `max_occurrences=0` is normalized to `null`
@@ -323,6 +329,38 @@ Enforcement:
 Disable/reenable behavior:
 - non-destructive
 - config is preserved while disabled
+
+### `map_poi` Capability Runtime Behavior
+
+Tenant key:
+- `events.capabilities.map_poi.available` (bool, default `true`)
+
+Event payload key:
+- `capabilities.map_poi.enabled`
+- `capabilities.map_poi.discovery_scope` (optional regional/online discovery geometry)
+
+Effective gate:
+- map projection side effects run only when:
+  - tenant `map_poi.available=true`
+  - event `capabilities.map_poi.enabled=true`
+
+Projection semantics:
+- one consolidated POI projection per event (`projection_key=event:{event_id}`)
+- occurrence details are projected as `occurrence_facets[]`
+- each facet includes `effective_end` and `is_happening_now`
+- stale/ineligible transitions are soft-hide (`is_active=false`) instead of hard delete
+- projection writes are idempotent by monotonic `source_checkpoint` (stale retries are ignored)
+
+Happening-now/staleness rule:
+- `is_happening_now=true` when `date_time_start <= now < effective_end`
+- `effective_end = date_time_end` when present
+- fallback `effective_end = date_time_start + 3h` when end is absent
+
+Geometry compatibility:
+- canonical persisted geo is always `Point` in `location`
+- `range/circle` persists `center + radius_meters` in `discovery_scope`
+- `polygon` persists GeoJSON polygon in `discovery_scope.polygon`
+- randomized/jitter coordinates are never persisted
 
 ---
 
