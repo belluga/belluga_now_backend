@@ -10,8 +10,10 @@ return new class extends Migration
     {
         Schema::create('event_occurrences', function (Blueprint $collection): void {
             $collection->unique(['event_id' => 1, 'occurrence_index' => 1]);
+            $collection->unique(['occurrence_slug' => 1]);
             $collection->index(['deleted_at' => 1, 'is_event_published' => 1, 'starts_at' => 1, '_id' => 1]);
             $collection->index(['event_id' => 1, 'starts_at' => 1]);
+            $collection->index(['event_id' => 1, 'occurrence_slug' => 1, '_id' => 1]);
             $collection->index(['updated_at' => 1, '_id' => 1]);
             $collection->index(['geo_location' => '2dsphere']);
             $collection->index(['deleted_at' => 1, '_id' => 1]);

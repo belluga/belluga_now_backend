@@ -8,12 +8,15 @@ use Belluga\Events\Application\Events\EventManagementService;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
+use Belluga\Ticketing\Contracts\EventTemplateReadContract;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
+use Illuminate\Support\Arr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Validation\ValidationException;
 
 class EventsController extends Controller
 {
@@ -21,7 +24,8 @@ class EventsController extends Controller
         private readonly EventQueryService $eventQueryService,
         private readonly EventManagementService $eventManagementService,
         private readonly EventAccountResolverContract $accountResolver,
-        private readonly EventTenantContextContract $tenantContext
+        private readonly EventTenantContextContract $tenantContext,
+        private readonly EventTemplateReadContract $eventTemplateRead,
     ) {
     }
 
@@ -45,7 +49,7 @@ class EventsController extends Controller
 
     public function store(EventStoreRequest $request): JsonResponse
     {
-        $payload = $request->validated();
+        $payload = $this->applyTemplateToPayload($request->validated());
         $payload['_created_by'] = $this->resolveActorPrincipal($request);
         $accountIdFromRoute = $this->resolveAccountFromRoute($request);
 
@@ -75,7 +79,7 @@ class EventsController extends Controller
             abort(404, 'Event not found.');
         }
 
-        $updated = $this->eventManagementService->update($event, $request->validated());
+        $updated = $this->eventManagementService->update($event, $this->applyTemplateToPayload($request->validated()));
 
         return response()->json([
             'data' => $this->eventQueryService->formatManagementEvent($updated),
@@ -184,5 +188,77 @@ class EventsController extends Controller
             'type' => 'user',
             'id' => $actorId,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function applyTemplateToPayload(array $payload): array
+    {
+        $templateId = (string) ($payload['template_id'] ?? '');
+        if ($templateId === '') {
+            return $payload;
+        }
+
+        $snapshot = $this->eventTemplateRead->findTemplateSnapshot($templateId);
+        if (! is_array($snapshot)) {
+            throw ValidationException::withMessages([
+                'template_id' => ['Template not found or inactive.'],
+            ]);
+        }
+
+        $defaults = is_array($snapshot['defaults'] ?? null) ? $snapshot['defaults'] : [];
+        $fieldStates = is_array($snapshot['field_states'] ?? null) ? $snapshot['field_states'] : [];
+        $hiddenFields = is_array($snapshot['hidden_fields'] ?? null) ? $snapshot['hidden_fields'] : [];
+
+        $guardedPaths = [];
+        foreach ($fieldStates as $path => $state) {
+            if (in_array((string) $state, ['hidden', 'disabled'], true)) {
+                $guardedPaths[] = (string) $path;
+            }
+        }
+        foreach ($hiddenFields as $path) {
+            if (is_string($path) && $path !== '') {
+                $guardedPaths[] = $path;
+            }
+        }
+
+        foreach (array_values(array_unique($guardedPaths)) as $path) {
+            if (! Arr::has($payload, $path)) {
+                continue;
+            }
+
+            if (! Arr::has($defaults, $path)) {
+                throw ValidationException::withMessages([
+                    $path => ['Field cannot be provided by payload for this template.'],
+                ]);
+            }
+
+            if (Arr::get($payload, $path) !== Arr::get($defaults, $path)) {
+                throw ValidationException::withMessages([
+                    $path => ['Template-protected field override is not allowed.'],
+                ]);
+            }
+        }
+
+        foreach ($defaults as $path => $value) {
+            $state = (string) ($fieldStates[$path] ?? 'enabled');
+            $shouldForce = in_array($state, ['hidden', 'disabled'], true);
+            if ($shouldForce || ! Arr::has($payload, (string) $path)) {
+                Arr::set($payload, (string) $path, $value);
+            }
+        }
+
+        unset($payload['template_id'], $payload['template_version']);
+
+        $existingTicketing = is_array($payload['ticketing'] ?? null) ? $payload['ticketing'] : [];
+        $existingTicketing['template'] = [
+            'template_id' => (string) ($snapshot['template_id'] ?? $templateId),
+            'version' => (int) ($snapshot['version'] ?? 1),
+        ];
+        $payload['ticketing'] = $existingTicketing;
+
+        return $payload;
     }
 }

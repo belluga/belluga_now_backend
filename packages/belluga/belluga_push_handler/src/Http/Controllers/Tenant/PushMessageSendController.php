@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Http\Requests\PushMessageSendRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushDeliveryService;
@@ -20,7 +20,8 @@ class PushMessageSendController
         private readonly PushRecipientResolver $recipientResolver,
         private readonly PushDeliveryService $deliveryService,
         private readonly PushDeviceService $pushDeviceService,
-        private readonly PushMessageAudienceService $audienceService
+        private readonly PushMessageAudienceService $audienceService,
+        private readonly PushUserGatewayContract $users
     ) {
     }
 
@@ -67,28 +68,22 @@ class PushMessageSendController
 
         $tokens = $this->recipientResolver->tokensForUser($user);
         if (! empty($payload['device_id'])) {
-            $tokens = array_values(array_filter($tokens, static function (string $token) use ($user, $payload): bool {
-                foreach ($user->devices ?? [] as $device) {
-                    $isActive = $device['is_active'] ?? true;
-                    if ($isActive !== true) {
-                        continue;
-                    }
-                    if (($device['device_id'] ?? null) === $payload['device_id'] && ($device['push_token'] ?? null) === $token) {
-                        return true;
-                    }
-                }
-                return false;
-            }));
+            $tokens = $this->users->activePushTokensForDevice($user, (string) $payload['device_id']);
         }
 
         if ($tokens === []) {
             return response()->json(['ok' => false, 'reason' => 'no_tokens'], 422);
         }
 
+        $recipientUserId = $this->users->userId($user);
+        if ($recipientUserId === null || $recipientUserId === '') {
+            return response()->json(['ok' => false, 'reason' => 'unauthorized'], 401);
+        }
+
         $messageInstanceId = null;
         if (! ($payload['dry_run'] ?? false)) {
             try {
-                $tokenUserMap = array_fill_keys($tokens, (string) $user->_id);
+                $tokenUserMap = array_fill_keys($tokens, $recipientUserId);
                 $response = $this->deliveryService->deliver($message, $tokens, $tokenUserMap);
             } catch (ValidationException $exception) {
                 return response()->json([
@@ -112,7 +107,7 @@ class PushMessageSendController
         $responsePayload = [
             'ok' => true,
             'push_message_id' => (string) $message->_id,
-            'recipient_user_id' => (string) $user->_id,
+            'recipient_user_id' => $recipientUserId,
             'queued' => true,
         ];
         if (is_string($messageInstanceId) && $messageInstanceId !== '') {
@@ -172,21 +167,14 @@ class PushMessageSendController
     /**
      * @param array<string, mixed> $payload
      */
-    private function resolveUser(array $payload): ?AccountUser
+    private function resolveUser(array $payload): ?\Illuminate\Contracts\Auth\Authenticatable
     {
-        if (! empty($payload['user_id'])) {
-            return AccountUser::query()
-                ->where('_id', $payload['user_id'])
-                ->first();
-        }
+        $userId = isset($payload['user_id']) ? (string) $payload['user_id'] : null;
+        $email = isset($payload['email']) ? (string) $payload['email'] : null;
 
-        if (! empty($payload['email'])) {
-            $email = strtolower((string) $payload['email']);
-            return AccountUser::query()
-                ->where('emails', 'all', [$email])
-                ->first();
-        }
-
-        return null;
+        return $this->users->findUserForTenant(
+            $userId !== '' ? $userId : null,
+            $email !== '' ? $email : null
+        );
     }
 }

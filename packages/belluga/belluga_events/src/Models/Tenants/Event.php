@@ -35,6 +35,7 @@ class Event extends Model
         'capabilities',
         'created_by',
         'event_parties',
+        'ticketing',
         'publication',
         'is_active',
     ];

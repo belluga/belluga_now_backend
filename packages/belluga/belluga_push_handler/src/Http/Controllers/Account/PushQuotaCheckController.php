@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use App\Models\Tenants\Account;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Http\Requests\PushQuotaCheckRequest;
@@ -14,14 +14,15 @@ use Illuminate\Http\JsonResponse;
 class PushQuotaCheckController
 {
     public function __construct(
-        private readonly PushPlanPolicyContract $planPolicy
+        private readonly PushPlanPolicyContract $planPolicy,
+        private readonly PushAccountContextContract $accountContext
     ) {
     }
 
     public function __invoke(PushQuotaCheckRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -32,7 +33,7 @@ class PushQuotaCheckController
         if (! empty($payload['push_message_id'])) {
             $message = PushMessage::query()
                 ->where('scope', 'account')
-                ->where('partner_id', (string) $account->_id)
+                ->where('partner_id', $accountId)
                 ->where('_id', (string) $payload['push_message_id'])
                 ->first();
         }
@@ -44,10 +45,10 @@ class PushQuotaCheckController
         $policy = $this->planPolicy;
 
         if ($policy instanceof PushPlanPolicyDecisionContract) {
-            return response()->json($policy->quotaDecision((string) $account->_id, $message, $audienceSize));
+            return response()->json($policy->quotaDecision($accountId, $message, $audienceSize));
         }
 
-        $allowed = $policy->canSend((string) $account->_id, $message, $audienceSize);
+        $allowed = $policy->canSend($accountId, $message, $audienceSize);
 
         return response()->json([
             'allowed' => $allowed,

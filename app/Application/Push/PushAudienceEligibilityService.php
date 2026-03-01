@@ -7,6 +7,7 @@ namespace App\Application\Push;
 use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Illuminate\Contracts\Auth\Authenticatable;
 
 class PushAudienceEligibilityService implements PushAudienceEligibilityContract
 {
@@ -15,11 +16,15 @@ class PushAudienceEligibilityService implements PushAudienceEligibilityContract
      * @param array<string, mixed> $context
      */
     public function isEligible(
-        AccountUser $user,
+        Authenticatable $user,
         PushMessage $message,
         array $audience,
         array $context = []
     ): bool {
+        if (! $user instanceof AccountUser) {
+            return false;
+        }
+
         $type = $audience['type'] ?? 'all';
 
         if ($type === 'users') {

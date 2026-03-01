@@ -810,7 +810,12 @@ class EventQueryService
 
     /**
      * @param mixed $event
-     * @return array<int, array{date_time_start: string|null, date_time_end: string|null}>
+     * @return array<int, array{
+     *   occurrence_id:string|null,
+     *   occurrence_slug:string|null,
+     *   date_time_start: string|null,
+     *   date_time_end: string|null
+     * }>
      */
     private function resolveEventOccurrences(mixed $event): array
     {
@@ -821,6 +826,8 @@ class EventQueryService
             }
 
             return [[
+                'occurrence_id' => isset($event->_id) ? (string) $event->_id : null,
+                'occurrence_slug' => isset($event->occurrence_slug) ? (string) $event->occurrence_slug : null,
                 'date_time_start' => $start,
                 'date_time_end' => $this->formatDate($event->ends_at ?? null),
             ]];
@@ -836,6 +843,8 @@ class EventQueryService
             if ($documents->isNotEmpty()) {
                 return $documents->map(function (EventOccurrence $occurrence): array {
                     return [
+                        'occurrence_id' => isset($occurrence->_id) ? (string) $occurrence->_id : null,
+                        'occurrence_slug' => isset($occurrence->occurrence_slug) ? (string) $occurrence->occurrence_slug : null,
                         'date_time_start' => $this->formatDate($occurrence->starts_at ?? null),
                         'date_time_end' => $this->formatDate($occurrence->ends_at ?? null),
                     ];

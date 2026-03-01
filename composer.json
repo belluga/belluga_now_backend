@@ -40,6 +40,10 @@
         {
             "type": "path",
             "url": "packages/belluga/belluga_push_handler"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_ticketing"
         }
     ],
     "autoload": {
@@ -48,6 +52,7 @@
             "Belluga\\Events\\": "packages/belluga/belluga_events/src/",
             "Belluga\\Settings\\": "packages/belluga/belluga_settings/src/",
             "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",
+            "Belluga\\Ticketing\\": "packages/belluga/belluga_ticketing/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }

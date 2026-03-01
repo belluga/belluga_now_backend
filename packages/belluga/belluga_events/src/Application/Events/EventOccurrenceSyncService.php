@@ -31,6 +31,7 @@ class EventOccurrenceSyncService
                 'event_id' => $eventId,
                 'occurrence_index' => $index,
                 'slug' => (string) ($event->slug ?? ''),
+                'occurrence_slug' => $this->buildOccurrenceSlug((string) ($event->slug ?? ''), $eventId, $index),
                 'title' => (string) ($event->title ?? ''),
                 'content' => (string) ($event->content ?? ''),
                 'type' => $this->normalizeArray($event->type ?? []),
@@ -201,5 +202,12 @@ class EventOccurrenceSyncService
         $publishAt = $this->toCarbon($publication['publish_at'] ?? null);
 
         return $publishAt === null || $publishAt->lessThanOrEqualTo($now);
+    }
+
+    private function buildOccurrenceSlug(string $eventSlug, string $eventId, int $index): string
+    {
+        $base = trim($eventSlug) !== '' ? trim($eventSlug) : ('event-' . substr($eventId, 0, 8));
+
+        return sprintf('%s-occ-%d', $base, $index + 1);
     }
 }

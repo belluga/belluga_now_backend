@@ -25,6 +25,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
@@ -86,11 +87,15 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
             return new class implements PushAudienceEligibilityContract {
                 public function isEligible(
-                    AccountUser $user,
+                    Authenticatable $user,
                     PushMessage $message,
                     array $audience,
                     array $context = []
                 ): bool {
+                    if (! $user instanceof AccountUser) {
+                        return false;
+                    }
+
                     $type = $audience['type'] ?? 'all';
                     if ($type === 'users') {
                         $ids = $audience['user_ids'] ?? [];
@@ -2389,7 +2394,7 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
             return new class implements PushAudienceEligibilityContract {
                 public function isEligible(
-                    AccountUser $user,
+                    Authenticatable $user,
                     PushMessage $message,
                     array $audience,
                     array $context = []
@@ -2422,7 +2427,7 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
             return new class implements PushAudienceEligibilityContract {
                 public function isEligible(
-                    AccountUser $user,
+                    Authenticatable $user,
                     PushMessage $message,
                     array $audience,
                     array $context = []
@@ -3456,7 +3461,7 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
             return new class implements PushAudienceEligibilityContract {
                 public function isEligible(
-                    AccountUser $user,
+                    Authenticatable $user,
                     PushMessage $message,
                     array $audience,
                     array $context = []

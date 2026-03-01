@@ -4,45 +4,27 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
-use App\Models\Tenants\AccountUser;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use MongoDB\BSON\UTCDateTime;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
+use Illuminate\Contracts\Auth\Authenticatable;
 
 class PushDeviceService
 {
+    public function __construct(
+        private readonly PushUserGatewayContract $users
+    ) {
+    }
+
     /**
      * @param Authenticatable $user
      * @param array<string, mixed> $payload
      */
     public function register(Authenticatable $user, array $payload): void
     {
-        if (! $user instanceof AccountUser) {
+        if (! $this->users->supports($user)) {
             return;
         }
 
-        $devices = collect($user->devices ?? []);
-        $deviceId = $payload['device_id'];
-
-        $index = $devices->search(static fn (array $device): bool => ($device['device_id'] ?? null) === $deviceId);
-
-        $record = [
-            'device_id' => $deviceId,
-            'platform' => $payload['platform'],
-            'push_token' => $payload['push_token'],
-            'is_active' => true,
-            'invalidated_at' => null,
-            'updated_at' => new UTCDateTime(),
-        ];
-
-        if ($index === false) {
-            $record['created_at'] = new UTCDateTime();
-            $devices->push($record);
-        } else {
-            $devices->put($index, array_merge($devices->get($index), $record));
-        }
-
-        $user->devices = $devices->values()->all();
-        $user->save();
+        $this->users->registerDevice($user, $payload);
     }
 
     /**
@@ -51,28 +33,11 @@ class PushDeviceService
      */
     public function invalidateTokens(Authenticatable $user, array $tokens): void
     {
-        if (! $user instanceof AccountUser || $tokens === []) {
+        if (! $this->users->supports($user) || $tokens === []) {
             return;
         }
 
-        $tokensLookup = array_fill_keys($tokens, true);
-        $devices = collect($user->devices ?? []);
-        $now = new UTCDateTime();
-
-        $devices = $devices->map(static function (array $device) use ($tokensLookup, $now): array {
-            $token = $device['push_token'] ?? null;
-            if (! is_string($token) || $token === '' || ! isset($tokensLookup[$token])) {
-                return $device;
-            }
-
-            $device['is_active'] = false;
-            $device['invalidated_at'] = $now;
-            $device['updated_at'] = $now;
-            return $device;
-        });
-
-        $user->devices = $devices->values()->all();
-        $user->save();
+        $this->users->invalidateTokens($user, $tokens);
     }
 
     /**
@@ -81,18 +46,10 @@ class PushDeviceService
      */
     public function unregister(Authenticatable $user, array $payload): void
     {
-        if (! $user instanceof AccountUser) {
+        if (! $this->users->supports($user)) {
             return;
         }
 
-        $devices = collect($user->devices ?? []);
-        $deviceId = $payload['device_id'];
-
-        $devices = $devices->reject(
-            static fn (array $device): bool => ($device['device_id'] ?? null) === $deviceId
-        );
-
-        $user->devices = $devices->values()->all();
-        $user->save();
+        $this->users->unregisterDevice($user, $payload);
     }
 }

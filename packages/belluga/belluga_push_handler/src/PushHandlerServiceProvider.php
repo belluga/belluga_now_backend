@@ -7,12 +7,17 @@ namespace Belluga\PushHandler;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
+use Belluga\PushHandler\Contracts\PushTenantContextContract;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Services\PushPlanPolicyAllowAll;
 use Belluga\PushHandler\Services\PushAudienceEligibilityAllowAll;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Support\ServiceProvider;
+use RuntimeException;
 
 class PushHandlerServiceProvider extends ServiceProvider
 {
@@ -38,6 +43,22 @@ class PushHandlerServiceProvider extends ServiceProvider
         if (! $this->app->bound(FcmClientContract::class)) {
             $this->app->bind(FcmClientContract::class, FcmHttpV1Client::class);
         }
+
+        $this->ensureHostBinding(PushAccountContextContract::class);
+        $this->ensureHostBinding(PushTenantContextContract::class);
+        $this->ensureHostBinding(PushUserGatewayContract::class);
+        $this->ensureHostBinding(PushTelemetryEmitterContract::class);
+    }
+
+    private function ensureHostBinding(string $abstract): void
+    {
+        if ($this->app->bound($abstract)) {
+            return;
+        }
+
+        $this->app->bind($abstract, static function () use ($abstract) {
+            throw new RuntimeException("belluga_push_handler host binding missing for [{$abstract}]");
+        });
     }
 
     private function registerPushSettingsNamespaces(): void

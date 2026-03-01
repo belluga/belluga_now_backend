@@ -6,4 +6,5 @@ return [
     Belluga\Events\EventsServiceProvider::class,
     Belluga\Settings\SettingsServiceProvider::class,
     Belluga\PushHandler\PushHandlerServiceProvider::class,
+    Belluga\Ticketing\TicketingServiceProvider::class,
 ];

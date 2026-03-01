@@ -22,6 +22,7 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Queue;
@@ -67,6 +68,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         Event::query()->delete();
         EventOccurrence::query()->delete();
+        TicketEventTemplate::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
 
@@ -157,6 +159,78 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['occurrences', 'date_time_start', 'date_time_end']);
+    }
+
+    public function testEventCreateAppliesTemplateDefaultsAndStoresTemplateAuditMetadata(): void
+    {
+        TicketEventTemplate::query()->create([
+            'template_key' => 'fair-template-defaults',
+            'version' => 3,
+            'status' => 'active',
+            'name' => 'Fair Template',
+            'defaults' => [
+                'ticketing' => [
+                    'hold_minutes' => 25,
+                ],
+            ],
+            'field_states' => [
+                'ticketing.hold_minutes' => 'hidden',
+            ],
+            'hidden_fields' => ['ticketing.hold_minutes'],
+            'metadata' => [
+                'owner' => 'qa',
+            ],
+        ]);
+
+        $payload = $this->makeEventPayload([
+            'template_id' => 'fair-template-defaults',
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+
+        /** @var Event $stored */
+        $stored = Event::query()->where('_id', $response->json('data.event_id'))->firstOrFail();
+        $ticketing = is_array($stored->ticketing ?? null) ? $stored->ticketing : [];
+        $template = is_array($ticketing['template'] ?? null) ? $ticketing['template'] : [];
+
+        $this->assertSame(25, (int) data_get($ticketing, 'hold_minutes', 0));
+        $this->assertSame('fair-template-defaults', (string) ($template['template_id'] ?? ''));
+        $this->assertSame(3, (int) ($template['version'] ?? 0));
+    }
+
+    public function testEventCreateRejectsOverrideForTemplateProtectedField(): void
+    {
+        TicketEventTemplate::query()->create([
+            'template_key' => 'template-hidden-publication',
+            'version' => 1,
+            'status' => 'active',
+            'name' => 'Hidden Publication',
+            'defaults' => [
+                'publication' => [
+                    'status' => 'draft',
+                ],
+            ],
+            'field_states' => [
+                'publication.status' => 'hidden',
+            ],
+            'hidden_fields' => ['publication.status'],
+            'metadata' => [],
+        ]);
+
+        $payload = $this->makeEventPayload([
+            'template_id' => 'template-hidden-publication',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => Carbon::now()->subMinute()->toISOString(),
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['publication.status']);
     }
 
     public function testEventCreateDispatchesMapProjectionSyncJobViaLifecycleEvent(): void

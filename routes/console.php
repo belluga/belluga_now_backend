@@ -1,12 +1,14 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
+use Belluga\Ticketing\Jobs\ProcessTicketOutboxJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -54,3 +56,6 @@ Schedule::call(static function (): void {
     ->name('events:occurrences:reconcile')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+
+Schedule::job(new ProcessTicketOutboxJob())->everyMinute();
+Schedule::job(new ExpireIssuedTicketUnitsJob())->everyMinute();

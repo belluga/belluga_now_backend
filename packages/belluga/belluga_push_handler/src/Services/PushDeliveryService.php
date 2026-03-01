@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
-use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Carbon\Carbon;
@@ -16,7 +16,7 @@ class PushDeliveryService
 {
     public function __construct(
         private readonly FcmClientContract $fcmClient,
-        private readonly TelemetryEmitterContract $telemetryEmitter,
+        private readonly PushTelemetryEmitterContract $telemetryEmitter,
         private readonly PushSettingsKernelBridge $pushSettings
     ) {
     }

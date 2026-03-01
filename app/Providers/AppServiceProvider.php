@@ -16,6 +16,15 @@ use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
 use App\Integration\Settings\TenantScopeContextAdapter;
+use App\Integration\Push\PushAccountContextAdapter;
+use App\Integration\Push\PushTelemetryEmitterAdapter;
+use App\Integration\Push\PushTenantContextAdapter;
+use App\Integration\Push\PushUserGatewayAdapter;
+use App\Integration\Ticketing\CheckoutOrchestratorAdapter;
+use App\Integration\Ticketing\EventTemplateReadAdapter;
+use App\Integration\Ticketing\OccurrencePublicationAdapter;
+use App\Integration\Ticketing\OccurrenceReadAdapter;
+use App\Integration\Ticketing\TenantTicketingPolicyAdapter;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventCreated;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventDeleted;
 use App\Listeners\EventsPackage\SyncMapPoiOnEventUpdated;
@@ -48,9 +57,18 @@ use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
+use Belluga\PushHandler\Contracts\PushTenantContextContract;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
+use Belluga\Ticketing\Contracts\CheckoutOrchestratorContract;
+use Belluga\Ticketing\Contracts\EventTemplateReadContract;
+use Belluga\Ticketing\Contracts\OccurrencePublicationContract;
+use Belluga\Ticketing\Contracts\OccurrenceReadContract;
+use Belluga\Ticketing\Contracts\TicketingPolicyContract;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -80,6 +98,26 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             PushAudienceEligibilityContract::class,
             PushAudienceEligibilityService::class
+        );
+
+        $this->app->bind(
+            PushAccountContextContract::class,
+            PushAccountContextAdapter::class
+        );
+
+        $this->app->bind(
+            PushTenantContextContract::class,
+            PushTenantContextAdapter::class
+        );
+
+        $this->app->bind(
+            PushUserGatewayContract::class,
+            PushUserGatewayAdapter::class
+        );
+
+        $this->app->bind(
+            PushTelemetryEmitterContract::class,
+            PushTelemetryEmitterAdapter::class
         );
 
         $this->app->bind(
@@ -151,6 +189,31 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             TenantScopeContextContract::class,
             TenantScopeContextAdapter::class
+        );
+
+        $this->app->bind(
+            OccurrenceReadContract::class,
+            OccurrenceReadAdapter::class
+        );
+
+        $this->app->bind(
+            OccurrencePublicationContract::class,
+            OccurrencePublicationAdapter::class
+        );
+
+        $this->app->bind(
+            EventTemplateReadContract::class,
+            EventTemplateReadAdapter::class
+        );
+
+        $this->app->bind(
+            CheckoutOrchestratorContract::class,
+            CheckoutOrchestratorAdapter::class
+        );
+
+        $this->app->bind(
+            TicketingPolicyContract::class,
+            TenantTicketingPolicyAdapter::class
         );
 
         $this->app->when(ProfileControllerLandlord::class)
