@@ -7,9 +7,11 @@ namespace Belluga\Events\Http\Api\v1\Controllers;
 use Belluga\Events\Application\Events\EventManagementService;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Ticketing\Contracts\EventTemplateReadContract;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
+use Belluga\Events\Http\Api\v1\Requests\EventPartyCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
 use Illuminate\Support\Arr;
@@ -24,6 +26,7 @@ class EventsController extends Controller
         private readonly EventQueryService $eventQueryService,
         private readonly EventManagementService $eventManagementService,
         private readonly EventAccountResolverContract $accountResolver,
+        private readonly EventProfileResolverContract $profileResolver,
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventTemplateReadContract $eventTemplateRead,
     ) {
@@ -45,6 +48,19 @@ class EventsController extends Controller
         );
 
         return response()->json($paginator->toArray());
+    }
+
+    public function partyCandidates(EventPartyCandidatesRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $search = isset($validated['search']) ? trim((string) $validated['search']) : null;
+        $limit = isset($validated['limit']) ? (int) $validated['limit'] : 50;
+
+        $candidates = $this->profileResolver->listPartyCandidates($search, $limit);
+
+        return response()->json([
+            'data' => $candidates,
+        ]);
     }
 
     public function store(EventStoreRequest $request): JsonResponse

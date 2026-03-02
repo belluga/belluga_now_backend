@@ -126,6 +126,55 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
+    public function testEventPartyCandidatesEndpointAllowsReadCreateOrUpdateAbilityAndReturnsFilteredCandidates(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.artists', []);
+
+        $venues = collect($response->json('data.venues') ?? []);
+        $matchedVenue = $venues->firstWhere('id', (string) $this->venue->_id);
+
+        $this->assertNotNull($matchedVenue);
+        $this->assertSame('venue', (string) ($matchedVenue['profile_type'] ?? ''));
+
+        Sanctum::actingAs($landlord, ['events:create']);
+        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
+        $createResponse->assertStatus(200);
+
+        Sanctum::actingAs($landlord, ['events:update']);
+        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
+        $updateResponse->assertStatus(200);
+    }
+
+    public function testEventPartyCandidatesEndpointRejectsWithoutPartyCandidateAbilities(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['account-users:view']);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates");
+
+        $response->assertStatus(403);
+    }
+
+    public function testAccountEventsPartyCandidatesEndpointUsesAccountAuthBoundary(): void
+    {
+        Sanctum::actingAs($this->user, ['events:create']);
+
+        $response = $this->getJson("{$this->accountEventsBase}/party_candidates?search=main");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.artists', []);
+
+        $venues = collect($response->json('data.venues') ?? []);
+        $matchedVenue = $venues->firstWhere('id', (string) $this->venue->_id);
+        $this->assertNotNull($matchedVenue);
+    }
+
     public function testEventCreatePersistsCreatedByAndDefaultEventParties(): void
     {
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());

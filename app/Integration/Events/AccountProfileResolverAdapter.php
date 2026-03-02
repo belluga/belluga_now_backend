@@ -121,4 +121,55 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ->where('account_id', $accountId)
             ->exists();
     }
+
+    public function listPartyCandidates(?string $search = null, int $perTypeLimit = 50): array
+    {
+        $normalizedLimit = max(1, min($perTypeLimit, 100));
+        $normalizedSearch = trim((string) ($search ?? ''));
+        $likePattern = $normalizedSearch === ''
+            ? null
+            : '%' . addcslashes($normalizedSearch, '%_\\') . '%';
+
+        $venues = $this->queryCandidatesByType('venue', $normalizedLimit, $likePattern);
+        $artists = $this->queryCandidatesByType('artist', $normalizedLimit, $likePattern);
+
+        return [
+            'venues' => $venues,
+            'artists' => $artists,
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function queryCandidatesByType(string $profileType, int $limit, ?string $likePattern): array
+    {
+        $query = AccountProfile::query()
+            ->where('profile_type', $profileType);
+
+        if ($likePattern !== null) {
+            $query->where(static function ($builder) use ($likePattern): void {
+                $builder->where('display_name', 'like', $likePattern)
+                    ->orWhere('slug', 'like', $likePattern);
+            });
+        }
+
+        return $query
+            ->orderBy('display_name')
+            ->limit($limit)
+            ->get()
+            ->map(static function (AccountProfile $profile): array {
+                return [
+                    'id' => (string) $profile->_id,
+                    'account_id' => (string) $profile->account_id,
+                    'profile_type' => (string) $profile->profile_type,
+                    'display_name' => (string) ($profile->display_name ?? ''),
+                    'slug' => $profile->slug ? (string) $profile->slug : null,
+                    'avatar_url' => $profile->avatar_url ?? null,
+                    'cover_url' => $profile->cover_url ?? null,
+                ];
+            })
+            ->values()
+            ->all();
+    }
 }

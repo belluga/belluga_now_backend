@@ -26,4 +26,12 @@ interface EventProfileResolverContract
     public function listProfileIdsForAccount(string $accountId): array;
 
     public function accountOwnsProfile(string $accountId, string $profileId): bool;
+
+    /**
+     * @return array{
+     *   venues: array<int, array<string, mixed>>,
+     *   artists: array<int, array<string, mixed>>
+     * }
+     */
+    public function listPartyCandidates(?string $search = null, int $perTypeLimit = 50): array;
 }

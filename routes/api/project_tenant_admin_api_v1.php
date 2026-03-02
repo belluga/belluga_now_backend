@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
+        Route::get('/events/party_candidates', [EventsController::class, 'partyCandidates'])
+            ->middleware('ability:events:read,events:create,events:update');
         Route::get('/events', [EventsController::class, 'index'])
             ->middleware('abilities:events:read');
         Route::post('/events', [EventsController::class, 'store'])
