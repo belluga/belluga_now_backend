@@ -22,6 +22,13 @@ class EventQueryService
 {
     private const DEFAULT_PAGE_SIZE = 10;
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
+    private const ATLAS_SEARCH_INDEX_NAME = 'events_occurrences_agenda_search_v1';
+    private const ATLAS_SEARCH_TEXT_FIELDS = [
+        'title',
+        'content',
+        'artists.display_name',
+        'venue.display_name',
+    ];
 
     /** @var array<string, mixed>|null */
     private ?array $tenantCapabilitiesCache = null;
@@ -282,8 +289,13 @@ class EventQueryService
     {
         $pipeline = $this->buildAgendaPipeline($filters, $userId, $skip, $limit, $useGeo);
 
-        /** @var Collection<int, EventOccurrence> $events */
-        $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+        try {
+            /** @var Collection<int, EventOccurrence> $events */
+            $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+        } catch (\Throwable $throwable) {
+            $this->handleAtlasSearchFailureIfNeeded($filters, $throwable);
+            throw $throwable;
+        }
 
         return $events->all();
     }
@@ -296,8 +308,13 @@ class EventQueryService
     {
         $pipeline = $this->buildStreamPipeline($filters, $userId, $since, $useGeo);
 
-        /** @var Collection<int, EventOccurrence> $events */
-        $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+        try {
+            /** @var Collection<int, EventOccurrence> $events */
+            $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+        } catch (\Throwable $throwable) {
+            $this->handleAtlasSearchFailureIfNeeded($filters, $throwable);
+            throw $throwable;
+        }
 
         return $events->all();
     }
@@ -315,8 +332,12 @@ class EventQueryService
             'deleted_at' => null,
             'is_event_published' => true,
         ];
+        $hasSearch = $filters['search'] !== '';
 
-        if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
+        if ($hasSearch) {
+            $pipeline[] = ['$search' => $this->buildAtlasSearchStage($filters)];
+            $pipeline[] = ['$match' => $baseMatch];
+        } elseif ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
                 'near' => [
                     'type' => 'Point',
@@ -339,7 +360,6 @@ class EventQueryService
             $pipeline[] = ['$match' => $baseMatch];
         }
 
-        $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
@@ -387,8 +407,11 @@ class EventQueryService
                 ['deleted_at' => ['$gt' => $sinceUtc]],
             ],
         ];
+        $hasSearch = $filters['search'] !== '';
 
-        if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
+        if ($hasSearch) {
+            $pipeline[] = ['$search' => $this->buildAtlasSearchStage($filters)];
+        } elseif ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
                 'near' => [
                     'type' => 'Point',
@@ -410,7 +433,6 @@ class EventQueryService
 
         $pipeline[] = ['$match' => $baseMatch];
 
-        $this->applySearchFilter($pipeline, $filters['search']);
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
@@ -421,27 +443,70 @@ class EventQueryService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $pipeline
+     * @param array<string, mixed> $filters
+     * @return array<string, mixed>
      */
-    private function applySearchFilter(array &$pipeline, string $search): void
+    private function buildAtlasSearchStage(array $filters): array
     {
+        $must = [[
+            'text' => [
+                'query' => (string) $filters['search'],
+                'path' => self::ATLAS_SEARCH_TEXT_FIELDS,
+            ],
+        ]];
+
+        if (
+            ($filters['use_geo'] ?? false) === true
+            && $filters['origin_lat'] !== null
+            && $filters['origin_lng'] !== null
+            && $filters['max_distance_meters'] !== null
+        ) {
+            $must[] = [
+                'geoWithin' => [
+                    'path' => 'geo_location',
+                    'circle' => [
+                        'center' => [
+                            'type' => 'Point',
+                            'coordinates' => [(float) $filters['origin_lng'], (float) $filters['origin_lat']],
+                        ],
+                        'radius' => (float) $filters['max_distance_meters'],
+                    ],
+                ],
+            ];
+        }
+
+        return [
+            'index' => self::ATLAS_SEARCH_INDEX_NAME,
+            'compound' => [
+                'must' => $must,
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    private function handleAtlasSearchFailureIfNeeded(array $filters, \Throwable $throwable): void
+    {
+        $search = trim((string) ($filters['search'] ?? ''));
         if ($search === '') {
             return;
         }
 
-        $pattern = new Regex(preg_quote($search), 'i');
+        Log::error('events_atlas_search_query_failed', [
+            'search' => $search,
+            'use_geo' => (bool) ($filters['use_geo'] ?? false),
+            'origin_lat' => $filters['origin_lat'] ?? null,
+            'origin_lng' => $filters['origin_lng'] ?? null,
+            'max_distance_meters' => $filters['max_distance_meters'] ?? null,
+            'index' => self::ATLAS_SEARCH_INDEX_NAME,
+            'error' => $throwable->getMessage(),
+        ]);
 
-        $pipeline[] = [
-            '$match' => [
-                '$or' => [
-                    ['title' => ['$regex' => $pattern]],
-                    ['content' => ['$regex' => $pattern]],
-                    ['artists.display_name' => ['$regex' => $pattern]],
-                    ['venue.display_name' => ['$regex' => $pattern]],
-                    ['place_ref.metadata.display_name' => ['$regex' => $pattern]],
-                ],
-            ],
-        ];
+        throw new \RuntimeException(
+            'Events search requires Atlas Search index availability and valid Atlas Search pipeline.',
+            previous: $throwable
+        );
     }
 
     /**

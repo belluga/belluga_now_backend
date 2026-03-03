@@ -50,6 +50,34 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertContains($firstTenantId, $ids);
     }
 
+    public function testPaginateUsesCanonicalSubdomainMainDomainWhenOnlyAliasDomainExists(): void
+    {
+        $tenant = $this->service->create($this->makeTenantPayload('Lambda Academy'), $this->operator)['tenant'];
+
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'type' => 'web',
+            'path' => 'alias-only.example.test',
+        ]);
+
+        $paginator = $this->service->paginate($this->operator, false, 50);
+        $item = collect($paginator->items())
+            ->first(fn (array $entry): bool => $entry['id'] === (string) $tenant->_id);
+
+        $configuredUrl = (string) config('app.url');
+        $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
+        if (! is_string($rootHost) || $rootHost === '') {
+            $rootHost = str_replace(['https://', 'http://'], '', $configuredUrl);
+            $rootHost = trim($rootHost, '/');
+        }
+
+        $this->assertNotNull($item);
+        $this->assertSame(
+            'https://' . strtolower($tenant->subdomain) . '.' . $rootHost,
+            $item['main_domain']
+        );
+    }
+
     public function testCreatePersistsTenantAndAssignsRoleToOperator(): void
     {
         $payload = $this->makeTenantPayload('Delta Stores');

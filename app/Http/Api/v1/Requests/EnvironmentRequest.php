@@ -12,7 +12,13 @@ class EnvironmentRequest extends FormRequest
 
     public function validationData(): array
     {
-        return $this->query();
+        $headerAppDomain = $this->header('X-App-Domain');
+
+        if (is_string($headerAppDomain) && $headerAppDomain !== '') {
+            return ['app_domain' => $headerAppDomain];
+        }
+
+        return [];
     }
 
     public function rules(): array
@@ -22,18 +28,6 @@ class EnvironmentRequest extends FormRequest
                 connection: 'landlord',
                 table: 'tenants',
                 key: 'app_domains',
-                shouldExist: false
-            ),
-            "domain" => new InArrayItemRule(
-                connection: 'landlord',
-                table: 'tenants',
-                key: 'domains',
-                shouldExist: false
-            ),
-            "subdomain" => new InArrayItemRule(
-                connection: 'landlord',
-                table: 'tenants',
-                key: 'subdomain',
                 shouldExist: false
             ),
         ];

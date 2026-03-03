@@ -1435,7 +1435,21 @@ class EventCrudControllerTest extends TestCaseTenant
 
     private function patchEventsSettings(array $payload): \Illuminate\Testing\TestResponse
     {
-        return $this->patchJson("{$this->base_api_tenant}settings/values/events", $payload);
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), [
+            'events:read',
+            'map-pois-settings:update',
+        ]);
+
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", $payload);
+
+        Sanctum::actingAs($this->user, [
+            'events:read',
+            'events:create',
+            'events:update',
+            'events:delete',
+        ]);
+
+        return $response;
     }
 
     private function readPrivateProperty(object $object, string $property): mixed

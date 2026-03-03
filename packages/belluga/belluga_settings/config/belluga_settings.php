@@ -10,7 +10,7 @@ return [
     ],
     'routes' => [
         'tenant' => [
-            'prefix' => 'api/v1',
+            'prefix' => 'admin/api/v1',
             'settings_prefix' => 'settings',
         ],
         'landlord' => [

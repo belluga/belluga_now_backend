@@ -12,6 +12,7 @@ use App\Application\Tenants\TenantDomainResolverService;
 class DomainTenantFinder extends TenantFinder
 {
     private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
+    private ?Request $activeRequest = null;
 
     public function __construct(private readonly TenantDomainResolverService $domainResolver)
     {
@@ -19,18 +20,24 @@ class DomainTenantFinder extends TenantFinder
 
     public function findForRequest(Request $request): ?IsTenant
     {
-        if($this->isRequestFromSubdomain()){
-            $tenant = $this->findTenantBySubdomain();
-            if ($tenant !== null) {
-                return $tenant;
+        $this->activeRequest = $request;
+
+        try {
+            if($this->isRequestFromSubdomain()){
+                $tenant = $this->findTenantBySubdomain();
+                if ($tenant !== null) {
+                    return $tenant;
+                }
             }
-        }
 
-        if($this->isRequestFromApp() && $this->isRequestToLandlordHost()){
-            return $this->findTenantByAppDomain();
-        }
+            if($this->isRequestFromApp() && $this->isRequestToLandlordHost()){
+                return $this->findTenantByAppDomain();
+            }
 
-        return $this->findTenantByWebDomain();
+            return $this->findTenantByWebDomain();
+        } finally {
+            $this->activeRequest = null;
+        }
     }
 
     protected function findTenantByAppDomain(): ?IsTenant
@@ -45,14 +52,14 @@ class DomainTenantFinder extends TenantFinder
 
     protected function findTenantByWebDomain(): ?IsTenant
     {
-        $domain = request()->getHost();
+        $domain = $this->request()->getHost();
 
         return $this->domainResolver->findTenantByDomain($domain);
     }
 
     protected function findTenantBySubdomain(): ?IsTenant
     {
-        $parts_request = explode('.', request()->getHost());
+        $parts_request = explode('.', $this->request()->getHost());
         $subdomain = $parts_request[0];
 
         return app(IsTenant::class)::where('subdomain', $subdomain)->first();
@@ -63,7 +70,7 @@ class DomainTenantFinder extends TenantFinder
     }
 
     protected function isRequestFromSubdomain(): bool {
-        $host = request()->getHost();
+        $host = $this->request()->getHost();
         $parts_request = explode('.', $host, 2);
 
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
@@ -91,22 +98,24 @@ class DomainTenantFinder extends TenantFinder
     }
 
     private function isLocalEnvironment(): bool {
-        return in_array(request()->getHost(), $this->local_environment_alternatives);
+        return in_array($this->request()->getHost(), $this->local_environment_alternatives);
     }
 
     private function resolveAppDomainFromRequest(): ?string
     {
-        $headerDomain = request()->header('X-App-Domain');
+        $request = $this->request();
+
+        $headerDomain = $request->header('X-App-Domain');
         if (is_string($headerDomain) && trim($headerDomain) !== '') {
             return trim($headerDomain);
         }
 
-        $queryDomain = request()->query('app_domain');
+        $queryDomain = $request->query('app_domain');
         if (is_string($queryDomain) && trim($queryDomain) !== '') {
             return trim($queryDomain);
         }
 
-        $inputDomain = request()->input('app_domain');
+        $inputDomain = $request->input('app_domain');
         if (is_string($inputDomain) && trim($inputDomain) !== '') {
             return trim($inputDomain);
         }
@@ -121,6 +130,11 @@ class DomainTenantFinder extends TenantFinder
             $configuredHost = (string) config('app.url');
         }
 
-        return strcasecmp(request()->getHost(), trim($configuredHost)) === 0;
+        return strcasecmp($this->request()->getHost(), trim($configuredHost)) === 0;
+    }
+
+    private function request(): Request
+    {
+        return $this->activeRequest ?? request();
     }
 }

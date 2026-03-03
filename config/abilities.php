@@ -40,6 +40,7 @@ return [
         'push-messages:update',
         'push-messages:delete',
         'push-messages:send',
+        'map-pois-settings:update',
         'push-settings:update',
         'telemetry-settings:update',
         'tenant-push-messages:read',

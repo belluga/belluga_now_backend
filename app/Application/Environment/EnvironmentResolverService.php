@@ -28,6 +28,7 @@ class EnvironmentResolverService
     public function resolve(array $input): array
     {
         $tenant = Tenant::current() ?? $this->locateTenant($input['app_domain'] ?? null);
+        $requestHost = $input['request_host'] ?? null;
 
         if ($tenant) {
             $tenant->makeCurrent();
@@ -35,7 +36,7 @@ class EnvironmentResolverService
             return $this->tenantEnvironment(
                 tenant: $tenant,
                 requestRoot: $input['request_root'] ?? null,
-                requestHost: $input['request_host'] ?? null
+                requestHost: is_string($requestHost) ? $requestHost : null,
             );
         }
 
@@ -66,24 +67,14 @@ class EnvironmentResolverService
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
         );
-        $mainDomain = $tenant->getMainDomain();
-        $hasRelationDomains = $tenant->domains()->exists();
-        $embeddedDomains = $tenant->getAttribute('domains');
-        $hasEmbeddedDomains = is_array($embeddedDomains) && $embeddedDomains !== [];
-        if (! $hasRelationDomains && ! $hasEmbeddedDomains) {
-            $rootHost = $this->resolveRootHost($requestHost, $tenant->subdomain)
-                ?? $this->resolveRootHost($requestRoot, $tenant->subdomain)
-                ?? $this->resolveRootHost((string) config('app.url'), $tenant->subdomain);
-            if ($rootHost) {
-                $host = $tenant->subdomain . '.' . $rootHost;
-                $mainDomain = $this->originWithRequestRoot(
-                    requestRoot: $requestRoot,
-                    host: $host,
-                ) ?? $this->forceHttps($host);
-            }
-        }
-
         $domains = $tenant->domains()->get()->all();
+        $canonicalTenantMainDomain = $tenant->getMainDomain();
+        $mainDomain = $this->resolveTenantMainDomain(
+            tenantMainDomain: $canonicalTenantMainDomain,
+            domains: $domains,
+            requestRoot: $requestRoot,
+            requestHost: $requestHost,
+        );
 
         return [
             'tenant_id' => (string) $tenant->_id,
@@ -91,6 +82,7 @@ class EnvironmentResolverService
             'type' => 'tenant',
             'subdomain' => $tenant->subdomain,
             'main_domain' => $mainDomain,
+            'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
             'domains' => $this->normalizeDomains($domains),
             'app_domains' => $tenant->app_domains,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
@@ -119,13 +111,14 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $branding = $landlord->branding_data ?? [];
 
-        $domainSource = $requestRoot ?? (string) config('app.url');
-        $mainDomain = $this->forceHttps($domainSource);
+        $mainDomain = $this->normalizeRequestRoot($requestRoot)
+            ?? $this->forceHttps((string) config('app.url'));
 
         return [
             'name' => $landlord->name,
             'type' => 'landlord',
             'main_domain' => $mainDomain,
+            'landlord_domain' => $mainDomain,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
@@ -177,6 +170,91 @@ class EnvironmentResolverService
         return array_values(array_filter($normalized, static fn (string $domain): bool => $domain !== ''));
     }
 
+    /**
+     * Web: use current tenant host as main_domain.
+     * Mobile (resolved via app_domain on landlord host): keep canonical tenant main domain.
+     *
+     * @param array<int, mixed> $domains
+     */
+    private function resolveTenantMainDomain(
+        string $tenantMainDomain,
+        array $domains,
+        ?string $requestRoot,
+        ?string $requestHost
+    ): string {
+        $normalizedRequestRoot = $this->normalizeRequestRoot($requestRoot);
+        $normalizedRequestHost = $this->normalizeHost($requestHost);
+        if ($normalizedRequestRoot === null || $normalizedRequestHost === null) {
+            return $tenantMainDomain;
+        }
+
+        $allowedHosts = [];
+        $tenantMainHost = $this->normalizeHost(parse_url($tenantMainDomain, PHP_URL_HOST));
+        if ($tenantMainHost !== null) {
+            $allowedHosts[$tenantMainHost] = true;
+        }
+
+        foreach ($this->normalizeDomains($domains) as $domain) {
+            $host = $this->normalizeHost(parse_url($this->forceHttps($domain), PHP_URL_HOST));
+            if ($host !== null) {
+                $allowedHosts[$host] = true;
+            }
+        }
+
+        if (! isset($allowedHosts[$normalizedRequestHost])) {
+            return $tenantMainDomain;
+        }
+
+        return $normalizedRequestRoot;
+    }
+
+    private function resolveLandlordDomain(?string $requestRoot): ?string
+    {
+        $configured = $this->forceHttps((string) config('app.url'));
+        if ($configured !== null) {
+            return $configured;
+        }
+
+        return $this->normalizeRequestRoot($requestRoot);
+    }
+
+    private function normalizeRequestRoot(?string $requestRoot): ?string
+    {
+        if (! is_string($requestRoot)) {
+            return null;
+        }
+
+        $trimmed = trim($requestRoot);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $parts = parse_url($trimmed);
+        if (! is_array($parts) || empty($parts['host'])) {
+            return null;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? 'https'));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            $scheme = 'https';
+        }
+
+        $host = (string) $parts['host'];
+        $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+
+        return sprintf('%s://%s%s', $scheme, $host, $port);
+    }
+
+    private function normalizeHost(mixed $host): ?string
+    {
+        if (! is_string($host)) {
+            return null;
+        }
+
+        $normalized = trim(Str::lower($host));
+        return $normalized === '' ? null : $normalized;
+    }
+
     private function forceHttps(?string $domain): ?string
     {
         if (! $domain) {
@@ -187,55 +265,6 @@ class EnvironmentResolverService
         $normalized = trim($normalized, '/');
 
         return $normalized === '' ? null : 'https://' . $normalized;
-    }
-
-    private function resolveRootHost(?string $domain, ?string $tenantSubdomain): ?string
-    {
-        if (! $domain) {
-            return null;
-        }
-
-        $normalized = Str::replace(['http://', 'https://'], '', $domain);
-        $normalized = trim($normalized, '/');
-
-        if ($normalized === '') {
-            return null;
-        }
-
-        if ($tenantSubdomain) {
-            $prefix = Str::lower($tenantSubdomain) . '.';
-            $normalizedLower = Str::lower($normalized);
-            if (Str::startsWith($normalizedLower, $prefix)) {
-                $normalized = substr($normalized, strlen($prefix));
-            }
-        }
-
-        return $normalized === '' ? null : $normalized;
-    }
-
-    private function originWithRequestRoot(?string $requestRoot, string $host): ?string
-    {
-        if (! $requestRoot) {
-            return null;
-        }
-
-        $parts = parse_url($requestRoot);
-        if (! is_array($parts)) {
-            return null;
-        }
-
-        $scheme = $parts['scheme'] ?? null;
-        if (! is_string($scheme) || $scheme === '') {
-            return null;
-        }
-
-        $origin = $scheme . '://' . $host;
-        $port = $parts['port'] ?? null;
-        if (is_int($port)) {
-            $origin .= ':' . $port;
-        }
-
-        return $origin;
     }
 
     private function defaultTelemetryLocationFreshnessMinutes(): int

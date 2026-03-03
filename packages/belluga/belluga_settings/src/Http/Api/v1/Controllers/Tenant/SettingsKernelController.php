@@ -28,8 +28,10 @@ class SettingsKernelController
         ]);
     }
 
-    public function patch(Request $request, string $namespace): JsonResponse
+    public function patch(Request $request, string $firstParam, ?string $secondParam = null): JsonResponse
     {
+        $namespace = $secondParam ?? $firstParam;
+
         $payload = $request->json()->all();
 
         if (! is_array($payload) || array_is_list($payload)) {

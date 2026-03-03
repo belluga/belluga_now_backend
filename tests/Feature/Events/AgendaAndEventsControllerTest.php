@@ -14,6 +14,7 @@ use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCaseTenant;
@@ -73,6 +74,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                     'default_km' => 5,
                     'max_km' => 50,
                 ],
+                'default_origin' => [
+                    'lat' => -20.671339,
+                    'lng' => -40.495395,
+                    'label' => 'Praia do Morro',
+                ],
             ],
         ]);
     }
@@ -110,6 +116,110 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertContains('Happening Now', $titles);
     }
 
+    public function testAgendaDefaultIncludesLiveNowAndExcludesPastEvents(): void
+    {
+        $now = Carbon::now();
+
+        $liveNow = $this->createEvent([
+            'title' => 'Live Agora',
+            'date_time_start' => $now->copy()->subMinutes(30),
+            'date_time_end' => $now->copy()->addMinutes(30),
+        ]);
+        $upcoming = $this->createEvent([
+            'title' => 'Upcoming Visible',
+            'date_time_start' => $now->copy()->addDays(1),
+            'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+        ]);
+        $this->createEvent([
+            'title' => 'Past Hidden',
+            'date_time_start' => $now->copy()->subDays(1)->subHours(3),
+            'date_time_end' => $now->copy()->subDays(1),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+        $response->assertStatus(200);
+
+        $items = $response->json('items');
+        $titles = array_map(static fn ($item): string => (string) ($item['title'] ?? ''), $items);
+
+        $this->assertContains('Live Agora', $titles);
+        $this->assertContains('Upcoming Visible', $titles);
+        $this->assertNotContains('Past Hidden', $titles);
+
+        $liveItem = collect($items)->firstWhere('title', 'Live Agora');
+        $upcomingItem = collect($items)->firstWhere('title', 'Upcoming Visible');
+
+        $this->assertNotNull($liveItem);
+        $this->assertNotNull($upcomingItem);
+        $this->assertSame((string) $liveNow->_id, (string) ($liveItem['event_id'] ?? null));
+        $this->assertSame((string) $upcoming->_id, (string) ($upcomingItem['event_id'] ?? null));
+        $this->assertNotSame('', (string) ($liveItem['occurrence_id'] ?? ''));
+        $this->assertNotSame('', (string) ($upcomingItem['occurrence_id'] ?? ''));
+    }
+
+    public function testAgendaPublicEndpointShowsOnlyEffectivelyPublishedItems(): void
+    {
+        $now = Carbon::now();
+
+        $this->createEvent([
+            'title' => 'Published Visible',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subMinute(),
+            ],
+            'date_time_start' => $now->copy()->addDays(2),
+            'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Draft Hidden',
+            'publication' => [
+                'status' => 'draft',
+                'publish_at' => $now->copy()->subMinute(),
+            ],
+            'date_time_start' => $now->copy()->addDays(2),
+            'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Scheduled Hidden',
+            'publication' => [
+                'status' => 'publish_scheduled',
+                'publish_at' => $now->copy()->addHour(),
+            ],
+            'date_time_start' => $now->copy()->addDays(2),
+            'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Ended Hidden',
+            'publication' => [
+                'status' => 'ended',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->addDays(2),
+            'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Published Future Hidden',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->addHour(),
+            ],
+            'date_time_start' => $now->copy()->addDays(2),
+            'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
+        $response->assertStatus(200);
+
+        $items = $response->json('items');
+        $titles = array_map(static fn ($item): string => (string) ($item['title'] ?? ''), $items);
+
+        $this->assertSame(['Published Visible'], $titles);
+    }
+
     public function testAgendaPastOnlyReturnsPastNotOngoing(): void
     {
         $now = Carbon::now();
@@ -136,6 +246,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
     public function testAgendaSearchMatchesArtistsAndVenue(): void
     {
+        if (! $this->atlasSearchCommandsSupported()) {
+            $this->markTestSkipped('Atlas Search commands are unavailable in this environment.');
+        }
+
         $this->createEvent([
             'title' => 'Search Event',
             'venue' => [
@@ -186,6 +300,42 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $items = $response->json('items');
         $this->assertCount(0, $items);
+    }
+
+    public function testAgendaGeoQueryFailsWhenGeoIndexIsMissing(): void
+    {
+        $this->createEvent([
+            'title' => 'Indexed Geo Event',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.495395, -20.671339],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.495395, -20.671339],
+            ],
+        ]);
+
+        $collection = DB::connection('tenant')->getDatabase()->selectCollection('event_occurrences');
+        $collection->dropIndexes();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=5000&page=1&page_size=10"
+        );
+
+        $response->assertStatus(500);
+
+        $indexNames = [];
+        foreach ($collection->listIndexes() as $index) {
+            $indexNames[] = (string) $index->getName();
+        }
+        $this->assertNotContains('geo_location_2dsphere', $indexNames);
+
+        // Keep test isolation: recreate the required geo index for subsequent tests.
+        $collection->createIndex(['geo_location' => '2dsphere']);
     }
 
     public function testEventDetailResolvesSlugAndId(): void
@@ -450,6 +600,20 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
             $this->landlord->tenant_primary->id = (string) $tenant->_id;
             $this->landlord->tenant_primary->role_admin->id = (string) ($tenant->roleTemplates()->first()?->_id ?? '');
+        }
+    }
+
+    private function atlasSearchCommandsSupported(): bool
+    {
+        try {
+            DB::connection('tenant')->getDatabase()->command([
+                'listSearchIndexes' => 'event_occurrences',
+                'name' => 'events_occurrences_agenda_search_v1',
+            ]);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
         }
     }
 }

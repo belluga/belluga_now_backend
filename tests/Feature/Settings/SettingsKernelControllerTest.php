@@ -69,6 +69,11 @@ class SettingsKernelControllerTest extends TestCaseTenant
                     'past' => 1,
                     'future' => 30,
                 ],
+                'default_origin' => [
+                    'lat' => -20.671339,
+                    'lng' => -40.495395,
+                    'label' => 'Praia do Morro',
+                ],
             ],
             'events' => [
                 'default_duration_hours' => 3,
@@ -88,6 +93,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         [$this->account] = $this->seedAccountWithRole([
             'account-users:view',
             'events:read',
+            'map-pois-settings:update',
             'push-settings:update',
             'telemetry-settings:update',
         ]);
@@ -96,21 +102,18 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->user = $this->createAccountUser([
             'account-users:view',
             'events:read',
+            'map-pois-settings:update',
             'push-settings:update',
             'telemetry-settings:update',
         ]);
 
-        Sanctum::actingAs($this->user, [
-            'account-users:view',
-            'events:read',
-            'push-settings:update',
-            'telemetry-settings:update',
-        ]);
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, $this->accountAbilities());
     }
 
     public function testSettingsSchemaEndpointReturnsRegisteredNamespaces(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
 
         $response->assertJsonPath('data.schema_version', '1.0.0');
@@ -126,10 +129,12 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testSettingsValuesEndpointReturnsNamespaceValues(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}settings/values");
+        $response = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $response->assertStatus(200);
 
         $response->assertJsonPath('data.map_ui.radius.default_km', 5);
+        $response->assertJsonPath('data.map_ui.default_origin.lat', -20.671339);
+        $response->assertJsonPath('data.map_ui.default_origin.lng', -40.495395);
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
@@ -137,14 +142,14 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testPatchNamespaceAppliesPartialMergeByFieldPresence(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}settings/values/events", [
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'default_duration_hours' => 4,
         ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.default_duration_hours', 4);
 
-        $values = $this->getJson("{$this->base_api_tenant}settings/values");
+        $values = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $values->assertStatus(200);
         $values->assertJsonPath('data.events.default_duration_hours', 4);
         $values->assertJsonPath('data.events.mode', 'basic');
@@ -152,7 +157,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testPatchNamespaceRejectsNullForNonNullableField(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}settings/values/events", [
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'default_duration_hours' => null,
         ]);
 
@@ -162,7 +167,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testPatchNamespaceAcceptsNullClearForNullableField(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}settings/values/push", [
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/push", [
             'throttles' => null,
         ]);
 
@@ -170,7 +175,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.throttles', null);
         $response->assertJsonPath('data.max_ttl_days', 7);
 
-        $values = $this->getJson("{$this->base_api_tenant}settings/values");
+        $values = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $values->assertStatus(200);
         $values->assertJsonPath('data.push.throttles', null);
         $values->assertJsonPath('data.push.max_ttl_days', 7);
@@ -178,7 +183,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testPatchNamespaceAppliesMixedSetAndClearAtomically(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}settings/values/push", [
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/push", [
             'max_ttl_days' => 12,
             'throttles' => null,
         ]);
@@ -187,7 +192,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.max_ttl_days', 12);
         $response->assertJsonPath('data.throttles', null);
 
-        $values = $this->getJson("{$this->base_api_tenant}settings/values");
+        $values = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $values->assertStatus(200);
         $values->assertJsonPath('data.push.max_ttl_days', 12);
         $values->assertJsonPath('data.push.throttles', null);
@@ -195,7 +200,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testPatchNamespaceAcceptsNamespacedFieldPath(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}settings/values/events", [
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'events.default_duration_hours' => 6,
         ]);
 
@@ -205,7 +210,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testPatchNamespaceRejectsEnvelopePayloadForm(): void
     {
-        $response = $this->patchJson("{$this->base_api_tenant}settings/values/events", [
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'events' => [
                 'default_duration_hours' => 6,
             ],
@@ -217,7 +222,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testSchemaExposesNavigationNodesAndConditionalMetadata(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
 
         $namespaces = $response->json('data.namespaces') ?? [];
@@ -244,7 +249,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testSchemaNavigationOrderingIsStable(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
 
         $namespaces = $response->json('data.namespaces') ?? [];
@@ -258,6 +263,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame([
             'map_ui.group.radius',
             'map_ui.group.poi_time_window_days',
+            'map_ui.group.default_origin',
         ], $rootNodeIds);
 
         $radiusNode = collect($mapUi['nodes'] ?? [])->firstWhere('id', 'map_ui.group.radius');
@@ -270,11 +276,22 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'map_ui.radius.default_km',
             'map_ui.radius.max_km',
         ], $radiusChildren);
+
+        $originNode = collect($mapUi['nodes'] ?? [])->firstWhere('id', 'map_ui.group.default_origin');
+        $originChildren = array_map(
+            static fn (array $node): ?string => $node['id'] ?? null,
+            $originNode['children'] ?? []
+        );
+        $this->assertSame([
+            'map_ui.default_origin.lat',
+            'map_ui.default_origin.lng',
+            'map_ui.default_origin.label',
+        ], $originChildren);
     }
 
     public function testSchemaNodesExposeEveryRegisteredFieldAsRenderableNode(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
 
         $namespaces = $response->json('data.namespaces') ?? [];
@@ -309,7 +326,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
     {
         $this->ensureConditionalStabilityNamespacesRegistered();
 
-        $response = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
 
         $namespaces = collect($response->json('data.namespaces') ?? []);
@@ -336,17 +353,15 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
     public function testAbilityFilteringHidesNamespacesAndBlocksPatch(): void
     {
-        $restrictedUser = $this->createAccountUser([
-            'account-users:view',
-            'events:read',
-        ]);
+        $restrictedUser = LandlordUser::query()->firstOrFail();
 
         Sanctum::actingAs($restrictedUser, [
             'account-users:view',
             'events:read',
+            'map-pois-settings:update',
         ]);
 
-        $schema = $this->getJson("{$this->base_api_tenant}settings/schema");
+        $schema = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $schema->assertStatus(200);
 
         $namespaces = array_column($schema->json('data.namespaces') ?? [], 'namespace');
@@ -354,7 +369,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('events', $namespaces);
         $this->assertNotContains('push', $namespaces);
 
-        $patch = $this->patchJson("{$this->base_api_tenant}settings/values/push", [
+        $patch = $this->patchJson("{$this->base_tenant_api_admin}settings/values/push", [
             'enabled' => true,
         ]);
 
@@ -429,9 +444,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertArrayNotHasKey('events', $landlordData);
 
         $this->asTenantHost();
-        Sanctum::actingAs($this->user, $this->accountAbilities());
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), $this->accountAbilities());
 
-        $tenantValues = $this->getJson("{$this->base_api_tenant}settings/values");
+        $tenantValues = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $tenantValues->assertStatus(200);
         $tenantData = $tenantValues->json('data') ?? [];
         $this->assertArrayNotHasKey('landlord_test_settings', $tenantData);
@@ -460,8 +475,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertFalse((bool) data_get($landlordValues->json('data') ?? [], 'landlord_test_settings.feature_flag'));
 
         $this->asTenantHost();
-        Sanctum::actingAs($this->user, $this->accountAbilities());
-        $tenantValues = $this->getJson("{$this->base_api_tenant}settings/values");
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), $this->accountAbilities());
+        $tenantValues = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $tenantValues->assertStatus(200);
         $tenantValues->assertJsonPath('data.events.default_duration_hours', 9);
     }
@@ -539,7 +554,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
         return [
             'account-users:view',
             'events:read',
+            'map-pois-settings:update',
             'push-settings:update',
+            'telemetry-settings:update',
         ];
     }
 

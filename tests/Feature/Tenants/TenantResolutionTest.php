@@ -70,7 +70,7 @@ class TenantResolutionTest extends TestCase
         $response->assertStatus(404);
     }
 
-    public function testUnknownHostCannotResolveTenantUsingAppDomain(): void
+    public function testUnknownHostCannotResolveTenantWhenAppDomainIsSentOnlyAsQuery(): void
     {
         $response = $this->getJson(
             sprintf('http://%s.%s/api/v1/environment?app_domain=tenant-alpha.test', 'unknown', $this->host)
@@ -80,15 +80,30 @@ class TenantResolutionTest extends TestCase
             ->assertJson(['message' => 'Resource you are looking for was not found.']);
     }
 
-    public function testMainDomainCanResolveTenantUsingAppDomain(): void
+    public function testMainDomainIgnoresAppDomainQueryWithoutHeader(): void
     {
         $response = $this->getJson(
             sprintf('http://%s/api/v1/environment?app_domain=tenant-alpha.test', $this->host)
         );
 
         $response->assertStatus(200)
+            ->assertJsonPath('type', 'landlord');
+    }
+
+    public function testMainDomainCanResolveTenantUsingAppDomainHeader(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', 'tenant-alpha')->firstOrFail();
+
+        $response = $this->withHeaders([
+            'X-App-Domain' => 'tenant-alpha.test',
+        ])->getJson(
+            sprintf('http://%s/api/v1/environment', $this->host)
+        );
+
+        $response->assertStatus(200)
             ->assertJsonPath('type', 'tenant')
-            ->assertJsonPath('subdomain', 'tenant-alpha');
+            ->assertJsonPath('subdomain', 'tenant-alpha')
+            ->assertJsonPath('main_domain', $tenant->getMainDomain());
     }
 
     private function initializeSystem(): void

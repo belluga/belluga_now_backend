@@ -4,6 +4,7 @@ namespace Tests\Api\v1\Admin;
 
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
+use App\Models\Landlord\LandlordUser;
 use Illuminate\Testing\TestResponse;
 use MongoDB\BSON\ObjectId;
 use Tests\TestCaseAuthenticated;
@@ -227,6 +228,137 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
 
         $response->assertStatus(422);
         $response->assertJsonPath('errors.device_name.0', 'The device name field must not be greater than 255 characters.');
+    }
+
+    public function testAdminLoginWorksOnTenantSubdomain(): void
+    {
+        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
+
+        $login = $this->json(
+            method: 'post',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/login",
+            data: [
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => $this->landlord->user_cross_tenant_admin->password,
+                'device_name' => 'tenant-subdomain-login-check',
+            ]
+        );
+
+        $login->assertStatus(200);
+        $login->assertJsonStructure([
+            'data' => [
+                'user',
+                'token',
+            ],
+        ]);
+
+        $token = $login->json('data.token');
+        $this->assertIsString($token);
+        $this->assertNotSame('', $token);
+
+        $validate = $this->json(
+            method: 'get',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/token_validate",
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ]
+        );
+
+        $validate->assertStatus(200);
+        $validate->assertJsonStructure([
+            'data' => [
+                'user',
+            ],
+        ]);
+
+        $me = $this->json(
+            method: 'get',
+            uri: "http://{$tenantHost}/admin/api/v1/me",
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ]
+        );
+
+        $me->assertStatus(200);
+        $me->assertJsonStructure([
+            'data' => [
+                'user_id',
+            ],
+        ]);
+    }
+
+    public function testAdminTenantSubdomainTokenCanPatchMapUiSettingsNamespace(): void
+    {
+        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
+        $tenantId = $this->landlord->tenant_primary->id;
+
+        $crossAdmin = LandlordUser::query()->find($this->landlord->user_cross_tenant_admin->user_id);
+        $this->assertNotNull($crossAdmin);
+
+        $crossAdmin->tenant_roles = [[
+            'name' => 'Tenant Admin',
+            'slug' => 'tenant-admin',
+            'permissions' => ['*'],
+            'tenant_id' => $tenantId,
+        ]];
+        $crossAdmin->save();
+
+        $login = $this->json(
+            method: 'post',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/login",
+            data: [
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => $this->landlord->user_cross_tenant_admin->password,
+                'device_name' => 'tenant-subdomain-map-ui-settings-patch',
+            ]
+        );
+
+        $login->assertStatus(200);
+        $token = (string) $login->json('data.token');
+        $this->assertNotSame('', $token);
+
+        $patch = $this->json(
+            method: 'patch',
+            uri: "http://{$tenantHost}/admin/api/v1/settings/values/map_ui",
+            data: [
+                'default_origin.lat' => -20.611121,
+                'default_origin.lng' => -40.498617,
+                'default_origin.label' => 'Praia do Morro',
+            ],
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ]
+        );
+
+        $patch->assertStatus(200);
+        $patch->assertJsonPath('data.default_origin.lat', -20.611121);
+        $patch->assertJsonPath('data.default_origin.lng', -40.498617);
+        $patch->assertJsonPath('data.default_origin.label', 'Praia do Morro');
+    }
+
+    public function testAdminLoginWrongPasswordOnTenantSubdomainReturnsCredentialsError(): void
+    {
+        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
+
+        $response = $this->json(
+            method: 'post',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/login",
+            data: [
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => 'invalid-password',
+                'device_name' => 'tenant-subdomain-invalid-password',
+            ]
+        );
+
+        $response->assertStatus(403);
+        $response->assertJsonStructure([
+            'errors' => [
+                'credentials',
+            ],
+        ]);
     }
 
     protected function userLoginWithToken(string $token): TestResponse {

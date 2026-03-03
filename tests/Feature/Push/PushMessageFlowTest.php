@@ -1359,7 +1359,7 @@ class PushMessageFlowTest extends TestCase
         $patch->assertJsonPath('data.max_ttl_days', 21);
         $patch->assertJsonPath('data.throttles.per_minute', 120);
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $kernelValues->assertJsonPath('data.push.max_ttl_days', 21);
         $kernelValues->assertJsonPath('data.push.throttles.per_minute', 120);
@@ -1431,7 +1431,7 @@ class PushMessageFlowTest extends TestCase
         $patch->assertOk();
         $patch->assertJsonPath('data.projectId', 'tenant-project');
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $kernelValues->assertJsonPath('data.firebase.projectId', 'tenant-project');
         $kernelValues->assertJsonPath('data.firebase.apiKey', 'tenant-key');
@@ -1501,7 +1501,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $routes = $kernelValues->json('data.push.message_routes');
         $this->assertIsArray($routes);
@@ -1600,7 +1600,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonFragment(['key' => 'agenda.detail', 'path' => '/agenda/evento/:slug']);
         $response->assertJsonFragment(['key' => 'agenda.new', 'path' => '/agenda/new']);
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $routes = $kernelValues->json('data.push.message_routes');
         $this->assertIsArray($routes);
@@ -1649,7 +1649,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonFragment(['key' => 'event_reminder', 'label' => 'Event Reminder']);
         $response->assertJsonFragment(['key' => 'new_type', 'label' => 'New Type']);
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $types = $kernelValues->json('data.push.message_types');
         $this->assertIsArray($types);
@@ -1694,7 +1694,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonFragment(['key' => 'agenda.search', 'path' => '/agenda']);
         $response->assertJsonFragment(['key' => 'agenda.detail', 'active' => false]);
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $routes = $kernelValues->json('data.push.message_routes');
         $this->assertIsArray($routes);
@@ -1735,7 +1735,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonFragment(['key' => 'invite_received', 'label' => 'Invite Received']);
         $response->assertJsonFragment(['key' => 'event_reminder', 'active' => false]);
 
-        $kernelValues = $this->getJson($baseApiTenant . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
         $kernelValues->assertOk();
         $types = $kernelValues->json('data.push.message_types');
         $this->assertIsArray($types);
