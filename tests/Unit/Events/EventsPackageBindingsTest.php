@@ -6,6 +6,7 @@ namespace Tests\Unit\Events;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
+use App\Integration\Events\EventTypeResolverAdapter;
 use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
@@ -24,6 +25,7 @@ use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
 use Tests\TestCase;
@@ -35,6 +37,10 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             EventTaxonomyValidationAdapter::class,
             $this->app->make(EventTaxonomyValidationContract::class)
+        );
+        $this->assertInstanceOf(
+            EventTypeResolverAdapter::class,
+            $this->app->make(EventTypeResolverContract::class)
         );
         $this->assertInstanceOf(
             AccountProfileResolverAdapter::class,

@@ -21,6 +21,7 @@ use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Queue;
@@ -43,6 +44,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->app->singletonIf(EventAsyncJobSignaturesContract::class, PackageEventAsyncJobSignatures::class);
 
         $this->ensureHostBinding(EventTaxonomyValidationContract::class);
+        $this->ensureHostBinding(EventTypeResolverContract::class);
         $this->ensureHostBinding(EventProfileResolverContract::class);
         $this->ensureHostBinding(EventAccountResolverContract::class);
         $this->ensureHostBinding(EventCapabilitySettingsContract::class);

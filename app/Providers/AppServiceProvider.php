@@ -9,6 +9,7 @@ use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventParties\ArtistEventPartyMapper;
 use App\Integration\Events\EventParties\VenueEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
@@ -50,6 +51,7 @@ use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
@@ -134,6 +136,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             EventTaxonomyValidationContract::class,
             EventTaxonomyValidationAdapter::class
+        );
+
+        $this->app->bind(
+            EventTypeResolverContract::class,
+            EventTypeResolverAdapter::class
         );
 
         $this->app->bind(

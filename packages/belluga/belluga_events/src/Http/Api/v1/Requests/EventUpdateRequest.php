@@ -46,7 +46,7 @@ class EventUpdateRequest extends FormRequest
             'artist_ids' => 'sometimes|array',
             'artist_ids.*' => 'string|size:' . InputConstraints::OBJECT_ID_LENGTH,
             'type' => 'sometimes|array',
-            'type.id' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'type.id' => 'required_with:type|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
             'type.name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'type.slug' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
             'type.description' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,

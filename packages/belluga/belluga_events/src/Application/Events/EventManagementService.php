@@ -7,6 +7,7 @@ namespace Belluga\Events\Application\Events;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Domain\Events\EventCreated;
 use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
@@ -24,6 +25,7 @@ class EventManagementService
 {
     public function __construct(
         private readonly EventTaxonomyValidationContract $taxonomyValidationService,
+        private readonly EventTypeResolverContract $eventTypeResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
         private readonly EventCapabilitiesService $eventCapabilities,
@@ -114,7 +116,6 @@ class EventManagementService
         foreach ([
             'title',
             'content',
-            'type',
             'thumb',
             'tags',
             'categories',
@@ -124,6 +125,10 @@ class EventManagementService
             if (array_key_exists($field, $payload)) {
                 $normalized[$field] = $payload[$field];
             }
+        }
+
+        if (array_key_exists('type', $payload)) {
+            $normalized['type'] = $this->resolveEventTypePayload($payload['type']);
         }
 
         if (array_key_exists('taxonomy_terms', $payload)) {
@@ -589,6 +594,51 @@ class EventManagementService
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    private function resolveEventTypePayload(mixed $value): array
+    {
+        if (! is_array($value)) {
+            throw ValidationException::withMessages([
+                'type' => ['type payload must be an object.'],
+            ]);
+        }
+
+        $id = trim((string) ($value['id'] ?? ''));
+        if ($id === '') {
+            throw ValidationException::withMessages([
+                'type.id' => ['type.id is required.'],
+            ]);
+        }
+
+        $resolved = $this->eventTypeResolver->resolveById($id);
+        if (! is_array($resolved) || $resolved === []) {
+            throw ValidationException::withMessages([
+                'type.id' => ['Event type not found for this tenant.'],
+            ]);
+        }
+
+        $name = trim((string) ($resolved['name'] ?? ''));
+        $slug = trim((string) ($resolved['slug'] ?? ''));
+        $description = trim((string) ($resolved['description'] ?? ''));
+        if ($name === '' || $slug === '' || $description === '') {
+            throw ValidationException::withMessages([
+                'type.id' => ['Resolved event type payload is invalid.'],
+            ]);
+        }
+
+        return [
+            'id' => (string) ($resolved['id'] ?? $id),
+            'name' => $name,
+            'slug' => $slug,
+            'description' => $description,
+            'icon' => $resolved['icon'] ?? null,
+            'color' => $resolved['color'] ?? null,
+        ];
     }
 
     /**

@@ -15,6 +15,7 @@ use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\EventType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
@@ -51,6 +52,7 @@ class EventCrudControllerTest extends TestCaseTenant
     private AccountUser $user;
     private AccountProfile $venue;
     private AccountProfile $artist;
+    private EventType $eventType;
     private string $accountEventsBase;
     private string $tenantAdminEventsBase;
 
@@ -69,6 +71,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         Event::query()->delete();
         EventOccurrence::query()->delete();
+        EventType::query()->delete();
         TicketEventTemplate::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
@@ -86,6 +89,13 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->venue = $this->createAccountProfile('venue', 'Main Venue', $this->account);
         $this->artist = $this->createAccountProfile('artist', 'DJ Test');
+        $this->eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'description' => 'Tipo de evento: Show',
+            'icon' => 'music_note',
+            'color' => '#123456',
+        ]);
 
         $this->accountEventsBase = "{$this->base_api_tenant}accounts/{$this->account->slug}/events";
         $this->tenantAdminEventsBase = "{$this->base_tenant_api_admin}events";
@@ -124,6 +134,20 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->where('occurrence_index', 0)
                 ->exists()
         );
+    }
+
+    public function testEventCreateRejectsUnknownEventTypeId(): void
+    {
+        $payload = $this->makeEventPayload([
+            'type' => [
+                'id' => 'aaaaaaaaaaaaaaaaaaaaaaaa',
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type.id']);
     }
 
     public function testEventPartyCandidatesEndpointAllowsReadCreateOrUpdateAbilityAndReturnsFilteredCandidates(): void
@@ -1298,10 +1322,10 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
             'artist_ids' => [(string) $this->artist->_id],
             'type' => [
-                'id' => 'type-1',
-                'name' => 'Show',
-                'slug' => 'show',
-                'description' => 'Show desc',
+                'id' => (string) $this->eventType->_id,
+                'name' => (string) $this->eventType->name,
+                'slug' => (string) $this->eventType->slug,
+                'description' => (string) $this->eventType->description,
             ],
             'occurrences' => [[
                 'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
@@ -1339,12 +1363,12 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
             ],
             'type' => [
-                'id' => 'type-1',
-                'name' => 'Show',
-                'slug' => 'show',
-                'description' => 'Show desc',
-                'icon' => null,
-                'color' => null,
+                'id' => (string) $this->eventType->_id,
+                'name' => (string) $this->eventType->name,
+                'slug' => (string) $this->eventType->slug,
+                'description' => (string) $this->eventType->description,
+                'icon' => (string) $this->eventType->icon,
+                'color' => (string) $this->eventType->color,
             ],
             'venue' => [
                 'id' => (string) $this->venue->_id,
