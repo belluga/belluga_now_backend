@@ -16,6 +16,7 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
+use Illuminate\Testing\Fluent\AssertableJson;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -302,9 +303,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}agenda?search=solar&page=1&page_size=10");
 
         $response->assertStatus(500);
+        $response->assertJson(fn (AssertableJson $json) => $json
+            ->whereType('message', 'string')
+            ->etc());
         $this->assertStringContainsString(
             'Events search requires Atlas Search index availability and valid Atlas Search pipeline.',
-            $response->getContent()
+            (string) $response->json('message')
         );
     }
 
