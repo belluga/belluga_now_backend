@@ -276,6 +276,38 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertCount(1, $response->json('items'));
     }
 
+    public function testAgendaSearchFailsFastWhenAtlasSearchIsUnavailable(): void
+    {
+        if ($this->atlasSearchCommandsSupported()) {
+            $this->markTestSkipped('Atlas Search commands are available in this environment.');
+        }
+
+        $this->createEvent([
+            'title' => 'Search Event',
+            'venue' => [
+                'id' => 'venue-1',
+                'display_name' => 'Club Aurora',
+            ],
+            'artists' => [
+                [
+                    'id' => 'artist-1',
+                    'display_name' => 'DJ Solar',
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['house'],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?search=solar&page=1&page_size=10");
+
+        $response->assertStatus(500);
+        $this->assertStringContainsString(
+            'Events search requires Atlas Search index availability and valid Atlas Search pipeline.',
+            $response->getContent()
+        );
+    }
+
     public function testAgendaGeoFiltersExcludeEventsOutsideDistance(): void
     {
         $this->createEvent([
