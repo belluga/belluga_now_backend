@@ -61,6 +61,29 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         );
     }
 
+    public function testEnvironmentApiPrefersFirstRelatedDomainWhenNoMainFlagExists(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'path' => 'custom-tenant-main.test',
+            'type' => 'web',
+        ]);
+        $tenant->makeCurrent();
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            'custom-tenant-main.test',
+            parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
+        );
+        $this->assertSame(
+            'custom-tenant-main.test',
+            parse_url($tenant->getMainDomain(), PHP_URL_HOST)
+        );
+    }
+
     public function testEnvironmentApiUsesTelemetryFromSettingsKernel(): void
     {
         $tenant = $this->currentTenant();
