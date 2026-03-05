@@ -35,3 +35,7 @@ foundation_documentation
 CLINE.md
 .cline
 .clinerules
+
+# Local-only helper scripts/symlinks
+/scripts/delphi
+/scripts/delphi/
