@@ -39,15 +39,13 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
 
           BASE_REF="${BASE_REF:-}"
           HEAD_REF="${HEAD_REF:-}"
           PR_HEAD_SHA="${PR_HEAD_SHA:-}"
-          PR_BODY="${PR_BODY:-}"
-          EXPECTED_SHA="$(printf '%s\n' "${PR_BODY}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_SHA="$(printf '%s\n' "${PR_HEAD_SHA}" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
 
           if [[ -z "$BASE_REF" || -z "$HEAD_REF" || -z "$PR_HEAD_SHA" ]]; then
             echo "ERROR: missing pull request branch context (base/head)." >&2
@@ -57,12 +55,8 @@ jobs:
           case "$BASE_REF" in
             stage)
               [[ "$HEAD_REF" == "dev" ]] || { echo "ERROR: only 'dev' may target 'stage' (received '$HEAD_REF' -> '$BASE_REF')." >&2; exit 1; }
-              if [[ -z "${EXPECTED_SHA}" ]]; then
-                echo "ERROR: promotion PR must declare '- Expected SHA: <40-char-sha>' in body." >&2
-                exit 1
-              fi
               if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-                echo "ERROR: invalid Expected SHA lock '${EXPECTED_SHA}' in PR body." >&2
+                echo "ERROR: invalid PR head SHA lock '${EXPECTED_SHA}'." >&2
                 exit 1
               fi
               git fetch origin "${PR_HEAD_SHA}" --quiet || true
@@ -82,12 +76,8 @@ jobs:
               ;;
             main)
               [[ "$HEAD_REF" == "stage" ]] || { echo "ERROR: only 'stage' may target 'main' (received '$HEAD_REF' -> '$BASE_REF')." >&2; exit 1; }
-              if [[ -z "${EXPECTED_SHA}" ]]; then
-                echo "ERROR: promotion PR must declare '- Expected SHA: <40-char-sha>' in body." >&2
-                exit 1
-              fi
               if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-                echo "ERROR: invalid Expected SHA lock '${EXPECTED_SHA}' in PR body." >&2
+                echo "ERROR: invalid PR head SHA lock '${EXPECTED_SHA}'." >&2
                 exit 1
               fi
               git fetch origin "${PR_HEAD_SHA}" --quiet || true
@@ -283,8 +273,7 @@ jobs:
 
           pr_number="$(jq -r '.pull_request.number // empty' "${GITHUB_EVENT_PATH}")"
           pr_url="$(jq -r '.pull_request.html_url // empty' "${GITHUB_EVENT_PATH}")"
-          pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
-          expected_sha="$(printf '%s\n' "${pr_body}" | sed -n 's/^- Expected SHA:[[:space:]]*//p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+          expected_sha="$(jq -r '.pull_request.head.sha // empty' "${GITHUB_EVENT_PATH}" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
 
           echo "result=${result}" >> "$GITHUB_OUTPUT"
           echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
