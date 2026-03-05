@@ -28,7 +28,6 @@ class TicketUnitAuditEvent extends Model
     ];
 
     protected $casts = [
-        'target_ticket_unit_ids' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

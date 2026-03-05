@@ -211,9 +211,14 @@ jobs:
           mkdir -p storage/logs
           chmod -R ug+rwX bootstrap/cache storage
 
+      - name: Run Laravel architecture guardrails
+        run: composer run architecture:guardrails
+
       - name: Run Laravel full test suite
         env:
           APP_ENV: testing
+          APP_URL: http://nginx
+          APP_HOST: nginx
           APP_KEY: base64:GmmALtgdmR+nNYciHr0ynX/QoqHXmoXXtbwHVNWg8Pk=
           APP_FAKER_LOCALE: pt_BR
           DB_CONNECTION_LANDLORD: landlord
@@ -230,6 +235,8 @@ jobs:
         if: failure()
         env:
           APP_ENV: testing
+          APP_URL: http://nginx
+          APP_HOST: nginx
           APP_KEY: base64:GmmALtgdmR+nNYciHr0ynX/QoqHXmoXXtbwHVNWg8Pk=
           APP_FAKER_LOCALE: pt_BR
           DB_CONNECTION_LANDLORD: landlord
