@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Models\Tenants\PushMessage;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Arr;
 
 class PushMessageRenderer
@@ -206,7 +205,7 @@ class PushMessageRenderer
      */
     private function routesByKey(): array
     {
-        $routes = TenantPushSettings::current()?->getPushMessageRoutes() ?? [];
+        $routes = app(PushSettingsKernelBridge::class)->currentMessageRoutes();
         if (! is_array($routes)) {
             return [];
         }

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushMessageRenderer;
@@ -18,14 +18,16 @@ class PushMessageDataController
     public function __construct(
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushMessageRenderer $renderer,
-        private readonly PushMetricsService $metricsService
+        private readonly PushMetricsService $metricsService,
+        private readonly PushAccountContextContract $accountContext,
+        private readonly PushUserGatewayContract $users
     ) {
     }
 
     public function show(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -38,7 +40,7 @@ class PushMessageDataController
         if ($message->scope !== 'account') {
             return response()->json(['ok' => false, 'reason' => 'not_found']);
         }
-        if ((string) $message->partner_id !== (string) $account->_id) {
+        if ((string) $message->partner_id !== $accountId) {
             return response()->json(['ok' => false, 'reason' => 'forbidden'], 403);
         }
 
@@ -51,13 +53,13 @@ class PushMessageDataController
         }
 
         $user = $request->user();
-        if (! $user instanceof AccountUser) {
+        if (! $user || ! $this->users->supports($user)) {
             return response()->json(['ok' => false, 'reason' => 'unauthorized'], 401);
         }
 
         if (! $this->audienceService->isEligible($user, $message, [
             'scope' => 'account',
-            'account_id' => (string) $account->_id,
+            'account_id' => $accountId,
         ])) {
             return response()->json(['ok' => false, 'reason' => 'not_found'], 404);
         }

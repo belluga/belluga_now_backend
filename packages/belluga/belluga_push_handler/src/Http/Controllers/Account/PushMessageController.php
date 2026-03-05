@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use App\Models\Tenants\Account;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
 use Belluga\PushHandler\Http\Requests\PushMessageStoreRequest;
 use Belluga\PushHandler\Http\Requests\PushMessageUpdateRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
@@ -20,20 +20,21 @@ class PushMessageController
     public function __construct(
         private readonly PushMessageService $service,
         private readonly PushMessageAudienceService $audienceService,
-        private readonly PushPlanPolicyContract $planPolicy
+        private readonly PushPlanPolicyContract $planPolicy,
+        private readonly PushAccountContextContract $accountContext
     ) {
     }
 
     public function index(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
         $query = PushMessage::query()
             ->where('scope', 'account')
-            ->where('partner_id', (string) $account->_id);
+            ->where('partner_id', $accountId);
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -50,8 +51,8 @@ class PushMessageController
 
     public function show(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -59,7 +60,7 @@ class PushMessageController
         $message = PushMessage::query()
             ->where('scope', 'account')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
+            ->where('partner_id', $accountId)
             ->firstOrFail();
 
         return response()->json(['data' => $message]);
@@ -67,8 +68,8 @@ class PushMessageController
 
     public function store(PushMessageStoreRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -76,7 +77,7 @@ class PushMessageController
 
         $exists = PushMessage::query()
             ->where('scope', 'account')
-            ->where('partner_id', (string) $account->_id)
+            ->where('partner_id', $accountId)
             ->where('internal_name', $payload['internal_name'])
             ->exists();
 
@@ -87,13 +88,13 @@ class PushMessageController
             ], 422);
         }
 
-        $message = $this->service->create('account', (string) $account->_id, $payload);
+        $message = $this->service->create('account', $accountId, $payload);
 
         $response = ['data' => $message];
         if ($this->planPolicy instanceof PushPlanPolicyDecisionContract) {
             $audienceSize = $this->audienceService->audienceSize($message);
             $response['quota_decision'] = $this->planPolicy->quotaDecision(
-                (string) $account->_id,
+                $accountId,
                 $message,
                 $audienceSize
             );
@@ -104,8 +105,8 @@ class PushMessageController
 
     public function update(PushMessageUpdateRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -113,7 +114,7 @@ class PushMessageController
         $message = PushMessage::query()
             ->where('scope', 'account')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
+            ->where('partner_id', $accountId)
             ->firstOrFail();
 
         $payload = $request->validated();
@@ -121,7 +122,7 @@ class PushMessageController
         if (isset($payload['internal_name'])) {
             $exists = PushMessage::query()
                 ->where('scope', 'account')
-                ->where('partner_id', (string) $account->_id)
+                ->where('partner_id', $accountId)
                 ->where('internal_name', $payload['internal_name'])
                 ->where('_id', '!=', $pushMessageId)
                 ->exists();
@@ -142,8 +143,8 @@ class PushMessageController
 
     public function destroy(Request $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -151,7 +152,7 @@ class PushMessageController
         $message = PushMessage::query()
             ->where('scope', 'account')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
+            ->where('partner_id', $accountId)
             ->firstOrFail();
 
         $metrics = $message->metrics ?? [];

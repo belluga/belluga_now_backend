@@ -40,10 +40,6 @@ return new class extends Migration
             $collection->index(['action' => 1]);
         });
 
-        Schema::create('settings', function (Blueprint $collection) {
-            $collection->index(['created_at' => -1]);
-        });
-
         Schema::create('push_credentials', function (Blueprint $collection) {
             $collection->index(['created_at' => -1]);
         });
@@ -61,7 +57,6 @@ return new class extends Migration
     {
         Schema::dropIfExists('push_messages');
         Schema::dropIfExists('push_message_actions');
-        Schema::dropIfExists('settings');
         Schema::dropIfExists('push_credentials');
         Schema::dropIfExists('push_delivery_logs');
     }

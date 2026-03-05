@@ -6,8 +6,8 @@ namespace App\Application\StaticAssets;
 
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\StaticAsset;
-use App\Jobs\MapPois\DeleteMapPoiByRefJob;
-use App\Jobs\MapPois\UpsertMapPoiFromStaticAssetJob;
+use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\UpsertMapPoiFromStaticAssetJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;

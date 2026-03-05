@@ -57,9 +57,11 @@ class Tenant extends BaseTenant
             return $this->formatAsHttpsDomain($primaryDomain);
         }
 
-        $landlordHost = Str::replace(['https://', 'http://'], '', (string) config('app.url'));
+        if (empty($this->subdomain)) {
+            throw new \RuntimeException('Tenant subdomain is not configured.');
+        }
 
-        return $this->formatAsHttpsDomain($this->subdomain . '.' . $landlordHost);
+        return $this->formatAsHttpsDomain(self::defaultDomainForSubdomain($this->subdomain));
     }
 
     public function domains(): HasMany
@@ -145,6 +147,7 @@ class Tenant extends BaseTenant
 
         static::created(function (Tenant $tenant) {
             $tenant->createDatabase();
+            $tenant->ensureMainDomainRecord();
         });
     }
 
@@ -186,17 +189,13 @@ class Tenant extends BaseTenant
         if ($mainDomain?->path) {
             return $mainDomain->path;
         }
-
-        $firstDomain = $this->domains()
-            ->orderBy('created_at')
-            ->first();
-
-        return $firstDomain?->path;
+        
+        return null;
     }
 
     private function primaryDomainFromEmbeddedArray(): ?string
     {
-        $domains = $this->getAttribute('domains') ?? [];
+        $domains = $this->attributes['domains'] ?? $this->getRawOriginal('domains') ?? [];
 
         if (! is_array($domains) || $domains === []) {
             return null;
@@ -223,6 +222,31 @@ class Tenant extends BaseTenant
         $normalized = trim($normalized, '/');
 
         return 'https://' . $normalized;
+    }
+
+    private function ensureMainDomainRecord(): void
+    {
+        if ($this->domains()->exists() || empty($this->subdomain)) {
+            return;
+        }
+
+        $this->domains()->create([
+            'type' => 'web',
+            'path' => self::defaultDomainForSubdomain($this->subdomain),
+        ]);
+    }
+
+    private static function defaultDomainForSubdomain(string $subdomain): string
+    {
+        $configuredUrl = (string) config('app.url');
+        $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
+        if (! is_string($rootHost) || $rootHost === '') {
+            $rootHost = Str::replace(['https://', 'http://'], '', $configuredUrl);
+            $rootHost = trim($rootHost, '/');
+        }
+        $prefix = Str::lower(trim($subdomain)) . '.';
+
+        return $prefix . $rootHost;
     }
 
     public function setDomainsAttribute(?array $domains): void

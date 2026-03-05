@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
-use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Illuminate\Contracts\Auth\Authenticatable;
 
 class PushMessageAudienceService
 {
@@ -18,7 +18,7 @@ class PushMessageAudienceService
     /**
      * @param array<string, mixed> $context
      */
-    public function isEligible(AccountUser $user, PushMessage $message, array $context = []): bool
+    public function isEligible(Authenticatable $user, PushMessage $message, array $context = []): bool
     {
         $audience = $message->audience ?? [];
         return $this->eligibilityContract->isEligible($user, $message, $audience, $context);

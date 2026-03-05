@@ -20,13 +20,11 @@ return [
             'settings_prefix' => 'settings',
             'settings_push' => 'push',
             'settings_firebase' => 'firebase',
-            'settings_telemetry' => 'telemetry',
         ],
         'landlord' => [
             'prefix' => 'admin/api/v1',
             'tenant_settings_path' => '{tenant_slug}/settings/push',
             'tenant_settings_firebase_path' => '{tenant_slug}/settings/firebase',
-            'tenant_settings_telemetry_path' => '{tenant_slug}/settings/telemetry',
         ],
     ],
     'fcm' => [

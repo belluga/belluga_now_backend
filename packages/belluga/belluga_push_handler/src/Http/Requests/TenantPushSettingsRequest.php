@@ -17,41 +17,55 @@ class TenantPushSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'push' => ['required', 'array'],
-            'push.max_ttl_days' => ['nullable', 'integer', 'min:1', 'max:30'],
-            'push.throttles' => ['nullable', 'array'],
+            'max_ttl_days' => ['sometimes', 'integer', 'min:1', 'max:30'],
+            'throttles' => ['sometimes', 'nullable', 'array'],
         ];
     }
 
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            if ($this->has('push_message_routes')) {
-                $validator->errors()->add('push_message_routes', 'Use /settings/push/route_types instead.');
+            if (! is_array($this->all()) || array_is_list($this->all())) {
+                $validator->errors()->add('payload', 'The payload must be an object/map.');
+                return;
             }
-            if ($this->has('push_message_types')) {
-                $validator->errors()->add('push_message_types', 'Use /settings/push/message_types instead.');
+
+            $allowedKeys = ['max_ttl_days', 'throttles'];
+            $disallowedMessages = [
+                'push' => 'Use direct payload keys (max_ttl_days/throttles) instead of a push envelope.',
+                'push_message_routes' => 'Use /settings/push/route_types instead.',
+                'push_message_types' => 'Use /settings/push/message_types instead.',
+                'message_routes' => 'Use /settings/push/route_types instead.',
+                'message_types' => 'Use /settings/push/message_types instead.',
+                'types' => 'Use /settings/push/message_types instead.',
+                'enabled' => 'Use /settings/push/enable or /settings/push/disable instead.',
+                'firebase' => 'Use /settings/firebase instead.',
+                'telemetry' => 'Use /settings/telemetry instead.',
+            ];
+
+            $input = $this->all();
+            foreach ($disallowedMessages as $key => $message) {
+                if ($this->has($key) || data_get($input, $key) !== null) {
+                    $validator->errors()->add($key, $message);
+                }
             }
-            if ($this->has('push.message_routes')) {
-                $validator->errors()->add('push.message_routes', 'Use /settings/push/route_types instead.');
+
+            foreach (array_keys($input) as $key) {
+                if (! in_array($key, $allowedKeys, true) && ! array_key_exists($key, $disallowedMessages)) {
+                    $validator->errors()->add($key, 'Unsupported key for this PATCH endpoint.');
+                }
             }
-            if ($this->has('push.message_types')) {
-                $validator->errors()->add('push.message_types', 'Use /settings/push/message_types instead.');
+
+            $hasAllowed = false;
+            foreach ($allowedKeys as $key) {
+                if (array_key_exists($key, $input)) {
+                    $hasAllowed = true;
+                    break;
+                }
             }
-            if ($this->has('push.types')) {
-                $validator->errors()->add('push.types', 'Use /settings/push/message_types instead.');
-            }
-            if ($this->has('push.enabled')) {
-                $validator->errors()->add('push.enabled', 'Use /settings/push/enable or /settings/push/disable instead.');
-            }
-            if ($this->has('max_ttl_days')) {
-                $validator->errors()->add('max_ttl_days', 'Use push.max_ttl_days instead.');
-            }
-            if ($this->has('firebase')) {
-                $validator->errors()->add('firebase', 'Use /settings/firebase instead.');
-            }
-            if ($this->has('telemetry')) {
-                $validator->errors()->add('telemetry', 'Use /settings/telemetry instead.');
+
+            if (! $hasAllowed) {
+                $validator->errors()->add('payload', 'At least one patchable key is required (max_ttl_days, throttles).');
             }
         });
     }

@@ -28,8 +28,8 @@ yarn-error.log
 AGENTS.md
 delphi-ai
 foundation_documentation
-.agent
-.codex
+.agent/
+.codex/
 
 # CLINE
 CLINE.md

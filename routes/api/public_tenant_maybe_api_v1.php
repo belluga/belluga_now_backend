@@ -6,6 +6,7 @@ use App\Http\Api\v1\Controllers\EnvironmentController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
@@ -52,5 +53,16 @@ Route::middleware('tenant')->group(function () {
 
                     Route::get('/token_validate', [AuthControllerAccount::class, 'loginByToken']);
                 });
+        });
+
+    Route::prefix('settings')
+        ->middleware(['auth:sanctum', CheckTenantAccess::class])
+        ->group(function () {
+            Route::get('/telemetry', [TenantTelemetrySettingsController::class, 'index'])
+                ->middleware('abilities:telemetry-settings:update');
+            Route::post('/telemetry', [TenantTelemetrySettingsController::class, 'store'])
+                ->middleware('abilities:telemetry-settings:update');
+            Route::delete('/telemetry/{type}', [TenantTelemetrySettingsController::class, 'destroy'])
+                ->middleware('abilities:telemetry-settings:update');
         });
 });

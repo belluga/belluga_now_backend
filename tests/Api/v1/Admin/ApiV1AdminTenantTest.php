@@ -16,6 +16,11 @@ class ApiV1AdminTenantTest extends TestCaseAuthenticated {
         $this->assertEquals(1, $responseData['total']);
         $this->assertCount(1, $responseData['data']);
         $this->assertEquals(1, $responseData['current_page']);
+        $this->assertArrayHasKey('main_domain', $responseData['data'][0]);
+        $this->assertNotEmpty($responseData['data'][0]['main_domain']);
+        $this->assertArrayHasKey('domains', $responseData['data'][0]);
+        $this->assertIsArray($responseData['data'][0]['domains']);
+        $this->assertNotEmpty($responseData['data'][0]['domains']);
     }
 
     public function testTenantsCreate(): void {
