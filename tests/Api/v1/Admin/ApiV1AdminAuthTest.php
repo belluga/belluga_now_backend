@@ -339,6 +339,71 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         $patch->assertJsonPath('data.default_origin.label', 'Praia do Morro');
     }
 
+    public function testLandlordTenantTelemetryEndpointsRejectTenantOutsideOperatorAccessScope(): void
+    {
+        $primaryTenant = Tenant::query()
+            ->where('slug', $this->landlord->tenant_primary->slug)
+            ->firstOrFail();
+
+        $targetTenant = Tenant::query()
+            ->where('slug', 'telemetry-bypass-target')
+            ->first();
+        if (! $targetTenant) {
+            $targetTenant = Tenant::create([
+                'name' => 'Telemetry Bypass Target',
+                'subdomain' => 'telemetry-bypass-target',
+                'app_domains' => ['com.telemetry.bypass.target'],
+            ]);
+        }
+
+        $crossAdmin = LandlordUser::query()->find($this->landlord->user_cross_tenant_admin->user_id);
+        $this->assertNotNull($crossAdmin);
+
+        $crossAdmin->tenant_roles = [[
+            'name' => 'Tenant Admin',
+            'slug' => 'tenant-admin',
+            'permissions' => ['telemetry-settings:update'],
+            'tenant_id' => (string) $primaryTenant->_id,
+        ]];
+        $crossAdmin->save();
+
+        $token = $crossAdmin->createToken(
+            'telemetry-access-scope-test',
+            ['telemetry-settings:update']
+        )->plainTextToken;
+
+        $headers = [
+            'Authorization' => "Bearer {$token}",
+            'Content-Type' => 'application/json',
+        ];
+
+        $indexResponse = $this->json(
+            method: 'get',
+            uri: "admin/api/v1/{$targetTenant->slug}/settings/telemetry",
+            headers: $headers,
+        );
+        $indexResponse->assertStatus(404);
+
+        $storeResponse = $this->json(
+            method: 'post',
+            uri: "admin/api/v1/{$targetTenant->slug}/settings/telemetry",
+            data: [
+                'type' => 'mixpanel',
+                'token' => 'mixpanel-token',
+                'track_all' => true,
+            ],
+            headers: $headers,
+        );
+        $storeResponse->assertStatus(404);
+
+        $destroyResponse = $this->json(
+            method: 'delete',
+            uri: "admin/api/v1/{$targetTenant->slug}/settings/telemetry/mixpanel",
+            headers: $headers,
+        );
+        $destroyResponse->assertStatus(404);
+    }
+
     public function testAdminLoginWrongPasswordOnTenantSubdomainReturnsCredentialsError(): void
     {
         $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";

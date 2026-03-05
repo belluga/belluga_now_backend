@@ -5,6 +5,7 @@ use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
@@ -58,4 +59,11 @@ Schedule::call(static function (): void {
     ->withoutOverlapping();
 
 Schedule::job(new ProcessTicketOutboxJob())->everyMinute();
-Schedule::job(new ExpireIssuedTicketUnitsJob())->everyMinute();
+Schedule::call(static function (): void {
+    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
+        app()->call([new ExpireIssuedTicketUnitsJob(), 'handle']);
+    });
+})
+    ->name('ticketing:issued-expiry:sweep')
+    ->everyMinute()
+    ->withoutOverlapping();
