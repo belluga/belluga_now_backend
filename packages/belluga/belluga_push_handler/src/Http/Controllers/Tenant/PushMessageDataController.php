@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Tenant;
 
-use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushMessageRenderer;
@@ -17,7 +17,8 @@ class PushMessageDataController
     public function __construct(
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushMessageRenderer $renderer,
-        private readonly PushMetricsService $metricsService
+        private readonly PushMetricsService $metricsService,
+        private readonly PushUserGatewayContract $users
     ) {
     }
 
@@ -42,7 +43,7 @@ class PushMessageDataController
         }
 
         $user = $request->user();
-        if (! $user instanceof AccountUser) {
+        if (! $user || ! $this->users->supports($user)) {
             return response()->json(['ok' => false, 'reason' => 'unauthorized'], 401);
         }
 

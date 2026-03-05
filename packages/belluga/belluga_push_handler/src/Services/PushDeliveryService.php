@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Carbon\Carbon;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
@@ -16,7 +16,8 @@ class PushDeliveryService
 {
     public function __construct(
         private readonly FcmClientContract $fcmClient,
-        private readonly TelemetryDeliveryService $telemetryDelivery
+        private readonly PushTelemetryEmitterContract $telemetryEmitter,
+        private readonly PushSettingsKernelBridge $pushSettings
     ) {
     }
 
@@ -78,10 +79,27 @@ class PushDeliveryService
 
         if ($message->type === 'invite_received' && $telemetryUserIds !== []) {
             foreach (array_keys($telemetryUserIds) as $userId) {
-                $this->telemetryDelivery->deliverInviteReceived(
-                    message: $message,
+                $this->telemetryEmitter->emit(
+                    event: 'invite_received',
                     userId: (string) $userId,
-                    messageInstanceId: $messageInstanceId
+                    properties: [
+                        'push_message_id' => (string) $message->_id,
+                        'message_instance_id' => $messageInstanceId,
+                        'push_type' => (string) ($message->type ?? ''),
+                    ],
+                    idempotencyKey: implode(':', [
+                        'invite_received',
+                        (string) $message->_id,
+                        $messageInstanceId,
+                        (string) $userId,
+                    ]),
+                    source: 'push',
+                    context: [
+                        'actor' => ['type' => 'user', 'id' => (string) $userId],
+                        'object' => ['type' => 'push_message', 'id' => (string) $message->_id],
+                        'target' => ['type' => 'user', 'id' => (string) $userId],
+                        'visibility' => 'tenant',
+                    ]
                 );
             }
         }
@@ -105,7 +123,7 @@ class PushDeliveryService
             ]);
         }
 
-        $maxTtlDays = TenantPushSettings::current()?->getPushMaxTtlDays() ?? 30;
+        $maxTtlDays = $this->pushSettings->resolveMaxTtlDays(30);
         $fcmMaxDays = (int) config('belluga_push_handler.fcm.max_ttl_days', 28);
         $maxAllowedDays = min($maxTtlDays, $fcmMaxDays);
         $maxAllowedMinutes = $maxAllowedDays * 24 * 60;

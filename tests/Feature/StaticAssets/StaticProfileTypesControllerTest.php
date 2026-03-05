@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\StaticAssets;
 
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\MapPoi;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use App\Application\Initialization\InitializationPayload;

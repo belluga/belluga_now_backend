@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Http\Requests\PushMessageActionRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
@@ -16,14 +16,16 @@ class PushMessageActionController
 {
     public function __construct(
         private readonly PushMetricsService $metricsService,
-        private readonly PushMessageAudienceService $audienceService
+        private readonly PushMessageAudienceService $audienceService,
+        private readonly PushAccountContextContract $accountContext,
+        private readonly PushUserGatewayContract $users
     ) {
     }
 
     public function store(PushMessageActionRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
@@ -31,24 +33,32 @@ class PushMessageActionController
         $message = PushMessage::query()
             ->where('scope', 'account')
             ->where('_id', $pushMessageId)
-            ->where('partner_id', (string) $account->_id)
+            ->where('partner_id', $accountId)
             ->firstOrFail();
 
         $user = $request->user();
-        if (! $user instanceof AccountUser) {
+        if (! $user || ! $this->users->supports($user)) {
             return response()->json(['ok' => false], 401);
         }
 
         if (! $this->audienceService->isEligible($user, $message, [
             'scope' => 'account',
-            'account_id' => (string) $account->_id,
+            'account_id' => $accountId,
         ])) {
             return response()->json(['ok' => false, 'reason' => 'forbidden'], 403);
         }
 
         $payload = $request->validated();
+        $userId = $this->users->userId($user);
+        if ($userId === null || $userId === '') {
+            return response()->json(['ok' => false, 'reason' => 'unauthorized'], 401);
+        }
 
-        $action = $this->metricsService->recordAction($message, $payload, (string) $user->_id);
+        $action = $this->metricsService->recordAction(
+            $message,
+            $payload,
+            $userId
+        );
 
         return response()->json([
             'ok' => true,

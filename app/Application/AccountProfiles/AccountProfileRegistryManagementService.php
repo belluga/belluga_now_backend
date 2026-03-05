@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\MapPoi;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;

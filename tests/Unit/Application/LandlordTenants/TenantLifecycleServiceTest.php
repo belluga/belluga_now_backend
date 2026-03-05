@@ -50,6 +50,28 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertContains($firstTenantId, $ids);
     }
 
+    public function testPaginateUsesFirstRelatedMainDomainWhenNoMainFlagExists(): void
+    {
+        $tenant = $this->service->create($this->makeTenantPayload('Lambda Academy'), $this->operator)['tenant'];
+        $aliasDomain = 'alias-only-' . Str::lower(Str::random(8)) . '.example.test';
+
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'type' => 'web',
+            'path' => $aliasDomain,
+        ]);
+
+        $paginator = $this->service->paginate($this->operator, false, 50);
+        $item = collect($paginator->items())
+            ->first(fn (array $entry): bool => $entry['id'] === (string) $tenant->_id);
+
+        $this->assertNotNull($item);
+        $this->assertSame(
+            'https://' . $aliasDomain,
+            $item['main_domain']
+        );
+    }
+
     public function testCreatePersistsTenantAndAssignsRoleToOperator(): void
     {
         $payload = $this->makeTenantPayload('Delta Stores');

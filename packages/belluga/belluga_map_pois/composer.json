@@ -1,0 +1,22 @@
+{
+  "name": "belluga/map-pois",
+  "description": "Belluga Map and POIs backend package with projection and query runtime.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\MapPois\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\MapPois\\MapPoisServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}

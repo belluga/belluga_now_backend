@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Contracts;
 
-use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Illuminate\Contracts\Auth\Authenticatable;
 
 interface PushAudienceEligibilityContract
 {
@@ -14,7 +14,7 @@ interface PushAudienceEligibilityContract
      * @param array<string, mixed> $context
      */
     public function isEligible(
-        AccountUser $user,
+        Authenticatable $user,
         PushMessage $message,
         array $audience,
         array $context = []

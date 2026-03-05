@@ -9,6 +9,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Landlord\TenantRoleTemplate;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -28,6 +29,8 @@ class TenantLifecycleService
                 'slug' => $tenant->slug,
                 'description' => $tenant->description,
                 'subdomain' => $tenant->subdomain,
+                'main_domain' => $tenant->getMainDomain(),
+                'domains' => self::resolveTenantDomains($tenant),
                 'database' => $tenant->database,
                 'app_domains' => $tenant->app_domains,
                 'created_at' => $tenant->created_at?->toJSON(),
@@ -151,5 +154,63 @@ class TenantLifecycleService
         }
 
         return $builder;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function resolveTenantDomains(Tenant $tenant): array
+    {
+        $domains = [];
+
+        foreach ($tenant->domains as $domain) {
+            $normalized = self::normalizeDomainPath((string) ($domain->path ?? ''));
+            if ($normalized !== null) {
+                $domains[] = $normalized;
+            }
+        }
+
+        if ($domains === []) {
+            $embedded = $tenant->getAttribute('domains');
+            if (is_array($embedded)) {
+                foreach ($embedded as $entry) {
+                    $candidate = null;
+                    if (is_string($entry)) {
+                        $candidate = $entry;
+                    } elseif (is_array($entry)) {
+                        $candidate = $entry['path'] ?? $entry['domain'] ?? null;
+                    }
+                    $normalized = self::normalizeDomainPath(
+                        is_string($candidate) ? $candidate : ''
+                    );
+                    if ($normalized !== null) {
+                        $domains[] = $normalized;
+                    }
+                }
+            }
+        }
+
+        $mainDomain = self::normalizeDomainPath($tenant->getMainDomain());
+        if ($mainDomain !== null) {
+            array_unshift($domains, $mainDomain);
+        }
+
+        return array_values(array_unique($domains));
+    }
+
+    private static function normalizeDomainPath(string $raw): ?string
+    {
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $normalizedInput = Str::replace(['https://', 'http://'], '', $trimmed);
+        $normalizedInput = trim($normalizedInput, '/');
+        if ($normalizedInput === '') {
+            return null;
+        }
+
+        return Str::lower($normalizedInput);
     }
 }

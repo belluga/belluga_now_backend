@@ -15,8 +15,31 @@ use App\Http\Api\v1\Controllers\StaticProfileTypesController;
 use App\Http\Api\v1\Controllers\TaxonomiesController;
 use App\Http\Api\v1\Controllers\TaxonomyTermsController;
 use App\Http\Api\v1\Controllers\ExternalImageProxyController;
+use App\Http\Api\v1\Controllers\AuthControllerLandlord;
+use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('auth')->group(function () {
+    Route::post('/logout', [AuthControllerLandlord::class, 'logout'])
+        ->middleware(['auth:sanctum']);
+
+    Route::withoutMiddleware('landlord')
+        ->group(function () {
+            Route::post('/login', [AuthControllerLandlord::class, 'login']);
+
+            Route::post('/password_token', [ProfileControllerLandlord::class, 'generateToken']);
+
+            Route::post('/password_reset', [ProfileControllerLandlord::class, 'resetPassword']);
+        });
+
+    Route::get('/token_validate', [AuthControllerLandlord::class, 'loginByToken'])
+        ->middleware(['auth:sanctum']);
+});
+
+Route::get('/me', [MeController::class, 'landlord'])
+    ->middleware(['auth:sanctum']);
 
 Route::prefix('domains')
     ->group(function (){
