@@ -42,7 +42,8 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
     return 0;
 })->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
 
-Schedule::job(new PublishScheduledEventsJob())->hourly();
+// Use class-string scheduling to avoid eager class instantiation during console bootstrap.
+Schedule::job(PublishScheduledEventsJob::class)->hourly();
 
 Schedule::call(static function (): void {
     app(EventAsyncOperationsMonitorService::class)->evaluate();
