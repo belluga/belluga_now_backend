@@ -34,6 +34,7 @@ final class ArchitectureGuardrailRunner
         $this->checkMongoModelCastBan();
         $this->checkPackageSourceCoupling();
         $this->checkTenantMigrationPathRegistration();
+        $this->checkCiLocalTestRuntimeGuardrails();
 
         if ($this->violations === []) {
             fwrite(STDOUT, "[ARCH-GUARDRAILS] PASS - no architecture violations found.\n");
@@ -343,6 +344,159 @@ final class ArchitectureGuardrailRunner
                 );
             }
         }
+    }
+
+    private function checkCiLocalTestRuntimeGuardrails(): void
+    {
+        $relativePath = '.github/workflows/ci.yml';
+        $absolutePath = $this->repoRoot.'/'.$relativePath;
+        $content = @file_get_contents($absolutePath);
+
+        if (! is_string($content)) {
+            $this->addViolation(
+                'LAR-CI-LOCAL-TEST-RUNTIME',
+                $relativePath,
+                1,
+                'Cannot read Laravel CI workflow file.'
+            );
+
+            return;
+        }
+
+        $requiredPairs = [
+            'APP_URL' => 'http://nginx',
+            'APP_HOST' => 'nginx',
+        ];
+
+        foreach ($requiredPairs as $key => $expected) {
+            if (preg_match("/^\\s*{$key}:\\s*(\\S+)\\s*$/m", $content, $matches, PREG_OFFSET_CAPTURE) !== 1) {
+                $this->addViolation(
+                    'LAR-CI-LOCAL-TEST-RUNTIME',
+                    $relativePath,
+                    1,
+                    "Missing {$key} definition in CI workflow test env."
+                );
+                continue;
+            }
+
+            $actual = trim((string) $matches[1][0], "\"'");
+            $line = substr_count(substr($content, 0, (int) $matches[0][1]), "\n") + 1;
+            if ($actual !== $expected) {
+                $this->addViolation(
+                    'LAR-CI-LOCAL-TEST-RUNTIME',
+                    $relativePath,
+                    $line,
+                    "{$key} must be `{$expected}` in CI test env (found `{$actual}`)."
+                );
+            }
+        }
+
+        if (preg_match_all('/^\\s*(DB_URI(?:_LANDLORD|_TENANTS)?):\\s*(\\S+)\\s*$/m', $content, $matches, PREG_OFFSET_CAPTURE) < 1) {
+            $this->addViolation(
+                'LAR-CI-LOCAL-TEST-RUNTIME',
+                $relativePath,
+                1,
+                'CI workflow must define DB_URI, DB_URI_LANDLORD, and DB_URI_TENANTS.'
+            );
+
+            return;
+        }
+
+        $allowedMongoHosts = [
+            'localhost' => true,
+            '127.0.0.1' => true,
+            '::1' => true,
+            'mongo' => true,
+        ];
+
+        foreach ($matches[1] as $index => $keyMatch) {
+            $key = (string) $keyMatch[0];
+            $dsn = trim((string) $matches[2][$index][0], "\"'");
+            $line = substr_count(substr($content, 0, (int) $keyMatch[1]), "\n") + 1;
+            $issues = $this->validateMongoDsnHosts($dsn, $allowedMongoHosts);
+            foreach ($issues as $issue) {
+                $this->addViolation(
+                    'LAR-CI-LOCAL-TEST-RUNTIME',
+                    $relativePath,
+                    $line,
+                    "{$key}: {$issue}"
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<string, true> $allowedHosts
+     * @return list<string>
+     */
+    private function validateMongoDsnHosts(string $dsn, array $allowedHosts): array
+    {
+        $issues = [];
+        $dsn = trim($dsn);
+        $lower = strtolower($dsn);
+
+        if ($dsn === '') {
+            return ['Mongo DSN cannot be empty.'];
+        }
+
+        if (str_starts_with($lower, 'mongodb+srv://')) {
+            return ['mongodb+srv is forbidden for test runtime; use local mongodb:// DSN.'];
+        }
+
+        if (! str_starts_with($lower, 'mongodb://')) {
+            return ['DSN must start with mongodb://'];
+        }
+
+        $withoutScheme = substr($dsn, strlen('mongodb://'));
+        $authority = strstr($withoutScheme, '/', true);
+        if ($authority === false) {
+            $authority = $withoutScheme;
+        }
+
+        if (str_contains($authority, '@')) {
+            $authority = substr((string) $authority, (int) strrpos((string) $authority, '@') + 1);
+        }
+
+        $hosts = array_filter(array_map('trim', explode(',', (string) $authority)));
+        if ($hosts === []) {
+            return ['DSN must contain at least one host in the authority section.'];
+        }
+
+        foreach ($hosts as $hostEntry) {
+            $host = $this->normalizeMongoHost((string) $hostEntry);
+            if ($host === null) {
+                $issues[] = "cannot parse host from `{$hostEntry}`";
+                continue;
+            }
+
+            if (! isset($allowedHosts[$host])) {
+                $issues[] = "host `{$host}` is not local; allowed hosts: ".implode(', ', array_keys($allowedHosts));
+            }
+        }
+
+        return $issues;
+    }
+
+    private function normalizeMongoHost(string $hostEntry): ?string
+    {
+        $hostEntry = trim($hostEntry);
+        if ($hostEntry === '') {
+            return null;
+        }
+
+        if (str_starts_with($hostEntry, '[')) {
+            $end = strpos($hostEntry, ']');
+            if ($end === false) {
+                return null;
+            }
+
+            return strtolower(trim(substr($hostEntry, 0, $end + 1), "[] \t\n\r\0\x0B"));
+        }
+
+        $host = explode(':', $hostEntry, 2)[0] ?? '';
+        $host = strtolower(trim($host, "[] \t\n\r\0\x0B"));
+
+        return $host === '' ? null : $host;
     }
 
     /**
