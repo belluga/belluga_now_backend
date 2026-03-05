@@ -189,8 +189,12 @@ class Tenant extends BaseTenant
         if ($mainDomain?->path) {
             return $mainDomain->path;
         }
-        
-        return null;
+
+        $firstDomain = $this->domains()
+            ->orderBy('created_at')
+            ->first();
+
+        return $firstDomain?->path ?: null;
     }
 
     private function primaryDomainFromEmbeddedArray(): ?string

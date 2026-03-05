@@ -211,9 +211,65 @@ jobs:
           mkdir -p storage/logs
           chmod -R ug+rwX bootstrap/cache storage
 
+      - name: Prepare local-only Laravel test environment file
+        run: |
+          cat > .env.testing <<'EOF'
+          APP_NAME=LaravelWithMongodbBoilerplate
+          APP_ENV=testing
+          APP_KEY=base64:GmmALtgdmR+nNYciHr0ynX/QoqHXmoXXtbwHVNWg8Pk=
+          APP_DEBUG=true
+          APP_URL=http://nginx
+          APP_HOST=nginx
+          APP_LOCALE=en
+          APP_FALLBACK_LOCALE=en
+          APP_FAKER_LOCALE=pt_BR
+          APP_MAINTENANCE_DRIVER=file
+          APP_MAINTENANCE_STORE=database
+          BCRYPT_ROUNDS=4
+          LOG_CHANNEL=stack
+          LOG_STACK=single
+          LOG_DEPRECATIONS_CHANNEL=null
+          LOG_LEVEL=debug
+          DB_CONNECTION=mongodb
+          DB_URI=mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_DATABASE=landlord_test
+          DB_CONNECTION_LANDLORD=landlord
+          DB_URI_LANDLORD=mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_DATABASE_LANDLORD=landlord_test
+          DB_CONNECTION_TENANTS=tenant
+          DB_URI_TENANTS=mongodb://localhost:27017/tenants_test?replicaSet=rs0&directConnection=true
+          DB_DATABASE_TENANTS=tenants_test
+          SESSION_DRIVER=array
+          CACHE_STORE=array
+          QUEUE_CONNECTION=sync
+          MAIL_MAILER=array
+          EOF
+
+          if ! grep -Eq '^APP_URL=http://nginx$' .env.testing; then
+            echo "ERROR: APP_URL in .env.testing must be local (http://nginx)." >&2
+            exit 1
+          fi
+          if ! grep -Eq '^APP_HOST=nginx$' .env.testing; then
+            echo "ERROR: APP_HOST in .env.testing must be local (nginx)." >&2
+            exit 1
+          fi
+          if grep -Eq '^DB_URI(_LANDLORD|_TENANTS)?=mongodb\\+srv://' .env.testing; then
+            echo "ERROR: Atlas/SRV Mongo DSN is forbidden in test CI env." >&2
+            exit 1
+          fi
+          if ! grep -Eq '^DB_URI(_LANDLORD|_TENANTS)?=mongodb://localhost:27017/' .env.testing; then
+            echo "ERROR: Mongo DSNs in .env.testing must target localhost." >&2
+            exit 1
+          fi
+
+      - name: Run Laravel architecture guardrails
+        run: composer run architecture:guardrails
+
       - name: Run Laravel full test suite
         env:
           APP_ENV: testing
+          APP_URL: http://nginx
+          APP_HOST: nginx
           APP_KEY: base64:GmmALtgdmR+nNYciHr0ynX/QoqHXmoXXtbwHVNWg8Pk=
           APP_FAKER_LOCALE: pt_BR
           DB_CONNECTION_LANDLORD: landlord
@@ -224,7 +280,45 @@ jobs:
           DB_DATABASE: landlord_test
           DB_DATABASE_LANDLORD: landlord_test
           DB_DATABASE_TENANTS: tenants_test
-        run: php artisan test
+        run: |
+          set -euo pipefail
+          log_file="$(mktemp)"
+
+          set +e
+          php artisan test --fail-on-warning --display-warnings 2>&1 | tee "$log_file"
+          test_exit="${PIPESTATUS[0]}"
+          set -e
+
+          if [[ "$test_exit" -ne 0 ]]; then
+            exit "$test_exit"
+          fi
+
+          if grep -Eq 'Tests:[[:space:]]+[1-9][0-9]* warnings' "$log_file"; then
+            echo "ERROR: Laravel test suite reported warnings; warnings are blocking." >&2
+            exit 1
+          fi
+
+      - name: Diagnose warning source (on failure)
+        if: failure()
+        env:
+          APP_ENV: testing
+          APP_URL: http://nginx
+          APP_HOST: nginx
+          APP_KEY: base64:GmmALtgdmR+nNYciHr0ynX/QoqHXmoXXtbwHVNWg8Pk=
+          APP_FAKER_LOCALE: pt_BR
+          DB_CONNECTION_LANDLORD: landlord
+          DB_CONNECTION_TENANTS: tenant
+          DB_URI: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_LANDLORD: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
+          DB_URI_TENANTS: mongodb://localhost:27017/tenants_test?replicaSet=rs0&directConnection=true
+          DB_DATABASE: landlord_test
+          DB_DATABASE_LANDLORD: landlord_test
+          DB_DATABASE_TENANTS: tenants_test
+        run: |
+          php artisan test tests/Feature/Initialization/InitializationControllerTest.php \
+            --display-warnings \
+            --stop-on-warning \
+            --debug || true
 
       - name: Stop MongoDB
         if: always()
