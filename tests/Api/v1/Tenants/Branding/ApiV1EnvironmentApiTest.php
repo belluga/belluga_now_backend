@@ -10,10 +10,20 @@ use Tests\Helpers\TenantLabels;
 
 class ApiV1EnvironmentApiTest extends TestCaseTenant
 {
+    /** @var array<string, mixed>|null */
+    private ?array $tenantSnapshot = null;
+
     protected TenantLabels $tenant {
         get{
             return $this->landlord->tenant_primary;
         }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreTenantSnapshot();
+
+        parent::tearDown();
     }
 
     public function testEnvironmentApiReturnsTenantPayload(): void
@@ -47,6 +57,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     public function testEnvironmentApiFallsBackToSubdomainWhenNoDomains(): void
     {
         $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
         $tenant->domains()->delete();
         $tenant->domains = [];
         $tenant->save();
@@ -64,6 +75,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     public function testEnvironmentApiPrefersFirstRelatedDomainWhenNoMainFlagExists(): void
     {
         $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
         $tenant->domains()->delete();
         $tenant->domains()->create([
             'path' => 'custom-tenant-main.test',
@@ -87,6 +99,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     public function testEnvironmentApiIgnoresLegacyPersistedLandlordFallbackDomains(): void
     {
         $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
         $rootHost = $this->rootHost();
 
         $tenant->update(['subdomain' => 'guarappari']);
@@ -170,6 +183,33 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     private function currentTenant(): Tenant
     {
         return Tenant::query()->firstOrFail();
+    }
+
+    private function snapshotTenant(Tenant $tenant): void
+    {
+        if ($this->tenantSnapshot !== null) {
+            return;
+        }
+
+        $this->tenantSnapshot = [
+            'id' => (string) $tenant->getKey(),
+            'subdomain' => $tenant->subdomain,
+        ];
+    }
+
+    private function restoreTenantSnapshot(): void
+    {
+        if ($this->tenantSnapshot === null) {
+            return;
+        }
+
+        $tenant = Tenant::query()->findOrFail($this->tenantSnapshot['id']);
+        $tenant->update([
+            'subdomain' => $this->tenantSnapshot['subdomain'],
+        ]);
+        $tenant->domains()->delete();
+
+        $this->tenantSnapshot = null;
     }
 
     private function rootHost(): string
