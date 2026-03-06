@@ -128,10 +128,6 @@ return new class extends Migration
 
     private function shouldIgnoreUnsupportedAtlasSearchCommand(MongoDriverException $exception): bool
     {
-        if (! app()->environment(['local', 'testing'])) {
-            return false;
-        }
-
         $message = strtolower($exception->getMessage());
         $unsupported = str_contains($message, 'no such command')
             || str_contains($message, 'search index commands are only supported')
@@ -142,10 +138,16 @@ return new class extends Migration
             return false;
         }
 
+        $strict = filter_var((string) env('EVENTS_ATLAS_SEARCH_INDEX_REQUIRED', 'false'), FILTER_VALIDATE_BOOL);
+        if ($strict) {
+            return false;
+        }
+
         Log::warning('events_atlas_search_index_migration_skipped', [
             'collection' => self::COLLECTION,
             'index' => self::INDEX_NAME,
             'reason' => $exception->getMessage(),
+            'strict' => false,
         ]);
 
         return true;
