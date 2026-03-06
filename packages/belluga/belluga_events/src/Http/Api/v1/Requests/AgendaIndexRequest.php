@@ -23,7 +23,8 @@ class AgendaIndexRequest extends FormRequest
             'page' => 'sometimes|integer|min:1',
             'page_size' => 'sometimes|integer|min:1',
             'past_only' => 'sometimes|boolean',
-            'search' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            // MVP: event text search is disabled; taxonomy/categorical filters are canonical.
+            'search' => 'prohibited',
             'categories' => 'sometimes|array',
             'categories.*' => 'string|max:' . InputConstraints::NAME_MAX,
             'tags' => 'sometimes|array',

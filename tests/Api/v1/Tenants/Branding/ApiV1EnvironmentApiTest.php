@@ -10,10 +10,20 @@ use Tests\Helpers\TenantLabels;
 
 class ApiV1EnvironmentApiTest extends TestCaseTenant
 {
+    /** @var array<string, mixed>|null */
+    private ?array $tenantSnapshot = null;
+
     protected TenantLabels $tenant {
         get{
             return $this->landlord->tenant_primary;
         }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreTenantSnapshot();
+
+        parent::tearDown();
     }
 
     public function testEnvironmentApiReturnsTenantPayload(): void
@@ -47,6 +57,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     public function testEnvironmentApiFallsBackToSubdomainWhenNoDomains(): void
     {
         $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
         $tenant->domains()->delete();
         $tenant->domains = [];
         $tenant->save();
@@ -64,6 +75,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     public function testEnvironmentApiPrefersFirstRelatedDomainWhenNoMainFlagExists(): void
     {
         $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
         $tenant->domains()->delete();
         $tenant->domains()->create([
             'path' => 'custom-tenant-main.test',
@@ -81,6 +93,33 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $this->assertSame(
             'custom-tenant-main.test',
             parse_url($tenant->getMainDomain(), PHP_URL_HOST)
+        );
+    }
+
+    public function testEnvironmentApiIgnoresLegacyPersistedLandlordFallbackDomains(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $rootHost = $this->rootHost();
+
+        $tenant->update(['subdomain' => 'guarappari']);
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'path' => "guarapari.$rootHost",
+            'type' => 'web',
+        ]);
+        $tenant->makeCurrent();
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            "guarappari.$rootHost",
+            parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
+        );
+        $this->assertSame(
+            ["guarappari.$rootHost"],
+            $response->json('domains')
         );
     }
 
@@ -144,6 +183,44 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     private function currentTenant(): Tenant
     {
         return Tenant::query()->firstOrFail();
+    }
+
+    private function snapshotTenant(Tenant $tenant): void
+    {
+        if ($this->tenantSnapshot !== null) {
+            return;
+        }
+
+        $this->tenantSnapshot = [
+            'id' => (string) $tenant->getKey(),
+            'subdomain' => $tenant->subdomain,
+        ];
+    }
+
+    private function restoreTenantSnapshot(): void
+    {
+        if ($this->tenantSnapshot === null) {
+            return;
+        }
+
+        $tenant = Tenant::query()->findOrFail($this->tenantSnapshot['id']);
+        $tenant->update([
+            'subdomain' => $this->tenantSnapshot['subdomain'],
+        ]);
+        $tenant->domains()->delete();
+
+        $this->tenantSnapshot = null;
+    }
+
+    private function rootHost(): string
+    {
+        $configuredUrl = (string) config('app.url');
+        $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
+        if (is_string($rootHost) && $rootHost !== '') {
+            return $rootHost;
+        }
+
+        return trim(str_replace(['https://', 'http://'], '', $configuredUrl), '/');
     }
 
 }

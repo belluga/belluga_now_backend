@@ -67,11 +67,11 @@ class EnvironmentResolverService
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
         );
-        $domains = $tenant->domains()->get()->all();
         $canonicalTenantMainDomain = $tenant->getMainDomain();
+        $resolvedDomains = $tenant->resolvedDomains();
         $mainDomain = $this->resolveTenantMainDomain(
             tenantMainDomain: $canonicalTenantMainDomain,
-            domains: $domains,
+            domains: $resolvedDomains,
             requestRoot: $requestRoot,
             requestHost: $requestHost,
         );
@@ -83,7 +83,7 @@ class EnvironmentResolverService
             'subdomain' => $tenant->subdomain,
             'main_domain' => $mainDomain,
             'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
-            'domains' => $this->normalizeDomains($domains),
+            'domains' => $resolvedDomains,
             'app_domains' => $tenant->app_domains,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
@@ -154,27 +154,11 @@ class EnvironmentResolverService
     }
 
     /**
-     * @param array<int, mixed> $domains
-     * @return array<int, string>
-     */
-    private function normalizeDomains(array $domains): array
-    {
-        $normalized = array_map(static function ($domain): string {
-            if (is_string($domain)) {
-                return $domain;
-            }
-
-            return (string) ($domain['path'] ?? $domain->path ?? '');
-        }, $domains);
-
-        return array_values(array_filter($normalized, static fn (string $domain): bool => $domain !== ''));
-    }
-
     /**
      * Web: use current tenant host as main_domain.
      * Mobile (resolved via app_domain on landlord host): keep canonical tenant main domain.
      *
-     * @param array<int, mixed> $domains
+     * @param array<int, string> $domains
      */
     private function resolveTenantMainDomain(
         string $tenantMainDomain,
@@ -194,7 +178,7 @@ class EnvironmentResolverService
             $allowedHosts[$tenantMainHost] = true;
         }
 
-        foreach ($this->normalizeDomains($domains) as $domain) {
+        foreach ($domains as $domain) {
             $host = $this->normalizeHost(parse_url($this->forceHttps($domain), PHP_URL_HOST));
             if ($host !== null) {
                 $allowedHosts[$host] = true;

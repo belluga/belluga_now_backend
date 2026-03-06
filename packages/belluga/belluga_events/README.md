@@ -160,11 +160,14 @@ Auth/guard expectations are defined by host routes/middleware (`auth:sanctum`, `
 Query:
 - `page`, `page_size`
 - `past_only`
-- `search`
 - `categories[]`
 - `tags[]`
 - `taxonomy[]` (`{type, value}`)
 - `origin_lat`, `origin_lng`, `max_distance_meters`
+
+Notes:
+- `search` is intentionally unsupported in MVP for agenda/events listing.
+- `taxonomy[].type` and `taxonomy[].value` are slug pairs (`taxonomy.slug`, `taxonomy_term.slug`).
 
 Response item (minimum):
 - `event_id`
@@ -405,7 +408,7 @@ Important index families:
 - agenda ordering/pagination (`deleted_at`, `is_event_published`, `starts_at`, `_id`)
 - stream deltas (`updated_at`, `_id`) + soft-delete path
 - event timeline/sync (`event_id`, `starts_at`)
-- filtering (`place_ref.type/id`, `categories`, `tags`, typed taxonomy terms)
+- filtering (`place_ref.type/id`, `categories`, `tags`, typed taxonomy terms on event + venue + artists)
 - geo (`geo_location` 2dsphere)
 - occurrence identity (`event_id`, `occurrence_index`, unique)
 
