@@ -22,13 +22,6 @@ class EventQueryService
 {
     private const DEFAULT_PAGE_SIZE = 10;
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
-    private const ATLAS_SEARCH_INDEX_NAME = 'events_occurrences_agenda_search_v1';
-    private const ATLAS_SEARCH_TEXT_FIELDS = [
-        'title',
-        'content',
-        'artists.display_name',
-        'venue.display_name',
-    ];
 
     /** @var array<string, mixed>|null */
     private ?array $tenantCapabilitiesCache = null;
@@ -82,16 +75,6 @@ class EventQueryService
 
         if ($accountContextId) {
             $this->applyAccountFiltersToQuery($query, $accountContextId);
-        }
-
-        $search = trim((string) ($queryParams['search'] ?? ''));
-        if ($search !== '') {
-            $query->where(function ($builder) use ($search): void {
-                $builder->where('title', 'like', '%' . $search . '%')
-                    ->orWhere('content', 'like', '%' . $search . '%')
-                    ->orWhere('venue.display_name', 'like', '%' . $search . '%')
-                    ->orWhere('place_ref.metadata.display_name', 'like', '%' . $search . '%');
-            });
         }
 
         if (array_key_exists('status', $queryParams) && $queryParams['status'] !== null) {
@@ -245,7 +228,6 @@ class EventQueryService
             'duration_ms' => $this->durationMs($startedAt),
             'since' => $since->toISOString(),
             'use_geo' => (bool) ($filters['use_geo'] ?? false),
-            'search_applied' => (string) ($filters['search'] ?? '') !== '',
             'category_filter_count' => count($filters['categories'] ?? []),
             'tag_filter_count' => count($filters['tags'] ?? []),
             'taxonomy_filter_count' => count($filters['taxonomy'] ?? []),
@@ -269,7 +251,6 @@ class EventQueryService
         $useGeo = $originLat !== null && $originLng !== null;
 
         return [
-            'search' => trim((string) ($queryParams['search'] ?? '')),
             'categories' => $this->normalizeStringArray($queryParams['categories'] ?? []),
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
@@ -289,14 +270,8 @@ class EventQueryService
     {
         $pipeline = $this->buildAgendaPipeline($filters, $userId, $skip, $limit, $useGeo);
 
-        try {
-            /** @var Collection<int, EventOccurrence> $events */
-            $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
-        } catch (\Throwable $throwable) {
-            $this->handleAtlasSearchFailureIfNeeded($filters, $throwable);
-            throw $throwable;
-        }
-
+        /** @var Collection<int, EventOccurrence> $events */
+        $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
         return $events->all();
     }
 
@@ -308,14 +283,8 @@ class EventQueryService
     {
         $pipeline = $this->buildStreamPipeline($filters, $userId, $since, $useGeo);
 
-        try {
-            /** @var Collection<int, EventOccurrence> $events */
-            $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
-        } catch (\Throwable $throwable) {
-            $this->handleAtlasSearchFailureIfNeeded($filters, $throwable);
-            throw $throwable;
-        }
-
+        /** @var Collection<int, EventOccurrence> $events */
+        $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
         return $events->all();
     }
 
@@ -332,12 +301,8 @@ class EventQueryService
             'deleted_at' => null,
             'is_event_published' => true,
         ];
-        $hasSearch = $filters['search'] !== '';
 
-        if ($hasSearch) {
-            $pipeline[] = ['$search' => $this->buildAtlasSearchStage($filters)];
-            $pipeline[] = ['$match' => $baseMatch];
-        } elseif ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
+        if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
                 'near' => [
                     'type' => 'Point',
@@ -407,11 +372,7 @@ class EventQueryService
                 ['deleted_at' => ['$gt' => $sinceUtc]],
             ],
         ];
-        $hasSearch = $filters['search'] !== '';
-
-        if ($hasSearch) {
-            $pipeline[] = ['$search' => $this->buildAtlasSearchStage($filters)];
-        } elseif ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
+        if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
                 'near' => [
                     'type' => 'Point',
@@ -440,73 +401,6 @@ class EventQueryService
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
 
         return $pipeline;
-    }
-
-    /**
-     * @param array<string, mixed> $filters
-     * @return array<string, mixed>
-     */
-    private function buildAtlasSearchStage(array $filters): array
-    {
-        $must = [[
-            'text' => [
-                'query' => (string) $filters['search'],
-                'path' => self::ATLAS_SEARCH_TEXT_FIELDS,
-            ],
-        ]];
-
-        if (
-            ($filters['use_geo'] ?? false) === true
-            && $filters['origin_lat'] !== null
-            && $filters['origin_lng'] !== null
-            && $filters['max_distance_meters'] !== null
-        ) {
-            $must[] = [
-                'geoWithin' => [
-                    'path' => 'geo_location',
-                    'circle' => [
-                        'center' => [
-                            'type' => 'Point',
-                            'coordinates' => [(float) $filters['origin_lng'], (float) $filters['origin_lat']],
-                        ],
-                        'radius' => (float) $filters['max_distance_meters'],
-                    ],
-                ],
-            ];
-        }
-
-        return [
-            'index' => self::ATLAS_SEARCH_INDEX_NAME,
-            'compound' => [
-                'must' => $must,
-            ],
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $filters
-     */
-    private function handleAtlasSearchFailureIfNeeded(array $filters, \Throwable $throwable): void
-    {
-        $search = trim((string) ($filters['search'] ?? ''));
-        if ($search === '') {
-            return;
-        }
-
-        Log::error('events_atlas_search_query_failed', [
-            'search' => $search,
-            'use_geo' => (bool) ($filters['use_geo'] ?? false),
-            'origin_lat' => $filters['origin_lat'] ?? null,
-            'origin_lng' => $filters['origin_lng'] ?? null,
-            'max_distance_meters' => $filters['max_distance_meters'] ?? null,
-            'index' => self::ATLAS_SEARCH_INDEX_NAME,
-            'error' => $throwable->getMessage(),
-        ]);
-
-        throw new \RuntimeException(
-            'Events search requires Atlas Search index availability and valid Atlas Search pipeline.',
-            previous: $throwable
-        );
     }
 
     /**
@@ -569,14 +463,11 @@ class EventQueryService
         $termMatches = [];
 
         foreach ($taxonomy as $term) {
-            $typeRegex = new Regex('^' . preg_quote($term['type']) . '$', 'i');
-            $valueRegex = new Regex('^' . preg_quote($term['value']) . '$', 'i');
-
             $termMatches[] = [
                 'venue.taxonomy_terms' => [
                     '$elemMatch' => [
-                        'type' => ['$regex' => $typeRegex],
-                        'value' => ['$regex' => $valueRegex],
+                        'type' => $term['type'],
+                        'value' => $term['value'],
                     ],
                 ],
             ];
@@ -584,8 +475,8 @@ class EventQueryService
             $termMatches[] = [
                 'artists.taxonomy_terms' => [
                     '$elemMatch' => [
-                        'type' => ['$regex' => $typeRegex],
-                        'value' => ['$regex' => $valueRegex],
+                        'type' => $term['type'],
+                        'value' => $term['value'],
                     ],
                 ],
             ];
@@ -593,8 +484,8 @@ class EventQueryService
             $termMatches[] = [
                 'taxonomy_terms' => [
                     '$elemMatch' => [
-                        'type' => ['$regex' => $typeRegex],
-                        'value' => ['$regex' => $valueRegex],
+                        'type' => $term['type'],
+                        'value' => $term['value'],
                     ],
                 ],
             ];

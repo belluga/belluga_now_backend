@@ -84,6 +84,32 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         );
     }
 
+    public function testEnvironmentApiIgnoresLegacyPersistedLandlordFallbackDomains(): void
+    {
+        $tenant = $this->currentTenant();
+        $rootHost = $this->rootHost();
+
+        $tenant->update(['subdomain' => 'guarappari']);
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'path' => "guarapari.$rootHost",
+            'type' => 'web',
+        ]);
+        $tenant->makeCurrent();
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            "guarappari.$rootHost",
+            parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
+        );
+        $this->assertSame(
+            ["guarappari.$rootHost"],
+            $response->json('domains')
+        );
+    }
+
     public function testEnvironmentApiUsesTelemetryFromSettingsKernel(): void
     {
         $tenant = $this->currentTenant();
@@ -144,6 +170,17 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     private function currentTenant(): Tenant
     {
         return Tenant::query()->firstOrFail();
+    }
+
+    private function rootHost(): string
+    {
+        $configuredUrl = (string) config('app.url');
+        $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
+        if (is_string($rootHost) && $rootHost !== '') {
+            return $rootHost;
+        }
+
+        return trim(str_replace(['https://', 'http://'], '', $configuredUrl), '/');
     }
 
 }
