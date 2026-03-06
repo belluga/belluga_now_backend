@@ -27,6 +27,8 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         'LOG_STACK',
         'LOG_LEVEL',
         'LOG_DAILY_DAYS',
+        'LOG_MONGODB_COLLECTION',
+        'LOG_MONGODB_RETENTION_DAYS',
     ];
 
     protected function setUp(): void
@@ -90,11 +92,13 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('database', $config['default']);
     }
 
-    public function testLoggingStackDefaultsToDailyAndSafeLevel(): void
+    public function testLoggingStackDefaultsToMongoAndStderrWithFiniteRetention(): void
     {
         $config = $this->loadLoggingConfig();
 
-        $this->assertSame(['daily'], $config['channels']['stack']['channels']);
+        $this->assertSame(['mongodb', 'stderr'], $config['channels']['stack']['channels']);
+        $this->assertSame('application_logs', $config['channels']['mongodb']['collection']);
+        $this->assertSame(14, $config['channels']['mongodb']['retention_days']);
         $this->assertSame('info', $config['channels']['daily']['level']);
     }
 
