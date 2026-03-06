@@ -16,7 +16,6 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
-use Illuminate\Testing\Fluent\AssertableJson;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -245,71 +244,76 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Past Event', $items[0]['title']);
     }
 
-    public function testAgendaSearchMatchesArtistsAndVenue(): void
+    public function testAgendaFiltersByTypedTaxonomyTerms(): void
     {
-        if (! $this->atlasSearchCommandsSupported()) {
-            $this->markTestSkipped('Atlas Search commands are unavailable in this environment.');
-        }
+        $this->createEvent([
+            'title' => 'Event Taxonomy Match',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+            ],
+        ]);
 
         $this->createEvent([
-            'title' => 'Search Event',
+            'title' => 'Venue Taxonomy Match',
             'venue' => [
-                'id' => 'venue-1',
-                'display_name' => 'Club Aurora',
-            ],
-            'artists' => [
-                [
-                    'id' => 'artist-1',
-                    'display_name' => 'DJ Solar',
-                    'avatar_url' => null,
-                    'highlight' => false,
-                    'genres' => ['house'],
+                'id' => 'venue-2',
+                'display_name' => 'Casa Noturna',
+                'taxonomy_terms' => [
+                    ['type' => 'cuisine', 'value' => 'seafood'],
                 ],
             ],
         ]);
 
-        $response = $this->getJson("{$this->base_api_tenant}agenda?search=solar&page=1&page_size=10");
-        $response->assertStatus(200);
-        $this->assertCount(1, $response->json('items'));
+        $this->createEvent([
+            'title' => 'Artist Taxonomy Match',
+            'artists' => [
+                [
+                    'id' => 'artist-3',
+                    'display_name' => 'DJ Mar',
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['house'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'samba'],
+                    ],
+                ],
+            ],
+        ]);
 
-        $response = $this->getJson("{$this->base_api_tenant}agenda?search=club&page=1&page_size=10");
+        $this->createEvent([
+            'title' => 'No Taxonomy Match',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'night'],
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=mood&taxonomy[0][value]=sunset&page=1&page_size=10"
+        );
         $response->assertStatus(200);
         $this->assertCount(1, $response->json('items'));
+        $this->assertSame('Event Taxonomy Match', $response->json('items.0.title'));
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=cuisine&taxonomy[0][value]=seafood&page=1&page_size=10"
+        );
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('items'));
+        $this->assertSame('Venue Taxonomy Match', $response->json('items.0.title'));
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=music_genre&taxonomy[0][value]=samba&page=1&page_size=10"
+        );
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('items'));
+        $this->assertSame('Artist Taxonomy Match', $response->json('items.0.title'));
     }
 
-    public function testAgendaSearchFailsFastWhenAtlasSearchIsUnavailable(): void
+    public function testAgendaRejectsDeprecatedSearchQueryParam(): void
     {
-        if ($this->atlasSearchCommandsSupported()) {
-            $this->markTestSkipped('Atlas Search commands are available in this environment.');
-        }
-
-        $this->createEvent([
-            'title' => 'Search Event',
-            'venue' => [
-                'id' => 'venue-1',
-                'display_name' => 'Club Aurora',
-            ],
-            'artists' => [
-                [
-                    'id' => 'artist-1',
-                    'display_name' => 'DJ Solar',
-                    'avatar_url' => null,
-                    'highlight' => false,
-                    'genres' => ['house'],
-                ],
-            ],
-        ]);
-
         $response = $this->getJson("{$this->base_api_tenant}agenda?search=solar&page=1&page_size=10");
-
-        $response->assertStatus(500);
-        $response->assertJson(fn (AssertableJson $json) => $json
-            ->whereType('message', 'string')
-            ->etc());
-        $this->assertStringContainsString(
-            'Events search requires Atlas Search index availability and valid Atlas Search pipeline.',
-            (string) $response->json('message')
-        );
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['search']);
     }
 
     public function testAgendaGeoFiltersExcludeEventsOutsideDistance(): void
@@ -639,17 +643,4 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         }
     }
 
-    private function atlasSearchCommandsSupported(): bool
-    {
-        try {
-            DB::connection('tenant')->getDatabase()->command([
-                'listSearchIndexes' => 'event_occurrences',
-                'name' => 'events_occurrences_agenda_search_v1',
-            ]);
-
-            return true;
-        } catch (\Throwable) {
-            return false;
-        }
-    }
 }

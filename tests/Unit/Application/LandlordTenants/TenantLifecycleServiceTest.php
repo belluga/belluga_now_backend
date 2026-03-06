@@ -72,6 +72,35 @@ class TenantLifecycleServiceTest extends TestCase
         );
     }
 
+    public function testPaginateIgnoresLegacyPersistedLandlordFallbackDomains(): void
+    {
+        $tenant = $this->service->create([
+            ...$this->makeTenantPayload('Guarapari Tenant'),
+            'subdomain' => 'guarappari',
+        ], $this->operator)['tenant'];
+        $rootHost = $this->rootHost();
+
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'type' => 'web',
+            'path' => "guarapari.$rootHost",
+        ]);
+
+        $paginator = $this->service->paginate($this->operator, false, 50);
+        $item = collect($paginator->items())
+            ->first(fn (array $entry): bool => $entry['id'] === (string) $tenant->_id);
+
+        $this->assertNotNull($item);
+        $this->assertSame(
+            "https://guarappari.$rootHost",
+            $item['main_domain']
+        );
+        $this->assertSame(
+            ["guarappari.$rootHost"],
+            $item['domains']
+        );
+    }
+
     public function testCreatePersistsTenantAndAssignsRoleToOperator(): void
     {
         $payload = $this->makeTenantPayload('Delta Stores');
@@ -87,6 +116,24 @@ class TenantLifecycleServiceTest extends TestCase
 
         $this->operator->refresh();
         $this->assertContains((string) $tenant->_id, $this->operator->getAccessToIds());
+    }
+
+    public function testCreateDoesNotPersistImplicitFallbackDomain(): void
+    {
+        $payload = $this->makeTenantPayload('No Domain Seed');
+
+        $tenant = $this->service->create($payload, $this->operator)['tenant'];
+        $rootHost = $this->rootHost();
+
+        $this->assertCount(0, $tenant->domains()->get());
+        $this->assertSame(
+            "https://{$tenant->subdomain}.$rootHost",
+            $tenant->getMainDomain()
+        );
+        $this->assertSame(
+            ["{$tenant->subdomain}.$rootHost"],
+            $tenant->resolvedDomains()
+        );
     }
 
     public function testUpdateMutatesTenantAttributes(): void
@@ -163,5 +210,16 @@ class TenantLifecycleServiceTest extends TestCase
         );
 
         $service->initialize($payload);
+    }
+
+    private function rootHost(): string
+    {
+        $configuredUrl = (string) config('app.url');
+        $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
+        if (is_string($rootHost) && $rootHost !== '') {
+            return $rootHost;
+        }
+
+        return trim(str_replace(['https://', 'http://'], '', $configuredUrl), '/');
     }
 }

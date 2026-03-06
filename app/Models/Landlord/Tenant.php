@@ -50,8 +50,7 @@ class Tenant extends BaseTenant
 
     public function getMainDomain(): string
     {
-        $primaryDomain = $this->primaryDomainFromRelation()
-            ?? $this->primaryDomainFromEmbeddedArray();
+        $primaryDomain = $this->primaryExplicitDomain();
 
         if ($primaryDomain) {
             return $this->formatAsHttpsDomain($primaryDomain);
@@ -62,6 +61,33 @@ class Tenant extends BaseTenant
         }
 
         return $this->formatAsHttpsDomain(self::defaultDomainForSubdomain($this->subdomain));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function resolvedDomains(): array
+    {
+        $domains = $this->explicitDomains();
+        $mainDomain = $this->normalizeDomainPath($this->getMainDomain());
+        if ($mainDomain !== null) {
+            array_unshift($domains, $mainDomain);
+        }
+
+        return array_values(array_unique($domains));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function explicitDomains(): array
+    {
+        $fromRelation = $this->explicitDomainsFromRelation();
+        if ($fromRelation !== []) {
+            return $fromRelation;
+        }
+
+        return $this->explicitDomainsFromEmbeddedArray();
     }
 
     public function domains(): HasMany
@@ -147,7 +173,6 @@ class Tenant extends BaseTenant
 
         static::created(function (Tenant $tenant) {
             $tenant->createDatabase();
-            $tenant->ensureMainDomainRecord();
         });
     }
 
@@ -179,45 +204,53 @@ class Tenant extends BaseTenant
 
     }
 
-    private function primaryDomainFromRelation(): ?string
+    private function primaryExplicitDomain(): ?string
     {
-        $mainDomain = $this->domains()
-            ->where('main', true)
-            ->orderBy('created_at')
-            ->first();
-
-        if ($mainDomain?->path) {
-            return $mainDomain->path;
-        }
-
-        $firstDomain = $this->domains()
-            ->orderBy('created_at')
-            ->first();
-
-        return $firstDomain?->path ?: null;
+        $domains = $this->explicitDomains();
+        return $domains[0] ?? null;
     }
 
-    private function primaryDomainFromEmbeddedArray(): ?string
+    /**
+     * @return array<int, string>
+     */
+    private function explicitDomainsFromRelation(): array
+    {
+        $domains = $this->domains()
+            ->orderBy('created_at')
+            ->get()
+            ->pluck('path')
+            ->all();
+
+        return $this->filterExplicitDomains($domains);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function explicitDomainsFromEmbeddedArray(): array
     {
         $domains = $this->attributes['domains'] ?? $this->getRawOriginal('domains') ?? [];
 
         if (! is_array($domains) || $domains === []) {
-            return null;
+            return [];
         }
 
+        $candidates = [];
         foreach ($domains as $domain) {
-            if (is_array($domain) && ($domain['main'] ?? false)) {
-                return $domain['path'] ?? $domain['domain'] ?? null;
+            if (is_string($domain)) {
+                $candidates[] = $domain;
+                continue;
+            }
+
+            if (is_array($domain)) {
+                $candidate = $domain['path'] ?? $domain['domain'] ?? null;
+                if (is_string($candidate) && trim($candidate) !== '') {
+                    $candidates[] = $candidate;
+                }
             }
         }
 
-        $first = $domains[0];
-
-        if (is_array($first)) {
-            return $first['path'] ?? $first['domain'] ?? null;
-        }
-
-        return is_string($first) ? $first : null;
+        return $this->filterExplicitDomains($candidates);
     }
 
     private function formatAsHttpsDomain(string $domain): string
@@ -228,19 +261,39 @@ class Tenant extends BaseTenant
         return 'https://' . $normalized;
     }
 
-    private function ensureMainDomainRecord(): void
+    /**
+     * @param array<int, mixed> $domains
+     * @return array<int, string>
+     */
+    private function filterExplicitDomains(array $domains): array
     {
-        if ($this->domains()->exists() || empty($this->subdomain)) {
-            return;
+        $resolved = [];
+
+        foreach ($domains as $domain) {
+            if (! is_string($domain)) {
+                continue;
+            }
+
+            $normalized = $this->normalizeDomainPath($domain);
+            if ($normalized === null || ! $this->isExplicitCustomDomain($normalized)) {
+                continue;
+            }
+
+            $resolved[] = $normalized;
         }
 
-        $this->domains()->create([
-            'type' => 'web',
-            'path' => self::defaultDomainForSubdomain($this->subdomain),
-        ]);
+        return array_values(array_unique($resolved));
     }
 
     private static function defaultDomainForSubdomain(string $subdomain): string
+    {
+        $rootHost = self::configuredRootHost();
+        $prefix = Str::lower(trim($subdomain)) . '.';
+
+        return $prefix . $rootHost;
+    }
+
+    private static function configuredRootHost(): string
     {
         $configuredUrl = (string) config('app.url');
         $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
@@ -248,9 +301,30 @@ class Tenant extends BaseTenant
             $rootHost = Str::replace(['https://', 'http://'], '', $configuredUrl);
             $rootHost = trim($rootHost, '/');
         }
-        $prefix = Str::lower(trim($subdomain)) . '.';
 
-        return $prefix . $rootHost;
+        return Str::lower(trim($rootHost));
+    }
+
+    private function normalizeDomainPath(?string $domain): ?string
+    {
+        if (! is_string($domain)) {
+            return null;
+        }
+
+        $normalized = Str::replace(['https://', 'http://'], '', $domain);
+        $normalized = Str::lower(trim($normalized, '/'));
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function isExplicitCustomDomain(string $domain): bool
+    {
+        $rootHost = self::configuredRootHost();
+        if ($rootHost === '') {
+            return true;
+        }
+
+        return ! Str::endsWith($domain, '.' . $rootHost);
     }
 
     public function setDomainsAttribute(?array $domains): void

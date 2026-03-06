@@ -150,6 +150,14 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type.id']);
     }
 
+    public function testEventsIndexRejectsDeprecatedSearchQueryParam(): void
+    {
+        $response = $this->getJson("{$this->accountEventsBase}?search=show&page=1&page_size=10");
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['search']);
+    }
+
     public function testEventPartyCandidatesEndpointAllowsReadCreateOrUpdateAbilityAndReturnsFilteredCandidates(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
