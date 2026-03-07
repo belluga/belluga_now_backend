@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Requests;
 
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmOptionsValidator;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Belluga\PushHandler\Support\PushHtmlSanitizer;
 use Carbon\Carbon;
 use Illuminate\Foundation\Http\FormRequest;
@@ -714,7 +714,7 @@ class PushMessageStoreRequest extends FormRequest
      */
     private function routesByKey(): array
     {
-        $routes = TenantPushSettings::current()?->getPushMessageRoutes() ?? [];
+        $routes = app(PushSettingsKernelBridge::class)->currentMessageRoutes();
         if (! is_array($routes)) {
             return [];
         }
@@ -756,7 +756,7 @@ class PushMessageStoreRequest extends FormRequest
             return null;
         }
 
-        $types = TenantPushSettings::current()?->getPushMessageTypes() ?? [];
+        $types = app(PushSettingsKernelBridge::class)->currentMessageTypes();
         if (! is_array($types)) {
             return null;
         }

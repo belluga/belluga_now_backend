@@ -101,40 +101,62 @@ final class ExternalImageProxyService
         $psrResponse = $response->toPsrResponse();
         $stream = $psrResponse->getBody();
 
-        $buffer = '';
+        $temp = fopen('php://temp/maxmemory:2097152', 'w+b');
+        if ($temp === false) {
+            throw ValidationException::withMessages([
+                'url' => 'Nao foi possivel baixar a imagem da URL informada.',
+            ]);
+        }
+
         $bytesRead = 0;
         $chunkSize = 8192;
         $startedAt = microtime(true);
         $lastByteAt = $startedAt;
 
-        while (!$stream->eof()) {
-            $chunk = $stream->read($chunkSize);
-            if ($chunk === '') {
-                // In streamed mode, some transports can yield an empty read before EOF
-                // (slow/chunked upstream). Keep reading until EOF or a small timeout.
-                $now = microtime(true);
-                // Time since last received bytes must not exceed the configured timeout.
-                // This avoids rejecting valid slow/chunked upstreams due to a short pause,
-                // while still preventing indefinite hangs if the upstream stalls.
-                if (($now - $lastByteAt) > self::TIMEOUT_SECONDS || ($now - $startedAt) > self::TIMEOUT_SECONDS) {
+        try {
+            while (!$stream->eof()) {
+                $chunk = $stream->read($chunkSize);
+                if ($chunk === '') {
+                    // In streamed mode, some transports can yield an empty read before EOF
+                    // (slow/chunked upstream). Keep reading until EOF or a small timeout.
+                    $now = microtime(true);
+                    // Time since last received bytes must not exceed the configured timeout.
+                    // This avoids rejecting valid slow/chunked upstreams due to a short pause,
+                    // while still preventing indefinite hangs if the upstream stalls.
+                    if (($now - $lastByteAt) > self::TIMEOUT_SECONDS || ($now - $startedAt) > self::TIMEOUT_SECONDS) {
+                        throw ValidationException::withMessages([
+                            'url' => 'Nao foi possivel baixar a imagem da URL informada.',
+                        ]);
+                    }
+                    usleep(50_000);
+                    continue;
+                }
+
+                $lastByteAt = microtime(true);
+                $bytesRead += strlen($chunk);
+                if ($bytesRead > self::MAX_BYTES) {
+                    throw ValidationException::withMessages([
+                        'url' => 'Imagem muito grande para processamento. Maximo 15MB.',
+                    ]);
+                }
+
+                if (fwrite($temp, $chunk) === false) {
                     throw ValidationException::withMessages([
                         'url' => 'Nao foi possivel baixar a imagem da URL informada.',
                     ]);
                 }
-                usleep(50_000);
-                continue;
             }
-            $lastByteAt = microtime(true);
-            $bytesRead += strlen($chunk);
-            if ($bytesRead > self::MAX_BYTES) {
-                throw ValidationException::withMessages([
-                    'url' => 'Imagem muito grande para processamento. Maximo 15MB.',
-                ]);
-            }
-            $buffer .= $chunk;
-        }
 
-        return $buffer;
+            if ($bytesRead === 0) {
+                return '';
+            }
+
+            rewind($temp);
+            $body = stream_get_contents($temp);
+            return is_string($body) ? $body : '';
+        } finally {
+            fclose($temp);
+        }
     }
 
     private function validateAndNormalizeUrl(string $url): string

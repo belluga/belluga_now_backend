@@ -28,6 +28,7 @@ class EnvironmentController extends Controller
             'name' => $resolved['name'] ?? null,
             'subdomain' => $resolved['subdomain'] ?? null,
             'main_domain' => $resolved['main_domain'] ?? null,
+            'landlord_domain' => $resolved['landlord_domain'] ?? null,
             'domains' => $resolved['domains'] ?? [],
             'app_domains' => $resolved['app_domains'] ?? [],
             'theme_data_settings' => $resolved['theme_data_settings'] ?? [],
@@ -35,6 +36,7 @@ class EnvironmentController extends Controller
             'firebase' => $resolved['firebase'] ?? [],
             'push' => $resolved['push'] ?? [],
             'profile_types' => $resolved['profile_types'] ?? [],
+            'settings' => $resolved['settings'] ?? [],
         ];
 
         return response()->json($payload);

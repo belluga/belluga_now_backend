@@ -1,5 +1,6 @@
 <?php
 
+use App\Logging\CreateMongoLogger;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -54,8 +55,19 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', env('LOG_STACK', 'daily')),
+            'channels' => explode(',', env('LOG_STACK', 'mongodb,stderr')),
             'ignore_exceptions' => false,
+        ],
+
+        'mongodb' => [
+            'driver' => 'custom',
+            'via' => CreateMongoLogger::class,
+            'name' => env('LOG_MONGODB_CHANNEL', 'application'),
+            'level' => env('LOG_LEVEL', 'info'),
+            'uri' => env('LOG_MONGODB_URI', env('DB_URI')),
+            'database' => env('LOG_MONGODB_DATABASE', env('DB_DATABASE_LANDLORD', 'laravel')),
+            'collection' => env('LOG_MONGODB_COLLECTION', 'application_logs'),
+            'retention_days' => (int) env('LOG_MONGODB_RETENTION_DAYS', 14),
         ],
 
         'single' => [

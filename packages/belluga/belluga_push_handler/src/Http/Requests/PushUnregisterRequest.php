@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Requests;
 
-use App\Support\Validation\InputConstraints;
+use Belluga\PushHandler\Support\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class PushUnregisterRequest extends FormRequest

@@ -4,16 +4,23 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\Telemetry\TelemetrySettingsKernelBridge;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Support\Str;
-use App\Application\AccountProfiles\AccountProfileRegistryService;
 
 class EnvironmentResolverService
 {
+    public function __construct(
+        private readonly TelemetrySettingsKernelBridge $telemetrySettings,
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {
+    }
+
     /**
      * @param array<string, mixed> $input
      * @return array<string, mixed>
@@ -21,6 +28,7 @@ class EnvironmentResolverService
     public function resolve(array $input): array
     {
         $tenant = Tenant::current() ?? $this->locateTenant($input['app_domain'] ?? null);
+        $requestHost = $input['request_host'] ?? null;
 
         if ($tenant) {
             $tenant->makeCurrent();
@@ -28,7 +36,7 @@ class EnvironmentResolverService
             return $this->tenantEnvironment(
                 tenant: $tenant,
                 requestRoot: $input['request_root'] ?? null,
-                requestHost: $input['request_host'] ?? null
+                requestHost: is_string($requestHost) ? $requestHost : null,
             );
         }
 
@@ -50,31 +58,23 @@ class EnvironmentResolverService
     private function tenantEnvironment(Tenant $tenant, ?string $requestRoot, ?string $requestHost): array
     {
         $landlord = Landlord::singleton();
-        $pushSettings = TenantPushSettings::current();
         $settings = TenantSettings::current();
+        $telemetry = $this->telemetrySettings->currentTelemetryConfig();
+        $firebase = $this->pushSettings->currentFirebaseConfig();
+        $push = $this->pushSettings->currentPushConfig();
         $profileTypes = (new AccountProfileRegistryService())->registry();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
         );
-        $mainDomain = $tenant->getMainDomain();
-        $hasRelationDomains = $tenant->domains()->exists();
-        $embeddedDomains = $tenant->getAttribute('domains');
-        $hasEmbeddedDomains = is_array($embeddedDomains) && $embeddedDomains !== [];
-        if (! $hasRelationDomains && ! $hasEmbeddedDomains) {
-            $rootHost = $this->resolveRootHost($requestHost, $tenant->subdomain)
-                ?? $this->resolveRootHost($requestRoot, $tenant->subdomain)
-                ?? $this->resolveRootHost((string) config('app.url'), $tenant->subdomain);
-            if ($rootHost) {
-                $host = $tenant->subdomain . '.' . $rootHost;
-                $mainDomain = $this->originWithRequestRoot(
-                    requestRoot: $requestRoot,
-                    host: $host,
-                ) ?? $this->forceHttps($host);
-            }
-        }
-
-        $domains = $tenant->domains()->get()->all();
+        $canonicalTenantMainDomain = $tenant->getMainDomain();
+        $resolvedDomains = $tenant->resolvedDomains();
+        $mainDomain = $this->resolveTenantMainDomain(
+            tenantMainDomain: $canonicalTenantMainDomain,
+            domains: $resolvedDomains,
+            requestRoot: $requestRoot,
+            requestHost: $requestHost,
+        );
 
         return [
             'tenant_id' => (string) $tenant->_id,
@@ -82,16 +82,20 @@ class EnvironmentResolverService
             'type' => 'tenant',
             'subdomain' => $tenant->subdomain,
             'main_domain' => $mainDomain,
-            'domains' => $this->normalizeDomains($domains),
+            'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
+            'domains' => $resolvedDomains,
             'app_domains' => $tenant->app_domains,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => $this->resolveTelemetryPayload($pushSettings),
-            'firebase' => $pushSettings?->getAttribute('firebase') ?? [],
-            'push' => $pushSettings?->getAttribute('push') ?? [],
+            'telemetry' => [
+                'location_freshness_minutes' => $telemetry['location_freshness_minutes'],
+                'trackers' => $telemetry['trackers'],
+            ],
+            'firebase' => $firebase,
+            'push' => $push,
             'profile_types' => $profileTypes,
             'settings' => [
                 'map_ui' => $settings?->getAttribute('map_ui') ?? [],
@@ -107,19 +111,23 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $branding = $landlord->branding_data ?? [];
 
-        $domainSource = $requestRoot ?? (string) config('app.url');
-        $mainDomain = $this->forceHttps($domainSource);
+        $mainDomain = $this->normalizeRequestRoot($requestRoot)
+            ?? $this->forceHttps((string) config('app.url'));
 
         return [
             'name' => $landlord->name,
             'type' => 'landlord',
             'main_domain' => $mainDomain,
+            'landlord_domain' => $mainDomain,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => $this->resolveTelemetryPayload(null),
+            'telemetry' => [
+                'location_freshness_minutes' => $this->defaultTelemetryLocationFreshnessMinutes(),
+                'trackers' => [],
+            ],
         ];
     }
 
@@ -146,20 +154,89 @@ class EnvironmentResolverService
     }
 
     /**
-     * @param array<int, mixed> $domains
-     * @return array<int, string>
+    /**
+     * Web: use current tenant host as main_domain.
+     * Mobile (resolved via app_domain on landlord host): keep canonical tenant main domain.
+     *
+     * @param array<int, string> $domains
      */
-    private function normalizeDomains(array $domains): array
-    {
-        $normalized = array_map(static function ($domain): string {
-            if (is_string($domain)) {
-                return $domain;
+    private function resolveTenantMainDomain(
+        string $tenantMainDomain,
+        array $domains,
+        ?string $requestRoot,
+        ?string $requestHost
+    ): string {
+        $normalizedRequestRoot = $this->normalizeRequestRoot($requestRoot);
+        $normalizedRequestHost = $this->normalizeHost($requestHost);
+        if ($normalizedRequestRoot === null || $normalizedRequestHost === null) {
+            return $tenantMainDomain;
+        }
+
+        $allowedHosts = [];
+        $tenantMainHost = $this->normalizeHost(parse_url($tenantMainDomain, PHP_URL_HOST));
+        if ($tenantMainHost !== null) {
+            $allowedHosts[$tenantMainHost] = true;
+        }
+
+        foreach ($domains as $domain) {
+            $host = $this->normalizeHost(parse_url($this->forceHttps($domain), PHP_URL_HOST));
+            if ($host !== null) {
+                $allowedHosts[$host] = true;
             }
+        }
 
-            return (string) ($domain['path'] ?? $domain->path ?? '');
-        }, $domains);
+        if (! isset($allowedHosts[$normalizedRequestHost])) {
+            return $tenantMainDomain;
+        }
 
-        return array_values(array_filter($normalized, static fn (string $domain): bool => $domain !== ''));
+        return $normalizedRequestRoot;
+    }
+
+    private function resolveLandlordDomain(?string $requestRoot): ?string
+    {
+        $configured = $this->forceHttps((string) config('app.url'));
+        if ($configured !== null) {
+            return $configured;
+        }
+
+        return $this->normalizeRequestRoot($requestRoot);
+    }
+
+    private function normalizeRequestRoot(?string $requestRoot): ?string
+    {
+        if (! is_string($requestRoot)) {
+            return null;
+        }
+
+        $trimmed = trim($requestRoot);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $parts = parse_url($trimmed);
+        if (! is_array($parts) || empty($parts['host'])) {
+            return null;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? 'https'));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            $scheme = 'https';
+        }
+
+        $host = (string) $parts['host'];
+        $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+
+        return sprintf('%s://%s%s', $scheme, $host, $port);
+    }
+
+    private function normalizeHost(mixed $host): ?string
+    {
+        if (! is_string($host)) {
+            return null;
+        }
+
+        $normalized = trim(Str::lower($host));
+        return $normalized === '' ? null : $normalized;
     }
 
     private function forceHttps(?string $domain): ?string
@@ -174,112 +251,9 @@ class EnvironmentResolverService
         return $normalized === '' ? null : 'https://' . $normalized;
     }
 
-    private function resolveRootHost(?string $domain, ?string $tenantSubdomain): ?string
+    private function defaultTelemetryLocationFreshnessMinutes(): int
     {
-        if (! $domain) {
-            return null;
-        }
-
-        $normalized = Str::replace(['http://', 'https://'], '', $domain);
-        $normalized = trim($normalized, '/');
-
-        if ($normalized === '') {
-            return null;
-        }
-
-        if ($tenantSubdomain) {
-            $prefix = Str::lower($tenantSubdomain) . '.';
-            $normalizedLower = Str::lower($normalized);
-            if (Str::startsWith($normalizedLower, $prefix)) {
-                $normalized = substr($normalized, strlen($prefix));
-            }
-        }
-
-        return $normalized === '' ? null : $normalized;
-    }
-
-    private function originWithRequestRoot(?string $requestRoot, string $host): ?string
-    {
-        if (! $requestRoot) {
-            return null;
-        }
-
-        $parts = parse_url($requestRoot);
-        if (! is_array($parts)) {
-            return null;
-        }
-
-        $scheme = $parts['scheme'] ?? null;
-        if (! is_string($scheme) || $scheme === '') {
-            return null;
-        }
-
-        $origin = $scheme . '://' . $host;
-        $port = $parts['port'] ?? null;
-        if (is_int($port)) {
-            $origin .= ':' . $port;
-        }
-
-        return $origin;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function resolveTelemetryPayload(?TenantPushSettings $pushSettings): array
-    {
-        $defaultMinutes = (int) config('belluga_push_handler.telemetry.location_freshness_minutes', 5);
-        $defaultMinutes = $defaultMinutes > 0 ? $defaultMinutes : 5;
-        $trackers = [];
-        $locationOverride = null;
-
-        if ($pushSettings) {
-            $rawTelemetry = $pushSettings->getAttribute('telemetry');
-            if ($rawTelemetry instanceof \MongoDB\Model\BSONDocument || $rawTelemetry instanceof \MongoDB\Model\BSONArray) {
-                $rawTelemetry = $rawTelemetry->getArrayCopy();
-            } elseif ($rawTelemetry instanceof \Traversable) {
-                $rawTelemetry = iterator_to_array($rawTelemetry);
-            } elseif (is_object($rawTelemetry)) {
-                $rawTelemetry = (array) $rawTelemetry;
-            }
-
-            if (is_array($rawTelemetry)) {
-                if (array_key_exists('trackers', $rawTelemetry) ||
-                    array_key_exists('location_freshness_minutes', $rawTelemetry)) {
-                    $trackersRaw = $rawTelemetry['trackers'] ?? [];
-                    $trackers = is_array($trackersRaw) ? $trackersRaw : [];
-                    $locationOverride = $rawTelemetry['location_freshness_minutes'] ?? null;
-                } else {
-                    $trackers = $rawTelemetry;
-                }
-            }
-        }
-
-        if ($locationOverride === null && $pushSettings) {
-            $raw = $pushSettings->getAttribute('telemetry_context');
-            if ($raw instanceof \MongoDB\Model\BSONDocument || $raw instanceof \MongoDB\Model\BSONArray) {
-                $raw = $raw->getArrayCopy();
-            } elseif ($raw instanceof \Traversable) {
-                $raw = iterator_to_array($raw);
-            } elseif (is_object($raw)) {
-                $raw = (array) $raw;
-            }
-
-            $context = is_array($raw) ? $raw : [];
-            $locationOverride = $context['location_freshness_minutes'] ?? null;
-        }
-
-        $minutes = $defaultMinutes;
-        if (is_numeric($locationOverride)) {
-            $candidate = (int) $locationOverride;
-            if ($candidate > 0) {
-                $minutes = $candidate;
-            }
-        }
-
-        return [
-            'trackers' => $trackers,
-            'location_freshness_minutes' => $minutes,
-        ];
+        $minutes = (int) config('telemetry.location_freshness_minutes', 5);
+        return $minutes > 0 ? $minutes : 5;
     }
 }

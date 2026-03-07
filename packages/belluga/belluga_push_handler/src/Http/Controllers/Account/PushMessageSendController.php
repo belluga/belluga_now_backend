@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Http\Requests\PushMessageSendRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushDeliveryService;
@@ -21,21 +21,23 @@ class PushMessageSendController
         private readonly PushRecipientResolver $recipientResolver,
         private readonly PushDeliveryService $deliveryService,
         private readonly PushDeviceService $pushDeviceService,
-        private readonly PushMessageAudienceService $audienceService
+        private readonly PushMessageAudienceService $audienceService,
+        private readonly PushAccountContextContract $accountContext,
+        private readonly PushUserGatewayContract $users
     ) {
     }
 
     public function __invoke(PushMessageSendRequest $request): JsonResponse
     {
-        $account = Account::current();
-        if (! $account) {
+        $accountId = $this->accountContext->currentAccountId();
+        if ($accountId === null || $accountId === '') {
             abort(422, 'Account context not available.');
         }
 
         $pushMessageId = (string) $request->route('push_message_id');
         $message = PushMessage::query()
             ->where('scope', 'account')
-            ->where('partner_id', (string) $account->_id)
+            ->where('partner_id', $accountId)
             ->where('_id', $pushMessageId)
             ->first();
 
@@ -61,42 +63,36 @@ class PushMessageSendController
 
         $payload = $request->validated();
 
-        $user = $this->resolveUser($payload, (string) $account->_id);
+        $user = $this->resolveUser($payload, $accountId);
         if (! $user) {
             return response()->json(['ok' => false, 'reason' => 'user_not_found'], 404);
         }
 
         if (! $this->audienceService->isEligible($user, $message, [
             'scope' => 'account',
-            'account_id' => (string) $account->_id,
+            'account_id' => $accountId,
         ])) {
             return response()->json(['ok' => false, 'reason' => 'forbidden'], 403);
         }
 
         $tokens = $this->recipientResolver->tokensForUser($user);
         if (! empty($payload['device_id'])) {
-            $tokens = array_values(array_filter($tokens, static function (string $token) use ($user, $payload): bool {
-                foreach ($user->devices ?? [] as $device) {
-                    $isActive = $device['is_active'] ?? true;
-                    if ($isActive !== true) {
-                        continue;
-                    }
-                    if (($device['device_id'] ?? null) === $payload['device_id'] && ($device['push_token'] ?? null) === $token) {
-                        return true;
-                    }
-                }
-                return false;
-            }));
+            $tokens = $this->users->activePushTokensForDevice($user, (string) $payload['device_id']);
         }
 
         if ($tokens === []) {
             return response()->json(['ok' => false, 'reason' => 'no_tokens'], 422);
         }
 
+        $recipientUserId = $this->users->userId($user);
+        if ($recipientUserId === null || $recipientUserId === '') {
+            return response()->json(['ok' => false, 'reason' => 'unauthorized'], 401);
+        }
+
         $messageInstanceId = null;
         if (! ($payload['dry_run'] ?? false)) {
             try {
-                $tokenUserMap = array_fill_keys($tokens, (string) $user->_id);
+                $tokenUserMap = array_fill_keys($tokens, $recipientUserId);
                 $response = $this->deliveryService->deliver($message, $tokens, $tokenUserMap);
             } catch (ValidationException $exception) {
                 return response()->json([
@@ -120,7 +116,7 @@ class PushMessageSendController
         $responsePayload = [
             'ok' => true,
             'push_message_id' => (string) $message->_id,
-            'recipient_user_id' => (string) $user->_id,
+            'recipient_user_id' => $recipientUserId,
             'queued' => true,
         ];
         if (is_string($messageInstanceId) && $messageInstanceId !== '') {
@@ -159,23 +155,15 @@ class PushMessageSendController
     /**
      * @param array<string, mixed> $payload
      */
-    private function resolveUser(array $payload, string $accountId): ?AccountUser
+    private function resolveUser(array $payload, string $accountId): ?\Illuminate\Contracts\Auth\Authenticatable
     {
-        if (! empty($payload['user_id'])) {
-            return AccountUser::query()
-                ->where('_id', $payload['user_id'])
-                ->where('account_roles.account_id', $accountId)
-                ->first();
-        }
+        $userId = isset($payload['user_id']) ? (string) $payload['user_id'] : null;
+        $email = isset($payload['email']) ? (string) $payload['email'] : null;
 
-        if (! empty($payload['email'])) {
-            $email = strtolower((string) $payload['email']);
-            return AccountUser::query()
-                ->where('emails', 'all', [$email])
-                ->where('account_roles.account_id', $accountId)
-                ->first();
-        }
-
-        return null;
+        return $this->users->findUserForAccount(
+            $accountId,
+            $userId !== '' ? $userId : null,
+            $email !== '' ? $email : null
+        );
     }
 }

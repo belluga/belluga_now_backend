@@ -10,7 +10,7 @@ use App\Application\StaticAssets\StaticAssetManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Models\Tenants\MapPoi;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
@@ -165,6 +165,43 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertArrayHasKey('time_end', $items[0]);
     }
 
+    public function testMapNearReturnsNowFlagAndOccurrenceFacets(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-now',
+            'projection_key' => 'event:event-now',
+            'source_checkpoint' => 12345,
+            'ref_slug' => 'event-now',
+            'ref_path' => '/event/event-now',
+            'name' => 'Event Now',
+            'category' => 'event',
+            'location' => $location,
+            'priority' => 80,
+            'is_active' => true,
+            'is_happening_now' => true,
+            'occurrence_facets' => [[
+                'occurrence_id' => 'occ-1',
+                'occurrence_slug' => 'occ-1',
+                'starts_at' => Carbon::now()->subMinutes(20)->toISOString(),
+                'ends_at' => null,
+                'effective_end' => Carbon::now()->addHours(2)->toISOString(),
+                'is_happening_now' => true,
+            ]],
+            'exact_key' => $this->exactKey($location),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10");
+        $response->assertStatus(200);
+
+        $item = $response->json('items.0');
+        $this->assertTrue((bool) ($item['is_happening_now'] ?? false));
+        $this->assertNotEmpty($item['occurrence_facets'] ?? []);
+        $this->assertTrue((bool) data_get($item, 'occurrence_facets.0.is_happening_now', false));
+    }
+
     public function testMapFiltersReturnsCatalogs(): void
     {
         $location = $this->point(-40.0, -20.0);
@@ -193,6 +230,48 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('categories'));
         $this->assertNotEmpty($response->json('tags'));
         $this->assertNotEmpty($response->json('taxonomy_terms'));
+    }
+
+    public function testMapPoisBoxIncludesPolygonDiscoveryScopeIntersections(): void
+    {
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-polygon',
+            'projection_key' => 'event:event-polygon',
+            'source_checkpoint' => 223344,
+            'ref_slug' => 'event-polygon',
+            'ref_path' => '/event/event-polygon',
+            'name' => 'Polygon Event',
+            'category' => 'event',
+            'location' => $this->point(-45.0, -25.0),
+            'discovery_scope' => [
+                'type' => 'polygon',
+                'polygon' => [
+                    'type' => 'Polygon',
+                    'coordinates' => [[
+                        [-41.0, -21.0],
+                        [-39.0, -21.0],
+                        [-39.0, -19.0],
+                        [-41.0, -19.0],
+                        [-41.0, -21.0],
+                    ]],
+                ],
+            ],
+            'priority' => 60,
+            'is_active' => true,
+            'exact_key' => '-25.00000,-45.00000',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $stacks = $response->json('stacks') ?? [];
+        $flatRefIds = [];
+        foreach ($stacks as $stack) {
+            $flatRefIds[] = data_get($stack, 'top_poi.ref_id');
+        }
+
+        $this->assertContains('event-polygon', $flatRefIds);
     }
 
     public function testStaticAssetCreationProjectsMapPoi(): void

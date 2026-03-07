@@ -275,6 +275,84 @@ class AccountControllerTest extends TestCase
         );
     }
 
+    public function testIndexFiltersByUnmanagedOwnershipState(): void
+    {
+        $unmanagedName = fake()->unique()->company();
+        $tenantOwnedName = fake()->unique()->company();
+        $userOwnedName = fake()->unique()->company();
+
+        $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $unmanagedName,
+            'document' => [
+                'type' => 'cpf',
+                'number' => fake()->unique()->numerify('###################'),
+            ],
+            'ownership_state' => 'unmanaged',
+        ])->assertCreated();
+
+        $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $tenantOwnedName,
+            'document' => [
+                'type' => 'cpf',
+                'number' => fake()->unique()->numerify('###################'),
+            ],
+            'ownership_state' => 'tenant_owned',
+        ])->assertCreated();
+
+        $userOwnedCreateResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => $userOwnedName,
+            'document' => [
+                'type' => 'cpf',
+                'number' => fake()->unique()->numerify('###################'),
+            ],
+            'ownership_state' => 'unmanaged',
+        ]);
+        $userOwnedCreateResponse->assertCreated();
+
+        $userOwnedSlug = $userOwnedCreateResponse->json('data.account.slug');
+        $userOwnedAccount = Account::query()->where('slug', $userOwnedSlug)->firstOrFail();
+        $userOwnedRole = $userOwnedAccount->roleTemplates()->firstOrFail();
+
+        $userOwnedAccount->makeCurrent();
+        $this->userService->create(
+            $userOwnedAccount,
+            [
+                'name' => 'Managed User',
+                'email' => fake()->unique()->safeEmail(),
+                'password' => 'Secret!234',
+            ],
+            (string) $userOwnedRole->_id
+        );
+
+        $response = $this->getJson(
+            "{$this->tenantAccountsAdminUrl}?ownership_state=unmanaged"
+        );
+
+        $response->assertOk();
+        $items = collect($response->json('data'));
+        $this->assertGreaterThanOrEqual(1, $items->count());
+        $this->assertTrue(
+            $items->contains(
+                static fn (array $item): bool => ($item['name'] ?? null) === $unmanagedName
+            )
+        );
+        $this->assertFalse(
+            $items->contains(
+                static fn (array $item): bool => ($item['name'] ?? null) === $tenantOwnedName
+            )
+        );
+        $this->assertFalse(
+            $items->contains(
+                static fn (array $item): bool => ($item['name'] ?? null) === $userOwnedName
+            )
+        );
+        $this->assertTrue(
+            $items->every(
+                static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged'
+            )
+        );
+    }
+
     public function testIndexForbiddenWithoutViewAbility(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);

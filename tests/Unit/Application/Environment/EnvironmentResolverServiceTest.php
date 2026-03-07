@@ -39,11 +39,31 @@ class EnvironmentResolverServiceTest extends TestCase
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
-        $result = $this->service->resolve(['app_domain' => 'tenant-beta.test', 'request_root' => 'https://example.test']);
+        $result = $this->service->resolve([
+            'app_domain' => 'tenant-beta.test',
+            'request_root' => 'https://tenant-beta.test',
+            'request_host' => 'tenant-beta.test',
+        ]);
 
         $this->assertSame('tenant', $result['type']);
         $this->assertSame($tenant->name, $result['name']);
+        $this->assertSame('https://tenant-beta.test', $result['main_domain']);
+        $this->assertArrayHasKey('landlord_domain', $result);
         $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
+    }
+
+    public function testResolveTenantOnLandlordHostKeepsCanonicalTenantMainDomain(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $result = $this->service->resolve([
+            'request_root' => 'https://landlord.test',
+            'request_host' => 'landlord.test',
+        ]);
+
+        $this->assertSame('tenant', $result['type']);
+        $this->assertSame($tenant->getMainDomain(), $result['main_domain']);
     }
 
     public function testResolveFallsBackToLandlordEnvironment(): void
@@ -53,7 +73,8 @@ class EnvironmentResolverServiceTest extends TestCase
         $result = $this->service->resolve(['request_root' => 'http://landlord.test']);
 
         $this->assertSame('landlord', $result['type']);
-        $this->assertSame('https://landlord.test', $result['main_domain']);
+        $this->assertSame('http://landlord.test', $result['main_domain']);
+        $this->assertSame('http://landlord.test', $result['landlord_domain']);
         $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
     }
 

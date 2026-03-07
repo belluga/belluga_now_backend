@@ -17,26 +17,53 @@ class TenantFirebaseSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'firebase' => ['required', 'array'],
-            'firebase.apiKey' => ['required', 'string'],
-            'firebase.appId' => ['required', 'string'],
-            'firebase.projectId' => ['required', 'string'],
-            'firebase.messagingSenderId' => ['required', 'string'],
-            'firebase.storageBucket' => ['required', 'string'],
+            'apiKey' => ['sometimes', 'string'],
+            'appId' => ['sometimes', 'string'],
+            'projectId' => ['sometimes', 'string'],
+            'messagingSenderId' => ['sometimes', 'string'],
+            'storageBucket' => ['sometimes', 'string'],
         ];
     }
 
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            if ($this->has('push')) {
-                $validator->errors()->add('push', 'Use /settings/push instead.');
+            if (! is_array($this->all()) || array_is_list($this->all())) {
+                $validator->errors()->add('payload', 'The payload must be an object/map.');
+                return;
             }
-            if ($this->has('telemetry')) {
-                $validator->errors()->add('telemetry', 'Use /settings/telemetry instead.');
+
+            $allowedKeys = ['apiKey', 'appId', 'projectId', 'messagingSenderId', 'storageBucket'];
+            $disallowedMessages = [
+                'firebase' => 'Use direct payload keys for firebase settings instead of a firebase envelope.',
+                'push' => 'Use /settings/push instead.',
+                'telemetry' => 'Use /settings/telemetry instead.',
+                'max_ttl_days' => 'Use /settings/push with max_ttl_days instead.',
+            ];
+
+            $input = $this->all();
+            foreach ($disallowedMessages as $key => $message) {
+                if ($this->has($key)) {
+                    $validator->errors()->add($key, $message);
+                }
             }
-            if ($this->has('max_ttl_days')) {
-                $validator->errors()->add('max_ttl_days', 'Use push.max_ttl_days instead.');
+
+            foreach (array_keys($input) as $key) {
+                if (! in_array($key, $allowedKeys, true) && ! array_key_exists($key, $disallowedMessages)) {
+                    $validator->errors()->add($key, 'Unsupported key for this PATCH endpoint.');
+                }
+            }
+
+            $hasAllowed = false;
+            foreach ($allowedKeys as $key) {
+                if (array_key_exists($key, $input)) {
+                    $hasAllowed = true;
+                    break;
+                }
+            }
+
+            if (! $hasAllowed) {
+                $validator->errors()->add('payload', 'At least one patchable key is required (apiKey, appId, projectId, messagingSenderId, storageBucket).');
             }
         });
     }

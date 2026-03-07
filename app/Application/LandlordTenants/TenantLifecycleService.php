@@ -28,6 +28,8 @@ class TenantLifecycleService
                 'slug' => $tenant->slug,
                 'description' => $tenant->description,
                 'subdomain' => $tenant->subdomain,
+                'main_domain' => $tenant->getMainDomain(),
+                'domains' => $tenant->resolvedDomains(),
                 'database' => $tenant->database,
                 'app_domains' => $tenant->app_domains,
                 'created_at' => $tenant->created_at?->toJSON(),
