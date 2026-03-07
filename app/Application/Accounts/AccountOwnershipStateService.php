@@ -8,8 +8,6 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Database\Eloquent\Builder;
-use MongoDB\BSON\ObjectId;
-
 class AccountOwnershipStateService
 {
     public const TENANT_OWNED = 'tenant_owned';
@@ -159,7 +157,6 @@ class AccountOwnershipStateService
 
         $tenantOrganizationId = $this->tenantOrganizationId();
         $userOwnedAccountIds = $this->userOperatedAccountIds();
-        $userOwnedObjectIds = $this->toObjectIds($userOwnedAccountIds);
 
         if ($state === self::TENANT_OWNED) {
             $query->where(function (Builder $tenantOwnedQuery) use ($tenantOrganizationId): void {
@@ -179,17 +176,17 @@ class AccountOwnershipStateService
         }
 
         if ($state === self::USER_OWNED) {
-            if ($userOwnedObjectIds === []) {
+            if ($userOwnedAccountIds === []) {
                 $query->where('ownership_state', self::USER_OWNED);
 
                 return;
             }
 
-            $query->where(function (Builder $userOwnedQuery) use ($userOwnedObjectIds): void {
+            $query->where(function (Builder $userOwnedQuery) use ($userOwnedAccountIds): void {
                 $userOwnedQuery->where('ownership_state', self::USER_OWNED);
 
-                $userOwnedQuery->orWhere(function (Builder $promotedQuery) use ($userOwnedObjectIds): void {
-                    $promotedQuery->whereRaw(['_id' => ['$in' => $userOwnedObjectIds]]);
+                $userOwnedQuery->orWhere(function (Builder $promotedQuery) use ($userOwnedAccountIds): void {
+                    $promotedQuery->whereIn('_id', $userOwnedAccountIds);
                     $promotedQuery->where(function (Builder $explicitNonTenant) {
                         $explicitNonTenant
                             ->whereNull('ownership_state')
@@ -205,21 +202,23 @@ class AccountOwnershipStateService
 
         $query->where(function (Builder $unmanagedQuery) use (
             $tenantOrganizationId,
-            $userOwnedObjectIds
+            $userOwnedAccountIds
         ): void {
-            $unmanagedQuery->where('ownership_state', self::UNMANAGED);
-            if ($userOwnedObjectIds !== []) {
-                $unmanagedQuery->whereRaw(['_id' => ['$nin' => $userOwnedObjectIds]]);
-            }
+            $unmanagedQuery->where(function (Builder $explicitUnmanagedQuery) use ($userOwnedAccountIds): void {
+                $explicitUnmanagedQuery->where('ownership_state', self::UNMANAGED);
+                if ($userOwnedAccountIds !== []) {
+                    $explicitUnmanagedQuery->whereNotIn('_id', $userOwnedAccountIds);
+                }
+            });
 
             $unmanagedQuery->orWhere(function (Builder $legacyQuery) use (
                 $tenantOrganizationId,
-                $userOwnedObjectIds
+                $userOwnedAccountIds
             ): void {
                 $this->applyMissingOwnershipStateConstraint($legacyQuery);
 
-                if ($userOwnedObjectIds !== []) {
-                    $legacyQuery->whereRaw(['_id' => ['$nin' => $userOwnedObjectIds]]);
+                if ($userOwnedAccountIds !== []) {
+                    $legacyQuery->whereNotIn('_id', $userOwnedAccountIds);
                 }
 
                 $this->applyNotTenantOwnedConstraint($legacyQuery, $tenantOrganizationId);
@@ -266,25 +265,6 @@ class AccountOwnershipStateService
         }
 
         return array_keys($set);
-    }
-
-    /**
-     * @param array<int, string> $ids
-     * @return array<int, ObjectId>
-     */
-    private function toObjectIds(array $ids): array
-    {
-        $objectIds = [];
-
-        foreach ($ids as $id) {
-            if (! preg_match('/^[a-f0-9]{24}$/i', $id)) {
-                continue;
-            }
-
-            $objectIds[] = new ObjectId($id);
-        }
-
-        return $objectIds;
     }
 
     private function applyNotTenantOwnedConstraint(
