@@ -9,8 +9,7 @@ final class ArchitectureViolation
         public string $file,
         public int $line,
         public string $message
-    ) {
-    }
+    ) {}
 }
 
 final class ArchitectureGuardrailRunner
@@ -18,9 +17,7 @@ final class ArchitectureGuardrailRunner
     /** @var list<ArchitectureViolation> */
     private array $violations = [];
 
-    public function __construct(private readonly string $repoRoot)
-    {
-    }
+    public function __construct(private readonly string $repoRoot) {}
 
     public function run(): int
     {
@@ -35,6 +32,7 @@ final class ArchitectureGuardrailRunner
         $this->checkPackageSourceCoupling();
         $this->checkTenantMigrationPathRegistration();
         $this->checkCiLocalTestRuntimeGuardrails();
+        $this->checkApiSecurityHardeningBaseline();
 
         if ($this->violations === []) {
             fwrite(STDOUT, "[ARCH-GUARDRAILS] PASS - no architecture violations found.\n");
@@ -100,7 +98,7 @@ final class ArchitectureGuardrailRunner
     }
 
     /**
-     * @param array<string, true> $catalog
+     * @param  array<string, true>  $catalog
      */
     private function checkAbilityCatalogSync(array $catalog): void
     {
@@ -143,7 +141,7 @@ final class ArchitectureGuardrailRunner
     }
 
     /**
-     * @param array<string, true> $catalog
+     * @param  array<string, true>  $catalog
      */
     private function assertAbilityListInCatalog(string $rawList, array $catalog, string $file, int $line): void
     {
@@ -234,11 +232,13 @@ final class ArchitectureGuardrailRunner
 
                 if (! $insideCasts && preg_match('/protected\\s+\\$casts\\s*=\\s*\\[/', $line) === 1) {
                     $insideCasts = true;
+
                     continue;
                 }
 
                 if ($insideCasts && str_contains($line, '];')) {
                     $insideCasts = false;
+
                     continue;
                 }
 
@@ -376,6 +376,7 @@ final class ArchitectureGuardrailRunner
                     1,
                     "Missing {$key} definition in CI workflow test env."
                 );
+
                 continue;
             }
 
@@ -425,8 +426,102 @@ final class ArchitectureGuardrailRunner
         }
     }
 
+    private function checkApiSecurityHardeningBaseline(): void
+    {
+        $configPath = 'config/api_security.php';
+        $configAbsolutePath = $this->repoRoot.'/'.$configPath;
+        if (! is_file($configAbsolutePath)) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'Missing api security baseline configuration file.'
+            );
+
+            return;
+        }
+
+        $configContent = @file_get_contents($configAbsolutePath);
+        if (! is_string($configContent)) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'Cannot read api_security configuration file.'
+            );
+
+            return;
+        }
+
+        if (
+            ! str_contains($configContent, "'levels' => [")
+            || ! preg_match("/['\"]L1['\"]\s*=>\s*\[/", $configContent)
+            || ! preg_match("/['\"]L2['\"]\s*=>\s*\[/", $configContent)
+            || ! preg_match("/['\"]L3['\"]\s*=>\s*\[/", $configContent)
+        ) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security levels must define L1, L2, and L3 arrays.'
+            );
+        }
+
+        if (preg_match("/['\"]observe_mode['\"]\s*=>/", $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security must define observe_mode rollout control.'
+            );
+        }
+
+        if (
+            preg_match("/['\"]route_overrides['\"]\s*=>\s*\[(.*?)\]\s*,\s*['\"]idempotency['\"]/s", $configContent, $matches) !== 1
+            || preg_match("/['\"]pattern['\"]\s*=>\s*['\"][^'\"]+['\"]/", (string) $matches[1]) !== 1
+        ) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security route_overrides must define at least one critical endpoint mapping.'
+            );
+        }
+
+        $bootstrapPath = 'bootstrap/app.php';
+        $bootstrapContent = @file_get_contents($this->repoRoot.'/'.$bootstrapPath);
+        if (! is_string($bootstrapContent)) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $bootstrapPath,
+                1,
+                'Cannot read bootstrap/app.php for middleware checks.'
+            );
+
+            return;
+        }
+
+        if (! str_contains($bootstrapContent, 'ApiSecurityHardening::class')) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $bootstrapPath,
+                1,
+                'ApiSecurityHardening middleware must be registered in bootstrap/app.php.'
+            );
+        }
+
+        if (! str_contains($bootstrapContent, 'Request::HEADER_X_FORWARDED_FOR')) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $bootstrapPath,
+                1,
+                'trustProxies must include HEADER_X_FORWARDED_FOR for proxy-aware client identity.'
+            );
+        }
+    }
+
     /**
-     * @param array<string, true> $allowedHosts
+     * @param  array<string, true>  $allowedHosts
      * @return list<string>
      */
     private function validateMongoDsnHosts(string $dsn, array $allowedHosts): array
@@ -466,6 +561,7 @@ final class ArchitectureGuardrailRunner
             $host = $this->normalizeMongoHost((string) $hostEntry);
             if ($host === null) {
                 $issues[] = "cannot parse host from `{$hostEntry}`";
+
                 continue;
             }
 
@@ -500,7 +596,7 @@ final class ArchitectureGuardrailRunner
     }
 
     /**
-     * @param list<string> $roots
+     * @param  list<string>  $roots
      * @return list<string>
      */
     private function collectPhpFiles(array $roots): array
