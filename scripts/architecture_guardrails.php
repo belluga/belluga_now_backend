@@ -476,15 +476,89 @@ final class ArchitectureGuardrailRunner
             );
         }
 
+        if (preg_match('/[\'"]risk_matrix[\'"]\s*=>\s*\$riskMatrix/', $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security risk_matrix must define critical endpoint mappings.'
+            );
+        }
+
+        foreach (['ticketing_checkout', 'ticketing_admission', 'settings_namespace_patch', 'events_admin_mutation'] as $requiredDomain) {
+            if (! str_contains($configContent, "'domain' => '{$requiredDomain}'")) {
+                $this->addViolation(
+                    'LAR-API-SECURITY-BASELINE',
+                    $configPath,
+                    1,
+                    "api_security risk_matrix is missing required domain `{$requiredDomain}`."
+                );
+            }
+        }
+
+        if (preg_match('/[\'"]route_overrides[\'"]\s*=>\s*\$routeOverrides/', $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security route_overrides must define at least one endpoint mapping.'
+            );
+        }
+
+        if (preg_match("/['\"]methods['\"]\s*=>\s*\[[^\]]+\]/", $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security risk_matrix entries must declare methods[] to keep endpoint mapping deterministic.'
+            );
+        }
+
         if (
-            preg_match("/['\"]route_overrides['\"]\s*=>\s*\[(.*?)\]\s*,\s*['\"]idempotency['\"]/s", $configContent, $matches) !== 1
-            || preg_match("/['\"]pattern['\"]\s*=>\s*['\"][^'\"]+['\"]/", (string) $matches[1]) !== 1
+            preg_match("~'domain'\\s*=>\\s*'ticketing_checkout'.*?'level'\\s*=>\\s*'L3'.*?'require_idempotency'\\s*=>\\s*true~s", $configContent) !== 1
+            || preg_match("~'domain'\\s*=>\\s*'ticketing_admission'.*?'level'\\s*=>\\s*'L3'.*?'require_idempotency'\\s*=>\\s*true~s", $configContent) !== 1
         ) {
             $this->addViolation(
                 'LAR-API-SECURITY-BASELINE',
                 $configPath,
                 1,
-                'api_security route_overrides must define at least one critical endpoint mapping.'
+                'L3 critical domains in api_security risk_matrix must enforce require_idempotency=true.'
+            );
+        }
+
+        if (preg_match("/['\"]tenant_overrides['\"]\s*=>\s*\[/", $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security must define tenant_overrides for hierarchy resolution.'
+            );
+        }
+
+        if (preg_match("/['\"]lifecycle['\"]\s*=>\s*\[/", $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security must define lifecycle escalation settings.'
+            );
+        }
+
+        if (preg_match("/['\"]abuse_signals['\"]\s*=>\s*\[/", $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security must define abuse_signals retention settings.'
+            );
+        }
+
+        if (preg_match("/['\"]require_trusted_proxy_for_forwarded_headers['\"]\s*=>/", $configContent) !== 1) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $configPath,
+                1,
+                'api_security.cloudflare must define require_trusted_proxy_for_forwarded_headers.'
             );
         }
 
