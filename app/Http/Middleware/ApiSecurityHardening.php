@@ -216,26 +216,50 @@ class ApiSecurityHardening
         $prefix = (string) config('api_security.rate_limit.cache_prefix', 'api_security:rate');
         $key = sprintf('%s:%s:%s', $prefix, strtolower($level), $identity);
 
-        if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
-            $retryAfter = max(1, RateLimiter::availableIn($key));
-            if ($observeMode) {
-                $this->observeViolation($request, $profile, 'rate_limited', $correlationId, $cfRayId, $retryAfter);
+        try {
+            if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+                $retryAfter = max(1, RateLimiter::availableIn($key));
+                if ($observeMode) {
+                    $this->observeViolation($request, $profile, 'rate_limited', $correlationId, $cfRayId, $retryAfter);
 
-                return null;
+                    return null;
+                }
+
+                return $this->buildErrorResponse(
+                    status: 429,
+                    code: 'rate_limited',
+                    message: 'Too many requests. Retry later.',
+                    correlationId: $correlationId,
+                    cfRayId: $cfRayId,
+                    level: $level,
+                    retryAfter: $retryAfter
+                );
             }
 
-            return $this->buildErrorResponse(
-                status: 429,
-                code: 'rate_limited',
-                message: 'Too many requests. Retry later.',
-                correlationId: $correlationId,
-                cfRayId: $cfRayId,
-                level: $level,
-                retryAfter: $retryAfter
-            );
-        }
+            RateLimiter::hit($key, $windowSeconds);
+        } catch (Throwable $exception) {
+            Log::error('API security rate limiter backend failed.', [
+                'code' => 'rate_limiter_backend_error',
+                'path' => '/'.ltrim($request->path(), '/'),
+                'method' => strtoupper($request->method()),
+                'level' => $level,
+                'correlation_id' => $correlationId,
+                'cf_ray_id' => $cfRayId,
+                'exception_class' => $exception::class,
+                'exception_message' => $exception->getMessage(),
+            ]);
 
-        RateLimiter::hit($key, $windowSeconds);
+            if ((bool) config('api_security.rate_limit.fail_closed_on_backend_error', false) && ! $observeMode) {
+                return $this->buildErrorResponse(
+                    status: 503,
+                    code: 'rate_limit_unavailable',
+                    message: 'Rate limiting is temporarily unavailable.',
+                    correlationId: $correlationId,
+                    cfRayId: $cfRayId,
+                    level: $level
+                );
+            }
+        }
 
         return null;
     }

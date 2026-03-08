@@ -97,6 +97,8 @@ return [
     'rate_limit' => [
         'cache_prefix' => 'api_security:rate',
         'window_seconds' => (int) env('API_SECURITY_RATE_WINDOW', 60),
+        // Keep API available if the rate limiter backend is temporarily unhealthy.
+        'fail_closed_on_backend_error' => (bool) env('API_SECURITY_RATE_LIMIT_FAIL_CLOSED_ON_BACKEND_ERROR', false),
     ],
 
     'cloudflare' => [
