@@ -174,13 +174,13 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(401);
     }
 
-    public function testListTenantWithCrossAccess(): void {
+    public function testListTenantWithCrossAccessIsUnauthorizedOnAccountScope(): void {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->landlord->user_cross_tenant_admin
             )
         );
-        $rolesList->assertStatus(200);
+        $rolesList->assertStatus(401);
     }
 
     protected function getUserHeaders(UserLabels $user): array {

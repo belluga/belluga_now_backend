@@ -21,6 +21,18 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
         }
     }
 
+    protected string $base_onboarding_api_url {
+        get{
+            return "{$this->base_tenant_api_admin}account_onboardings";
+        }
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->hydrateFromDatabase();
+    }
+
     public function testAccountCreatePrimary(): void
     {
         $this->tenant->account_primary->name = fake()->company();
@@ -309,11 +321,15 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
     protected function accountCreate(array $data): TestResponse
     {
-        $payload = ['ownership_state' => 'unmanaged', ...$data];
+        $payload = [
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
+            ...$data,
+        ];
 
         return $this->json(
             method: 'post',
-            uri: $this->base_api_url,
+            uri: $this->base_onboarding_api_url,
             data: $payload,
             headers: $this->getHeaders(),
         );

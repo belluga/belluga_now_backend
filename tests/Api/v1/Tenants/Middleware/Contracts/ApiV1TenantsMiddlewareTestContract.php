@@ -77,12 +77,12 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $rolesList->assertStatus(403);
     }
 
-    public function testListWithPermissionCrossTenant(): void {
+    public function testListWithPermissionCrossTenantStillRequiresTenantAccess(): void {
         $rolesList = $this->list(
             $this->getHeader($this->landlord->user_cross_tenant_admin)
         );
 
-        $rolesList->assertStatus(200);
+        $rolesList->assertStatus(403);
     }
 
     public function testListWithAccountPermission(): void {

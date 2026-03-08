@@ -1,6 +1,7 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\AccountProfiles\AccountProfileRepairService;
 use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
@@ -41,6 +42,41 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 
     return 0;
 })->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+
+Artisan::command('tenant:accounts:profiles:repair {tenant_slug} {--execute} {--profile_type=personal}', function () {
+    $tenantSlug = (string) $this->argument('tenant_slug');
+    $execute = (bool) $this->option('execute');
+    $profileType = (string) $this->option('profile_type');
+
+    $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+    if (! $tenant) {
+        $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+        return 1;
+    }
+
+    $tenant->makeCurrent();
+    app(AccountProfileRegistrySeeder::class)->ensureDefaults();
+
+    $repairService = app(AccountProfileRepairService::class);
+    $result = $execute
+        ? $repairService->repairMissingProfiles($profileType)
+        : [
+            'audited' => $repairService->auditMissingProfiles(),
+            'created_count' => 0,
+        ];
+
+    $this->line(json_encode([
+        'tenant_slug' => $tenantSlug,
+        'execute' => $execute,
+        'profile_type' => $profileType,
+        ...$result,
+    ], JSON_PRETTY_PRINT));
+
+    $tenant->forgetCurrent();
+
+    return 0;
+})->purpose('Audit or repair tenant accounts missing account_profiles.');
 
 // Use class-string scheduling to avoid eager class instantiation during console bootstrap.
 Schedule::job(PublishScheduledEventsJob::class)->hourly();
