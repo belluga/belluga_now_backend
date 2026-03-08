@@ -50,5 +50,7 @@ return [
         'tenant-push-messages:send',
         'tenant-push-credentials:read',
         'tenant-push-credentials:update',
+        'security-signals:read',
+        'security-signals:read-raw',
     ],
 ];
