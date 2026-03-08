@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Security;
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use RuntimeException;
 use Tests\TestCase;
 
 class ApiSecurityHardeningMiddlewareTest extends TestCase
@@ -99,5 +101,28 @@ class ApiSecurityHardeningMiddlewareTest extends TestCase
             ->postJson('/api/v1/_security_test/l2', ['payload' => 'alpha']);
         $allowed->assertOk()->assertJsonPath('ok', true);
         $allowed->assertHeader('X-CF-Ray-Id', 'abc-xyz');
+    }
+
+    public function test_rate_limiter_backend_error_fails_open_by_default(): void
+    {
+        RateLimiter::shouldReceive('tooManyAttempts')
+            ->once()
+            ->andThrow(new RuntimeException('rate limiter backend unavailable'));
+
+        $response = $this->postJson('/api/v1/_security_test/l2', ['payload' => 'alpha']);
+        $response->assertOk()->assertJsonPath('ok', true);
+    }
+
+    public function test_rate_limiter_backend_error_can_fail_closed_when_configured(): void
+    {
+        config()->set('api_security.rate_limit.fail_closed_on_backend_error', true);
+
+        RateLimiter::shouldReceive('tooManyAttempts')
+            ->once()
+            ->andThrow(new RuntimeException('rate limiter backend unavailable'));
+
+        $response = $this->postJson('/api/v1/_security_test/l2', ['payload' => 'alpha']);
+        $response->assertStatus(503);
+        $response->assertJsonPath('code', 'rate_limit_unavailable');
     }
 }
