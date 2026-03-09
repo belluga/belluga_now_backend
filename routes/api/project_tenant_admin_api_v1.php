@@ -1,13 +1,22 @@
 <?php
 
-use App\Http\Middleware\CheckTenantAccess;
-use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
-use Belluga\Events\Http\Api\v1\Controllers\EventsController;
+use App\Http\Api\v1\Controllers\AccountOnboardingsController;
 use App\Http\Api\v1\Controllers\EventTypesController;
+use App\Http\Api\v1\Controllers\TenantAdminLegacyCreateGuardController;
+use App\Http\Middleware\CheckTenantAccess;
+use Belluga\Events\Http\Api\v1\Controllers\EventsController;
+use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
+        Route::post('/accounts', [TenantAdminLegacyCreateGuardController::class, 'rejectAccountsCreate'])
+            ->middleware('abilities:account-users:create');
+        Route::post('/account_profiles', [TenantAdminLegacyCreateGuardController::class, 'rejectAccountProfilesCreate'])
+            ->middleware('abilities:account-users:create');
+        Route::post('/account_onboardings', [AccountOnboardingsController::class, 'store'])
+            ->middleware('abilities:account-users:create');
+
         Route::get('/events/party_candidates', [EventsController::class, 'partyCandidates'])
             ->middleware('ability:events:read,events:create,events:update');
         Route::get('/events', [EventsController::class, 'index'])

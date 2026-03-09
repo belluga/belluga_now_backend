@@ -8,7 +8,6 @@ use Tests\TestCaseTenant;
 
 class ApiV1TenantAccountsTestContract extends TestCaseTenant
 {
-
     protected TenantLabels $tenant {
         get{
             return $this->landlord->tenant_primary;
@@ -21,6 +20,18 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
         }
     }
 
+    protected string $base_onboarding_api_url {
+        get{
+            return "{$this->base_tenant_api_admin}account_onboardings";
+        }
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->hydrateFromDatabase();
+    }
+
     public function testAccountCreatePrimary(): void
     {
         $this->tenant->account_primary->name = fake()->company();
@@ -28,28 +39,28 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
         $response = $this->accountCreate(
             [
-                "name" => $this->tenant->account_primary->name,
-                "document" => [
-                    "type" => "cpf",
-                    "number" => $this->tenant->account_primary->document
+                'name' => $this->tenant->account_primary->name,
+                'document' => [
+                    'type' => 'cpf',
+                    'number' => $this->tenant->account_primary->document,
                 ],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "account" => [
-                    "id",
-                    "name",
-                    "slug",
-                    "created_at"
+            'data' => [
+                'account' => [
+                    'id',
+                    'name',
+                    'slug',
+                    'created_at',
                 ],
-                "role" => [
-                    "id",
-                    "slug"
-                ]
-            ]
+                'role' => [
+                    'id',
+                    'slug',
+                ],
+            ],
         ]);
 
         $this->tenant->account_primary->id = $response->json()['data']['account']['id'];
@@ -64,28 +75,28 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
         $response = $this->accountCreate(
             [
-                "name" => $this->landlord->tenant_primary->account_secondary->name,
-                "document" => [
-                    "type" => "cpf",
-                    "number" => $this->landlord->tenant_primary->account_secondary->document
+                'name' => $this->landlord->tenant_primary->account_secondary->name,
+                'document' => [
+                    'type' => 'cpf',
+                    'number' => $this->landlord->tenant_primary->account_secondary->document,
                 ],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "account" => [
-                    "id",
-                    "name",
-                    "slug",
-                    "created_at"
+            'data' => [
+                'account' => [
+                    'id',
+                    'name',
+                    'slug',
+                    'created_at',
                 ],
-                "role" => [
-                    "id",
-                    "slug"
-                ]
-            ]
+                'role' => [
+                    'id',
+                    'slug',
+                ],
+            ],
         ]);
 
         $this->tenant->account_secondary->id = $response->json()['data']['account']['id'];
@@ -100,28 +111,28 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
         $response = $this->accountCreate(
             [
-                "name" => $this->landlord->tenant_primary->account_disposable->name,
-                "document" => [
-                    "type" => "cpf",
-                    "number" => $this->landlord->tenant_primary->account_disposable->document
+                'name' => $this->landlord->tenant_primary->account_disposable->name,
+                'document' => [
+                    'type' => 'cpf',
+                    'number' => $this->landlord->tenant_primary->account_disposable->document,
                 ],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "account" => [
-                    "id",
-                    "name",
-                    "slug",
-                    "created_at"
+            'data' => [
+                'account' => [
+                    'id',
+                    'name',
+                    'slug',
+                    'created_at',
                 ],
-                "role" => [
-                    "id",
-                    "slug"
-                ]
-            ]
+                'role' => [
+                    'id',
+                    'slug',
+                ],
+            ],
         ]);
 
         $this->tenant->account_disposable->id = $response->json()['data']['account']['id'];
@@ -136,9 +147,9 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
-            "data" => [
-                "name",
-                "created_at",
+            'data' => [
+                'name',
+                'created_at',
             ],
         ]);
 
@@ -147,9 +158,9 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
-            "data" => [
-                "name",
-                "created_at",
+            'data' => [
+                'name',
+                'created_at',
             ],
         ]);
 
@@ -158,25 +169,25 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
-            "data" => [
-                "name",
-                "created_at",
+            'data' => [
+                'name',
+                'created_at',
             ],
         ]);
     }
 
     public function testAccountUpdate(): void
     {
-        $this->tenant->account_disposable->name = fake()->company() . " Updated";
+        $this->tenant->account_disposable->name = fake()->company().' Updated';
 
         $roleUpdate = $this->accountUpdate(
             $this->tenant->account_disposable->slug,
             [
-                "name" => $this->tenant->account_disposable->name,
-                "document" => [
-                    "type" => "cpf",
-                    "number" => fake()->cpf(false),
-                ]
+                'name' => $this->tenant->account_disposable->name,
+                'document' => [
+                    'type' => 'cpf',
+                    'number' => fake()->cpf(false),
+                ],
             ]
         );
 
@@ -187,7 +198,7 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
             $roleUpdate->json()['data']['name']);
 
         $this->assertEquals(
-            "cpf",
+            'cpf',
             $roleUpdate->json()['data']['document']['type']
         );
         $this->tenant->account_disposable->slug = $roleUpdate->json()['data']['slug'];
@@ -309,11 +320,15 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
 
     protected function accountCreate(array $data): TestResponse
     {
-        $payload = ['ownership_state' => 'unmanaged', ...$data];
+        $payload = [
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
+            ...$data,
+        ];
 
         return $this->json(
             method: 'post',
-            uri: $this->base_api_url,
+            uri: $this->base_onboarding_api_url,
             data: $payload,
             headers: $this->getHeaders(),
         );

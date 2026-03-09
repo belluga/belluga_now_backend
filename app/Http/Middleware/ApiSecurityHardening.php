@@ -249,7 +249,7 @@ class ApiSecurityHardening
      */
     private function trustedProxyRanges(): array
     {
-        $raw = trim((string) env('TRUSTED_PROXIES', ''));
+        $raw = trim((string) env('TRUSTED_PROXIES', '172.16.0.0/12'));
         if ($raw === '') {
             return [];
         }
