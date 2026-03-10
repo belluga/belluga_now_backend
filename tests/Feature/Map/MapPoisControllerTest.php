@@ -206,6 +206,26 @@ class MapPoisControllerTest extends TestCaseTenant
     {
         $location = $this->point(-40.0, -20.0);
 
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'poi_time_window_days' => [
+                    'past' => 1,
+                    'future' => 30,
+                ],
+                'filters' => [
+                    [
+                        'key' => 'event',
+                        'label' => 'Eventos em destaque',
+                        'image_uri' => 'https://tenant-zeta.test/storage/map-filters/event.png',
+                    ],
+                    [
+                        'key' => 'beach',
+                        'label' => 'Praias',
+                    ],
+                ],
+            ],
+        ]);
+
         MapPoi::create([
             'ref_type' => 'event',
             'ref_id' => 'event-3',
@@ -223,6 +243,18 @@ class MapPoisControllerTest extends TestCaseTenant
             'taxonomy_terms_flat' => ['cuisine:italian'],
             'exact_key' => $this->exactKey($location),
         ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-beach',
+            'ref_slug' => 'praia-azul',
+            'ref_path' => '/static/praia-azul',
+            'name' => 'Praia Azul',
+            'category' => 'beach',
+            'location' => $location,
+            'priority' => 40,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
 
         $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
         $response->assertStatus(200);
@@ -230,6 +262,11 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('categories'));
         $this->assertNotEmpty($response->json('tags'));
         $this->assertNotEmpty($response->json('taxonomy_terms'));
+        $response->assertJsonPath('categories.0.key', 'event');
+        $response->assertJsonPath('categories.0.label', 'Eventos em destaque');
+        $response->assertJsonPath('categories.0.image_uri', 'https://tenant-zeta.test/storage/map-filters/event.png');
+        $response->assertJsonPath('categories.1.key', 'beach');
+        $response->assertJsonPath('categories.1.label', 'Praias');
     }
 
     public function testMapPoisBoxIncludesPolygonDiscoveryScopeIntersections(): void

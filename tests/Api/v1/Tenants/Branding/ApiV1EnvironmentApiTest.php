@@ -169,6 +169,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
                     'lng' => -40.495395,
                     'label' => 'Praia do Morro',
                 ],
+                'filters' => [
+                    [
+                        'key' => 'event',
+                        'label' => 'Eventos',
+                        'image_uri' => 'https://tenant-alpha.test/storage/map-filters/event.png',
+                    ],
+                ],
             ],
         ]);
 
@@ -178,6 +185,12 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('settings.map_ui.default_origin.lat', -20.671339);
         $response->assertJsonPath('settings.map_ui.default_origin.lng', -40.495395);
         $response->assertJsonPath('settings.map_ui.default_origin.label', 'Praia do Morro');
+        $response->assertJsonPath('settings.map_ui.filters.0.key', 'event');
+        $response->assertJsonPath('settings.map_ui.filters.0.label', 'Eventos');
+        $response->assertJsonPath(
+            'settings.map_ui.filters.0.image_uri',
+            'https://tenant-alpha.test/storage/map-filters/event.png'
+        );
     }
 
     private function currentTenant(): Tenant

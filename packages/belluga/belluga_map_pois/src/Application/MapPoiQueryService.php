@@ -204,6 +204,10 @@ class MapPoiQueryService
                 'count' => (int) ($rowData['count'] ?? 0),
             ];
         }
+        $categoryItems = $this->decorateAndOrderCategoryItems(
+            $categoryItems,
+            $this->configuredCategoryMetadata()
+        );
 
         $tagItems = [];
         foreach ($tags as $row) {
@@ -251,6 +255,106 @@ class MapPoiQueryService
             'tags' => $tagItems,
             'taxonomy_terms' => $taxonomyItems,
         ];
+    }
+
+    /**
+     * @param array<int, array{key: string, label: string, count: int}> $items
+     * @param array<string, array{position: int, label: ?string, image_uri: ?string}> $metadataByKey
+     * @return array<int, array<string, mixed>>
+     */
+    private function decorateAndOrderCategoryItems(array $items, array $metadataByKey): array
+    {
+        if ($metadataByKey === []) {
+            return $items;
+        }
+
+        $configured = [];
+        $remaining = [];
+
+        foreach ($items as $item) {
+            $key = strtolower(trim((string) ($item['key'] ?? '')));
+            $metadata = $metadataByKey[$key] ?? null;
+
+            if ($metadata === null) {
+                $remaining[] = $item;
+                continue;
+            }
+
+            if (is_string($metadata['label'] ?? null) && trim((string) $metadata['label']) !== '') {
+                $item['label'] = trim((string) $metadata['label']);
+            }
+            if (is_string($metadata['image_uri'] ?? null) && trim((string) $metadata['image_uri']) !== '') {
+                $item['image_uri'] = trim((string) $metadata['image_uri']);
+            }
+
+            $configured[] = [
+                'position' => (int) $metadata['position'],
+                'item' => $item,
+            ];
+        }
+
+        usort(
+            $configured,
+            static fn (array $left, array $right): int => $left['position'] <=> $right['position']
+        );
+
+        $ordered = array_map(
+            static fn (array $entry): array => $entry['item'],
+            $configured
+        );
+
+        return [...$ordered, ...$remaining];
+    }
+
+    /**
+     * @return array<string, array{position: int, label: ?string, image_uri: ?string}>
+     */
+    private function configuredCategoryMetadata(): array
+    {
+        $mapUiSettings = $this->settings->resolveMapUiSettings();
+        $rawFilters = $mapUiSettings['filters'] ?? null;
+        if (! is_array($rawFilters)) {
+            return [];
+        }
+
+        $metadata = [];
+        $position = 0;
+
+        foreach ($rawFilters as $rawFilter) {
+            $filter = $this->normalizeDocument($rawFilter);
+            $rawKey = $filter['key'] ?? null;
+            if (! is_string($rawKey)) {
+                continue;
+            }
+
+            $key = strtolower(trim($rawKey));
+            if ($key === '' || isset($metadata[$key])) {
+                continue;
+            }
+
+            $label = $filter['label'] ?? null;
+            if (! is_string($label) || trim($label) === '') {
+                $label = null;
+            } else {
+                $label = trim($label);
+            }
+
+            $imageUri = $filter['image_uri'] ?? null;
+            if (! is_string($imageUri) || trim($imageUri) === '') {
+                $imageUri = null;
+            } else {
+                $imageUri = trim($imageUri);
+            }
+
+            $metadata[$key] = [
+                'position' => $position,
+                'label' => $label,
+                'image_uri' => $imageUri,
+            ];
+            $position++;
+        }
+
+        return $metadata;
     }
 
     /**

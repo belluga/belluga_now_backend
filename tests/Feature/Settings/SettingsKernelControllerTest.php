@@ -74,6 +74,13 @@ class SettingsKernelControllerTest extends TestCaseTenant
                     'lng' => -40.495395,
                     'label' => 'Praia do Morro',
                 ],
+                'filters' => [
+                    [
+                        'key' => 'event',
+                        'label' => 'Eventos',
+                        'image_uri' => 'https://tenant-omega.test/storage/map-filters/event.png',
+                    ],
+                ],
             ],
             'events' => [
                 'default_duration_hours' => 3,
@@ -135,6 +142,12 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.map_ui.radius.default_km', 5);
         $response->assertJsonPath('data.map_ui.default_origin.lat', -20.671339);
         $response->assertJsonPath('data.map_ui.default_origin.lng', -40.495395);
+        $response->assertJsonPath('data.map_ui.filters.0.key', 'event');
+        $response->assertJsonPath('data.map_ui.filters.0.label', 'Eventos');
+        $response->assertJsonPath(
+            'data.map_ui.filters.0.image_uri',
+            'https://tenant-omega.test/storage/map-filters/event.png'
+        );
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
@@ -264,6 +277,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'map_ui.group.radius',
             'map_ui.group.poi_time_window_days',
             'map_ui.group.default_origin',
+            'map_ui.group.filters',
         ], $rootNodeIds);
 
         $radiusNode = collect($mapUi['nodes'] ?? [])->firstWhere('id', 'map_ui.group.radius');
@@ -287,6 +301,15 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'map_ui.default_origin.lng',
             'map_ui.default_origin.label',
         ], $originChildren);
+
+        $filtersNode = collect($mapUi['nodes'] ?? [])->firstWhere('id', 'map_ui.group.filters');
+        $filtersChildren = array_map(
+            static fn (array $node): ?string => $node['id'] ?? null,
+            $filtersNode['children'] ?? []
+        );
+        $this->assertSame([
+            'map_ui.filters',
+        ], $filtersChildren);
     }
 
     public function testSchemaNodesExposeEveryRegisteredFieldAsRenderableNode(): void

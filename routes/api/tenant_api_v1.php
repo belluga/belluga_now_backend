@@ -15,6 +15,7 @@ use App\Http\Api\v1\Controllers\StaticProfileTypesController;
 use App\Http\Api\v1\Controllers\TaxonomiesController;
 use App\Http\Api\v1\Controllers\TaxonomyTermsController;
 use App\Http\Api\v1\Controllers\ExternalImageProxyController;
+use App\Http\Api\v1\Controllers\MapFilterImageController;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\MeController;
@@ -259,6 +260,9 @@ Route::prefix('static_assets')
 
 Route::post('/media/external-image', [ExternalImageProxyController::class, 'store'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create,account-users:update']);
+
+Route::post('/media/map-filter-image', [MapFilterImageController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:map-pois-settings:update']);
 
 Route::prefix('roles')->group(function () {
     Route::get('/', [TenantRolesController::class, 'index'])
