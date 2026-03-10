@@ -7,8 +7,8 @@ namespace Belluga\MapPois\Application;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
-use Illuminate\Support\Carbon;
 use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Carbon;
 use MongoDB\BSON\UTCDateTime;
 
 class MapPoiQueryService
@@ -16,11 +16,10 @@ class MapPoiQueryService
     public function __construct(
         private readonly MapPoiSettingsContract $settings,
         private readonly MapPoiTenantContextContract $tenantContext,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     public function stacks(array $queryParams, ?string $timezone): array
@@ -99,7 +98,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     public function near(array $queryParams, ?string $timezone): array
@@ -151,12 +150,13 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     public function filters(array $queryParams, ?string $timezone): array
     {
         $basePipeline = $this->buildBasePipeline($queryParams, $timezone, false);
+        $configuredCategories = $this->configuredCategoryMetadata();
 
         $categoryPipeline = array_merge($basePipeline, [
             ['$group' => ['_id' => '$category', 'count' => ['$sum' => 1]]],
@@ -191,22 +191,24 @@ class MapPoiQueryService
             return $collection->aggregate($taxonomyPipeline);
         });
 
-        $categoryItems = [];
+        $categoryCountByKey = [];
         foreach ($categories as $row) {
             $rowData = $this->normalizeDocument($row);
             $rowId = $rowData['_id'] ?? $rowData['id'] ?? null;
             if ($rowId === null || $rowId === '') {
                 continue;
             }
-            $categoryItems[] = [
-                'key' => (string) $rowId,
-                'label' => (string) $rowId,
-                'count' => (int) ($rowData['count'] ?? 0),
-            ];
+            $key = strtolower(trim((string) $rowId));
+            if ($key === '') {
+                continue;
+            }
+            $categoryCountByKey[$key] = (int) ($rowData['count'] ?? 0);
         }
-        $categoryItems = $this->decorateAndOrderCategoryItems(
-            $categoryItems,
-            $this->configuredCategoryMetadata()
+        $categoryItems = $this->buildConfiguredCategoryItems(
+            $queryParams,
+            $timezone,
+            $configuredCategories,
+            $categoryCountByKey
         );
 
         $tagItems = [];
@@ -258,56 +260,250 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<int, array{key: string, label: string, count: int}> $items
-     * @param array<string, array{position: int, label: ?string, image_uri: ?string}> $metadataByKey
+     * @param  array<string, mixed>  $queryParams
+     * @param array<string, array{
+     *   key: string,
+     *   position: int,
+     *   label: string,
+     *   image_uri: ?string,
+     *   query: array{
+     *     source: ?string,
+     *     types: array<int, string>,
+     *     taxonomy: array<int, string>,
+     *     tags: array<int, string>,
+     *     categories: array<int, string>
+     *   }
+     * }> $metadataByKey
+     * @param  array<string, int>  $categoryCountByKey
      * @return array<int, array<string, mixed>>
      */
-    private function decorateAndOrderCategoryItems(array $items, array $metadataByKey): array
-    {
+    private function buildConfiguredCategoryItems(
+        array $queryParams,
+        ?string $timezone,
+        array $metadataByKey,
+        array $categoryCountByKey
+    ): array {
         if ($metadataByKey === []) {
-            return $items;
+            return [];
         }
 
-        $configured = [];
-        $remaining = [];
+        $orderedMetadata = array_values($metadataByKey);
+        usort(
+            $orderedMetadata,
+            static fn (array $left, array $right): int => ((int) $left['position']) <=> ((int) $right['position'])
+        );
 
-        foreach ($items as $item) {
-            $key = strtolower(trim((string) ($item['key'] ?? '')));
-            $metadata = $metadataByKey[$key] ?? null;
-
-            if ($metadata === null) {
-                $remaining[] = $item;
+        $items = [];
+        foreach ($orderedMetadata as $metadata) {
+            $key = strtolower(trim((string) ($metadata['key'] ?? '')));
+            if ($key === '') {
                 continue;
             }
 
-            if (is_string($metadata['label'] ?? null) && trim((string) $metadata['label']) !== '') {
-                $item['label'] = trim((string) $metadata['label']);
-            }
-            if (is_string($metadata['image_uri'] ?? null) && trim((string) $metadata['image_uri']) !== '') {
-                $item['image_uri'] = trim((string) $metadata['image_uri']);
+            $query = is_array($metadata['query'] ?? null)
+                ? $metadata['query']
+                : [
+                    'source' => null,
+                    'types' => [],
+                    'taxonomy' => [],
+                    'tags' => [],
+                    'categories' => [],
+                ];
+
+            $hasScopedQuery = $query['source'] !== null ||
+                ($query['types'] ?? []) !== [] ||
+                ($query['taxonomy'] ?? []) !== [] ||
+                ($query['tags'] ?? []) !== [] ||
+                ($query['categories'] ?? []) !== [];
+
+            $count = $hasScopedQuery
+                ? $this->countConfiguredCategoryMatches(
+                    $queryParams,
+                    $timezone,
+                    $key,
+                    $query
+                )
+                : (int) ($categoryCountByKey[$key] ?? 0);
+
+            $item = [
+                'key' => $key,
+                'label' => (string) ($metadata['label'] ?? $key),
+                'count' => $count,
+            ];
+
+            $imageUri = $metadata['image_uri'] ?? null;
+            if (is_string($imageUri) && trim($imageUri) !== '') {
+                $item['image_uri'] = trim($imageUri);
             }
 
-            $configured[] = [
-                'position' => (int) $metadata['position'],
-                'item' => $item,
-            ];
+            if ($hasScopedQuery) {
+                $item['query'] = [
+                    ...($query['source'] !== null ? ['source' => $query['source']] : []),
+                    ...(($query['types'] ?? []) !== [] ? ['types' => array_values($query['types'])] : []),
+                    ...(($query['taxonomy'] ?? []) !== [] ? ['taxonomy' => array_values($query['taxonomy'])] : []),
+                    ...(($query['tags'] ?? []) !== [] ? ['tags' => array_values($query['tags'])] : []),
+                    ...(($query['categories'] ?? []) !== [] ? ['categories' => array_values($query['categories'])] : []),
+                ];
+            }
+
+            $items[] = $item;
         }
 
-        usort(
-            $configured,
-            static fn (array $left, array $right): int => $left['position'] <=> $right['position']
-        );
-
-        $ordered = array_map(
-            static fn (array $entry): array => $entry['item'],
-            $configured
-        );
-
-        return [...$ordered, ...$remaining];
+        return $items;
     }
 
     /**
-     * @return array<string, array{position: int, label: ?string, image_uri: ?string}>
+     * @param  array<string, mixed>  $queryParams
+     * @param array{
+     *   source: ?string,
+     *   types: array<int, string>,
+     *   taxonomy: array<int, string>,
+     *   tags: array<int, string>,
+     *   categories: array<int, string>
+     * } $query
+     */
+    private function countConfiguredCategoryMatches(
+        array $queryParams,
+        ?string $timezone,
+        string $fallbackCategoryKey,
+        array $query
+    ): int {
+        $pipeline = $this->buildBasePipeline($queryParams, $timezone, false);
+        $pipeline = $this->appendFilterConstraintToPipeline(
+            $pipeline,
+            $fallbackCategoryKey,
+            $query
+        );
+        $pipeline[] = ['$count' => 'total'];
+
+        $rows = MapPoi::raw(function ($collection) use ($pipeline) {
+            return $collection->aggregate($pipeline);
+        });
+
+        foreach ($rows as $row) {
+            $data = $this->normalizeDocument($row);
+
+            return (int) ($data['total'] ?? 0);
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param array{
+     *   source: ?string,
+     *   types: array<int, string>,
+     *   taxonomy: array<int, string>,
+     *   tags: array<int, string>,
+     *   categories: array<int, string>
+     * } $query
+     * @return array<int, array<string, mixed>>
+     */
+    private function appendFilterConstraintToPipeline(
+        array $pipeline,
+        string $fallbackCategoryKey,
+        array $query
+    ): array {
+        if ($pipeline === []) {
+            return $pipeline;
+        }
+
+        $constraint = $this->applyFilterQueryToMatch(
+            $fallbackCategoryKey,
+            $query
+        );
+
+        if ($constraint === []) {
+            return $pipeline;
+        }
+
+        $first = $pipeline[0];
+        if (isset($first['$match']) && is_array($first['$match'])) {
+            $pipeline[0]['$match'] = array_merge($first['$match'], $constraint);
+
+            return $pipeline;
+        }
+
+        if (
+            isset($first['$geoNear']) &&
+            is_array($first['$geoNear']) &&
+            is_array($first['$geoNear']['query'] ?? null)
+        ) {
+            $pipeline[0]['$geoNear']['query'] = array_merge(
+                $first['$geoNear']['query'],
+                $constraint
+            );
+        }
+
+        return $pipeline;
+    }
+
+    /**
+     * @param array{
+     *   source: ?string,
+     *   types: array<int, string>,
+     *   taxonomy: array<int, string>,
+     *   tags: array<int, string>,
+     *   categories: array<int, string>
+     * } $query
+     * @return array<string, mixed>
+     */
+    private function applyFilterQueryToMatch(
+        string $fallbackCategoryKey,
+        array $query
+    ): array {
+        $match = [];
+
+        $source = $query['source'] ?? null;
+        if (is_string($source) && trim($source) !== '') {
+            $refType = $this->mapSourceToRefType($source);
+            if ($refType !== null) {
+                $match['ref_type'] = $refType;
+            }
+        }
+
+        $types = $this->normalizeStringArray($query['types'] ?? []);
+        if ($types !== []) {
+            $match['source_type'] = ['$in' => $types];
+        }
+
+        $categories = $this->normalizeStringArray($query['categories'] ?? []);
+        if ($categories !== []) {
+            $match['category'] = ['$in' => $categories];
+        }
+
+        $taxonomy = $this->normalizeStringArray($query['taxonomy'] ?? []);
+        if ($taxonomy !== []) {
+            $match['taxonomy_terms_flat'] = ['$in' => $taxonomy];
+        }
+
+        $tags = $this->normalizeStringArray($query['tags'] ?? []);
+        if ($tags !== []) {
+            $match['tags'] = ['$in' => $tags];
+        }
+
+        if ($categories === [] && $source === null && $types === [] && $taxonomy === [] && $tags === []) {
+            $match['category'] = $fallbackCategoryKey;
+        }
+
+        return $match;
+    }
+
+    /**
+     * @return array<string, array{
+     *   key: string,
+     *   position: int,
+     *   label: string,
+     *   image_uri: ?string,
+     *   query: array{
+     *     source: ?string,
+     *     types: array<int, string>,
+     *     taxonomy: array<int, string>,
+     *     tags: array<int, string>,
+     *     categories: array<int, string>
+     *   }
+     * }>
      */
     private function configuredCategoryMetadata(): array
     {
@@ -334,7 +530,7 @@ class MapPoiQueryService
 
             $label = $filter['label'] ?? null;
             if (! is_string($label) || trim($label) === '') {
-                $label = null;
+                $label = $key;
             } else {
                 $label = trim($label);
             }
@@ -346,10 +542,16 @@ class MapPoiQueryService
                 $imageUri = trim($imageUri);
             }
 
+            $query = $this->normalizeConfiguredFilterQuery(
+                is_array($filter['query'] ?? null) ? $filter['query'] : []
+            );
+
             $metadata[$key] = [
+                'key' => $key,
                 'position' => $position,
                 'label' => $label,
                 'image_uri' => $imageUri,
+                'query' => $query,
             ];
             $position++;
         }
@@ -358,7 +560,33 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $query
+     * @return array{
+     *   source: ?string,
+     *   types: array<int, string>,
+     *   taxonomy: array<int, string>,
+     *   tags: array<int, string>,
+     *   categories: array<int, string>
+     * }
+     */
+    private function normalizeConfiguredFilterQuery(array $query): array
+    {
+        $sourceRaw = strtolower(trim((string) ($query['source'] ?? '')));
+        $source = $sourceRaw === '' ? null : $sourceRaw;
+
+        return [
+            'source' => $source,
+            'types' => $this->normalizeStringArray($query['types'] ?? []),
+            'taxonomy' => $this->normalizeStringArray($query['taxonomy'] ?? []),
+            'tags' => $this->normalizeStringArray($query['tags'] ?? []),
+            'categories' => $this->normalizeStringArray(
+                $query['categories'] ?? ($query['category_keys'] ?? [])
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     private function resolveBounds(array $queryParams): array
@@ -374,7 +602,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<int, array<string, mixed>>
      */
     private function resolveStackItems(array $queryParams, ?string $timezone, string $stackKey): array
@@ -416,7 +644,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<int, array<string, mixed>>
      */
     private function buildBasePipeline(
@@ -458,7 +686,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     private function buildMatchConditions(array $queryParams, ?string $timezone): array
@@ -466,6 +694,19 @@ class MapPoiQueryService
         $match = [
             'is_active' => true,
         ];
+
+        $source = strtolower(trim((string) ($queryParams['source'] ?? '')));
+        if ($source !== '') {
+            $refType = $this->mapSourceToRefType($source);
+            if ($refType !== null) {
+                $match['ref_type'] = $refType;
+            }
+        }
+
+        $types = $this->normalizeStringArray($queryParams['types'] ?? []);
+        if ($types !== []) {
+            $match['source_type'] = ['$in' => $types];
+        }
 
         $categories = $this->normalizeStringArray($queryParams['categories'] ?? []);
         if ($categories !== []) {
@@ -513,8 +754,18 @@ class MapPoiQueryService
         return $match;
     }
 
+    private function mapSourceToRefType(string $source): ?string
+    {
+        return match (strtolower(trim($source))) {
+            'event' => 'event',
+            'account_profile', 'account' => 'account_profile',
+            'static', 'static_asset', 'asset' => 'static',
+            default => null,
+        };
+    }
+
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     private function buildGeoWithinMatch(array $queryParams): array
@@ -602,7 +853,6 @@ class MapPoiQueryService
     }
 
     /**
-     * @param mixed $stack
      * @return array<string, mixed>
      */
     private function formatStackFromAggregate(mixed $stack): array
@@ -620,8 +870,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param string $stackKey
-     * @param array<int, array<string, mixed>> $items
+     * @param  array<int, array<string, mixed>>  $items
      * @return array<string, mixed>|null
      */
     private function formatStack(string $stackKey, array $items): ?array
@@ -642,7 +891,6 @@ class MapPoiQueryService
     }
 
     /**
-     * @param mixed $item
      * @return array<string, mixed>
      */
     private function formatTopPoi(mixed $item): array
@@ -650,15 +898,31 @@ class MapPoiQueryService
         $payloadData = $this->normalizeDocument($item);
         $location = $this->formatLocation($payloadData['location'] ?? null);
         $distance = isset($payloadData['distance_meters']) ? (float) $payloadData['distance_meters'] : null;
+        $name = (string) ($payloadData['name'] ?? $payloadData['title'] ?? '');
+        $subtitleRaw = $payloadData['subtitle'] ?? $payloadData['description'] ?? $payloadData['address'] ?? null;
+        $subtitle = is_string($subtitleRaw) && trim($subtitleRaw) !== '' ? trim($subtitleRaw) : null;
 
         $payload = [
             'ref_type' => (string) ($payloadData['ref_type'] ?? ''),
             'ref_id' => (string) ($payloadData['ref_id'] ?? ''),
+            'ref_slug' => (string) ($payloadData['ref_slug'] ?? ''),
+            'ref_path' => (string) ($payloadData['ref_path'] ?? ''),
+            'title' => $name,
+            'subtitle' => $subtitle,
+            'name' => $name,
+            'description' => $subtitle,
+            'address' => $subtitle,
             'category' => (string) ($payloadData['category'] ?? ''),
+            'source_type' => isset($payloadData['source_type']) ? (string) $payloadData['source_type'] : null,
             'location' => $location,
             'is_happening_now' => (bool) ($payloadData['is_happening_now'] ?? false),
             'priority' => (int) ($payloadData['priority'] ?? 0),
             'updated_at' => $this->formatDate($payloadData['updated_at'] ?? null),
+            'time_start' => $this->formatDate($payloadData['time_start'] ?? null),
+            'time_end' => $this->formatDate($payloadData['time_end'] ?? null),
+            'avatar_url' => $payloadData['avatar_url'] ?? null,
+            'cover_url' => $payloadData['cover_url'] ?? null,
+            'badge' => $payloadData['badge'] ?? null,
         ];
 
         if ($distance !== null) {
@@ -669,7 +933,6 @@ class MapPoiQueryService
     }
 
     /**
-     * @param mixed $item
      * @return array<string, mixed>
      */
     private function formatNearItem(mixed $item): array
@@ -677,14 +940,17 @@ class MapPoiQueryService
         $payloadData = $this->normalizeDocument($item);
         $location = $this->formatLocation($payloadData['location'] ?? null);
         $distance = isset($payloadData['distance_meters']) ? (float) $payloadData['distance_meters'] : null;
+        $title = (string) ($payloadData['name'] ?? $payloadData['title'] ?? '');
+        $subtitleRaw = $payloadData['subtitle'] ?? $payloadData['description'] ?? $payloadData['address'] ?? null;
+        $subtitle = is_string($subtitleRaw) && trim($subtitleRaw) !== '' ? trim($subtitleRaw) : null;
 
         return [
             'ref_type' => (string) ($payloadData['ref_type'] ?? ''),
             'ref_id' => (string) ($payloadData['ref_id'] ?? ''),
             'ref_slug' => (string) ($payloadData['ref_slug'] ?? ''),
             'ref_path' => (string) ($payloadData['ref_path'] ?? ''),
-            'title' => (string) ($payloadData['name'] ?? ''),
-            'subtitle' => $payloadData['subtitle'] ?? null,
+            'title' => $title,
+            'subtitle' => $subtitle,
             'category' => (string) ($payloadData['category'] ?? ''),
             'location' => $location,
             'distance_meters' => $distance,
@@ -702,7 +968,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<int, mixed> $facets
+     * @param  array<int, mixed>  $facets
      * @return array<int, array<string, mixed>>
      */
     private function formatOccurrenceFacets(array $facets): array
@@ -728,7 +994,6 @@ class MapPoiQueryService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, float>|null
      */
     private function formatLocation(mixed $location): ?array
@@ -792,9 +1057,6 @@ class MapPoiQueryService
         return [];
     }
 
-    /**
-     * @param mixed $value
-     */
     private function toFloat(mixed $value): ?float
     {
         if ($value === null || $value === '') {
@@ -805,7 +1067,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<int, mixed> $values
+     * @param  array<int, mixed>  $values
      * @return array<int, string>
      */
     private function normalizeStringArray(array $values): array
@@ -823,7 +1085,7 @@ class MapPoiQueryService
     }
 
     /**
-     * @param array<int, mixed> $terms
+     * @param  array<int, mixed>  $terms
      * @return array<int, array<string, string>>
      */
     private function normalizeTaxonomyTerms(array $terms): array

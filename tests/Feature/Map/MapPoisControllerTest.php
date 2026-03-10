@@ -4,18 +4,18 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Map;
 
+use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\StaticAssets\StaticAssetManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantSettings;
-use App\Application\Accounts\AccountUserService;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -35,8 +35,11 @@ class MapPoisControllerTest extends TestCaseTenant
     }
 
     private static bool $bootstrapped = false;
+
     private Account $account;
+
     private AccountUserService $userService;
+
     private AccountUser $user;
 
     protected function setUp(): void
@@ -75,7 +78,7 @@ class MapPoisControllerTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['account-users:view']);
     }
 
-    public function testMapPoisRequiresAuth(): void
+    public function test_map_pois_requires_auth(): void
     {
         auth('sanctum')->forgetUser();
         auth()->forgetGuards();
@@ -84,7 +87,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertStatus(401);
     }
 
-    public function testMapPoisReturnsStacks(): void
+    public function test_map_pois_returns_stacks(): void
     {
         $location = $this->point(-40.0, -20.0);
         $exactKey = $this->exactKey($location);
@@ -95,7 +98,9 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_slug' => 'event-one',
             'ref_path' => '/event/event-one',
             'name' => 'Event One',
+            'subtitle' => 'Live tonight',
             'category' => 'event',
+            'source_type' => 'show',
             'location' => $location,
             'priority' => 80,
             'is_active' => true,
@@ -109,6 +114,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_path' => '/static/static-one',
             'name' => 'Static One',
             'category' => 'beach',
+            'source_type' => 'poi',
             'location' => $location,
             'priority' => 20,
             'is_active' => true,
@@ -123,11 +129,16 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertEquals(2, $stacks[0]['stack_count']);
         $this->assertArrayHasKey('stack_key', $stacks[0]);
         $this->assertArrayHasKey('updated_at', $stacks[0]['top_poi']);
+        $this->assertArrayHasKey('title', $stacks[0]['top_poi']);
+        $this->assertArrayHasKey('subtitle', $stacks[0]['top_poi']);
+        $this->assertArrayHasKey('ref_slug', $stacks[0]['top_poi']);
+        $this->assertArrayHasKey('ref_path', $stacks[0]['top_poi']);
+        $this->assertArrayHasKey('source_type', $stacks[0]['top_poi']);
         $this->assertArrayNotHasKey('tags', $stacks[0]['top_poi']);
         $this->assertArrayNotHasKey('taxonomy_terms', $stacks[0]['top_poi']);
     }
 
-    public function testMapNearReturnsCardsWithTagsAndTaxonomy(): void
+    public function test_map_near_returns_cards_with_tags_and_taxonomy(): void
     {
         $location = $this->point(-40.0, -20.0);
 
@@ -165,7 +176,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertArrayHasKey('time_end', $items[0]);
     }
 
-    public function testMapNearReturnsNowFlagAndOccurrenceFacets(): void
+    public function test_map_near_returns_now_flag_and_occurrence_facets(): void
     {
         $location = $this->point(-40.0, -20.0);
 
@@ -202,7 +213,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($item, 'occurrence_facets.0.is_happening_now', false));
     }
 
-    public function testMapFiltersReturnsCatalogs(): void
+    public function test_map_filters_returns_catalogs(): void
     {
         $location = $this->point(-40.0, -20.0);
 
@@ -214,13 +225,20 @@ class MapPoisControllerTest extends TestCaseTenant
                 ],
                 'filters' => [
                     [
-                        'key' => 'event',
+                        'key' => 'events',
                         'label' => 'Eventos em destaque',
                         'image_uri' => 'https://tenant-zeta.test/storage/map-filters/event.png',
+                        'query' => [
+                            'source' => 'event',
+                        ],
                     ],
                     [
-                        'key' => 'beach',
+                        'key' => 'praia',
                         'label' => 'Praias',
+                        'query' => [
+                            'source' => 'static_asset',
+                            'types' => ['beach_spot'],
+                        ],
                     ],
                 ],
             ],
@@ -233,6 +251,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_path' => '/event/event-three',
             'name' => 'Event Three',
             'category' => 'event',
+            'source_type' => 'show',
             'location' => $location,
             'priority' => 60,
             'is_active' => true,
@@ -250,6 +269,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_path' => '/static/praia-azul',
             'name' => 'Praia Azul',
             'category' => 'beach',
+            'source_type' => 'beach_spot',
             'location' => $location,
             'priority' => 40,
             'is_active' => true,
@@ -262,14 +282,124 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('categories'));
         $this->assertNotEmpty($response->json('tags'));
         $this->assertNotEmpty($response->json('taxonomy_terms'));
-        $response->assertJsonPath('categories.0.key', 'event');
+        $response->assertJsonPath('categories.0.key', 'events');
         $response->assertJsonPath('categories.0.label', 'Eventos em destaque');
         $response->assertJsonPath('categories.0.image_uri', 'https://tenant-zeta.test/storage/map-filters/event.png');
-        $response->assertJsonPath('categories.1.key', 'beach');
+        $response->assertJsonPath('categories.0.query.source', 'event');
+        $response->assertJsonPath('categories.1.key', 'praia');
         $response->assertJsonPath('categories.1.label', 'Praias');
+        $response->assertJsonPath('categories.1.query.source', 'static_asset');
+        $response->assertJsonPath('categories.1.query.types.0', 'beach_spot');
     }
 
-    public function testMapPoisBoxIncludesPolygonDiscoveryScopeIntersections(): void
+    public function test_map_filters_returns_configured_filters_even_when_count_is_zero(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'poi_time_window_days' => [
+                    'past' => 1,
+                    'future' => 30,
+                ],
+                'filters' => [
+                    [
+                        'key' => 'events',
+                        'label' => 'Eventos',
+                        'query' => [
+                            'source' => 'event',
+                        ],
+                    ],
+                    [
+                        'key' => 'restaurantes',
+                        'label' => 'Restaurantes',
+                        'query' => [
+                            'source' => 'account_profile',
+                            'types' => ['restaurant'],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-only',
+            'ref_slug' => 'event-only',
+            'ref_path' => '/event/event-only',
+            'name' => 'Event only',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 60,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('categories.0.key', 'events');
+        $response->assertJsonPath('categories.0.count', 1);
+        $response->assertJsonPath('categories.1.key', 'restaurantes');
+        $response->assertJsonPath('categories.1.count', 0);
+    }
+
+    public function test_map_pois_supports_source_and_types_filters(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-show',
+            'ref_slug' => 'event-show',
+            'ref_path' => '/event/event-show',
+            'name' => 'Event Show',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 80,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-festival',
+            'ref_slug' => 'event-festival',
+            'ref_path' => '/event/event-festival',
+            'name' => 'Event Festival',
+            'category' => 'event',
+            'source_type' => 'festival',
+            'location' => $location,
+            'priority' => 60,
+            'is_active' => true,
+            'exact_key' => '-20.00010,-40.00010',
+        ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-poi',
+            'ref_slug' => 'static-poi',
+            'ref_path' => '/static/static-poi',
+            'name' => 'Static POI',
+            'category' => 'beach',
+            'source_type' => 'beach_spot',
+            'location' => $location,
+            'priority' => 40,
+            'is_active' => true,
+            'exact_key' => '-20.00020,-40.00020',
+        ]);
+
+        $allEvents = $this->getJson("{$this->base_api_tenant}map/pois?source=event&ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $allEvents->assertStatus(200);
+        $this->assertCount(2, $allEvents->json('stacks'));
+
+        $showsOnly = $this->getJson("{$this->base_api_tenant}map/pois?source=event&types[]=show&ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $showsOnly->assertStatus(200);
+        $this->assertCount(1, $showsOnly->json('stacks'));
+        $showsOnly->assertJsonPath('stacks.0.top_poi.ref_id', 'event-show');
+    }
+
+    public function test_map_pois_box_includes_polygon_discovery_scope_intersections(): void
     {
         MapPoi::create([
             'ref_type' => 'event',
@@ -311,7 +441,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertContains('event-polygon', $flatRefIds);
     }
 
-    public function testStaticAssetCreationProjectsMapPoi(): void
+    public function test_static_asset_creation_projects_map_poi(): void
     {
         StaticProfileType::query()->delete();
         Taxonomy::query()->delete();
@@ -373,15 +503,13 @@ class MapPoisControllerTest extends TestCaseTenant
 
         return $this->userService->create($this->account, [
             'name' => 'Test User',
-            'email' => uniqid('map-user', true) . '@example.org',
+            'email' => uniqid('map-user', true).'@example.org',
             'password' => 'Secret!234',
             'timezone' => 'America/Sao_Paulo',
         ], (string) $role->_id);
     }
 
     /**
-     * @param float $lng
-     * @param float $lat
      * @return array<string, mixed>
      */
     private function point(float $lng, float $lat): array
@@ -398,7 +526,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $lng = number_format((float) ($coordinates[0] ?? 0.0), 5, '.', '');
         $lat = number_format((float) ($coordinates[1] ?? 0.0), 5, '.', '');
 
-        return $lat . ',' . $lng;
+        return $lat.','.$lng;
     }
 
     private function initializeSystem(): void
