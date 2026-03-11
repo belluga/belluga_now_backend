@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Api\v1\Tenants\Media;
 
+use App\Application\Media\MapFilterImageStorageService;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -83,13 +84,54 @@ final class MapFilterImageUploadTest extends TestCaseTenant
 
         $imageUri = (string) $response->json('data.image_uri');
         $this->assertNotSame('', $imageUri);
-        $this->assertStringContainsString('/storage/tenants/', $imageUri);
+        $this->assertStringContainsString('/api/v1/media/map-filters/events_main', $imageUri);
+        $this->assertSame('/api/v1/media/map-filters/events_main', parse_url($imageUri, PHP_URL_PATH));
+        $resolvedPath = app(MapFilterImageStorageService::class)->resolveMediaPathForBaseUrl(
+            'events_main',
+            $this->base_tenant_url,
+        );
+        $this->assertNotNull(
+            $resolvedPath,
+            'Stored file was not resolvable after upload.'
+        );
+        $absolutePath = Storage::disk('public')->path($resolvedPath);
+        $this->assertNotFalse(@getimagesize($absolutePath));
 
-        $path = parse_url($imageUri, PHP_URL_PATH);
-        $this->assertIsString($path);
+        $publicResponse = $this->get($imageUri);
+        $publicResponse->assertOk();
+        $publicResponse->assertHeader('ETag');
 
-        $relativePath = ltrim(str_replace('/storage/', '', (string) $path), '/');
-        Storage::disk('public')->assertExists($relativePath);
+        Storage::disk('public')->assertExists(
+            'tenants/'.$this->tenant->slug.'/map_filters/events_main.png'
+        );
+    }
+
+    public function test_replacing_map_filter_image_returns_a_new_public_fingerprint(): void
+    {
+        Storage::fake('public');
+
+        $firstResponse = $this->withHeaders($this->uploadHeadersFor($this->landlord->user_superadmin))
+            ->post("{$this->base_tenant_api_admin}media/map-filter-image", [
+                'key' => 'events_main',
+                'image' => UploadedFile::fake()->image('events.png', 1024, 1024),
+            ]);
+
+        $firstResponse->assertOk();
+        $firstUri = (string) $firstResponse->json('data.image_uri');
+
+        $secondResponse = $this->withHeaders($this->uploadHeadersFor($this->landlord->user_superadmin))
+            ->post("{$this->base_tenant_api_admin}media/map-filter-image", [
+                'key' => 'events_main',
+                'image' => UploadedFile::fake()->image('events.jpg', 1024, 1024),
+            ]);
+
+        $secondResponse->assertOk();
+        $secondUri = (string) $secondResponse->json('data.image_uri');
+
+        $this->assertNotSame('', $firstUri);
+        $this->assertNotSame('', $secondUri);
+        $this->assertNotSame($firstUri, $secondUri);
+        $this->assertStringContainsString('/api/v1/media/map-filters/events_main', $secondUri);
     }
 
     private function uploadHeadersFor(UserLabels $user): array

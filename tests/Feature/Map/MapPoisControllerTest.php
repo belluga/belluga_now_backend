@@ -227,7 +227,7 @@ class MapPoisControllerTest extends TestCaseTenant
                     [
                         'key' => 'events',
                         'label' => 'Eventos em destaque',
-                        'image_uri' => 'https://tenant-zeta.test/storage/map-filters/event.png',
+                        'image_uri' => 'https://tenant-zeta.test/map-filters/events/image?v=1710000000',
                         'query' => [
                             'source' => 'event',
                         ],
@@ -284,7 +284,11 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('taxonomy_terms'));
         $response->assertJsonPath('categories.0.key', 'events');
         $response->assertJsonPath('categories.0.label', 'Eventos em destaque');
-        $response->assertJsonPath('categories.0.image_uri', 'https://tenant-zeta.test/storage/map-filters/event.png');
+        $imageUri = (string) $response->json('categories.0.image_uri');
+        $this->assertNotSame('', $imageUri);
+        $this->assertSame('/api/v1/media/map-filters/events', parse_url($imageUri, PHP_URL_PATH));
+        parse_str((string) parse_url($imageUri, PHP_URL_QUERY), $imageQuery);
+        $this->assertSame('1710000000', $imageQuery['v'] ?? null);
         $response->assertJsonPath('categories.0.query.source', 'event');
         $response->assertJsonPath('categories.1.key', 'praia');
         $response->assertJsonPath('categories.1.label', 'Praias');
@@ -397,6 +401,11 @@ class MapPoisControllerTest extends TestCaseTenant
         $showsOnly->assertStatus(200);
         $this->assertCount(1, $showsOnly->json('stacks'));
         $showsOnly->assertJsonPath('stacks.0.top_poi.ref_id', 'event-show');
+
+        $beachesOnly = $this->getJson("{$this->base_api_tenant}map/pois?source=static_asset&types[]=beach_spot&ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $beachesOnly->assertStatus(200);
+        $this->assertCount(1, $beachesOnly->json('stacks'));
+        $beachesOnly->assertJsonPath('stacks.0.top_poi.ref_id', 'static-poi');
     }
 
     public function test_map_pois_box_includes_polygon_discovery_scope_intersections(): void

@@ -2,12 +2,11 @@
 
 use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\BrandingController;
-use App\Http\Api\v1\Controllers\EnvironmentController;
+use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
+use App\Http\Api\v1\Controllers\StaticAssetMediaController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(['auth'])->group(function () {
-
-});
+Route::middleware(['auth'])->group(function () {});
 
 Route::middleware('guest')->group(function () {
     Route::get('/', function () {
@@ -18,6 +17,9 @@ Route::middleware('guest')->group(function () {
 Route::middleware('tenant-maybe')->group(function () {
     Route::get('/account-profiles/{account_profile}/avatar', [AccountProfileMediaController::class, 'avatar']);
     Route::get('/account-profiles/{account_profile}/cover', [AccountProfileMediaController::class, 'cover']);
+    Route::get('/static-assets/{static_asset}/avatar', [StaticAssetMediaController::class, 'avatar']);
+    Route::get('/static-assets/{static_asset}/cover', [StaticAssetMediaController::class, 'cover']);
+    Route::get('/map-filters/{key}/image', [MapFilterImageMediaController::class, 'show']);
     Route::get('/manifest.json', [BrandingController::class, 'getManifest']);
     Route::get('/favicon.ico', [BrandingController::class, 'getFavicon']);
     Route::get('/icon/icon-maskable-512x512.png', [BrandingController::class, 'getMaskableIcon']);

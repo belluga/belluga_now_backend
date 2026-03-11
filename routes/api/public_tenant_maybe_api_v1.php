@@ -3,6 +3,7 @@
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\EnvironmentController;
+use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('tenant')->group(function () {
     Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
+    Route::get('/media/map-filters/{key}', [MapFilterImageMediaController::class, 'show']);
 
     Route::prefix('anonymous')
         ->group(function () {
