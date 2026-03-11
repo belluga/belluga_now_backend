@@ -30,7 +30,7 @@ class AccountRoleTemplateQueryService
             ->first();
 
         if (! $role) {
-            throw (new ModelNotFoundException())->setModel(AccountRoleTemplate::class, [$roleId]);
+            throw (new ModelNotFoundException)->setModel(AccountRoleTemplate::class, [$roleId]);
         }
 
         return $role;

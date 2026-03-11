@@ -13,11 +13,10 @@ class EventCapabilitiesService
     public function __construct(
         private readonly EventCapabilityRegistryContract $capabilityRegistry,
         private readonly EventCapabilitySettingsContract $capabilitySettings,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, array<string, mixed>>
      */
     public function resolveEventCapabilities(array $payload, ?Event $existing): array
@@ -45,7 +44,7 @@ class EventCapabilitiesService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function shouldPersistCapabilities(array $payload, ?Event $existing): bool
     {
@@ -53,8 +52,8 @@ class EventCapabilitiesService
     }
 
     /**
-     * @param array<string, array<string, mixed>> $eventCapabilities
-     * @param array<int, array<string, mixed>> $occurrences
+     * @param  array<string, array<string, mixed>>  $eventCapabilities
+     * @param  array<int, array<string, mixed>>  $occurrences
      */
     public function assertScheduleConstraints(array $eventCapabilities, array $occurrences): void
     {
@@ -91,7 +90,6 @@ class EventCapabilitiesService
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     private function normalizeArray(mixed $value): array
@@ -112,4 +110,3 @@ class EventCapabilitiesService
         return [];
     }
 }
-

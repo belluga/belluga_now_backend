@@ -38,7 +38,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->service = $this->app->make(TenantAppDomainManagementService::class);
     }
 
-    public function testListReturnsTenantAppDomains(): void
+    public function test_list_returns_tenant_app_domains(): void
     {
         $this->tenant->update(['app_domains' => ['tenant-theta.app']]);
 
@@ -47,7 +47,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->assertSame(['tenant-theta.app'], $domains);
     }
 
-    public function testAddPersistsUniqueDomain(): void
+    public function test_add_persists_unique_domain(): void
     {
         $domains = $this->service->add($this->tenant, 'theta-app.test');
 
@@ -55,7 +55,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->assertContains('theta-app.test', $this->tenant->fresh()->app_domains);
     }
 
-    public function testAddRejectsDuplicateDomain(): void
+    public function test_add_rejects_duplicate_domain(): void
     {
         $this->service->add($this->tenant, 'duplicate-app.test');
 
@@ -63,7 +63,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->service->add($this->tenant, 'duplicate-app.test');
     }
 
-    public function testRemoveDeletesExistingDomain(): void
+    public function test_remove_deletes_existing_domain(): void
     {
         $this->tenant->update(['app_domains' => ['remove-me.test', 'keep-me.test']]);
 
@@ -73,7 +73,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->assertSame(['keep-me.test'], $this->tenant->fresh()->app_domains);
     }
 
-    public function testRemoveRejectsMissingDomain(): void
+    public function test_remove_rejects_missing_domain(): void
     {
         $this->tenant->update(['app_domains' => ['present.test']]);
 
@@ -103,4 +103,3 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $service->initialize($payload);
     }
 }
-

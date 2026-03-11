@@ -17,17 +17,17 @@ class InitializationController extends Controller
     public function __construct(
         private readonly SystemInitializationService $initializationService,
         private readonly BrandingAssetManager $brandingAssetManager
-    ) {
-    }
+    ) {}
 
-    public function isInitialized(): JsonResponse {
+    public function isInitialized(): JsonResponse
+    {
 
         if ($this->initializationService->isInitialized()) {
             return response()->json(
                 [
-                    "message" => "Sistema já inicializado",
-                    "errors" => [
-                        "user" => ["Sistema já inicializado"]
+                    'message' => 'Sistema já inicializado',
+                    'errors' => [
+                        'user' => ['Sistema já inicializado'],
                     ]],
                 200);
         }
@@ -38,7 +38,7 @@ class InitializationController extends Controller
     public function initialize(InitializeRequest $request): JsonResponse
     {
         if ($this->initializationService->isInitialized()) {
-            return response()->json(["success" => false, "message" => "System already initialized."], 403);
+            return response()->json(['success' => false, 'message' => 'System already initialized.'], 403);
         }
 
         $validated = $request->validated();

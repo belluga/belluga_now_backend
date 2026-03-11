@@ -15,14 +15,13 @@ class PushMessageService
     public function __construct(
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushPlanPolicyContract $planPolicy
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(string $scope, ?string $accountId, array $payload): PushMessage
     {
@@ -69,6 +68,7 @@ class PushMessageService
 
         if ($scheduledAt) {
             Bus::dispatch($job->delay(Carbon::parse($scheduledAt)));
+
             return;
         }
 

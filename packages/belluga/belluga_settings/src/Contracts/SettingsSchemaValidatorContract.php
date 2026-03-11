@@ -9,7 +9,7 @@ use Belluga\Settings\Support\SettingsNamespaceDefinition;
 interface SettingsSchemaValidatorContract
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function validatePatch(SettingsNamespaceDefinition $definition, array $payload): array;

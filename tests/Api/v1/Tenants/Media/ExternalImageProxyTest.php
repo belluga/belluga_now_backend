@@ -182,10 +182,9 @@ final class ExternalImageProxyTest extends TestCaseTenant
     {
         $this->app->instance(
             ExternalImageDnsResolverContract::class,
-            new class($ips) implements ExternalImageDnsResolverContract {
-                public function __construct(private readonly array $ips)
-                {
-                }
+            new class($ips) implements ExternalImageDnsResolverContract
+            {
+                public function __construct(private readonly array $ips) {}
 
                 public function resolve(string $host): array
                 {

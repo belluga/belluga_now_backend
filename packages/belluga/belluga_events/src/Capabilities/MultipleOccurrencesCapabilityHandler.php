@@ -74,4 +74,3 @@ class MultipleOccurrencesCapabilityHandler implements EventCapabilityHandlerCont
         }
     }
 }
-

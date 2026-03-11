@@ -13,7 +13,5 @@ class TenantPasswordRegistrationResult
         public readonly AccountUser $user,
         public readonly string $plainTextToken,
         public readonly ?Carbon $expiresAt = null,
-    ) {
-    }
+    ) {}
 }
-

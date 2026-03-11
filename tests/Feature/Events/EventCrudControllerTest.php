@@ -7,16 +7,12 @@ namespace Tests\Feature\Events;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use Belluga\MapPois\Application\MapPoiProjectionService;
-use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
-use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
-use App\Models\Landlord\Tenant;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\EventType;
-use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
@@ -24,10 +20,14 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -48,12 +48,19 @@ class EventCrudControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
+
     private AccountUserService $userService;
+
     private AccountUser $user;
+
     private AccountProfile $venue;
+
     private AccountProfile $artist;
+
     private EventType $eventType;
+
     private string $accountEventsBase;
+
     private string $tenantAdminEventsBase;
 
     protected function setUp(): void
@@ -114,7 +121,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testEventCreateStoresEvent(): void
+    public function test_event_create_stores_event(): void
     {
         $payload = $this->makeEventPayload();
 
@@ -136,7 +143,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function testEventCreateRejectsUnknownEventTypeId(): void
+    public function test_event_create_rejects_unknown_event_type_id(): void
     {
         $payload = $this->makeEventPayload([
             'type' => [
@@ -150,7 +157,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type.id']);
     }
 
-    public function testEventsIndexRejectsDeprecatedSearchQueryParam(): void
+    public function test_events_index_rejects_deprecated_search_query_param(): void
     {
         $response = $this->getJson("{$this->accountEventsBase}?search=show&page=1&page_size=10");
 
@@ -158,7 +165,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['search']);
     }
 
-    public function testEventPartyCandidatesEndpointAllowsReadCreateOrUpdateAbilityAndReturnsFilteredCandidates(): void
+    public function test_event_party_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -183,7 +190,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertStatus(200);
     }
 
-    public function testEventPartyCandidatesEndpointRejectsWithoutPartyCandidateAbilities(): void
+    public function test_event_party_candidates_endpoint_rejects_without_party_candidate_abilities(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['account-users:view']);
@@ -193,7 +200,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(403);
     }
 
-    public function testAccountEventsPartyCandidatesEndpointUsesAccountAuthBoundary(): void
+    public function test_account_events_party_candidates_endpoint_uses_account_auth_boundary(): void
     {
         Sanctum::actingAs($this->user, ['events:create']);
 
@@ -207,7 +214,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($matchedVenue);
     }
 
-    public function testEventCreatePersistsCreatedByAndDefaultEventParties(): void
+    public function test_event_create_persists_created_by_and_default_event_parties(): void
     {
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
@@ -228,7 +235,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($artistParty, 'permissions.can_edit', false));
     }
 
-    public function testEventCreateRejectsLegacySingleDatePayloadWithoutOccurrences(): void
+    public function test_event_create_rejects_legacy_single_date_payload_without_occurrences(): void
     {
         $now = Carbon::now();
         $payload = $this->makeEventPayload([
@@ -243,7 +250,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences', 'date_time_start', 'date_time_end']);
     }
 
-    public function testEventCreateAppliesTemplateDefaultsAndStoresTemplateAuditMetadata(): void
+    public function test_event_create_applies_template_defaults_and_stores_template_audit_metadata(): void
     {
         TicketEventTemplate::query()->create([
             'template_key' => 'fair-template-defaults',
@@ -282,7 +289,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame(3, (int) ($template['version'] ?? 0));
     }
 
-    public function testEventCreateRejectsOverrideForTemplateProtectedField(): void
+    public function test_event_create_rejects_override_for_template_protected_field(): void
     {
         TicketEventTemplate::query()->create([
             'template_key' => 'template-hidden-publication',
@@ -315,7 +322,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['publication.status']);
     }
 
-    public function testEventCreateDispatchesMapProjectionSyncJobViaLifecycleEvent(): void
+    public function test_event_create_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
 
@@ -328,7 +335,7 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
-    public function testEventCreateRejectsUnknownTaxonomy(): void
+    public function test_event_create_rejects_unknown_taxonomy(): void
     {
         $payload = $this->makeEventPayload([
             'taxonomy_terms' => [
@@ -341,7 +348,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testEventCreateAcceptsAllowedTaxonomy(): void
+    public function test_event_create_accepts_allowed_taxonomy(): void
     {
         $payload = $this->makeEventPayload([
             'taxonomy_terms' => [
@@ -356,7 +363,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
     }
 
-    public function testEventCreateRejectsScheduledWithoutPublishAt(): void
+    public function test_event_create_rejects_scheduled_without_publish_at(): void
     {
         $payload = $this->makeEventPayload([
             'publication' => [
@@ -369,7 +376,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testEventCreateRejectsNonArtistIds(): void
+    public function test_event_create_rejects_non_artist_ids(): void
     {
         $payload = $this->makeEventPayload([
             'artist_ids' => [(string) $this->venue->_id],
@@ -380,7 +387,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testEventCreateRejectsUnknownEventPartyType(): void
+    public function test_event_create_rejects_unknown_event_party_type(): void
     {
         $payload = $this->makeEventPayload([
             'event_parties' => [
@@ -398,7 +405,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['event_parties.0.party_type']);
     }
 
-    public function testEventCreateRejectsVenueWithoutLocation(): void
+    public function test_event_create_rejects_venue_without_location(): void
     {
         [$extraAccount] = $this->seedAccountWithRole(['*']);
         $venue = AccountProfile::create([
@@ -422,7 +429,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testEventCreateOnlineAllowsMissingPlaceRef(): void
+    public function test_event_create_online_allows_missing_place_ref(): void
     {
         $payload = $this->makeEventPayload([
             'location' => [
@@ -442,7 +449,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.place_ref', null);
     }
 
-    public function testEventCreateOnlineRequiresOnlinePayload(): void
+    public function test_event_create_online_requires_online_payload(): void
     {
         $payload = $this->makeEventPayload([
             'location' => [
@@ -457,7 +464,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['location.online']);
     }
 
-    public function testEventCreateHybridRequiresBothPlaceRefAndOnlinePayload(): void
+    public function test_event_create_hybrid_requires_both_place_ref_and_online_payload(): void
     {
         $missingPlaceRef = $this->makeEventPayload([
             'location' => [
@@ -488,7 +495,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['location.online']);
     }
 
-    public function testEventCreateForbiddenWithoutAbility(): void
+    public function test_event_create_forbidden_without_ability(): void
     {
         $limited = $this->createAccountUser(['*']);
         Sanctum::actingAs($limited, ['events:read']);
@@ -498,7 +505,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(403);
     }
 
-    public function testEventIndexFiltersByStatus(): void
+    public function test_event_index_filters_by_status(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -520,7 +527,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Published Event', $items[0]['title']);
     }
 
-    public function testEventUpdateChangesFields(): void
+    public function test_event_update_changes_fields(): void
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
         $createResponse->assertStatus(201);
@@ -536,7 +543,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.publication.status', 'ended');
     }
 
-    public function testEventUpdateDispatchesMapProjectionSyncJobViaLifecycleEvent(): void
+    public function test_event_update_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
         $event = $this->createEvent();
@@ -552,7 +559,7 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
-    public function testEventCreateRejectsMultipleOccurrencesWhenCapabilityIsNotEffective(): void
+    public function test_event_create_rejects_multiple_occurrences_when_capability_is_not_effective(): void
     {
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
@@ -569,7 +576,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences']);
     }
 
-    public function testEventCreateExposesMapPoiCapabilityByDefaultWhenTenantAllowsIt(): void
+    public function test_event_create_exposes_map_poi_capability_by_default_when_tenant_allows_it(): void
     {
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
@@ -577,7 +584,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.map_poi.enabled', true);
     }
 
-    public function testEventCreateHidesMapPoiCapabilityWhenTenantDisablesIt(): void
+    public function test_event_create_hides_map_poi_capability_when_tenant_disables_it(): void
     {
         $this->patchEventsSettings([
             'capabilities.map_poi.available' => false,
@@ -593,7 +600,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ])->assertStatus(200);
     }
 
-    public function testEventCreateOnlineSupportsRangeDiscoveryScopeForMapPoiProjection(): void
+    public function test_event_create_online_supports_range_discovery_scope_for_map_poi_projection(): void
     {
         $this->patchEventsSettings([
             'capabilities.map_poi.available' => true,
@@ -645,7 +652,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertEquals(-20.01, (float) data_get($poi->location, 'coordinates.1'));
     }
 
-    public function testEventMapPoiProjectionSoftHidesWhenOccurrencesBecomeStale(): void
+    public function test_event_map_poi_projection_soft_hides_when_occurrences_become_stale(): void
     {
         $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
         Carbon::setTestNow($baseline);
@@ -694,7 +701,7 @@ class EventCrudControllerTest extends TestCaseTenant
         }
     }
 
-    public function testEventMapPoiCapabilityDisableAndReenableIsNonDestructive(): void
+    public function test_event_map_poi_capability_disable_and_reenable_is_non_destructive(): void
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
         $createResponse->assertStatus(201);
@@ -750,7 +757,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertTrue((bool) ($reenabledPoi->is_active ?? false));
     }
 
-    public function testEventMapPoiProjectionIgnoresStaleCheckpointWrite(): void
+    public function test_event_map_poi_projection_ignores_stale_checkpoint_write(): void
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
         $createResponse->assertStatus(201);
@@ -786,7 +793,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Locked POI Name', (string) ($freshPoi->name ?? ''));
     }
 
-    public function testEventCreateAllowsMultipleOccurrencesWhenTenantSettingsEnableIt(): void
+    public function test_event_create_allows_multiple_occurrences_when_tenant_settings_enable_it(): void
     {
         $this->patchEventsSettings([
             'capabilities.multiple_occurrences.allow_multiple' => true,
@@ -814,7 +821,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function testEventCreateRejectsAboveTenantMaxOccurrences(): void
+    public function test_event_create_rejects_above_tenant_max_occurrences(): void
     {
         $this->patchEventsSettings([
             'capabilities.multiple_occurrences.allow_multiple' => true,
@@ -836,7 +843,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences']);
     }
 
-    public function testEventCreateTreatsZeroTenantMaxAsNullLimit(): void
+    public function test_event_create_treats_zero_tenant_max_as_null_limit(): void
     {
         $this->patchEventsSettings([
             'capabilities.multiple_occurrences.allow_multiple' => true,
@@ -858,7 +865,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertCount(3, $response->json('data.occurrences'));
     }
 
-    public function testEventUpdateWithoutScheduleMutationKeepsStoredOccurrencesWhenTenantDisablesCapability(): void
+    public function test_event_update_without_schedule_mutation_keeps_stored_occurrences_when_tenant_disables_capability(): void
     {
         $this->patchEventsSettings([
             'capabilities.multiple_occurrences.allow_multiple' => true,
@@ -889,7 +896,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNull($response->json('data.capabilities.multiple_occurrences'));
     }
 
-    public function testEventUpdateWithScheduleMutationRejectsMultipleOccurrencesWhenCapabilityNotEffective(): void
+    public function test_event_update_with_schedule_mutation_rejects_multiple_occurrences_when_capability_not_effective(): void
     {
         $this->patchEventsSettings([
             'capabilities.multiple_occurrences.allow_multiple' => true,
@@ -919,7 +926,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences']);
     }
 
-    public function testEventUpdateReturns404WhenMissing(): void
+    public function test_event_update_returns404_when_missing(): void
     {
         $response = $this->patchJson("{$this->accountEventsBase}/missing-event", [
             'title' => 'Missing',
@@ -928,7 +935,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(404);
     }
 
-    public function testEventDeleteSoftDeletes(): void
+    public function test_event_delete_soft_deletes(): void
     {
         $event = $this->createEvent();
 
@@ -942,7 +949,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($occurrence?->deleted_at);
     }
 
-    public function testEventDeleteDispatchesMapProjectionDeleteJobViaLifecycleEvent(): void
+    public function test_event_delete_dispatches_map_projection_delete_job_via_lifecycle_event(): void
     {
         Queue::fake();
         $event = $this->createEvent();
@@ -957,7 +964,7 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
-    public function testPublishScheduledEventsJobPromotesReadyEvents(): void
+    public function test_publish_scheduled_events_job_promotes_ready_events(): void
     {
         $ready = $this->createEvent([
             'title' => 'Ready Event',
@@ -975,7 +982,7 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ]);
 
-        app()->call([new PublishScheduledEventsJob(), 'handle']);
+        app()->call([new PublishScheduledEventsJob, 'handle']);
 
         Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
 
@@ -1009,7 +1016,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function testPublishScheduledEventsJobEmitsStreamDeltaAfterPublicationTransition(): void
+    public function test_publish_scheduled_events_job_emits_stream_delta_after_publication_transition(): void
     {
         $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
         Carbon::setTestNow($baseline);
@@ -1026,7 +1033,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $cursor = $baseline->copy()->addSecond()->toISOString();
 
             Carbon::setTestNow($baseline->copy()->addMinutes(5));
-            app()->call([new PublishScheduledEventsJob(), 'handle']);
+            app()->call([new PublishScheduledEventsJob, 'handle']);
 
             Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
 
@@ -1047,7 +1054,7 @@ class EventCrudControllerTest extends TestCaseTenant
         }
     }
 
-    public function testEventOccurrenceReconciliationSyncsMirroredFieldsFromEvent(): void
+    public function test_event_occurrence_reconciliation_syncs_mirrored_fields_from_event(): void
     {
         $event = $this->createEvent([
             'title' => 'Initial Title',
@@ -1071,7 +1078,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Canonical Event Title', (string) $occurrence->title);
     }
 
-    public function testEventOccurrenceReconciliationSoftDeletesOccurrencesForDeletedEvents(): void
+    public function test_event_occurrence_reconciliation_soft_deletes_occurrences_for_deleted_events(): void
     {
         $event = $this->createEvent([
             'title' => 'Deleted Event',
@@ -1088,7 +1095,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($occurrence->deleted_at);
     }
 
-    public function testTenantAdminCreateUsesVenueWithoutOnBehalfAccountParams(): void
+    public function test_tenant_admin_create_uses_venue_without_on_behalf_account_params(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:create']);
@@ -1100,7 +1107,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
     }
 
-    public function testTenantAdminCreateOnBehalfIsScopedToTargetAccount(): void
+    public function test_tenant_admin_create_on_behalf_is_scoped_to_target_account(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:create', 'events:read']);
@@ -1125,7 +1132,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertCount(0, $otherList->json('data'));
     }
 
-    public function testAccountUserCannotManageAnotherAccountEvents(): void
+    public function test_account_user_cannot_manage_another_account_events(): void
     {
         $event = $this->createEvent();
 
@@ -1141,7 +1148,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $otherUser = $this->userService->create($otherAccount, [
             'name' => 'Other User',
-            'email' => uniqid('other-user', true) . '@example.org',
+            'email' => uniqid('other-user', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
 
@@ -1155,7 +1162,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(404);
     }
 
-    public function testAccountUserCanManageEventWhenEventPartyCanEditIsTrue(): void
+    public function test_account_user_can_manage_event_when_event_party_can_edit_is_true(): void
     {
         $event = $this->createEvent();
 
@@ -1181,7 +1188,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $otherUser = $this->userService->create($otherAccount, [
             'name' => 'Editable User',
-            'email' => uniqid('editable-user', true) . '@example.org',
+            'email' => uniqid('editable-user', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
 
@@ -1196,7 +1203,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.title', 'Updated By Shared Party');
     }
 
-    public function testAccountMemberCannotManageEventWhenEventPartyCanEditIsFalse(): void
+    public function test_account_member_cannot_manage_event_when_event_party_can_edit_is_false(): void
     {
         $event = $this->createEvent();
 
@@ -1219,7 +1226,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(404);
     }
 
-    public function testEventOwnerCanManageEventWhenPartyCanEditIsFalse(): void
+    public function test_event_owner_can_manage_event_when_party_can_edit_is_false(): void
     {
         $event = $this->createEvent();
 
@@ -1242,7 +1249,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.title', 'Updated By Owner Override');
     }
 
-    public function testEventOwnerCanManageEventWithoutMatchingEventParty(): void
+    public function test_event_owner_can_manage_event_without_matching_event_party(): void
     {
         $event = $this->createEvent();
 
@@ -1274,13 +1281,13 @@ class EventCrudControllerTest extends TestCaseTenant
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
-            'name' => 'Events Role ' . uniqid('role-', true),
+            'name' => 'Events Role '.uniqid('role-', true),
             'permissions' => $permissions,
         ]);
 
         return $this->userService->create($this->account, [
             'name' => 'Events User',
-            'email' => uniqid('events-user', true) . '@example.org',
+            'email' => uniqid('events-user', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
     }
@@ -1288,7 +1295,7 @@ class EventCrudControllerTest extends TestCaseTenant
     private function createAccountProfile(string $profileType, string $displayName, ?Account $account = null): AccountProfile
     {
         $account = $account ?? Account::create([
-            'name' => $displayName . ' Account',
+            'name' => $displayName.' Account',
             'document' => (string) Str::uuid(),
         ]);
 

@@ -11,8 +11,7 @@ class EventTaxonomyValidationAdapter implements EventTaxonomyValidationContract
 {
     public function __construct(
         private readonly TaxonomyValidationService $taxonomyValidationService
-    ) {
-    }
+    ) {}
 
     public function assertTermsAllowedForEvent(array $terms): void
     {

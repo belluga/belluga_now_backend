@@ -24,7 +24,7 @@ class TenantPushSettings extends PackageTenantSettings
     ];
 
     /**
-     * @param mixed $value
+     * @param  mixed  $value
      * @return array<int, array<string, mixed>>
      */
     public function getTelemetryAttribute($value): array
@@ -45,7 +45,7 @@ class TenantPushSettings extends PackageTenantSettings
     }
 
     /**
-     * @param array<mixed> $telemetry
+     * @param  array<mixed>  $telemetry
      * @return array<int, array<string, mixed>>
      */
     private function normalizeTelemetry(array $telemetry): array

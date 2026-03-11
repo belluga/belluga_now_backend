@@ -12,8 +12,7 @@ class TelemetrySettingsKernelBridge
     public function __construct(
         private readonly SettingsStoreContract $settingsStore,
         private readonly SettingsKernelService $settingsKernelService
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{location_freshness_minutes:int, trackers:array<int, array<string, mixed>>}
@@ -26,7 +25,7 @@ class TelemetrySettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{location_freshness_minutes:int, trackers:array<int, array<string, mixed>>}
      */
     public function patchTelemetryConfig(mixed $user, array $payload): array
@@ -37,7 +36,7 @@ class TelemetrySettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $tracker
+     * @param  array<string, mixed>  $tracker
      * @return array{location_freshness_minutes:int, trackers:array<int, array<string, mixed>>}
      */
     public function upsertTracker(mixed $user, array $tracker): array
@@ -108,7 +107,7 @@ class TelemetrySettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $raw
+     * @param  array<string, mixed>  $raw
      * @return array{location_freshness_minutes:int, trackers:array<int, array<string, mixed>>}
      */
     private function normalizeTelemetryConfig(array $raw): array
@@ -146,7 +145,7 @@ class TelemetrySettingsKernelBridge
     }
 
     /**
-     * @param array<int, mixed> $trackers
+     * @param  array<int, mixed>  $trackers
      * @return array<int, array<string, mixed>>
      */
     private function normalizeTrackers(array $trackers): array
@@ -170,7 +169,7 @@ class TelemetrySettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $tracker
+     * @param  array<string, mixed>  $tracker
      * @return array<string, mixed>
      */
     private function normalizeTracker(array $tracker): array
@@ -190,6 +189,7 @@ class TelemetrySettingsKernelBridge
     private function defaultLocationFreshnessMinutes(): int
     {
         $value = (int) config('telemetry.location_freshness_minutes', 5);
+
         return $value > 0 ? $value : 5;
     }
 }

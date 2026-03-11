@@ -33,7 +33,7 @@ class LandlordRoleServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function testCreatesLandlordRole(): void
+    public function test_creates_landlord_role(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
 
@@ -46,7 +46,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertEquals(['landlord-users:view'], $role->permissions);
     }
 
-    public function testUpdatesPermissionsWithMutation(): void
+    public function test_updates_permissions_with_mutation(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
         $role = LandlordRole::create([
@@ -64,7 +64,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertEquals(['profile:update'], $updated->permissions);
     }
 
-    public function testDeletesRoleAndReassignsUsers(): void
+    public function test_deletes_role_and_reassigns_users(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
         $fallback = LandlordRole::create([
@@ -91,7 +91,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertSoftDeleted('landlord_roles', ['name' => 'Disposable']);
     }
 
-    public function testPaginateReturnsRoles(): void
+    public function test_paginate_returns_roles(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
 
@@ -100,7 +100,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $paginator->total());
     }
 
-    public function testDeleteByIdSoftDeletesRole(): void
+    public function test_delete_by_id_soft_deletes_role(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
         $fallback = LandlordRole::create([
@@ -118,7 +118,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertSoftDeleted('landlord_roles', ['name' => 'Disposable By Id']);
     }
 
-    public function testRestoreByIdRevivesRole(): void
+    public function test_restore_by_id_revives_role(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
         $fallback = LandlordRole::create([
@@ -137,7 +137,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertFalse($restored->trashed());
     }
 
-    public function testForceDeleteByIdRemovesRole(): void
+    public function test_force_delete_by_id_removes_role(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
         $fallback = LandlordRole::create([
@@ -156,7 +156,7 @@ class LandlordRoleServiceTest extends TestCase
         $this->assertDatabaseMissing('landlord_roles', ['_id' => $role->_id], 'landlord');
     }
 
-    public function testAssignRoleToUserAssociatesRole(): void
+    public function test_assign_role_to_user_associates_role(): void
     {
         $service = $this->app->make(LandlordRoleService::class);
         $role = LandlordRole::create([

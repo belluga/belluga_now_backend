@@ -30,7 +30,7 @@ final class SettingsNamespaceDefinition
     private array $fieldsById = [];
 
     /**
-     * @param array<string, array<string, mixed>> $fields
+     * @param  array<string, array<string, mixed>>  $fields
      */
     public function __construct(
         public readonly string $namespace,
@@ -115,7 +115,7 @@ final class SettingsNamespaceDefinition
     }
 
     /**
-     * @param array<string, array<string, mixed>> $rawFields
+     * @param  array<string, array<string, mixed>>  $rawFields
      * @return array<string, array<string, mixed>>
      */
     private function normalizeFields(array $rawFields): array
@@ -134,7 +134,7 @@ final class SettingsNamespaceDefinition
                 throw new InvalidArgumentException("Field [{$path}] in namespace [{$this->namespace}] must be an object.");
             }
 
-            $id = $meta['id'] ?? ($this->namespace . '.' . $path);
+            $id = $meta['id'] ?? ($this->namespace.'.'.$path);
             if (! is_string($id) || trim($id) === '') {
                 throw new InvalidArgumentException("Field [{$path}] in namespace [{$this->namespace}] has an invalid id.");
             }
@@ -187,14 +187,14 @@ final class SettingsNamespaceDefinition
             $this->fieldsById[$id] = $field;
             $this->fieldReferences[$id] = ['id' => $id, 'type' => $type, 'nullable' => $nullable];
             $this->fieldReferences[$path] = ['id' => $id, 'type' => $type, 'nullable' => $nullable];
-            $this->fieldReferences[$this->namespace . '.' . $path] = ['id' => $id, 'type' => $type, 'nullable' => $nullable];
+            $this->fieldReferences[$this->namespace.'.'.$path] = ['id' => $id, 'type' => $type, 'nullable' => $nullable];
         }
 
         return $normalized;
     }
 
     /**
-     * @param array<string, array<string, mixed>> $normalizedFields
+     * @param  array<string, array<string, mixed>>  $normalizedFields
      * @return array<string, array<string, mixed>>
      */
     private function normalizeFieldConditions(array $normalizedFields): array
@@ -221,7 +221,7 @@ final class SettingsNamespaceDefinition
     }
 
     /**
-     * @param array<int, array<string, mixed>> $fields
+     * @param  array<int, array<string, mixed>>  $fields
      * @return array<int, array<string, mixed>>
      */
     private function buildSchemaTree(array $fields): array
@@ -233,16 +233,17 @@ final class SettingsNamespaceDefinition
             $segments = $this->resolveSegments($field);
             if ($segments === []) {
                 $root[] = $this->fieldNode($field);
+
                 continue;
             }
 
-            $children =& $root;
+            $children = &$root;
             $prefix = [];
 
             foreach ($segments as $segment) {
                 $prefix[] = $segment['key'];
                 $groupKey = implode('.', $prefix);
-                $groupId = $this->namespace . '.group.' . $groupKey;
+                $groupId = $this->namespace.'.group.'.$groupKey;
 
                 if (! isset($index[$groupId])) {
                     $index[$groupId] = [
@@ -258,7 +259,7 @@ final class SettingsNamespaceDefinition
                 }
 
                 $index[$groupId]['order'] = min((int) ($index[$groupId]['order'] ?? 0), (int) ($field['order'] ?? 0));
-                $children =& $index[$groupId]['children'];
+                $children = &$index[$groupId]['children'];
             }
 
             $children[] = $this->fieldNode($field);
@@ -268,7 +269,7 @@ final class SettingsNamespaceDefinition
     }
 
     /**
-     * @param array<string, mixed> $field
+     * @param  array<string, mixed>  $field
      * @return array<int, array{key:string,label:string,label_i18n_key:?string,icon:?string}>
      */
     private function resolveSegments(array $field): array
@@ -314,7 +315,7 @@ final class SettingsNamespaceDefinition
     }
 
     /**
-     * @param array<string, mixed> $field
+     * @param  array<string, mixed>  $field
      * @return array<string, mixed>
      */
     private function fieldNode(array $field): array
@@ -341,7 +342,7 @@ final class SettingsNamespaceDefinition
     }
 
     /**
-     * @param array<int, array<string, mixed>> $nodes
+     * @param  array<int, array<string, mixed>>  $nodes
      * @return array<int, array<string, mixed>>
      */
     private function sortNodes(array $nodes): array
@@ -366,7 +367,6 @@ final class SettingsNamespaceDefinition
     }
 
     /**
-     * @param mixed $options
      * @return array<int, array<string, mixed>>
      */
     private function normalizeOptions(mixed $options): array
@@ -389,6 +389,7 @@ final class SettingsNamespaceDefinition
                     'label' => is_string($label) ? $label : (is_scalar($label) ? (string) $label : ''),
                     'label_i18n_key' => $this->nullableString($option['label_i18n_key'] ?? null),
                 ];
+
                 continue;
             }
 
@@ -398,6 +399,7 @@ final class SettingsNamespaceDefinition
                     'label' => (string) $option,
                     'label_i18n_key' => null,
                 ];
+
                 continue;
             }
 

@@ -9,8 +9,8 @@ use Belluga\Ticketing\Models\Tenants\TicketPromotion;
 class TicketPromotionResolverService
 {
     /**
-     * @param array<int, array<string, mixed>> $lines
-     * @param array<int, string> $promotionCodes
+     * @param  array<int, array<string, mixed>>  $lines
+     * @param  array<int, string>  $promotionCodes
      * @return array{
      *   lines: array<int, array<string, mixed>>,
      *   snapshot: array<string, mixed>
@@ -72,7 +72,7 @@ class TicketPromotionResolverService
                 if ($promotionId === '') {
                     continue;
                 }
-                $rejectedCatalog[$promotionId . ':' . ($rejectedPromotion['reason_code'] ?? 'unknown')] = $rejectedPromotion;
+                $rejectedCatalog[$promotionId.':'.($rejectedPromotion['reason_code'] ?? 'unknown')] = $rejectedPromotion;
             }
 
             $resolvedLines[] = $line;
@@ -91,7 +91,7 @@ class TicketPromotionResolverService
     }
 
     /**
-     * @param array<int, string> $promotionCodes
+     * @param  array<int, string>  $promotionCodes
      * @return array<int, string>
      */
     private function normalizeCodes(array $promotionCodes): array
@@ -109,7 +109,7 @@ class TicketPromotionResolverService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      * @return array<int, array<string, mixed>>
      */
     private function ensurePricingFields(array $lines): array
@@ -138,8 +138,8 @@ class TicketPromotionResolverService
     }
 
     /**
-     * @param array<string, mixed> $line
-     * @param array<int, TicketPromotion> $promotions
+     * @param  array<string, mixed>  $line
+     * @param  array<int, TicketPromotion>  $promotions
      * @return array{
      *   applied: array<int, array<string, mixed>>,
      *   rejected: array<int, array<string, mixed>>,
@@ -171,6 +171,7 @@ class TicketPromotionResolverService
             $existing = $candidatesByType[$type] ?? null;
             if ($existing === null) {
                 $candidatesByType[$type] = $promotion;
+
                 continue;
             }
 
@@ -246,6 +247,7 @@ class TicketPromotionResolverService
         }
 
         $scopeType = (string) ($promotion->scope_type ?? 'event');
+
         return match ($scopeType) {
             'event' => true,
             'occurrence' => (string) ($promotion->occurrence_id ?? '') === $occurrenceId,
@@ -373,4 +375,3 @@ class TicketPromotionResolverService
         return (int) floor($lineAmount / $quantity);
     }
 }
-

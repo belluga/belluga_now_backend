@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler;
 
-use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
-use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
 use Belluga\PushHandler\Contracts\PushTenantContextContract;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
-use Belluga\PushHandler\Services\PushPlanPolicyAllowAll;
-use Belluga\PushHandler\Services\PushAudienceEligibilityAllowAll;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
+use Belluga\PushHandler\Services\PushAudienceEligibilityAllowAll;
+use Belluga\PushHandler\Services\PushPlanPolicyAllowAll;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Support\ServiceProvider;
@@ -23,14 +23,14 @@ class PushHandlerServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__ . '/../routes/push_handler.php');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->loadRoutesFrom(__DIR__.'/../routes/push_handler.php');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         $this->registerPushSettingsNamespaces();
     }
 
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/belluga_push_handler.php', 'belluga_push_handler');
+        $this->mergeConfigFrom(__DIR__.'/../config/belluga_push_handler.php', 'belluga_push_handler');
 
         if (! $this->app->bound(PushPlanPolicyContract::class)) {
             $this->app->bind(PushPlanPolicyContract::class, PushPlanPolicyAllowAll::class);

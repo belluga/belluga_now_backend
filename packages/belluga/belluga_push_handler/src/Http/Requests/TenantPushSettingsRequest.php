@@ -27,6 +27,7 @@ class TenantPushSettingsRequest extends FormRequest
         $validator->after(function (Validator $validator): void {
             if (! is_array($this->all()) || array_is_list($this->all())) {
                 $validator->errors()->add('payload', 'The payload must be an object/map.');
+
                 return;
             }
 

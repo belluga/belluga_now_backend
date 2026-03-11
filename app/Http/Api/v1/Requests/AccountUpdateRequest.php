@@ -25,17 +25,17 @@ class AccountUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'slug' => [
                 'sometimes',
                 'string',
-                'max:' . InputConstraints::NAME_MAX,
+                'max:'.InputConstraints::NAME_MAX,
                 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             ],
             'document' => 'sometimes|array',
             'document.type' => 'required_with:document.number|string|in:cpf,cnpj',
-            'document.number' => 'required_with:document.type|string|max:' . InputConstraints::NAME_MAX,
-            'organization_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'document.number' => 'required_with:document.type|string|max:'.InputConstraints::NAME_MAX,
+            'organization_id' => 'sometimes|string|size:'.InputConstraints::OBJECT_ID_LENGTH,
         ];
     }
 

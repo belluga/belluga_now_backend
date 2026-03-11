@@ -21,7 +21,7 @@ class EmailAvailableRuleTest extends TestCase
         parent::tearDown();
     }
 
-    public function testFailsWhenEmailAlreadyExists(): void
+    public function test_fails_when_email_already_exists(): void
     {
         $builder = $this->mockQuery('tenant', 'account_users', 'emails', 'user@example.org');
         $builder->shouldReceive('exists')->once()->andReturn(true);
@@ -36,7 +36,7 @@ class EmailAvailableRuleTest extends TestCase
         $this->assertSame('The provided email is already registered.', $message);
     }
 
-    public function testPassesWhenEmailDoesNotExist(): void
+    public function test_passes_when_email_does_not_exist(): void
     {
         $builder = $this->mockQuery('tenant', 'account_users', 'emails', 'available@example.org');
         $builder->shouldReceive('exists')->once()->andReturn(false);
@@ -51,7 +51,7 @@ class EmailAvailableRuleTest extends TestCase
         $this->assertFalse($messageFired);
     }
 
-    public function testRespectsCustomColumn(): void
+    public function test_respects_custom_column(): void
     {
         $builder = $this->mockQuery('landlord', 'landlord_users', 'emails.normalized', 'custom@example.org');
         $builder->shouldReceive('exists')->once()->andReturn(false);
@@ -66,9 +66,9 @@ class EmailAvailableRuleTest extends TestCase
         $this->assertFalse($failed);
     }
 
-    public function testIgnoresProvidedObjectId(): void
+    public function test_ignores_provided_object_id(): void
     {
-        $ignoreId = new ObjectId();
+        $ignoreId = new ObjectId;
         $builder = $this->mockQuery('tenant', 'account_users', 'emails', 'user@example.org');
         $builder->shouldReceive('where')
             ->once()
@@ -90,7 +90,7 @@ class EmailAvailableRuleTest extends TestCase
         $this->assertFalse($failed);
     }
 
-    public function testFallsBackToStringWhenObjectIdIsInvalid(): void
+    public function test_falls_back_to_string_when_object_id_is_invalid(): void
     {
         $builder = $this->mockQuery('tenant', 'account_users', 'emails', 'user@example.org');
         $builder->shouldReceive('where')
@@ -109,7 +109,7 @@ class EmailAvailableRuleTest extends TestCase
         $this->assertFalse($failed);
     }
 
-    public function testSkipsLookupWhenValueIsNotString(): void
+    public function test_skips_lookup_when_value_is_not_string(): void
     {
         DB::partialMock()
             ->shouldReceive('connection')

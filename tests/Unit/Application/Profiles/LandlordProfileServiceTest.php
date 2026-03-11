@@ -36,49 +36,49 @@ class LandlordProfileServiceTest extends TestCase
         ]);
     }
 
-    public function testUpdateProfile(): void
+    public function test_update_profile(): void
     {
         $updated = $this->service->updateProfile($this->user, ['name' => 'Updated Landlord']);
 
         $this->assertSame('Updated Landlord', $updated->name);
     }
 
-    public function testUpdateProfileRejectsEmpty(): void
+    public function test_update_profile_rejects_empty(): void
     {
         $this->expectException(ValidationException::class);
 
         $this->service->updateProfile($this->user, []);
     }
 
-    public function testUpdatePassword(): void
+    public function test_update_password(): void
     {
         $this->service->updatePassword($this->user, 'Another!234');
 
         $this->assertTrue(Hash::check('Another!234', (string) $this->user->fresh()->password));
     }
 
-    public function testAddEmail(): void
+    public function test_add_email(): void
     {
         $updated = $this->service->addEmail($this->user, $this->uniqueEmail());
 
         $this->assertGreaterThan(1, count($updated->emails));
     }
 
-    public function testRemoveEmailPreventsRemovingLast(): void
+    public function test_remove_email_prevents_removing_last(): void
     {
         $this->expectException(HttpResponseException::class);
 
         $this->service->removeEmail($this->user, $this->user->emails[0]);
     }
 
-    public function testAddPhones(): void
+    public function test_add_phones(): void
     {
         $updated = $this->service->addPhones($this->user, [$this->uniquePhoneNumber()]);
 
         $this->assertNotEmpty($updated->phones);
     }
 
-    public function testAddPhonesRejectsInvalid(): void
+    public function test_add_phones_rejects_invalid(): void
     {
         $this->expectException(ValidationException::class);
 
@@ -92,6 +92,6 @@ class LandlordProfileServiceTest extends TestCase
 
     private function uniquePhoneNumber(): string
     {
-        return '+1' . random_int(2000000000, 2999999999);
+        return '+1'.random_int(2000000000, 2999999999);
     }
 }

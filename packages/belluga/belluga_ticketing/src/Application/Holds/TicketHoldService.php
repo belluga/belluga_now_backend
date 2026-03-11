@@ -17,11 +17,10 @@ class TicketHoldService
     public function __construct(
         private readonly InventoryMutationService $inventory,
         private readonly TicketOutboxEmitter $outbox,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     public function createOrReuseActiveHold(
         string $eventId,
@@ -199,7 +198,7 @@ class TicketHoldService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      * @return array<string, mixed>
      */
     private function buildSnapshot(array $lines, string $checkoutMode, array $promotionSnapshot): array

@@ -7,9 +7,9 @@ namespace Tests\Feature\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
-use Tests\Helpers\TenantLabels;
 
 class TenantDomainControllerTest extends TestCaseTenant
 {
@@ -56,7 +56,7 @@ class TenantDomainControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testStoreCreatesDomain(): void
+    public function test_store_creates_domain(): void
     {
         $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
             'path' => 'tenantkappa.com',
@@ -73,7 +73,7 @@ class TenantDomainControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testDestroySoftDeletesDomain(): void
+    public function test_destroy_soft_deletes_domain(): void
     {
         $domain = $this->tenantModel->domains()->create([
             'path' => 'removekappa.com',
@@ -86,7 +86,7 @@ class TenantDomainControllerTest extends TestCaseTenant
         $this->assertSoftDeleted('domains', ['_id' => $domain->_id], 'landlord');
     }
 
-    public function testRestoreBringsBackDomain(): void
+    public function test_restore_brings_back_domain(): void
     {
         $domain = $this->tenantModel->domains()->create([
             'path' => 'restorekappa.com',
@@ -102,7 +102,7 @@ class TenantDomainControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.path', 'restorekappa.com');
     }
 
-    public function testForceDeleteRemovesDomain(): void
+    public function test_force_delete_removes_domain(): void
     {
         $domain = $this->tenantModel->domains()->create([
             'path' => 'forcekappa.com',

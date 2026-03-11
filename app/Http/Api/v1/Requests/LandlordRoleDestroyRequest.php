@@ -26,10 +26,10 @@ class LandlordRoleDestroyRequest extends FormRequest
             'background_role_id' => [
                 'required',
                 'string',
-                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'size:'.InputConstraints::OBJECT_ID_LENGTH,
                 'regex:/^[a-fA-F0-9]{24}$/',
                 'exists:landlord.landlord_roles,_id',
-            ]
+            ],
         ];
     }
 }

@@ -12,12 +12,11 @@ final class ConditionRule
         public readonly string $fieldId,
         public readonly ConditionOperator $operator,
         public readonly mixed $value,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $rawRule
-     * @param array<string, array{id:string,type:string,nullable:bool}> $fieldReferences
+     * @param  array<string, mixed>  $rawRule
+     * @param  array<string, array{id:string,type:string,nullable:bool}>  $fieldReferences
      */
     public static function fromArray(array $rawRule, array $fieldReferences): self
     {
@@ -107,4 +106,3 @@ final class ConditionRule
         };
     }
 }
-

@@ -16,8 +16,7 @@ class AnonymousIdentityController extends Controller
     public function __construct(
         private readonly AnonymousIdentityService $identityService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function store(AnonymousIdentityRequest $request): JsonResponse
     {

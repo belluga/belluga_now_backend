@@ -31,12 +31,14 @@ return new class extends Migration
             $existing = $collection->findOne([]);
             if (! $existing) {
                 $this->enforceRootIdValidator($connectionName);
+
                 return;
             }
 
             $existingId = (string) ($existing['_id'] ?? '');
             if ($existingId === SettingsDocument::ROOT_ID) {
                 $this->enforceRootIdValidator($connectionName);
+
                 return;
             }
 

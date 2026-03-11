@@ -13,7 +13,7 @@ use Tests\TestCase;
 
 class DomainTenantFinderTest extends TestCase
 {
-    public function testDelegatesWebDomainResolutionToResolverService(): void
+    public function test_delegates_web_domain_resolution_to_resolver_service(): void
     {
         $tenant = Tenant::make([
             'name' => 'Mock Tenant',

@@ -4,8 +4,8 @@ use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Events\Http\Api\v1\Controllers\AgendaController;
-use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
 use Belluga\Events\Http\Api\v1\Controllers\EventsController;
+use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])

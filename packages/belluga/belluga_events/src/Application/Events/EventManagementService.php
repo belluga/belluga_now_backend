@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
+use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Domain\Events\EventCreated;
@@ -31,11 +31,10 @@ class EventManagementService
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrenceSyncService $eventOccurrenceSyncService,
         private readonly Dispatcher $events,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload): Event
     {
@@ -57,7 +56,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function update(Event $event, array $payload): Event
     {
@@ -98,7 +97,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{
      *   payload: array<string, mixed>,
      *   schedule: array{
@@ -201,7 +200,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{
      *   touched: bool,
      *   occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
@@ -237,7 +236,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $occurrences
      * @return array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>
      */
     private function normalizeOccurrences(mixed $occurrences): array
@@ -288,7 +286,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}> $occurrences
+     * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
      * @return array{
      *   touched: bool,
      *   occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
@@ -325,7 +323,7 @@ class EventManagementService
 
         if ($fromCollection->isEmpty()) {
             throw new RuntimeException(
-                'Event occurrences are required for updates without schedule mutation. ' .
+                'Event occurrences are required for updates without schedule mutation. '.
                 'Provide occurrences payload to rebuild the schedule.'
             );
         }
@@ -429,7 +427,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed>|null $publication
+     * @param  array<string, mixed>|null  $publication
      * @return array<string, mixed>
      */
     private function resolvePublicationPayload(?array $publication, ?Event $existing): array
@@ -465,7 +463,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{
      *   touched: bool,
      *   location: array<string, mixed>,
@@ -561,7 +559,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>|null
      */
     private function normalizePlaceRef(mixed $value): ?array
@@ -597,7 +594,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     private function resolveEventTypePayload(mixed $value): array
@@ -642,7 +638,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>|null
      */
     private function normalizeNullableArray(mixed $value): ?array
@@ -659,7 +654,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $value
+     * @param  array<string, mixed>  $value
      * @return array<string, mixed>
      */
     private function normalizeOnlineLocation(array $value): array
@@ -686,7 +681,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $value
      * @return array{type: string, coordinates: array{0: float, 1: float}}|null
      */
     private function normalizeGeoLocation(mixed $value, ?string $field): ?array
@@ -726,8 +720,8 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
-     * @param array{venue: array<string, mixed>, location: array<string, mixed>} $resolvedVenue
+     * @param  array<string, mixed>  $payload
+     * @param  array{venue: array<string, mixed>, location: array<string, mixed>}  $resolvedVenue
      */
     private function assertVenueBelongsToAccountContext(array $payload, array $resolvedVenue): void
     {
@@ -748,9 +742,9 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
-     * @param array<string, mixed> $venue
-     * @param array<int, array<string, mixed>> $artists
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $venue
+     * @param  array<int, array<string, mixed>>  $artists
      * @return array<int, array{
      *   party_type: string,
      *   party_ref_id: string,
@@ -765,8 +759,7 @@ class EventManagementService
         array $artists,
         bool $venueSourceTouched,
         bool $artistsSourceTouched
-    ): array
-    {
+    ): array {
         $existingRows = $this->normalizeEventPartiesMap($existing?->event_parties ?? []);
         $resolved = $existingRows;
 
@@ -871,14 +864,14 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $source
+     * @param  array<string, mixed>  $source
      * @param array{
      *   party_type: string,
      *   party_ref_id: string,
      *   permissions: array{can_edit: bool},
      *   metadata?: array<string, mixed>
      * }|null $existingRow
-     * @param array<string, mixed>|null $metadataOverride
+     * @param  array<string, mixed>|null  $metadataOverride
      * @return array{
      *   party_type: string,
      *   party_ref_id: string,
@@ -938,7 +931,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $value
      * @return array<string, array{
      *   party_type: string,
      *   party_ref_id: string,
@@ -988,7 +980,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{type: string, id: string}
      */
     private function resolveCreatedByPrincipal(array $payload): array
@@ -1011,7 +1003,6 @@ class EventManagementService
     }
 
     /**
-     * @param mixed $value
      * @return array<int, mixed>|array<string, mixed>
      */
     private function normalizeArray(mixed $value): array
@@ -1036,7 +1027,7 @@ class EventManagementService
     }
 
     /**
-     * @param array<int, string>|null $artistIds
+     * @param  array<int, string>|null  $artistIds
      * @return array<int, array<string, mixed>>
      */
     private function resolveArtistPayloads(?array $artistIds, ?Event $existing): array
@@ -1079,7 +1070,8 @@ class EventManagementService
 
     /**
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     private function runTenantTransaction(callable $callback): mixed

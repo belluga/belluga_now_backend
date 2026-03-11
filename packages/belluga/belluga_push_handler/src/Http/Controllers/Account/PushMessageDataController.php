@@ -21,8 +21,7 @@ class PushMessageDataController
         private readonly PushMetricsService $metricsService,
         private readonly PushAccountContextContract $accountContext,
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     public function show(Request $request): JsonResponse
     {

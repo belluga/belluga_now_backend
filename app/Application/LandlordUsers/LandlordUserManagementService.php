@@ -16,11 +16,10 @@ class LandlordUserManagementService
     public function __construct(
         private readonly LandlordUserCreator $creator,
         private readonly LandlordUserQueryService $queryService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      */
     public function paginate(
         bool $includeArchived,
@@ -45,7 +44,7 @@ class LandlordUserManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload, string $roleId, ?string $operatorId): LandlordUser
     {
@@ -57,7 +56,7 @@ class LandlordUserManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(LandlordUser $user, array $attributes): LandlordUser
     {
@@ -110,7 +109,7 @@ class LandlordUserManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      * @return array<string, mixed>
      */
     private function filterGuarded(LandlordUser $user, array $attributes): array

@@ -6,7 +6,7 @@ use Tests\TestCaseAuthenticated;
 
 class ApiV1AdminMeTest extends TestCaseAuthenticated
 {
-    public function testAdminMeReturnsProfilePayload(): void
+    public function test_admin_me_returns_profile_payload(): void
     {
         $response = $this->json(
             method: 'get',

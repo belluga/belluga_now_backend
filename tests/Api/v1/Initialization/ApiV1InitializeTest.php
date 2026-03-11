@@ -3,13 +3,12 @@
 namespace Tests\Api\v1\Initialization;
 
 use Illuminate\Http\UploadedFile;
-
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
-class ApiV1InitializeTest extends TestCase {
-
+class ApiV1InitializeTest extends TestCase
+{
     use RefreshLandlordAndTenantDatabases;
 
     protected function setUp(): void
@@ -18,7 +17,8 @@ class ApiV1InitializeTest extends TestCase {
         $this->refreshLandlordAndTenantDatabases();
     }
 
-    public function testInitiate(): void {
+    public function test_initiate(): void
+    {
 
         $response = $this->initiateCheck();
         $response->assertStatus(403);
@@ -28,64 +28,63 @@ class ApiV1InitializeTest extends TestCase {
         $this->landlord->user_superadmin->email_2 = fake()->email();
         $this->landlord->user_superadmin->password = fake()->password(8);
 
-        $this->landlord->role_superadmin->name = "Super Admin";
+        $this->landlord->role_superadmin->name = 'Super Admin';
 
         $response = $this->initiate();
 
         $response->assertStatus(201);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user" => [
-                    "name",
-                    "emails",
-                    "token"
+            'data' => [
+                'user' => [
+                    'name',
+                    'emails',
+                    'token',
                 ],
-                "tenant" => [
-                    "name",
-                    "subdomain",
-                    "slug"
+                'tenant' => [
+                    'name',
+                    'subdomain',
+                    'slug',
                 ],
-                "role" => [
-                    "name",
-                    "permissions"
+                'role' => [
+                    'name',
+                    'permissions',
                 ],
-                "landlord" => [
-                    "name",
-                    "branding_data" => [
-                        "theme_data_settings"=> [
+                'landlord' => [
+                    'name',
+                    'branding_data' => [
+                        'theme_data_settings' => [
                             'brightness_default',
                             'primary_seed_color',
                             'secondary_seed_color',
                         ],
-                        "logo_settings" => [
-                            "favicon_uri",
-                            "light_logo_uri",
-                            "dark_logo_uri",
-                            "light_icon_uri",
-                            "dark_icon_uri"
-                        ]
-                    ]
-                ]
+                        'logo_settings' => [
+                            'favicon_uri',
+                            'light_logo_uri',
+                            'dark_logo_uri',
+                            'light_icon_uri',
+                            'dark_icon_uri',
+                        ],
+                    ],
+                ],
             ],
         ]);
 
-        $this->landlord->user_superadmin->user_id = $response->json()['data']['user']["id"];
+        $this->landlord->user_superadmin->user_id = $response->json()['data']['user']['id'];
         $this->landlord->user_superadmin->token = $response->json()['data']['user']['token'];
 
-        $this->landlord->tenant_primary->slug = $response->json()['data']['tenant']["slug"];
-        $this->landlord->tenant_primary->id = $response->json()['data']['tenant']["id"];
+        $this->landlord->tenant_primary->slug = $response->json()['data']['tenant']['slug'];
+        $this->landlord->tenant_primary->id = $response->json()['data']['tenant']['id'];
 
-        $this->landlord->tenant_primary->role_admin->name = "Admin";
+        $this->landlord->tenant_primary->role_admin->name = 'Admin';
         $this->landlord->tenant_primary->role_admin->id = $response->json()['data']['tenant']['role_admin_id'];
 
-        $this->landlord->role_superadmin->id = $response->json()['data']["role"]["id"];
+        $this->landlord->role_superadmin->id = $response->json()['data']['role']['id'];
     }
 
     // public function testInitiateAgain(): void {
     //     $response = $this->initiate();
     //     $response->assertStatus(403);
-
 
     //     $response = $this->initiateCheck();
     //     $response->assertStatus(200);
@@ -96,26 +95,31 @@ class ApiV1InitializeTest extends TestCase {
     //     ]);
     // }
 
-    protected function initiate(): TestResponse {
+    protected function initiate(): TestResponse
+    {
         $initializeUrl = "http://{$this->host}/api/v1/initialize";
+
         return $this->post(
             $initializeUrl,
             $this->payloadInitiate(),
             [
-                'Content-Type' => 'multipart/form-data'
+                'Content-Type' => 'multipart/form-data',
             ],
         );
     }
 
-    protected function initiateCheck(): TestResponse {
+    protected function initiateCheck(): TestResponse
+    {
         $initializeUrl = "http://{$this->host}/api/v1/initialize";
+
         return $this->json(
             method: 'get',
             uri: $initializeUrl,
         );
     }
 
-    protected function payloadInitiate(): array {
+    protected function payloadInitiate(): array
+    {
 
         $favicon_fixture_path = base_path('tests/Assets/landlord.ico');
         $favicon_for_upload = new UploadedFile(
@@ -132,26 +136,26 @@ class ApiV1InitializeTest extends TestCase {
         $dark_logo_uri = UploadedFile::fake()->image('dark-logo.png', 400, 512);
 
         return [
-            "landlord" => [
-                "name" => fake()->company()
+            'landlord' => [
+                'name' => fake()->company(),
             ],
-            "user" => [
-                "name" => $this->landlord->user_superadmin->name,
-                "email" => $this->landlord->user_superadmin->email_1,
-                "password" => $this->landlord->user_superadmin->password
+            'user' => [
+                'name' => $this->landlord->user_superadmin->name,
+                'email' => $this->landlord->user_superadmin->email_1,
+                'password' => $this->landlord->user_superadmin->password,
             ],
-            "tenant" => [
-                "name" => $this->landlord->tenant_primary->name,
-                "subdomain" => $this->landlord->tenant_primary->subdomain,
+            'tenant' => [
+                'name' => $this->landlord->tenant_primary->name,
+                'subdomain' => $this->landlord->tenant_primary->subdomain,
             ],
-            "role" => [
-                "name" =>  $this->landlord->role_superadmin->name,
-                "permissions" => [
-                    "*"
+            'role' => [
+                'name' => $this->landlord->role_superadmin->name,
+                'permissions' => [
+                    '*',
                 ],
             ],
-            "branding_data" => [
-                "theme_data_settings" => [
+            'branding_data' => [
+                'theme_data_settings' => [
                     'brightness_default' => 'light',
                     'primary_seed_color' => '#FFFFFF',
                     'secondary_seed_color' => '#999999',
@@ -164,7 +168,7 @@ class ApiV1InitializeTest extends TestCase {
                     'favicon_uri' => $favicon_for_upload,
                 ],
                 'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
-            ]
+            ],
         ];
     }
 }

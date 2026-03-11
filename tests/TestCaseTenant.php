@@ -4,7 +4,8 @@ namespace Tests;
 
 use Tests\Helpers\TenantLabels;
 
-abstract class TestCaseTenant extends TestCaseAuthenticated {
+abstract class TestCaseTenant extends TestCaseAuthenticated
+{
     abstract protected TenantLabels $tenant {
         get;
     }

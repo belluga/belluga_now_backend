@@ -15,7 +15,7 @@ class SettingsSchemaValidatorTest extends TestCase
     #[Test]
     public function it_accepts_namespaced_and_non_namespaced_patch_keys(): void
     {
-        $validator = new SettingsSchemaValidator();
+        $validator = new SettingsSchemaValidator;
         $definition = new SettingsNamespaceDefinition(
             namespace: 'events',
             scope: 'tenant',
@@ -40,7 +40,7 @@ class SettingsSchemaValidatorTest extends TestCase
     #[Test]
     public function it_rejects_null_for_non_nullable_field(): void
     {
-        $validator = new SettingsSchemaValidator();
+        $validator = new SettingsSchemaValidator;
         $definition = new SettingsNamespaceDefinition(
             namespace: 'events',
             scope: 'tenant',
@@ -62,7 +62,7 @@ class SettingsSchemaValidatorTest extends TestCase
     #[Test]
     public function it_rejects_wrong_value_type(): void
     {
-        $validator = new SettingsSchemaValidator();
+        $validator = new SettingsSchemaValidator;
         $definition = new SettingsNamespaceDefinition(
             namespace: 'events',
             scope: 'tenant',
@@ -84,7 +84,7 @@ class SettingsSchemaValidatorTest extends TestCase
     #[Test]
     public function it_rejects_envelope_payload_form(): void
     {
-        $validator = new SettingsSchemaValidator();
+        $validator = new SettingsSchemaValidator;
         $definition = new SettingsNamespaceDefinition(
             namespace: 'events',
             scope: 'tenant',

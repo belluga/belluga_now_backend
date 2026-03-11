@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 class TaxonomyManagementService
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function create(array $payload): array
@@ -29,7 +29,7 @@ class TaxonomyManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function update(string $taxonomyId, array $payload): array
@@ -69,7 +69,7 @@ class TaxonomyManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function buildEntry(array $payload, string $slug): array
@@ -84,8 +84,7 @@ class TaxonomyManagementService
     }
 
     /**
-     * @param Taxonomy $taxonomy
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function mergeEntry(Taxonomy $taxonomy, array $payload, string $slug): array
@@ -113,7 +112,6 @@ class TaxonomyManagementService
     }
 
     /**
-     * @param mixed $raw
      * @return array<int, string>
      */
     private function normalizeAppliesTo(mixed $raw): array

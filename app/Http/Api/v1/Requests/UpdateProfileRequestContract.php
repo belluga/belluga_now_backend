@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
 abstract class UpdateProfileRequestContract extends FormRequest
@@ -28,7 +28,7 @@ abstract class UpdateProfileRequestContract extends FormRequest
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'errors' => $validator->errors()
+            'errors' => $validator->errors(),
         ], 422));
     }
 }

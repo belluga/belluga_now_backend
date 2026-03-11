@@ -14,13 +14,13 @@ use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
-use Tests\Helpers\TenantLabels;
 
 class AgendaAndEventsControllerTest extends TestCaseTenant
 {
@@ -36,7 +36,9 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
+
     private AccountUserService $userService;
+
     private AccountUser $user;
 
     protected function setUp(): void
@@ -83,7 +85,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testAgendaDefaultReturnsUpcomingAndNow(): void
+    public function test_agenda_default_returns_upcoming_and_now(): void
     {
         $now = Carbon::now();
 
@@ -116,7 +118,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertContains('Happening Now', $titles);
     }
 
-    public function testAgendaDefaultIncludesLiveNowAndExcludesPastEvents(): void
+    public function test_agenda_default_includes_live_now_and_excludes_past_events(): void
     {
         $now = Carbon::now();
 
@@ -157,7 +159,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame('', (string) ($upcomingItem['occurrence_id'] ?? ''));
     }
 
-    public function testAgendaPublicEndpointShowsOnlyEffectivelyPublishedItems(): void
+    public function test_agenda_public_endpoint_shows_only_effectively_published_items(): void
     {
         $now = Carbon::now();
 
@@ -220,7 +222,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame(['Published Visible'], $titles);
     }
 
-    public function testAgendaPastOnlyReturnsPastNotOngoing(): void
+    public function test_agenda_past_only_returns_past_not_ongoing(): void
     {
         $now = Carbon::now();
 
@@ -244,7 +246,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Past Event', $items[0]['title']);
     }
 
-    public function testAgendaFiltersByTypedTaxonomyTerms(): void
+    public function test_agenda_filters_by_typed_taxonomy_terms(): void
     {
         $this->createEvent([
             'title' => 'Event Taxonomy Match',
@@ -309,14 +311,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Artist Taxonomy Match', $response->json('items.0.title'));
     }
 
-    public function testAgendaRejectsDeprecatedSearchQueryParam(): void
+    public function test_agenda_rejects_deprecated_search_query_param(): void
     {
         $response = $this->getJson("{$this->base_api_tenant}agenda?search=solar&page=1&page_size=10");
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['search']);
     }
 
-    public function testAgendaGeoFiltersExcludeEventsOutsideDistance(): void
+    public function test_agenda_geo_filters_exclude_events_outside_distance(): void
     {
         $this->createEvent([
             'title' => 'Remote Event',
@@ -342,7 +344,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertCount(0, $items);
     }
 
-    public function testAgendaGeoQueryFailsWhenGeoIndexIsMissing(): void
+    public function test_agenda_geo_query_fails_when_geo_index_is_missing(): void
     {
         $this->createEvent([
             'title' => 'Indexed Geo Event',
@@ -378,7 +380,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $collection->createIndex(['geo_location' => '2dsphere']);
     }
 
-    public function testEventDetailResolvesSlugAndId(): void
+    public function test_event_detail_resolves_slug_and_id(): void
     {
         $event = $this->createEvent([
             'title' => 'Slug Test Event',
@@ -397,13 +399,13 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.event_id', (string) $event->_id);
     }
 
-    public function testEventDetailReturns404WhenMissing(): void
+    public function test_event_detail_returns404_when_missing(): void
     {
         $response = $this->getJson("{$this->base_api_tenant}events/missing-event");
         $response->assertStatus(404);
     }
 
-    public function testEventStreamReturnsDeltas(): void
+    public function test_event_stream_returns_deltas(): void
     {
         $event = $this->createEvent(['title' => 'Stream Event']);
         $occurrence = EventOccurrence::query()->where('event_id', (string) $event->_id)->first();
@@ -426,7 +428,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringContainsString((string) $occurrence->_id, $content);
     }
 
-    public function testEventStreamReconnectUsesLastEventIdWithoutReplay(): void
+    public function test_event_stream_reconnect_uses_last_event_id_without_replay(): void
     {
         $this->createEvent(['title' => 'Reconnect Event']);
 
@@ -460,7 +462,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringNotContainsString('event:', $reconnectResponse->streamedContent());
     }
 
-    public function testEventStreamReturnsEmptyPayloadForInvalidLastEventId(): void
+    public function test_event_stream_returns_empty_payload_for_invalid_last_event_id(): void
     {
         $this->createEvent(['title' => 'Invalid Cursor Event']);
 
@@ -476,7 +478,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringNotContainsString('event:', $response->streamedContent());
     }
 
-    public function testEventStreamReturnsDeletedDeltaForFutureScheduledPublication(): void
+    public function test_event_stream_returns_deleted_delta_for_future_scheduled_publication(): void
     {
         $event = $this->createEvent([
             'title' => 'Future Scheduled Event',
@@ -501,7 +503,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringContainsString((string) $event->_id, $content);
     }
 
-    public function testAgendaRequiresAuth(): void
+    public function test_agenda_requires_auth(): void
     {
         auth('sanctum')->forgetUser();
         auth()->forgetGuards();
@@ -510,7 +512,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(401);
     }
 
-    public function testAgendaValidatesOriginPairs(): void
+    public function test_agenda_validates_origin_pairs(): void
     {
         $response = $this->getJson("{$this->base_api_tenant}agenda?origin_lat=10&page=1&page_size=10");
         $response->assertStatus(422);
@@ -525,7 +527,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         return $this->userService->create($this->account, [
             'name' => 'Test User',
-            'email' => uniqid('event-user', true) . '@example.org',
+            'email' => uniqid('event-user', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
     }
@@ -642,5 +644,4 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             $this->landlord->tenant_primary->role_admin->id = (string) ($tenant->roleTemplates()->first()?->_id ?? '');
         }
     }
-
 }

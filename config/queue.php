@@ -20,8 +20,8 @@ if (
     && in_array($databaseQueueConnection, ['', 'mongodb', 'landlord', 'tenant'], true)
 ) {
     throw new \RuntimeException(
-        'Unsafe queue configuration detected: DB_CONNECTION is MongoDB but QUEUE_CONNECTION=database ' .
-        'without a dedicated SQL DB_QUEUE_CONNECTION. Use QUEUE_CONNECTION=mongodb or set DB_QUEUE_CONNECTION ' .
+        'Unsafe queue configuration detected: DB_CONNECTION is MongoDB but QUEUE_CONNECTION=database '.
+        'without a dedicated SQL DB_QUEUE_CONNECTION. Use QUEUE_CONNECTION=mongodb or set DB_QUEUE_CONNECTION '.
         'to a SQL connection.'
     );
 }

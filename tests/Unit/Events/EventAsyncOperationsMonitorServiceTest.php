@@ -20,7 +20,7 @@ class EventAsyncOperationsMonitorServiceTest extends TestCase
         Cache::forget(EventAsyncOperationsMonitorService::CACHE_ALERT_ACTIVE_KEY);
     }
 
-    public function testItTriggersStalenessAlertAfterFiveConsecutiveBreaches(): void
+    public function test_it_triggers_staleness_alert_after_five_consecutive_breaches(): void
     {
         Log::spy();
 
@@ -45,7 +45,7 @@ class EventAsyncOperationsMonitorServiceTest extends TestCase
         )->once();
     }
 
-    public function testItClearsAlertStateWhenQueueRecovers(): void
+    public function test_it_clears_alert_state_when_queue_recovers(): void
     {
         Log::spy();
 
@@ -74,11 +74,9 @@ class EventAsyncOperationsMonitorServiceTest extends TestCase
 final class FakeEventAsyncQueueMetricsProvider implements EventAsyncQueueMetricsProviderContract
 {
     /**
-     * @param array<int, int> $ages
+     * @param  array<int, int>  $ages
      */
-    public function __construct(private array $ages)
-    {
-    }
+    public function __construct(private array $ages) {}
 
     /**
      * @return array<int, int>
@@ -89,11 +87,10 @@ final class FakeEventAsyncQueueMetricsProvider implements EventAsyncQueueMetrics
     }
 
     /**
-     * @param array<int, int> $ages
+     * @param  array<int, int>  $ages
      */
     public function setAges(array $ages): void
     {
         $this->ages = $ages;
     }
 }
-

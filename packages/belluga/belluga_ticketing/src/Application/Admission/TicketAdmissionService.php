@@ -12,7 +12,6 @@ use Belluga\Ticketing\Application\Queue\TicketQueueService;
 use Belluga\Ticketing\Application\Settings\TicketingRuntimeSettingsService;
 use Belluga\Ticketing\Application\Transactions\TenantTransactionRunner;
 use Belluga\Ticketing\Models\Tenants\TicketHold;
-use Belluga\Ticketing\Models\Tenants\TicketQueueEntry;
 use Belluga\Ticketing\Support\TicketingDomainException;
 
 class TicketAdmissionService
@@ -25,8 +24,7 @@ class TicketAdmissionService
         private readonly TicketQueueService $queue,
         private readonly TicketPromotionResolverService $promotions,
         private readonly TenantTransactionRunner $transactions,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -73,7 +71,7 @@ class TicketAdmissionService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function requestAdmissionForRefs(
@@ -249,7 +247,7 @@ class TicketAdmissionService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      * @return array<string, mixed>
      */
     private function queueOrReject(
@@ -375,7 +373,7 @@ class TicketAdmissionService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     private function resolveScopeType(array $lines): string
     {
@@ -393,7 +391,7 @@ class TicketAdmissionService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function resolveCheckoutMode(array $payload): string
     {
@@ -408,7 +406,7 @@ class TicketAdmissionService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      * @return array<string, mixed>
      */
     private function promotionSnapshotFromLines(array $lines): array
@@ -446,7 +444,6 @@ class TicketAdmissionService
     }
 
     /**
-     * @param mixed $rawCodes
      * @return array<int, string>
      */
     private function normalizePromotionCodes(mixed $rawCodes): array

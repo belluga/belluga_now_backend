@@ -36,7 +36,7 @@ class TenantUserQueryServiceTest extends TestCase
         }
 
         $this->service = $this->app->make(TenantUserQueryService::class);
-        $this->filterName = 'Tenant Filter ' . Str::uuid()->toString();
+        $this->filterName = 'Tenant Filter '.Str::uuid()->toString();
 
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -44,7 +44,7 @@ class TenantUserQueryServiceTest extends TestCase
         $this->seedUsers();
     }
 
-    public function testFiltersByName(): void
+    public function test_filters_by_name(): void
     {
         $paginator = $this->service->paginate(
             ['filter' => ['name' => $this->filterName]],
@@ -56,9 +56,9 @@ class TenantUserQueryServiceTest extends TestCase
         $this->assertSame($this->filterName, $paginator->items()[0]['name']);
     }
 
-    public function testFiltersByEmail(): void
+    public function test_filters_by_email(): void
     {
-        $email = 'tenant.filter+' . uniqid('', true) . '@example.org';
+        $email = 'tenant.filter+'.uniqid('', true).'@example.org';
         $this->createUser([
             'name' => 'Email Match',
             'emails' => [$email],
@@ -74,9 +74,9 @@ class TenantUserQueryServiceTest extends TestCase
         $this->assertSame('Email Match', $paginator->items()[0]['name']);
     }
 
-    public function testFiltersByPhone(): void
+    public function test_filters_by_phone(): void
     {
-        $phone = '+55119' . random_int(1000000, 9999999);
+        $phone = '+55119'.random_int(1000000, 9999999);
         $target = $this->createUser([
             'name' => 'Phone Match',
             'phones' => [$phone],
@@ -92,7 +92,7 @@ class TenantUserQueryServiceTest extends TestCase
         $this->assertSame((string) $target->_id, $paginator->items()[0]['_id']);
     }
 
-    public function testFiltersByRegistrationRange(): void
+    public function test_filters_by_registration_range(): void
     {
         $from = Carbon::now()->subHour()->toDateString();
         $to = Carbon::now()->addHour()->toDateString();
@@ -106,9 +106,9 @@ class TenantUserQueryServiceTest extends TestCase
         $this->assertGreaterThanOrEqual(2, $paginator->total());
     }
 
-    public function testIncludesArchivedUsersWhenRequested(): void
+    public function test_includes_archived_users_when_requested(): void
     {
-        $email = 'archived.tenant+' . uniqid('', true) . '@example.org';
+        $email = 'archived.tenant+'.uniqid('', true).'@example.org';
         $user = $this->createUser([
             'name' => 'Archived Tenant User',
             'emails' => [$email],
@@ -122,7 +122,7 @@ class TenantUserQueryServiceTest extends TestCase
         $this->assertSame(1, $withArchived->total());
     }
 
-    public function testUnsupportedSortFallsBackToDefaultOrder(): void
+    public function test_unsupported_sort_falls_back_to_default_order(): void
     {
         $baseline = $this->service->paginate([], includeArchived: false, perPage: 15);
         $fallback = $this->service->paginate(['sort' => 'not-valid'], includeArchived: false, perPage: 15);
@@ -142,13 +142,13 @@ class TenantUserQueryServiceTest extends TestCase
         return [
             $this->createUser([
                 'name' => $this->filterName,
-                'emails' => ['tenant.filter+' . uniqid('', true) . '@example.org'],
+                'emails' => ['tenant.filter+'.uniqid('', true).'@example.org'],
                 'registered_at' => Carbon::now()->subHours(2),
                 'created_at' => Carbon::now()->subHours(2),
             ]),
             $this->createUser([
                 'name' => 'Baseline Tenant',
-                'emails' => ['baseline.tenant+' . uniqid('', true) . '@example.org'],
+                'emails' => ['baseline.tenant+'.uniqid('', true).'@example.org'],
                 'registered_at' => Carbon::now()->subHour(),
                 'created_at' => Carbon::now()->subHour(),
             ]),
@@ -156,13 +156,13 @@ class TenantUserQueryServiceTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createUser(array $overrides): AccountUser
     {
         $payload = array_merge([
             'name' => 'Tenant Fixture',
-            'emails' => ['tenant.fixture+' . uniqid('', true) . '@example.org'],
+            'emails' => ['tenant.fixture+'.uniqid('', true).'@example.org'],
             'phones' => [],
             'registered_at' => Carbon::now(),
             'password' => Hash::make('Secret!234'),

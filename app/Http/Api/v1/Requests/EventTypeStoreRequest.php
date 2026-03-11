@@ -15,11 +15,11 @@ class EventTypeStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'slug' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
-            'description' => ['required', 'string', 'min:10', 'max:' . InputConstraints::DESCRIPTION_MAX],
-            'icon' => ['sometimes', 'nullable', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'color' => ['sometimes', 'nullable', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'slug' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
+            'description' => ['required', 'string', 'min:10', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'icon' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'color' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
         ];
     }
 }

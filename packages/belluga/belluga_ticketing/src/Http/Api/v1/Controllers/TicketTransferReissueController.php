@@ -17,8 +17,7 @@ class TicketTransferReissueController extends Controller
 
     public function __construct(
         private readonly TicketTransferReissueService $transferReissue,
-    ) {
-    }
+    ) {}
 
     public function transfer(
         TicketTransferRequest $request,
@@ -79,4 +78,3 @@ class TicketTransferReissueController extends Controller
         ];
     }
 }
-

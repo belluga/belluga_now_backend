@@ -6,7 +6,8 @@ use Tests\Api\v1\Accounts\Middleware\Contracts\ApiV1AccountsMiddlewareTestContra
 use Tests\Helpers\AccountLabels;
 use Tests\Helpers\TenantLabels;
 
-class T1A1Test extends ApiV1AccountsMiddlewareTestContract {
+class T1A1Test extends ApiV1AccountsMiddlewareTestContract
+{
     protected TenantLabels $tenant {
         get{
             return $this->landlord->tenant_primary;

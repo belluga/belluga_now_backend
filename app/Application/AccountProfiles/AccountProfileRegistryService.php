@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\TenantProfileType;
-use App\Application\AccountProfiles\AccountProfileRegistryManagementService;
 
 class AccountProfileRegistryService
 {

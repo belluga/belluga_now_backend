@@ -1,24 +1,24 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Http\Api\v1\Controllers\TenantAppDomainController;
-use App\Http\Api\v1\Controllers\DomainController;
-use App\Http\Api\v1\Controllers\LandlordUserController;
-use App\Http\Api\v1\Controllers\TenantRolesController;
-use App\Http\Api\v1\Controllers\TenantUsersController;
-use App\Http\Api\v1\Controllers\TenantBrandingController;
-use App\Http\Api\v1\Controllers\OrganizationsController;
 use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\AccountProfileTypesController;
+use App\Http\Api\v1\Controllers\AuthControllerLandlord;
+use App\Http\Api\v1\Controllers\DomainController;
+use App\Http\Api\v1\Controllers\ExternalImageProxyController;
+use App\Http\Api\v1\Controllers\LandlordUserController;
+use App\Http\Api\v1\Controllers\MapFilterImageController;
+use App\Http\Api\v1\Controllers\MeController;
+use App\Http\Api\v1\Controllers\OrganizationsController;
+use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Api\v1\Controllers\StaticProfileTypesController;
 use App\Http\Api\v1\Controllers\TaxonomiesController;
 use App\Http\Api\v1\Controllers\TaxonomyTermsController;
-use App\Http\Api\v1\Controllers\ExternalImageProxyController;
-use App\Http\Api\v1\Controllers\MapFilterImageController;
-use App\Http\Api\v1\Controllers\AuthControllerLandlord;
-use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
-use App\Http\Api\v1\Controllers\MeController;
+use App\Http\Api\v1\Controllers\TenantAppDomainController;
+use App\Http\Api\v1\Controllers\TenantBrandingController;
+use App\Http\Api\v1\Controllers\TenantRolesController;
+use App\Http\Api\v1\Controllers\TenantUsersController;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
@@ -43,7 +43,7 @@ Route::get('/me', [MeController::class, 'landlord'])
     ->middleware(['auth:sanctum']);
 
 Route::prefix('domains')
-    ->group(function (){
+    ->group(function () {
         Route::post('/', [DomainController::class, 'store']);
 
         Route::delete('/{domain_id}', [DomainController::class, 'destroy']);
@@ -51,10 +51,10 @@ Route::prefix('domains')
         Route::post('/{domain_id}/restore', [DomainController::class, 'restore']);
 
         Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy']);
-});
+    });
 
 Route::prefix('appdomains')
-    ->group(function (){
+    ->group(function () {
         Route::get('/', [TenantAppDomainController::class, 'index']);
         Route::post('/', [TenantAppDomainController::class, 'store']);
         Route::delete('/', [TenantAppDomainController::class, 'destroy']);
@@ -76,7 +76,7 @@ Route::prefix('tenant-users')
 
     });
 
-    Route::prefix('users')
+Route::prefix('users')
     ->group(function () {
 
         Route::get('/', [TenantUsersController::class, 'index'])
@@ -89,10 +89,10 @@ Route::prefix('tenant-users')
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
 
         Route::post('/{user_id}/restore', [TenantUsersController::class, 'restore'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, "abilities:account-users:create,account-users:update,account-users:delete"]);
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create,account-users:update,account-users:delete']);
 
         Route::delete('/{user_id}/force_destroy', [TenantUsersController::class, 'forceDestroy'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, "abilities:account-users:delete"]);
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
 
     });
 

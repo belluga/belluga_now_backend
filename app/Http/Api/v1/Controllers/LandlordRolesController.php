@@ -8,15 +8,15 @@ use App\Http\Api\v1\Requests\LandlordRoleStoreRequest;
 use App\Http\Api\v1\Requests\LandlordRoleUpdateRequest;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
-use MongoDB\Driver\Exception\BulkWriteException;
 use Illuminate\Http\Request;
+use MongoDB\Driver\Exception\BulkWriteException;
 
 class LandlordRolesController extends Controller
 {
     public function __construct(
         private readonly LandlordRoleService $landlordRoleService
-    ) {
-    }
+    ) {}
+
     /**
      * Display a listing of the roles.
      */
@@ -47,7 +47,7 @@ class LandlordRolesController extends Controller
         }
 
         return response()->json([
-            'data' => $role
+            'data' => $role,
         ], 201);
     }
 
@@ -60,7 +60,7 @@ class LandlordRolesController extends Controller
         $role = $this->landlordRoleService->findById($role_id);
 
         return response()->json([
-            'data' => $role
+            'data' => $role,
         ]);
     }
 
@@ -74,7 +74,7 @@ class LandlordRolesController extends Controller
         $role = $this->landlordRoleService->update($role, $request->validated());
 
         return response()->json([
-            'data' => $role
+            'data' => $role,
         ]);
     }
 
@@ -90,17 +90,18 @@ class LandlordRolesController extends Controller
                 $request->validated()['background_role_id']
             );
         } catch (\Throwable) {
-            abort(422, "Erro ao excluir role. Tente novamente mais tarde.");
+            abort(422, 'Erro ao excluir role. Tente novamente mais tarde.');
         }
 
         return response()->json([], 200);
     }
 
-    public function forceDestroy($user_id): JsonResponse {
+    public function forceDestroy($user_id): JsonResponse
+    {
         try {
             $this->landlordRoleService->forceDeleteById($user_id);
         } catch (\Throwable) {
-            return response()->json(["errors" => ["role" => ["Error deleting relationships."]]]);
+            return response()->json(['errors' => ['role' => ['Error deleting relationships.']]]);
         }
 
         return response()->json();

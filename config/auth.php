@@ -69,7 +69,6 @@ return [
             'model' => App\Models\Landlord\LandlordUser::class,
         ],
 
-
         // 'users' => [
         //     'driver' => 'database',
         //     'table' => 'users',

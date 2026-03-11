@@ -19,7 +19,7 @@ class SettingsServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/belluga_settings.php', 'belluga_settings');
+        $this->mergeConfigFrom(__DIR__.'/../config/belluga_settings.php', 'belluga_settings');
 
         $this->app->singleton(SettingsRegistryContract::class, InMemorySettingsRegistry::class);
         $this->app->singleton(SettingsMergePolicyContract::class, NamespacePatchMergePolicy::class);
@@ -30,8 +30,8 @@ class SettingsServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__ . '/../routes/settings.php');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations_landlord');
+        $this->loadRoutesFrom(__DIR__.'/../routes/settings.php');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations_landlord');
     }
 }

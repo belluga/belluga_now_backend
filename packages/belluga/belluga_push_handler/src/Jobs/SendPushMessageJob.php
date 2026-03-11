@@ -30,14 +30,12 @@ class SendPushMessageJob implements ShouldQueue
         private readonly string $messageId,
         private readonly string $scope,
         private readonly ?string $accountId
-    ) {
-    }
+    ) {}
 
     public function handle(
         PushDeliveryService $deliveryService,
         PushRecipientResolver $recipientResolver
-    ): void
-    {
+    ): void {
         $message = PushMessage::query()->find($this->messageId);
         if (! $message || ! $message->isActive() || $message->isExpired()) {
             return;

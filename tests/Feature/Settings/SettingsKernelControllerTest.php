@@ -9,15 +9,15 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use Belluga\Settings\Contracts\SettingsRegistryContract;
-use Belluga\Settings\Models\Landlord\LandlordSettings;
-use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
+use Belluga\Settings\Contracts\SettingsRegistryContract;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
+use Belluga\Settings\Support\SettingsNamespaceDefinition;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Database\QueryException;
 use Laravel\Sanctum\Sanctum;
 use MongoDB\Driver\Exception\Exception as MongoDriverException;
 use Tests\Helpers\TenantLabels;
@@ -37,11 +37,15 @@ class SettingsKernelControllerTest extends TestCaseTenant
     }
 
     private static bool $bootstrapped = false;
+
     private static bool $landlordNamespaceRegistered = false;
+
     private static bool $conditionalStabilityNamespacesRegistered = false;
 
     private Account $account;
+
     private AccountUserService $userService;
+
     private AccountUser $user;
 
     protected function setUp(): void
@@ -118,7 +122,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         Sanctum::actingAs($landlordUser, $this->accountAbilities());
     }
 
-    public function testSettingsSchemaEndpointReturnsRegisteredNamespaces(): void
+    public function test_settings_schema_endpoint_returns_registered_namespaces(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
@@ -134,7 +138,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('telemetry', $namespaces);
     }
 
-    public function testSettingsValuesEndpointReturnsNamespaceValues(): void
+    public function test_settings_values_endpoint_returns_namespace_values(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}settings/values");
         $response->assertStatus(200);
@@ -153,7 +157,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
     }
 
-    public function testPatchNamespaceAppliesPartialMergeByFieldPresence(): void
+    public function test_patch_namespace_applies_partial_merge_by_field_presence(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'default_duration_hours' => 4,
@@ -168,7 +172,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $values->assertJsonPath('data.events.mode', 'basic');
     }
 
-    public function testPatchNamespaceRejectsNullForNonNullableField(): void
+    public function test_patch_namespace_rejects_null_for_non_nullable_field(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'default_duration_hours' => null,
@@ -178,7 +182,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['default_duration_hours']);
     }
 
-    public function testPatchNamespaceAcceptsNullClearForNullableField(): void
+    public function test_patch_namespace_accepts_null_clear_for_nullable_field(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/push", [
             'throttles' => null,
@@ -194,7 +198,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $values->assertJsonPath('data.push.max_ttl_days', 7);
     }
 
-    public function testPatchNamespaceAppliesMixedSetAndClearAtomically(): void
+    public function test_patch_namespace_applies_mixed_set_and_clear_atomically(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/push", [
             'max_ttl_days' => 12,
@@ -211,7 +215,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $values->assertJsonPath('data.push.throttles', null);
     }
 
-    public function testPatchNamespaceAcceptsNamespacedFieldPath(): void
+    public function test_patch_namespace_accepts_namespaced_field_path(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'events.default_duration_hours' => 6,
@@ -221,7 +225,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.default_duration_hours', 6);
     }
 
-    public function testPatchNamespaceRejectsEnvelopePayloadForm(): void
+    public function test_patch_namespace_rejects_envelope_payload_form(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
             'events' => [
@@ -233,7 +237,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['events']);
     }
 
-    public function testSchemaExposesNavigationNodesAndConditionalMetadata(): void
+    public function test_schema_exposes_navigation_nodes_and_conditional_metadata(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
@@ -260,7 +264,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertIsArray($stock['visible_if'] ?? null);
     }
 
-    public function testSchemaNavigationOrderingIsStable(): void
+    public function test_schema_navigation_ordering_is_stable(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
@@ -312,7 +316,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         ], $filtersChildren);
     }
 
-    public function testSchemaNodesExposeEveryRegisteredFieldAsRenderableNode(): void
+    public function test_schema_nodes_expose_every_registered_field_as_renderable_node(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}settings/schema");
         $response->assertStatus(200);
@@ -345,7 +349,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         }
     }
 
-    public function testConditionalMetadataRemainsStableAcrossLabelI18nAndOrderChanges(): void
+    public function test_conditional_metadata_remains_stable_across_label_i18n_and_order_changes(): void
     {
         $this->ensureConditionalStabilityNamespacesRegistered();
 
@@ -374,7 +378,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame($v1Field['enabled_if'] ?? null, $v2Field['enabled_if'] ?? null);
     }
 
-    public function testAbilityFilteringHidesNamespacesAndBlocksPatch(): void
+    public function test_ability_filtering_hides_namespaces_and_blocks_patch(): void
     {
         $restrictedUser = LandlordUser::query()->firstOrFail();
 
@@ -399,7 +403,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $patch->assertStatus(403);
     }
 
-    public function testTenantScopeRejectsSecondSettingsDocument(): void
+    public function test_tenant_scope_rejects_second_settings_document(): void
     {
         $thrown = null;
 
@@ -418,7 +422,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame(1, TenantSettings::query()->count());
     }
 
-    public function testLandlordScopeRejectsSecondSettingsDocument(): void
+    public function test_landlord_scope_rejects_second_settings_document(): void
     {
         LandlordSettings::query()->delete();
         LandlordSettings::query()->create([
@@ -445,7 +449,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame(1, LandlordSettings::query()->count());
     }
 
-    public function testTenantAndLandlordScopesAreIsolatedWhenLandlordNamespaceExists(): void
+    public function test_tenant_and_landlord_scopes_are_isolated_when_landlord_namespace_exists(): void
     {
         $this->ensureLandlordTestNamespaceRegistered();
 
@@ -453,13 +457,13 @@ class SettingsKernelControllerTest extends TestCaseTenant
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['*']);
 
         $hostApi = sprintf('http://%s/admin/api/v1/', $this->host);
-        $landlordPatch = $this->patchJson($hostApi . 'settings/values/landlord_test_settings', [
+        $landlordPatch = $this->patchJson($hostApi.'settings/values/landlord_test_settings', [
             'feature_flag' => true,
         ]);
         $landlordPatch->assertStatus(200);
         $landlordPatch->assertJsonPath('data.feature_flag', true);
 
-        $landlordValues = $this->getJson($hostApi . 'settings/values');
+        $landlordValues = $this->getJson($hostApi.'settings/values');
         $landlordValues->assertStatus(200);
         $landlordData = $landlordValues->json('data') ?? [];
         $this->assertTrue((bool) data_get($landlordData, 'landlord_test_settings.feature_flag'));
@@ -476,24 +480,24 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame(5, data_get($tenantData, 'map_ui.radius.default_km'));
     }
 
-    public function testLandlordOnBehalfTenantPatchDoesNotMutateLandlordScopeValues(): void
+    public function test_landlord_on_behalf_tenant_patch_does_not_mutate_landlord_scope_values(): void
     {
         $this->ensureLandlordTestNamespaceRegistered();
         $this->asLandlordHost();
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['*']);
 
         $hostApi = sprintf('http://%s/admin/api/v1/', $this->host);
-        $this->patchJson($hostApi . 'settings/values/landlord_test_settings', [
+        $this->patchJson($hostApi.'settings/values/landlord_test_settings', [
             'feature_flag' => false,
         ])->assertStatus(200);
 
-        $tenantPatch = $this->patchJson($hostApi . "{$this->tenant->slug}/settings/values/events", [
+        $tenantPatch = $this->patchJson($hostApi."{$this->tenant->slug}/settings/values/events", [
             'default_duration_hours' => 9,
         ]);
         $tenantPatch->assertStatus(200);
         $tenantPatch->assertJsonPath('data.default_duration_hours', 9);
 
-        $landlordValues = $this->getJson($hostApi . 'settings/values');
+        $landlordValues = $this->getJson($hostApi.'settings/values');
         $landlordValues->assertStatus(200);
         $this->assertFalse((bool) data_get($landlordValues->json('data') ?? [], 'landlord_test_settings.feature_flag'));
 
@@ -504,7 +508,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $tenantValues->assertJsonPath('data.events.default_duration_hours', 9);
     }
 
-    public function testSettingsMigrationsAreConfiguredAndCollectionsCarrySingletonValidator(): void
+    public function test_settings_migrations_are_configured_and_collections_carry_singleton_validator(): void
     {
         $paths = (array) config('multitenancy.tenant_migration_paths', []);
         $this->assertContains('packages/belluga/belluga_settings/database/migrations', $paths);
@@ -535,7 +539,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame('settings_root', data_get($landlordOptions, 'validator.$expr.$eq.1'));
     }
 
-    public function testTenantScopedSettingsMigrationCommandSucceedsForExistingTenants(): void
+    public function test_tenant_scoped_settings_migration_command_succeeds_for_existing_tenants(): void
     {
         $exitCode = Artisan::call('tenants:artisan', [
             'artisanCommand' => 'migrate --database=tenant --path=packages/belluga/belluga_settings/database/migrations',
@@ -544,7 +548,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertSame(0, $exitCode, Artisan::output());
     }
 
-    public function testLandlordScopedSettingsMigrationCommandSucceeds(): void
+    public function test_landlord_scoped_settings_migration_command_succeeds(): void
     {
         $exitCode = Artisan::call('migrate', [
             '--database' => 'landlord',
@@ -557,13 +561,13 @@ class SettingsKernelControllerTest extends TestCaseTenant
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
-            'name' => 'Settings Role ' . uniqid(),
+            'name' => 'Settings Role '.uniqid(),
             'permissions' => $permissions,
         ]);
 
         return $this->userService->create($this->account, [
             'name' => 'Settings User',
-            'email' => uniqid('settings-user', true) . '@example.org',
+            'email' => uniqid('settings-user', true).'@example.org',
             'password' => 'Secret!234',
             'timezone' => 'America/Sao_Paulo',
         ], (string) $role->_id);
@@ -610,6 +614,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $registry = $this->app->make(SettingsRegistryContract::class);
         if ($registry->find('landlord_test_settings', 'landlord') !== null) {
             self::$landlordNamespaceRegistered = true;
+
             return;
         }
 
@@ -640,6 +645,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
             $registry->find('settings_stability_v2', 'tenant') !== null
         ) {
             self::$conditionalStabilityNamespacesRegistered = true;
+
             return;
         }
 
@@ -752,7 +758,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
             pwaIcon: [
                 'icon192_uri' => '/pwa/icon192.png',
             ],
-            tenantDomains: [$this->tenant->subdomain . '.test'],
+            tenantDomains: [$this->tenant->subdomain.'.test'],
         );
 
         $service->initialize($payload);

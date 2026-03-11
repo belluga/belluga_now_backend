@@ -48,7 +48,7 @@ class TenantUserManagementServiceTest extends TestCase
         $this->userService = $this->app->make(AccountUserService::class);
     }
 
-    public function testFindReturnsExistingUser(): void
+    public function test_find_returns_existing_user(): void
     {
         $user = $this->createUser('show@example.org');
 
@@ -58,7 +58,7 @@ class TenantUserManagementServiceTest extends TestCase
         $this->assertTrue(Str::endsWith($found->emails[0], '@example.org'));
     }
 
-    public function testDeleteSoftDeletesUser(): void
+    public function test_delete_soft_deletes_user(): void
     {
         $user = $this->createUser('delete@example.org');
 
@@ -67,7 +67,7 @@ class TenantUserManagementServiceTest extends TestCase
         $this->assertSoftDeleted('account_users', ['_id' => $user->_id], 'tenant');
     }
 
-    public function testRestoreBringsBackSoftDeletedUser(): void
+    public function test_restore_brings_back_soft_deleted_user(): void
     {
         $user = $this->createUser('restore@example.org');
         $user->delete();
@@ -77,7 +77,7 @@ class TenantUserManagementServiceTest extends TestCase
         $this->assertFalse($restored->trashed());
     }
 
-    public function testForceDeleteRemovesUser(): void
+    public function test_force_delete_removes_user(): void
     {
         $user = $this->createUser('force@example.org');
         $user->delete();
@@ -92,7 +92,7 @@ class TenantUserManagementServiceTest extends TestCase
         $emailParts = explode('@', $email, 2);
         $uniqueEmail = isset($emailParts[1])
             ? sprintf('%s+%s@%s', $emailParts[0], Str::uuid()->toString(), $emailParts[1])
-            : $email . '+' . Str::uuid()->toString();
+            : $email.'+'.Str::uuid()->toString();
 
         return $this->userService->create($this->account, [
             'name' => 'Tenant User',

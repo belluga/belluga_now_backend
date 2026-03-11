@@ -11,7 +11,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class LandlordRole extends Model
 {
-    use UsesLandlordConnection, SoftDeletes, HasSlug;
+    use HasSlug, SoftDeletes, UsesLandlordConnection;
 
     protected $fillable = [
         'name',
@@ -19,7 +19,8 @@ class LandlordRole extends Model
         'permissions',
     ];
 
-    public function users(): HasMany {
+    public function users(): HasMany
+    {
         return $this->hasMany(LandlordUser::class);
     }
 

@@ -6,13 +6,12 @@ namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\PushMessageAction;
-use Illuminate\Support\Arr;
 use MongoDB\BSON\UTCDateTime;
 
 class PushMetricsService
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function recordAction(PushMessage $message, array $payload, string $userId): ?PushMessageAction
     {
@@ -37,7 +36,7 @@ class PushMetricsService
             'metadata' => $payload['metadata'] ?? [],
             'context' => $payload['context'] ?? [],
             'idempotency_key' => $idempotencyKey,
-            'created_at' => new UTCDateTime(),
+            'created_at' => new UTCDateTime,
         ]);
 
         $this->updateAggregates($message, $action, $isUnique);
@@ -69,7 +68,7 @@ class PushMetricsService
     }
 
     /**
-     * @param array<string, mixed> $metrics
+     * @param  array<string, mixed>  $metrics
      * @return array<string, mixed>
      */
     private function incrementMetric(array $metrics, string $actionType, bool $isUnique): array
@@ -82,6 +81,7 @@ class PushMetricsService
 
         if ($actionType === 'delivered') {
             $metrics['delivered_count'] = ($metrics['delivered_count'] ?? 0) + 1;
+
             return $metrics;
         }
 

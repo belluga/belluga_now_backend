@@ -11,11 +11,11 @@ use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Application\MapPoiQueryService;
+use Belluga\MapPois\Console\Commands\RebuildMapPoisCommand;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
-use Belluga\MapPois\Console\Commands\RebuildMapPoisCommand;
 use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
 use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use Belluga\MapPois\Listeners\EventsPackage\SyncMapPoiOnEventCreated;
@@ -50,8 +50,8 @@ class MapPoisServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__ . '/../routes/map_pois.php');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->loadRoutesFrom(__DIR__.'/../routes/map_pois.php');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         if ($this->app->runningInConsole()) {
             $this->commands([

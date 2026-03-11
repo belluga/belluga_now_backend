@@ -2,8 +2,8 @@
 
 namespace Tests\Api\v1\Tenants\Auth;
 
-use Tests\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
+use Tests\TestCaseTenant;
 
 class ApiV1TenantMeTest extends TestCaseTenant
 {
@@ -13,7 +13,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
         }
     }
 
-    public function testTenantMeReturnsProfilePayload(): void
+    public function test_tenant_me_returns_profile_payload(): void
     {
         $email = fake()->unique()->safeEmail();
         $password = 'Secret!234';
@@ -46,7 +46,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
             uri: "{$this->base_api_tenant}me",
             headers: [
                 'Authorization' => "Bearer $token",
-                'Content-Type' => 'application/json'
+                'Content-Type' => 'application/json',
             ]
         );
 

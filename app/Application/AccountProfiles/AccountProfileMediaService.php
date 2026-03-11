@@ -119,7 +119,7 @@ class AccountProfileMediaService
 
     private function buildStoragePath(AccountProfile $profile, string $fileName): string
     {
-        return $this->baseDirectory($profile) . '/' . $fileName;
+        return $this->baseDirectory($profile).'/'.$fileName;
     }
 
     private function baseDirectory(AccountProfile $profile): string

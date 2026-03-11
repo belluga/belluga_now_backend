@@ -12,7 +12,7 @@ use MongoDB\BSON\UTCDateTime;
 class EventOccurrenceSyncService
 {
     /**
-     * @param array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}> $occurrences
+     * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
      */
     public function syncFromEvent(Event $event, array $occurrences): void
     {
@@ -83,7 +83,7 @@ class EventOccurrenceSyncService
     }
 
     /**
-     * @param array<string, mixed> $publication
+     * @param  array<string, mixed>  $publication
      */
     public function mirrorPublicationByEventId(string $eventId, array $publication): int
     {
@@ -109,7 +109,6 @@ class EventOccurrenceSyncService
     }
 
     /**
-     * @param mixed $value
      * @return array<int, mixed>|array<string, mixed>
      */
     private function normalizeArray(mixed $value): array
@@ -145,9 +144,6 @@ class EventOccurrenceSyncService
         return $this->normalizeArray($event->geo_location ?? null);
     }
 
-    /**
-     * @param mixed $value
-     */
     private function toCarbon(mixed $value): ?Carbon
     {
         if ($value instanceof Carbon) {
@@ -174,7 +170,6 @@ class EventOccurrenceSyncService
     }
 
     /**
-     * @param mixed $publication
      * @return array<string, mixed>
      */
     private function normalizePublication(mixed $publication, mixed $fallbackDate): array
@@ -190,7 +185,7 @@ class EventOccurrenceSyncService
     }
 
     /**
-     * @param array<string, mixed> $publication
+     * @param  array<string, mixed>  $publication
      */
     private function isEffectivelyPublished(array $publication, Carbon $now): bool
     {
@@ -206,7 +201,7 @@ class EventOccurrenceSyncService
 
     private function buildOccurrenceSlug(string $eventSlug, string $eventId, int $index): string
     {
-        $base = trim($eventSlug) !== '' ? trim($eventSlug) : ('event-' . substr($eventId, 0, 8));
+        $base = trim($eventSlug) !== '' ? trim($eventSlug) : ('event-'.substr($eventId, 0, 8));
 
         return sprintf('%s-occ-%d', $base, $index + 1);
     }

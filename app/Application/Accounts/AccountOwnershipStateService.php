@@ -8,10 +8,13 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Database\Eloquent\Builder;
+
 class AccountOwnershipStateService
 {
     public const TENANT_OWNED = 'tenant_owned';
+
     public const UNMANAGED = 'unmanaged';
+
     public const USER_OWNED = 'user_owned';
 
     /**
@@ -51,13 +54,12 @@ class AccountOwnershipStateService
     }
 
     /**
-     * @param array<string, bool>|null $userOperatedAccountLookup
+     * @param  array<string, bool>|null  $userOperatedAccountLookup
      */
     public function deriveOwnershipState(
         Account $account,
         ?array $userOperatedAccountLookup = null
-    ): string
-    {
+    ): string {
         $storedState = $this->normalize(
             is_string($account->ownership_state ?? null)
                 ? $account->ownership_state
@@ -96,13 +98,12 @@ class AccountOwnershipStateService
     }
 
     /**
-     * @param array<string, bool>|null $userOperatedAccountLookup
+     * @param  array<string, bool>|null  $userOperatedAccountLookup
      */
     public function hasUserOperator(
         Account $account,
         ?array $userOperatedAccountLookup = null
-    ): bool
-    {
+    ): bool {
         if ($userOperatedAccountLookup !== null) {
             return array_key_exists((string) $account->_id, $userOperatedAccountLookup);
         }
@@ -113,7 +114,7 @@ class AccountOwnershipStateService
     }
 
     /**
-     * @param array<int, string>|null $candidateAccountIds
+     * @param  array<int, string>|null  $candidateAccountIds
      * @return array<string, bool>
      */
     public function userOperatedAccountIdLookup(?array $candidateAccountIds = null): array

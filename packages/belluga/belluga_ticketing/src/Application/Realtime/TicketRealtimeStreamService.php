@@ -16,8 +16,7 @@ class TicketRealtimeStreamService
 {
     public function __construct(
         private readonly TicketingRuntimeSettingsService $settings,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -164,4 +163,3 @@ class TicketRealtimeStreamService
         ];
     }
 }
-

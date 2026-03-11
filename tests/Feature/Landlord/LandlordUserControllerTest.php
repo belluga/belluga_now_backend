@@ -17,7 +17,7 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
         $this->ensureSupportRoles();
     }
 
-    public function testCreatesLandlordUser(): void
+    public function test_creates_landlord_user(): void
     {
         $payload = [
             'name' => 'Support Staff',
@@ -34,7 +34,7 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
             ->assertJsonPath('data.name', 'Support Staff');
     }
 
-    public function testIndexFiltersByName(): void
+    public function test_index_filters_by_name(): void
     {
         $this->createLandlordUser('Filter Target', 'filter.target@example.org');
         $this->createLandlordUser('Another Staff', 'another.staff@example.org');
@@ -50,7 +50,7 @@ class LandlordUserControllerTest extends TestCaseAuthenticated
         $this->assertSame('Filter Target', $response->json('data.0.name'));
     }
 
-    public function testIndexIgnoresUnsupportedSortAndUsesDefaultOrder(): void
+    public function test_index_ignores_unsupported_sort_and_uses_default_order(): void
     {
         $this->createLandlordUser('Alpha Staff', 'alpha.staff@example.org');
         $this->createLandlordUser('Zulu Staff', 'zulu.staff@example.org');

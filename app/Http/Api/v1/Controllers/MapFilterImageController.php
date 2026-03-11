@@ -15,8 +15,7 @@ final class MapFilterImageController extends Controller
 {
     public function __construct(
         private readonly MapFilterImageStorageService $storageService,
-    ) {
-    }
+    ) {}
 
     public function store(MapFilterImageUploadRequest $request): JsonResponse
     {

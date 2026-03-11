@@ -9,9 +9,9 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
-use Tests\Helpers\TenantLabels;
 
 class TenantBrandingControllerTest extends TestCaseTenant
 {
@@ -26,6 +26,7 @@ class TenantBrandingControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private array $headers;
+
     private string $baseUrl;
 
     protected function setUp(): void
@@ -45,7 +46,7 @@ class TenantBrandingControllerTest extends TestCaseTenant
         $this->headers['X-App-Domain'] = 'tenant-sigma.test';
     }
 
-    public function testUpdatePersistsBrandingData(): void
+    public function test_update_persists_branding_data(): void
     {
         $payload = [
             'theme_data_settings' => [
@@ -66,7 +67,7 @@ class TenantBrandingControllerTest extends TestCaseTenant
         );
     }
 
-    public function testUpdateStoresUploadedLogos(): void
+    public function test_update_stores_uploaded_logos(): void
     {
         Storage::fake('public');
 

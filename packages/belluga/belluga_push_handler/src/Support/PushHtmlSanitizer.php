@@ -79,6 +79,7 @@ final class PushHtmlSanitizer
         foreach ($children as $child) {
             if ($child->nodeType === XML_COMMENT_NODE) {
                 $node->removeChild($child);
+
                 continue;
             }
 
@@ -90,14 +91,17 @@ final class PushHtmlSanitizer
             if (! in_array($tagName, self::ALLOWED_TAGS, true)) {
                 if (in_array($tagName, ['script', 'style'], true)) {
                     $node->removeChild($child);
+
                     continue;
                 }
                 self::unwrapNode($child);
+
                 continue;
             }
 
             if (! self::sanitizeElement($child)) {
                 $node->removeChild($child);
+
                 continue;
             }
 
@@ -116,10 +120,12 @@ final class PushHtmlSanitizer
         if ($tagName === 'span') {
             self::sanitizeSpanStyle($element);
             self::stripAttributes($element, ['style']);
+
             return true;
         }
 
         self::stripAttributes($element, []);
+
         return true;
     }
 
@@ -168,11 +174,12 @@ final class PushHtmlSanitizer
             if ($value === '' || ! self::isAllowedStyleValue($property, $value)) {
                 continue;
             }
-            $sanitized[] = $property . ': ' . $value;
+            $sanitized[] = $property.': '.$value;
         }
 
         if ($sanitized === []) {
             $element->removeAttribute('style');
+
             return;
         }
 
@@ -205,6 +212,7 @@ final class PushHtmlSanitizer
         }
 
         $scheme = parse_url($value, PHP_URL_SCHEME);
+
         return $scheme === 'http' || $scheme === 'https';
     }
 

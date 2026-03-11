@@ -11,8 +11,7 @@ class EventTypeResolverAdapter implements EventTypeResolverContract
 {
     public function __construct(
         private readonly EventTypeRegistryService $registryService,
-    ) {
-    }
+    ) {}
 
     public function resolveById(string $eventTypeId): ?array
     {

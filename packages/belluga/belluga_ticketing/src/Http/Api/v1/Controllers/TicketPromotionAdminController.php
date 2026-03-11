@@ -99,4 +99,3 @@ class TicketPromotionAdminController extends Controller
         });
     }
 }
-

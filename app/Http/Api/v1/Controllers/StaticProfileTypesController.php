@@ -6,9 +6,9 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\StaticAssets\StaticProfileTypeRegistryManagementService;
 use App\Application\StaticAssets\StaticProfileTypeRegistryService;
-use App\Http\Controllers\Controller;
 use App\Http\Api\v1\Requests\StaticProfileTypeStoreRequest;
 use App\Http\Api\v1\Requests\StaticProfileTypeUpdateRequest;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,8 +17,7 @@ class StaticProfileTypesController extends Controller
     public function __construct(
         private readonly StaticProfileTypeRegistryService $registryService,
         private readonly StaticProfileTypeRegistryManagementService $managementService,
-    ) {
-    }
+    ) {}
 
     public function index(): JsonResponse
     {

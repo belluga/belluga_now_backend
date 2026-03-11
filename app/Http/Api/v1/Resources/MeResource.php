@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Resources;
 
 use App\Models\Landlord\LandlordUser;
-use App\Models\Tenants\AccountUser;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\AccountUser;
 use App\Support\ValueObjects\SocialScoreDefaults;
 
 final class MeResource
@@ -20,7 +20,7 @@ final class MeResource
 
         return [
             'tenant_id' => $tenant ? (string) $tenant->_id : null,
-            'data' => static::profilePayload(
+            'data' => self::profilePayload(
                 userId: (string) $user->_id,
                 displayName: $user->name ?? '',
                 avatarUrl: null,
@@ -49,7 +49,7 @@ final class MeResource
     {
         return [
             'tenant_id' => null,
-            'data' => static::profilePayload(
+            'data' => self::profilePayload(
                 userId: (string) $user->_id,
                 displayName: $user->name ?? '',
                 avatarUrl: null,

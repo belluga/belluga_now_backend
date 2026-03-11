@@ -16,10 +16,10 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class AccountUser extends Authenticatable
 {
+    use DocumentModel;
     use HasApiTokens;
     use Notifiable;
     use SoftDeletes;
-    use DocumentModel;
     use UsesTenantConnection;
 
     protected $table = 'account_users';
@@ -51,7 +51,7 @@ class AccountUser extends Authenticatable
         'email_verified_at' => 'datetime',
         'first_seen_at' => 'datetime',
         'registered_at' => 'datetime',
-        'password' => 'hashed'
+        'password' => 'hashed',
     ];
 
     protected static function booted(): void
@@ -148,5 +148,4 @@ class AccountUser extends Authenticatable
     {
         return in_array($this->identity_state, ['registered', 'validated'], true);
     }
-
 }

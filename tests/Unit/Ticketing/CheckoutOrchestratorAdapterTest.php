@@ -18,7 +18,7 @@ class CheckoutOrchestratorAdapterTest extends TestCase
         parent::tearDown();
     }
 
-    public function testPaidModeFailsFastWhenCheckoutIntegrationIsDisabled(): void
+    public function test_paid_mode_fails_fast_when_checkout_integration_is_disabled(): void
     {
         $store = Mockery::mock(SettingsStoreContract::class);
         $store->shouldReceive('getNamespaceValue')
@@ -36,7 +36,7 @@ class CheckoutOrchestratorAdapterTest extends TestCase
         $this->assertSame('idemp-1', $result['idempotency_key']);
     }
 
-    public function testFreeModeIsAcceptedWithoutExternalCheckoutIntegration(): void
+    public function test_free_mode_is_accepted_without_external_checkout_integration(): void
     {
         $store = Mockery::mock(SettingsStoreContract::class);
         $store->shouldReceive('mergeNamespace')
@@ -50,7 +50,7 @@ class CheckoutOrchestratorAdapterTest extends TestCase
         $this->assertSame('idemp-2', $result['idempotency_key']);
     }
 
-    public function testInvalidCheckoutModeIsRejected(): void
+    public function test_invalid_checkout_mode_is_rejected(): void
     {
         $store = Mockery::mock(SettingsStoreContract::class);
         $store->shouldReceive('mergeNamespace')

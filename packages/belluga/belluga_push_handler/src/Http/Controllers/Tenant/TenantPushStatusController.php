@@ -15,8 +15,7 @@ class TenantPushStatusController
     public function __construct(
         private readonly PushCredentialService $credentialService,
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     public function show(): JsonResponse
     {
@@ -47,8 +46,8 @@ class TenantPushStatusController
     }
 
     /**
-     * @param array<string, mixed> $push
-     * @param array<string, mixed> $firebase
+     * @param  array<string, mixed>  $push
+     * @param  array<string, mixed>  $firebase
      */
     private function isConfigured(array $push, array $firebase): bool
     {

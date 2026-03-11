@@ -249,6 +249,7 @@ class PushMessageStoreRequest extends FormRequest
                             'Route key is not defined in tenant settings.'
                         );
                     }
+
                     continue;
                 }
 
@@ -257,6 +258,7 @@ class PushMessageStoreRequest extends FormRequest
                         "payload_template.buttons.$index.action.route_key",
                         $this->formatAllowedRouteKeysMessage($allowedKeys)
                     );
+
                     continue;
                 }
 
@@ -325,6 +327,7 @@ class PushMessageStoreRequest extends FormRequest
                     "payload_template.steps.$index",
                     'Step must be an object.'
                 );
+
                 continue;
             }
 
@@ -393,6 +396,7 @@ class PushMessageStoreRequest extends FormRequest
 
             if (! in_array($type, ['question', 'selector'], true)) {
                 $this->validateStepButtons($validator, $step, $index, $routes, $allowedKeys);
+
                 continue;
             }
 
@@ -403,6 +407,7 @@ class PushMessageStoreRequest extends FormRequest
                     'Config is required for question/selector steps.'
                 );
                 $this->validateStepButtons($validator, $step, $index, $routes, $allowedKeys);
+
                 continue;
             }
 
@@ -518,6 +523,7 @@ class PushMessageStoreRequest extends FormRequest
                             "payload_template.steps.$index.config.options.$optionIndex",
                             'Option must be an object.'
                         );
+
                         continue;
                     }
                     $id = $option['id'] ?? null;
@@ -626,9 +632,9 @@ class PushMessageStoreRequest extends FormRequest
     }
 
     /**
-     * @param array<string, mixed> $step
-     * @param array<string, array<string, mixed>> $routes
-     * @param array<int, string>|null $allowedKeys
+     * @param  array<string, mixed>  $step
+     * @param  array<string, array<string, mixed>>  $routes
+     * @param  array<int, string>|null  $allowedKeys
      */
     private function validateStepButtons(
         Validator $validator,
@@ -661,6 +667,7 @@ class PushMessageStoreRequest extends FormRequest
                         'Route key is not defined in tenant settings.'
                     );
                 }
+
                 continue;
             }
 
@@ -669,6 +676,7 @@ class PushMessageStoreRequest extends FormRequest
                     "payload_template.steps.$index.buttons.$buttonIndex.action.route_key",
                     $this->formatAllowedRouteKeysMessage($allowedKeys)
                 );
+
                 continue;
             }
 
@@ -738,11 +746,12 @@ class PushMessageStoreRequest extends FormRequest
     }
 
     /**
-     * @param array<string, mixed> $entry
+     * @param  array<string, mixed>  $entry
      */
     private function isActiveEntry(array $entry): bool
     {
         $active = $entry['active'] ?? true;
+
         return $active !== false;
     }
 
@@ -790,7 +799,7 @@ class PushMessageStoreRequest extends FormRequest
     }
 
     /**
-     * @param array<string, array<string, mixed>> $routes
+     * @param  array<string, array<string, mixed>>  $routes
      * @return array<int, string>|null
      */
     private function allowedRouteKeysForValidation(array $routes): ?array
@@ -812,7 +821,7 @@ class PushMessageStoreRequest extends FormRequest
     }
 
     /**
-     * @param array<int, string> $allowedKeys
+     * @param  array<int, string>  $allowedKeys
      */
     private function formatAllowedRouteKeysMessage(array $allowedKeys): string
     {

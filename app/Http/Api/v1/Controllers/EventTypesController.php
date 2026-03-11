@@ -17,8 +17,7 @@ class EventTypesController extends Controller
     public function __construct(
         private readonly EventTypeRegistryService $registryService,
         private readonly EventTypeRegistryManagementService $managementService,
-    ) {
-    }
+    ) {}
 
     public function index(): JsonResponse
     {

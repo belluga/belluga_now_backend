@@ -18,8 +18,7 @@ class EventOccurrenceReconciliationService
     public function __construct(
         private readonly TenantExecutionContextContract $tenantExecutionContext,
         private readonly EventOccurrenceSyncService $occurrenceSyncService
-    ) {
-    }
+    ) {}
 
     public function reconcileAllTenants(): void
     {
@@ -109,9 +108,6 @@ class EventOccurrenceReconciliationService
         ]];
     }
 
-    /**
-     * @param mixed $value
-     */
     private function toCarbon(mixed $value): ?Carbon
     {
         if ($value instanceof Carbon) {
@@ -139,7 +135,8 @@ class EventOccurrenceReconciliationService
 
     /**
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     private function runTenantTransaction(callable $callback): mixed
@@ -178,4 +175,3 @@ class EventOccurrenceReconciliationService
             || str_contains($message, 'starttransaction');
     }
 }
-

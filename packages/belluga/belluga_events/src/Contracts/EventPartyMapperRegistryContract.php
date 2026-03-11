@@ -15,4 +15,3 @@ interface EventPartyMapperRegistryContract
 
     public function find(string $partyType): ?EventPartyMapperContract;
 }
-

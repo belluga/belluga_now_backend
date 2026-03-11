@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Jobs\Ticketing;
 
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Settings\Contracts\SettingsStoreContract;
 use Belluga\Ticketing\Application\Lifecycle\TicketUnitLifecycleService;
-use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,8 +24,7 @@ class ExpireIssuedTicketUnitsJob implements ShouldQueue
 
     public function __construct(
         private readonly int $batchSize = 500,
-    ) {
-    }
+    ) {}
 
     public function handle(
         TicketUnitLifecycleService $lifecycle,
@@ -72,4 +71,3 @@ class ExpireIssuedTicketUnitsJob implements ShouldQueue
         return max(0, min(1440, (int) $raw));
     }
 }
-

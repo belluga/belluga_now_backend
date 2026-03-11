@@ -25,12 +25,12 @@ class AccountStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'required|string|max:'.InputConstraints::NAME_MAX,
             'document' => 'sometimes|array',
             'document.type' => 'required_with:document|string|in:cpf,cnpj',
-            'document.number' => 'required_with:document|string|max:' . InputConstraints::NAME_MAX,
+            'document.number' => 'required_with:document|string|max:'.InputConstraints::NAME_MAX,
             'ownership_state' => 'required|string|in:tenant_owned,unmanaged',
-            'organization_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
+            'organization_id' => 'sometimes|string|size:'.InputConstraints::OBJECT_ID_LENGTH,
         ];
     }
 

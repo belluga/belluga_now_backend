@@ -10,9 +10,9 @@ interface PushTenantContextContract
 
     /**
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     public function runForTenantSlug(string $tenantSlug, callable $callback): mixed;
 }
-

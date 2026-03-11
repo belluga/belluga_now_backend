@@ -19,8 +19,7 @@ class StaticAssetsController extends Controller
         private readonly StaticAssetManagementService $assetService,
         private readonly StaticAssetMediaService $mediaService,
         private readonly StaticAssetQueryService $assetQueryService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {

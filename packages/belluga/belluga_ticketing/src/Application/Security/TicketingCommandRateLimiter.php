@@ -19,7 +19,7 @@ class TicketingCommandRateLimiter
         $decay = 60;
 
         $identity = $principalId && $principalId !== '' ? $principalId : ($ip ?? 'anon');
-        $scopePart = $scopeKey && $scopeKey !== '' ? ':' . $scopeKey : '';
+        $scopePart = $scopeKey && $scopeKey !== '' ? ':'.$scopeKey : '';
         $key = sprintf('ticketing:%s:%s%s', $action, $identity, $scopePart);
 
         if (RateLimiter::tooManyAttempts($key, $limit)) {
@@ -51,4 +51,3 @@ class TicketingCommandRateLimiter
         return max(1, (int) $configured);
     }
 }
-

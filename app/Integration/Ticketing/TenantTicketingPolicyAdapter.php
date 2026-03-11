@@ -11,8 +11,7 @@ class TenantTicketingPolicyAdapter implements TicketingPolicyContract
 {
     public function __construct(
         private readonly SettingsStoreContract $settingsStore,
-    ) {
-    }
+    ) {}
 
     public function isTicketingEnabled(): bool
     {
@@ -29,4 +28,3 @@ class TenantTicketingPolicyAdapter implements TicketingPolicyContract
         return in_array($mode, ['auth_only', 'guest_or_auth'], true) ? $mode : 'auth_only';
     }
 }
-

@@ -46,28 +46,28 @@ class TenantProfileServiceTest extends TestCase
         ]);
     }
 
-    public function testUpdateProfileUpdatesAttributes(): void
+    public function test_update_profile_updates_attributes(): void
     {
         $updated = $this->service->updateProfile($this->user, ['name' => 'Updated Name']);
 
         $this->assertSame('Updated Name', $updated->name);
     }
 
-    public function testUpdateProfileRejectsEmptyPayload(): void
+    public function test_update_profile_rejects_empty_payload(): void
     {
         $this->expectException(ValidationException::class);
 
         $this->service->updateProfile($this->user, []);
     }
 
-    public function testUpdatePasswordHashesSecret(): void
+    public function test_update_password_hashes_secret(): void
     {
         $this->service->updatePassword($this->user, 'Another!234');
 
         $this->assertTrue(Hash::check('Another!234', (string) $this->user->fresh()->password));
     }
 
-    public function testAddEmailAppendsNewAddress(): void
+    public function test_add_email_appends_new_address(): void
     {
         $newEmail = $this->uniqueEmail();
 
@@ -76,21 +76,21 @@ class TenantProfileServiceTest extends TestCase
         $this->assertContains($newEmail, $updated->emails);
     }
 
-    public function testRemoveEmailPreventsRemovingLast(): void
+    public function test_remove_email_prevents_removing_last(): void
     {
         $this->expectException(HttpResponseException::class);
 
         $this->service->removeEmail($this->user, $this->user->emails[0]);
     }
 
-    public function testAddPhonesStoresParsedNumbers(): void
+    public function test_add_phones_stores_parsed_numbers(): void
     {
         $updated = $this->service->addPhones($this->user, [$this->uniquePhoneNumber()]);
 
         $this->assertNotEmpty($updated->phones);
     }
 
-    public function testAddPhonesRejectsInvalid(): void
+    public function test_add_phones_rejects_invalid(): void
     {
         $this->expectException(ValidationException::class);
 
@@ -122,7 +122,7 @@ class TenantProfileServiceTest extends TestCase
 
     private function uniquePhoneNumber(): string
     {
-        return '+55' . random_int(1000000000, 1999999999);
+        return '+55'.random_int(1000000000, 1999999999);
     }
 
     private function uniqueEmail(): string

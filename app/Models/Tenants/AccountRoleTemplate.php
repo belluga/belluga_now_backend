@@ -14,7 +14,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class AccountRoleTemplate extends Model
 {
-    use SoftDeletes, UsesTenantConnection, HasOwner, HasSlug;
+    use HasOwner, HasSlug, SoftDeletes, UsesTenantConnection;
 
     protected $fillable = [
         'name',
@@ -22,11 +22,13 @@ class AccountRoleTemplate extends Model
         'permissions',
     ];
 
-    public function account(): BelongsTo {
+    public function account(): BelongsTo
+    {
         return $this->belongsTo(Account::class);
     }
 
-    public function getSlugOptions(): SlugOptions {
+    public function getSlugOptions(): SlugOptions
+    {
         return SlugOptions::create()
             ->allowDuplicateSlugs()
             ->generateSlugsFrom('name')

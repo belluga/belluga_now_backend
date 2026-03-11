@@ -8,4 +8,3 @@ interface PushAccountContextContract
 {
     public function currentAccountId(): ?string;
 }
-

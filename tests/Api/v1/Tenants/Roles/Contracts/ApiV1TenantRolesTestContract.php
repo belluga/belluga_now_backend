@@ -9,29 +9,29 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
 {
     public function testRoleRolesManagerCreate(): void
     {
-        $this->tenant->role_roles_manager->name = "Roles Manager";
+        $this->tenant->role_roles_manager->name = 'Roles Manager';
 
         $response = $this->rolesCreate(
             [
-                "name" => $this->tenant->role_roles_manager->name,
-                "description" => "Roles Manager Role",
-                "permissions" => [
-                    "profile:view",
-                    "profile:update",
-                    "landlord-user:view",
-                    "landlord-user:create",
-                    "landlord-user:delete",
-                    "landlord-user:update"
+                'name' => $this->tenant->role_roles_manager->name,
+                'description' => 'Roles Manager Role',
+                'permissions' => [
+                    'profile:view',
+                    'profile:update',
+                    'landlord-user:view',
+                    'landlord-user:create',
+                    'landlord-user:delete',
+                    'landlord-user:update',
                 ],
-        ]);
+            ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->tenant->role_roles_manager->id = $response->json()['data']['id'];
@@ -40,37 +40,37 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
 
     public function testRoleUsersManagerCreate(): void
     {
-        $this->tenant->role_users_manager->name = "Users Manager";
+        $this->tenant->role_users_manager->name = 'Users Manager';
 
         $response = $this->rolesCreate(
             [
-            "name" => $this->tenant->role_users_manager->name,
-            "description" => "Tenants Manager Role",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
-                "landlord-user:view",
-                "landlord-user:create",
-                "landlord-user:delete",
-                "landlord-user:update",
-                "tenants:view",
-                "tenants:create",
-                "tenants:delete",
-                "tenants:update",
-                "tenants-roles:view",
-                "tenants-roles:create",
-                "tenants-roles:delete",
-                "tenants-roles:update",
-            ],
-        ]);
+                'name' => $this->tenant->role_users_manager->name,
+                'description' => 'Tenants Manager Role',
+                'permissions' => [
+                    'profile:view',
+                    'profile:update',
+                    'landlord-user:view',
+                    'landlord-user:create',
+                    'landlord-user:delete',
+                    'landlord-user:update',
+                    'tenants:view',
+                    'tenants:create',
+                    'tenants:delete',
+                    'tenants:update',
+                    'tenants-roles:view',
+                    'tenants-roles:create',
+                    'tenants-roles:delete',
+                    'tenants-roles:update',
+                ],
+            ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->tenant->role_users_manager->id = $response->json()['data']['id'];
@@ -79,25 +79,25 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
 
     public function testRoleVisitorCreate(): void
     {
-        $this->tenant->role_visitor->name = "Visitor";
+        $this->tenant->role_visitor->name = 'Visitor';
 
         $response = $this->rolesCreate(
             [
-            "name" => $this->tenant->role_visitor->name,
-            "description" => "Visitor Role",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
-            ],
-        ]);
+                'name' => $this->tenant->role_visitor->name,
+                'description' => 'Visitor Role',
+                'permissions' => [
+                    'profile:view',
+                    'profile:update',
+                ],
+            ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->tenant->role_visitor->id = $response->json()['data']['id'];
@@ -106,25 +106,25 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
 
     public function testRoleDisposableCreate(): void
     {
-        $this->tenant->role_disposable->name = "Disposable";
+        $this->tenant->role_disposable->name = 'Disposable';
 
         $response = $this->rolesCreate(
             [
-            "name" => $this->tenant->role_disposable->name,
-            "description" => "To be deleted",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
-            ],
-        ]);
+                'name' => $this->tenant->role_disposable->name,
+                'description' => 'To be deleted',
+                'permissions' => [
+                    'profile:view',
+                    'profile:update',
+                ],
+            ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->tenant->role_disposable->id = $response->json()['data']['id'];
@@ -152,10 +152,10 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
 
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
             ],
         ]);
     }
@@ -165,10 +165,10 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
         $roleUpdate = $this->rolesUpdate(
             $this->tenant->role_disposable->id,
             [
-                "name" => "Updated Role Name",
-                "permissions" => [
-                    "add" => ["user:view", "user:create", "role:view", "role:create"],
-                    "remove" => ["profile:view", "profile:update"],
+                'name' => 'Updated Role Name',
+                'permissions' => [
+                    'add' => ['user:view', 'user:create', 'role:view', 'role:create'],
+                    'remove' => ['profile:view', 'profile:update'],
                 ],
             ]
         );
@@ -178,9 +178,9 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
         $rolesShow = $this->rolesShow($this->tenant->role_disposable->id);
         $rolesShow->assertOk();
 
-        $this->assertEquals("Updated Role Name", $rolesShow->json()['data']['name']);
+        $this->assertEquals('Updated Role Name', $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["user:view", "user:create", "role:view", "role:create"],
+            ['user:view', 'user:create', 'role:view', 'role:create'],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -289,7 +289,7 @@ abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
             method: 'delete',
             uri: "{$this->base_tenant_api_admin}roles/$roleId",
             data: [
-                "background_role_id" => $this->tenant->role_visitor->id,
+                'background_role_id' => $this->tenant->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );

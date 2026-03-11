@@ -14,8 +14,7 @@ class OccurrenceWriteGuardService
         private readonly TicketingPolicyContract $policy,
         private readonly OccurrenceReadContract $occurrenceRead,
         private readonly OccurrencePublicationContract $occurrencePublication,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{allowed:bool,code:string,occurrence?:array<string,mixed>}

@@ -26,12 +26,10 @@ class AccountRolesDeleteRequest extends FormRequest
             'background_role_id' => [
                 'required',
                 'string',
-                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'size:'.InputConstraints::OBJECT_ID_LENGTH,
                 'regex:/^[a-fA-F0-9]{24}$/',
                 'exists:tenant.account_role_templates,_id',
-            ]
+            ],
         ];
     }
-
-
 }

@@ -7,9 +7,9 @@ namespace App\Application\Accounts;
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use MongoDB\BSON\ObjectId;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Pagination\LengthAwarePaginator;
+use MongoDB\BSON\ObjectId;
 
 class AccountUserQueryService extends AbstractQueryService
 {
@@ -34,7 +34,7 @@ class AccountUserQueryService extends AbstractQueryService
             ->first();
 
         if (! $user) {
-            throw (new ModelNotFoundException())->setModel(AccountUser::class, [$userId]);
+            throw (new ModelNotFoundException)->setModel(AccountUser::class, [$userId]);
         }
 
         return $user;
@@ -47,7 +47,7 @@ class AccountUserQueryService extends AbstractQueryService
             ->first();
 
         if (! $user) {
-            throw (new ModelNotFoundException())->setModel(AccountUser::class, [$userId]);
+            throw (new ModelNotFoundException)->setModel(AccountUser::class, [$userId]);
         }
 
         return $user;
@@ -63,7 +63,7 @@ class AccountUserQueryService extends AbstractQueryService
     protected function baseSearchableFields(): array
     {
         return array_diff(
-            (new AccountUser())->getFillable(),
+            (new AccountUser)->getFillable(),
             [
                 'password',
                 'credentials',

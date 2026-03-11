@@ -6,6 +6,4 @@ namespace App\Exceptions\FoundationControlPlane;
 
 use Exception;
 
-class ConcurrencyConflictException extends Exception
-{
-}
+class ConcurrencyConflictException extends Exception {}

@@ -28,6 +28,7 @@ class RebuildMapPoisCommand extends Command
         $allowedSources = ['all', 'events', 'account_profiles', 'static_assets'];
         if (! in_array($source, $allowedSources, true)) {
             $this->error('Invalid source. Use one of: all, events, account_profiles, static_assets.');
+
             return self::INVALID;
         }
 
@@ -35,6 +36,7 @@ class RebuildMapPoisCommand extends Command
         $enabled = (bool) ($ingest['rebuild']['enabled'] ?? true);
         if (! $enabled) {
             $this->error('Map rebuild is disabled by tenant settings (map_ingest.rebuild.enabled=false).');
+
             return self::FAILURE;
         }
 
@@ -86,7 +88,7 @@ class RebuildMapPoisCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $ingest
+     * @param  array<string, mixed>  $ingest
      */
     private function resolveBatchSize(array $ingest): int
     {

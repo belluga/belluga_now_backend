@@ -7,7 +7,6 @@ namespace Tests\Unit\Application\Branding;
 use App\Application\Branding\BrandingManifestService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -34,7 +33,7 @@ class BrandingManifestServiceTest extends TestCase
         $this->service = $this->app->make(BrandingManifestService::class);
     }
 
-    public function testBuildManifestUsesTenantDataWhenAvailable(): void
+    public function test_build_manifest_uses_tenant_data_when_available(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -45,7 +44,7 @@ class BrandingManifestServiceTest extends TestCase
         $this->assertCount(3, $manifest['icons']);
     }
 
-    public function testResolveLogoSettingFallsBackToLandlord(): void
+    public function test_resolve_logo_setting_falls_back_to_landlord(): void
     {
         Tenant::forgetCurrent();
 
@@ -54,7 +53,7 @@ class BrandingManifestServiceTest extends TestCase
         $this->assertNotNull($value);
     }
 
-    public function testAssetResponseReturnsNotFoundWhenMissing(): void
+    public function test_asset_response_returns_not_found_when_missing(): void
     {
         Storage::fake('public');
 

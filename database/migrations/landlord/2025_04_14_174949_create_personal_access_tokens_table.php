@@ -1,8 +1,8 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use MongoDB\Laravel\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {
@@ -15,7 +15,7 @@ return new class extends Migration
             $collection->unique('token');
             $collection->sparse('last_used_at');
             $collection->sparse('expires_at');
-            $collection->index(['created_at' => -1, "updated_at" => -1], );
+            $collection->index(['created_at' => -1, 'updated_at' => -1]);
         });
     }
 

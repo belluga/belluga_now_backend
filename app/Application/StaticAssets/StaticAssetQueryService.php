@@ -6,8 +6,8 @@ namespace App\Application\StaticAssets;
 
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\StaticAsset;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Pagination\LengthAwarePaginator;
 use MongoDB\BSON\ObjectId;
 
 class StaticAssetQueryService extends AbstractQueryService
@@ -36,7 +36,7 @@ class StaticAssetQueryService extends AbstractQueryService
         }
 
         if (! $asset) {
-            throw (new ModelNotFoundException())->setModel(StaticAsset::class, [$assetId]);
+            throw (new ModelNotFoundException)->setModel(StaticAsset::class, [$assetId]);
         }
 
         return $asset;
@@ -47,7 +47,7 @@ class StaticAssetQueryService extends AbstractQueryService
         $asset = StaticAsset::query()->where('slug', $slug)->first();
 
         if (! $asset) {
-            throw (new ModelNotFoundException())->setModel(StaticAsset::class, [$slug]);
+            throw (new ModelNotFoundException)->setModel(StaticAsset::class, [$slug]);
         }
 
         return $asset;
@@ -88,7 +88,6 @@ class StaticAssetQueryService extends AbstractQueryService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, float>|null
      */
     private function formatLocation(mixed $location): ?array
@@ -110,7 +109,7 @@ class StaticAssetQueryService extends AbstractQueryService
 
     protected function baseSearchableFields(): array
     {
-        return (new StaticAsset())->getFillable();
+        return (new StaticAsset)->getFillable();
     }
 
     protected function stringFields(): array

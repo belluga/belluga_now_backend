@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\StaticAssets;
 
-use App\Models\Landlord\Tenant;
-use Belluga\MapPois\Models\Tenants\MapPoi;
-use App\Models\Tenants\StaticAsset;
-use App\Models\Tenants\StaticProfileType;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\StaticAsset;
+use App\Models\Tenants\StaticProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -49,7 +49,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testStaticProfileTypeIndexListsRegistry(): void
+    public function test_static_profile_type_index_lists_registry(): void
     {
         StaticProfileType::query()->delete();
         StaticProfileType::create([
@@ -73,7 +73,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.map_category', 'beach');
     }
 
-    public function testStaticProfileTypeCreate(): void
+    public function test_static_profile_type_create(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}static_profile_types",
@@ -96,7 +96,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.has_content', true);
     }
 
-    public function testStaticProfileTypeCreateValidation(): void
+    public function test_static_profile_type_create_validation(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}static_profile_types",
@@ -107,7 +107,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testStaticProfileTypeCreateRejectsDuplicateType(): void
+    public function test_static_profile_type_create_rejects_duplicate_type(): void
     {
         StaticProfileType::query()->delete();
         StaticProfileType::create([
@@ -132,7 +132,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testStaticProfileTypeUpdate(): void
+    public function test_static_profile_type_update(): void
     {
         StaticProfileType::query()->delete();
         StaticProfileType::create([
@@ -172,7 +172,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.has_bio', true);
     }
 
-    public function testStaticProfileTypeUpdateAllowsTypeRenameAndPropagatesDependents(): void
+    public function test_static_profile_type_update_allows_type_rename_and_propagates_dependents(): void
     {
         StaticProfileType::query()->delete();
         StaticAsset::query()->delete();
@@ -255,7 +255,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
-    public function testStaticProfileTypeUpdatePropagatesMapCategoryWithoutTypeRename(): void
+    public function test_static_profile_type_update_propagates_map_category_without_type_rename(): void
     {
         StaticProfileType::query()->delete();
         StaticAsset::query()->delete();
@@ -309,7 +309,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
-    public function testStaticProfileTypeUpdateRejectsDuplicateTypeRename(): void
+    public function test_static_profile_type_update_rejects_duplicate_type_rename(): void
     {
         StaticProfileType::query()->delete();
 
@@ -340,7 +340,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type']);
     }
 
-    public function testStaticProfileTypeDelete(): void
+    public function test_static_profile_type_delete(): void
     {
         StaticProfileType::query()->delete();
         StaticProfileType::create([

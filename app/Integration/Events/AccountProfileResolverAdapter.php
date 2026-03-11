@@ -128,7 +128,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $normalizedSearch = trim((string) ($search ?? ''));
         $likePattern = $normalizedSearch === ''
             ? null
-            : '%' . addcslashes($normalizedSearch, '%_\\') . '%';
+            : '%'.addcslashes($normalizedSearch, '%_\\').'%';
 
         $venues = $this->queryCandidatesByType('venue', $normalizedLimit, $likePattern);
         $artists = $this->queryCandidatesByType('artist', $normalizedLimit, $likePattern);

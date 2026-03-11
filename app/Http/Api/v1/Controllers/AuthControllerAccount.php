@@ -20,17 +20,16 @@ class AuthControllerAccount extends Controller
     public function __construct(
         private readonly AccountAuthenticationService $authentication,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function login(LoginEmailRequest $request): JsonResponse
     {
         try {
-        $result = $this->authentication->login(
-            $request->email,
-            $request->password,
-            $request->device_name
-        );
+            $result = $this->authentication->login(
+                $request->email,
+                $request->password,
+                $request->device_name
+            );
         } catch (InvalidCredentialsException $exception) {
             return response()->json([
                 'message' => $exception->getMessage(),
