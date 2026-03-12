@@ -7,9 +7,9 @@ namespace Tests\Unit\Application\Accounts;
 use App\Application\Accounts\AccountUserAccessService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Models\Landlord\Tenant;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -43,13 +43,13 @@ class AccountUserAccessServiceTest extends TestCase
         $tenant->makeCurrent();
 
         $this->account = Account::create([
-            'name' => 'Test Account ' . uniqid(),
+            'name' => 'Test Account '.uniqid(),
             'document' => (string) random_int(100000000, 999999999),
         ]);
 
         $this->user = AccountUser::create([
             'name' => 'Account Admin',
-            'emails' => ['admin+' . uniqid() . '@tenant.test'],
+            'emails' => ['admin+'.uniqid().'@tenant.test'],
             'password' => Hash::make('Secret!234'),
             'identity_state' => 'registered',
             'registered_at' => Carbon::now(),
@@ -66,7 +66,7 @@ class AccountUserAccessServiceTest extends TestCase
         ]);
     }
 
-    public function testAccountAccessIdsIncludesAssignedAccount(): void
+    public function test_account_access_ids_includes_assigned_account(): void
     {
         $ids = $this->service->accountAccessIds($this->user);
 
@@ -74,7 +74,7 @@ class AccountUserAccessServiceTest extends TestCase
         $this->assertContains((string) $this->account->_id, $ids);
     }
 
-    public function testSyncCredentialStoresPassword(): void
+    public function test_sync_credential_stores_password(): void
     {
         $credential = $this->service->syncCredential($this->user, 'password', 'user@example.org', 'secret-hash');
 
@@ -82,9 +82,9 @@ class AccountUserAccessServiceTest extends TestCase
         $this->assertSame('password', $credential['provider']);
     }
 
-    public function testEnsureEmailPersistsNewEntry(): void
+    public function test_ensure_email_persists_new_entry(): void
     {
-        $email = 'additional+' . uniqid('', true) . '@example.org';
+        $email = 'additional+'.uniqid('', true).'@example.org';
         $this->service->ensureEmail($this->user, $email);
 
         $this->user->refresh();

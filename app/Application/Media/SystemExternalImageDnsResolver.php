@@ -11,13 +11,13 @@ final class SystemExternalImageDnsResolver implements ExternalImageDnsResolverCo
         $ips = [];
 
         foreach (dns_get_record($host, DNS_A) ?: [] as $record) {
-            if (!empty($record['ip'])) {
+            if (! empty($record['ip'])) {
                 $ips[] = $record['ip'];
             }
         }
 
         foreach (dns_get_record($host, DNS_AAAA) ?: [] as $record) {
-            if (!empty($record['ipv6'])) {
+            if (! empty($record['ipv6'])) {
                 $ips[] = $record['ipv6'];
             }
         }
@@ -38,4 +38,3 @@ final class SystemExternalImageDnsResolver implements ExternalImageDnsResolverCo
         );
     }
 }
-

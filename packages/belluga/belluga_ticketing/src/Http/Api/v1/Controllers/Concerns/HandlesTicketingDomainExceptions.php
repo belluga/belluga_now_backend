@@ -10,7 +10,7 @@ use Illuminate\Http\JsonResponse;
 trait HandlesTicketingDomainExceptions
 {
     /**
-     * @param callable():array<string,mixed> $callback
+     * @param  callable():array<string,mixed>  $callback
      */
     private function runWithDomainGuard(callable $callback): JsonResponse
     {

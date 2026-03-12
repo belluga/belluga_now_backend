@@ -3,10 +3,9 @@
 namespace Tests;
 
 use Tests\Helpers\AccountLabels;
-use Tests\Helpers\TenantLabels;
 
-abstract class TestCaseAccount extends TestCaseTenant {
-
+abstract class TestCaseAccount extends TestCaseTenant
+{
     abstract protected AccountLabels $account {
         get;
     }

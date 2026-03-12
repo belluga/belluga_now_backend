@@ -23,17 +23,17 @@ interface PushUserGatewayContract
     public function activePushTokensForDevice(Authenticatable $user, string $deviceId): array;
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function registerDevice(Authenticatable $user, array $payload): void;
 
     /**
-     * @param array<int, string> $tokens
+     * @param  array<int, string>  $tokens
      */
     public function invalidateTokens(Authenticatable $user, array $tokens): void;
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function unregisterDevice(Authenticatable $user, array $payload): void;
 
@@ -42,8 +42,7 @@ interface PushUserGatewayContract
     public function findUserForTenant(?string $userId, ?string $email): ?Authenticatable;
 
     /**
-     * @param callable(Authenticatable): void $callback
+     * @param  callable(Authenticatable): void  $callback
      */
     public function chunkUsers(?string $accountId, int $chunkSize, callable $callback): void;
 }
-

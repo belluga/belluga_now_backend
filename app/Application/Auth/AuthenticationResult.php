@@ -11,7 +11,5 @@ class AuthenticationResult
     public function __construct(
         public readonly Authenticatable $user,
         public readonly string $plainTextToken
-    ) {
-    }
+    ) {}
 }
-

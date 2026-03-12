@@ -18,9 +18,9 @@ class TenantBrandingManagementService
     ];
 
     /**
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $uploadedLogos
-     * @param array<string, string> $pwaVariants
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $uploadedLogos
+     * @param  array<string, string>  $pwaVariants
      * @return array<string, mixed>
      */
     public function update(
@@ -46,9 +46,9 @@ class TenantBrandingManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $uploadedLogos
-     * @param array<string, string> $pwaVariants
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $uploadedLogos
+     * @param  array<string, string>  $pwaVariants
      * @return array<string, mixed>
      */
     private function buildBrandingPayload(

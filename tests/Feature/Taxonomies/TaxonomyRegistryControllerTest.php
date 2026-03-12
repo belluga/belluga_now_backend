@@ -39,7 +39,7 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         }
     }
 
-    public function testTaxonomyCrudFlow(): void
+    public function test_taxonomy_crud_flow(): void
     {
         $created = $this->postJson(
             "{$this->base_tenant_api_admin}taxonomies",
@@ -116,7 +116,7 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         $deleted->assertStatus(200);
     }
 
-    public function testTaxonomyRequiresValidColor(): void
+    public function test_taxonomy_requires_valid_color(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}taxonomies",

@@ -1,8 +1,8 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use MongoDB\Laravel\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {
@@ -13,10 +13,10 @@ return new class extends Migration
     {
         Schema::create('tenants', function (Blueprint $collection) {
             $collection->unique('slug');
-            $collection->unique("subdomain");
+            $collection->unique('subdomain');
             $collection->index('user_ids');
             $collection->index(['created_at' => -1]);
-            $collection->index([ "updated_at" => -1]);
+            $collection->index(['updated_at' => -1]);
             $collection->timestamps();
 
             $collection->index(
@@ -25,8 +25,8 @@ return new class extends Migration
                     'unique' => true,
                     'name' => 'unique_appdomains_if_present',
                     'partialFilterExpression' => [
-                        'app_domains.0' => ['$exists' => true]
-                    ]
+                        'app_domains.0' => ['$exists' => true],
+                    ],
                 ]);
 
             $collection->index(
@@ -35,8 +35,8 @@ return new class extends Migration
                     'unique' => true,
                     'name' => 'unique_domains_if_present',
                     'partialFilterExpression' => [
-                        'domains.0' => ['$exists' => true]
-                    ]
+                        'domains.0' => ['$exists' => true],
+                    ],
                 ]);
         });
     }

@@ -14,9 +14,7 @@ class TicketCartController extends Controller
 {
     use HandlesTicketingDomainExceptions;
 
-    public function __construct(private readonly TicketCheckoutService $checkout)
-    {
-    }
+    public function __construct(private readonly TicketCheckoutService $checkout) {}
 
     public function show(CartShowRequest $request): JsonResponse
     {

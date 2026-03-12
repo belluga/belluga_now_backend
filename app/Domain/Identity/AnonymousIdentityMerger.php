@@ -17,7 +17,8 @@ use MongoDB\BSON\ObjectId;
 class AnonymousIdentityMerger
 {
     /**
-     * @param iterable<AccountUser> $sources
+     * @param  iterable<AccountUser>  $sources
+     *
      * @throws ConcurrencyConflictException|\Throwable
      */
     public function merge(AccountUser $target, iterable $sources, ?string $operatorId = null, string $reason = 'merged'): void
@@ -249,8 +250,8 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @param Collection<int, array<string, mixed>> $devices
-     * @param array<int, array<string, mixed>> $sourceDevices
+     * @param  Collection<int, array<string, mixed>>  $devices
+     * @param  array<int, array<string, mixed>>  $sourceDevices
      */
     private function mergeDevices(Collection $devices, array $sourceDevices, Carbon $now): Collection
     {
@@ -265,6 +266,7 @@ class AnonymousIdentityMerger
             $existing = $devices->get($deviceId);
             if ($existing === null) {
                 $devices->put($deviceId, $device);
+
                 continue;
             }
             $devices->put(
@@ -277,8 +279,8 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @param array<string, mixed> $current
-     * @param array<string, mixed> $incoming
+     * @param  array<string, mixed>  $current
+     * @param  array<string, mixed>  $incoming
      */
     private function resolveLatestDevice(array $current, array $incoming, Carbon $now): array
     {
@@ -302,7 +304,7 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @param Collection<int, array<string, mixed>> $fingerprints
+     * @param  Collection<int, array<string, mixed>>  $fingerprints
      */
     private function resolveFirstSeenAt(Collection $fingerprints, AccountUser $source): ?Carbon
     {
@@ -325,7 +327,7 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @param Collection<int, array<string, mixed>> $fingerprints
+     * @param  Collection<int, array<string, mixed>>  $fingerprints
      */
     private function resolveLastSeenAt(Collection $fingerprints, AccountUser $source): ?Carbon
     {
@@ -348,13 +350,14 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @param array<int, array<string, mixed>> $promotionAudit
+     * @param  array<int, array<string, mixed>>  $promotionAudit
      */
     private function resolveRegisteredAt(array $promotionAudit, ?Carbon $currentRegisteredAt): ?Carbon
     {
         $candidates = Collection::make($promotionAudit)
             ->filter(static function (array $entry): bool {
                 $toState = $entry['to_state'] ?? null;
+
                 return in_array($toState, ['registered', 'validated'], true);
             })
             ->map(fn (array $entry): ?Carbon => $this->toCarbon($entry['promoted_at'] ?? null))

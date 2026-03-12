@@ -15,7 +15,7 @@ class SettingsRegistryTest extends TestCase
     #[Test]
     public function it_rejects_duplicate_namespace_registration_within_same_scope(): void
     {
-        $registry = new InMemorySettingsRegistry();
+        $registry = new InMemorySettingsRegistry;
 
         $definition = new SettingsNamespaceDefinition(
             namespace: 'events',
@@ -46,7 +46,7 @@ class SettingsRegistryTest extends TestCase
     #[Test]
     public function it_allows_same_namespace_in_different_scopes(): void
     {
-        $registry = new InMemorySettingsRegistry();
+        $registry = new InMemorySettingsRegistry;
 
         $registry->register(new SettingsNamespaceDefinition(
             namespace: 'events',

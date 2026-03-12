@@ -6,7 +6,8 @@ use Tests\Api\v1\Accounts\Validation\Contracts\ApiV1AccountApiValidationTestCont
 use Tests\Helpers\AccountLabels;
 use Tests\Helpers\TenantLabels;
 
-class T2A1Test extends ApiV1AccountApiValidationTestContract {
+class T2A1Test extends ApiV1AccountApiValidationTestContract
+{
     protected TenantLabels $tenant {
         get{
             return $this->landlord->tenant_secondary;

@@ -28,14 +28,14 @@ class TenantLandlordUserAttachRequest extends FormRequest
             'user_id' => [
                 'required',
                 'string',
-                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'size:'.InputConstraints::OBJECT_ID_LENGTH,
                 'regex:/^[a-fA-F0-9]{24}$/',
                 'exists:landlord.landlord_users,_id',
             ],
             'role_id' => [
                 'required',
                 'string',
-                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'size:'.InputConstraints::OBJECT_ID_LENGTH,
                 'regex:/^[a-fA-F0-9]{24}$/',
                 'exists:landlord.tenant_role_templates,_id',
             ],

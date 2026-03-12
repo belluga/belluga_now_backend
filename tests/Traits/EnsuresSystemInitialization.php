@@ -19,6 +19,7 @@ trait EnsuresSystemInitialization
 
         if ($hasLandlordUser && $hasTenant) {
             static::$systemInitialized = true;
+
             return;
         }
 
@@ -27,6 +28,7 @@ trait EnsuresSystemInitialization
         if ($hasLandlordUser) {
             $this->hydrateFromDatabase();
             static::$systemInitialized = true;
+
             return;
         }
 
@@ -205,7 +207,7 @@ trait EnsuresSystemInitialization
     }
 
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(array $abilities): array
@@ -216,5 +218,4 @@ trait EnsuresSystemInitialization
 
         return $abilities;
     }
-
 }

@@ -30,7 +30,7 @@ use Spatie\Sluggable\SlugOptions;
  */
 class Tenant extends BaseTenant
 {
-    use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
+    use DocumentModel, HasOwner, HasSlug, OwnRoles, SoftDeletes, UsesLandlordConnection;
 
     protected $fillable = [
         'name',
@@ -44,7 +44,8 @@ class Tenant extends BaseTenant
         'organization_id',
     ];
 
-    public function roleTemplates(): HasMany {
+    public function roleTemplates(): HasMany
+    {
         return $this->hasMany(TenantRoleTemplate::class);
     }
 
@@ -109,8 +110,9 @@ class Tenant extends BaseTenant
     /**
      * Add multiple domains to the tenant
      *
-     * @param array $domains Array of domain strings to be added
+     * @param  array  $domains  Array of domain strings to be added
      * @return ?string Returns an error message if the domain already exists, null on success
+     *
      * @throws BulkWriteException When a duplicate domain is detected
      * @throws \Exception For other database or general errors
      */
@@ -119,38 +121,38 @@ class Tenant extends BaseTenant
         foreach ($domains as $domain) {
             try {
                 $this->domains()->create([
-                    "type" => "web",
-                    "path" => $domain
+                    'type' => 'web',
+                    'path' => $domain,
                 ]);
             } catch (BulkWriteException $e) {
                 if (str_contains($e->getMessage(), 'E11000')) {
-                    return "Domain already exists.";
+                    return 'Domain already exists.';
                 }
                 throw $e;
             } catch (\Exception $e) {
-                throw new \Exception("Failed to add domain '{$domain}': " . $e->getMessage());
+                throw new \Exception("Failed to add domain '{$domain}': ".$e->getMessage());
             }
         }
 
         return null;
     }
 
-    public function getManifestData(): array {
+    public function getManifestData(): array
+    {
 
         $landlord = Landlord::singleton();
-        $main_color = $this->branding_data["theme_data_settings"]['primary_seed_color']
-            ?? $landlord->branding_data["theme_data_settings"]['primary_seed_color']
+        $main_color = $this->branding_data['theme_data_settings']['primary_seed_color']
+            ?? $landlord->branding_data['theme_data_settings']['primary_seed_color']
             ?? '';
 
-
         return [
-            'name'             => $this->name,
-            'short_name'       => $this->short_name ?? $this->name,
-            'description'      => $this->description,
-            'start_url'        => '/',
-            'display'          => 'standalone',
+            'name' => $this->name,
+            'short_name' => $this->short_name ?? $this->name,
+            'description' => $this->description,
+            'start_url' => '/',
+            'display' => 'standalone',
             'background_color' => $main_color,
-            'theme_color'      => $main_color
+            'theme_color' => $main_color,
         ];
     }
 
@@ -168,7 +170,7 @@ class Tenant extends BaseTenant
                 $tenant->generateSlug();
             }
 
-            $tenant->database = 'tenant_' . str_replace('-', '_', $tenant->slug);
+            $tenant->database = 'tenant_'.str_replace('-', '_', $tenant->slug);
         });
 
         static::created(function (Tenant $tenant) {
@@ -181,9 +183,9 @@ class Tenant extends BaseTenant
         $this->makeCurrent();
 
         try {
-            DB::connection(env('DB_CONNECTION_TENANT', 'mongodb'),);
+            DB::connection(env('DB_CONNECTION_TENANT', 'mongodb'));
         } catch (\Exception $e) {
-            throw new \Exception("MongoDB connection failed: " . $e->getMessage());
+            throw new \Exception('MongoDB connection failed: '.$e->getMessage());
         }
 
         // Run migrations
@@ -199,7 +201,7 @@ class Tenant extends BaseTenant
         Artisan::call('migrate', [
             '--database' => config('multitenancy.tenant_database_connection_name'),
             '--path' => $paths,
-            '--force' => true
+            '--force' => true,
         ]);
 
     }
@@ -207,6 +209,7 @@ class Tenant extends BaseTenant
     private function primaryExplicitDomain(): ?string
     {
         $domains = $this->explicitDomains();
+
         return $domains[0] ?? null;
     }
 
@@ -239,6 +242,7 @@ class Tenant extends BaseTenant
         foreach ($domains as $domain) {
             if (is_string($domain)) {
                 $candidates[] = $domain;
+
                 continue;
             }
 
@@ -258,11 +262,11 @@ class Tenant extends BaseTenant
         $normalized = Str::replace(['https://', 'http://'], '', $domain);
         $normalized = trim($normalized, '/');
 
-        return 'https://' . $normalized;
+        return 'https://'.$normalized;
     }
 
     /**
-     * @param array<int, mixed> $domains
+     * @param  array<int, mixed>  $domains
      * @return array<int, string>
      */
     private function filterExplicitDomains(array $domains): array
@@ -288,9 +292,9 @@ class Tenant extends BaseTenant
     private static function defaultDomainForSubdomain(string $subdomain): string
     {
         $rootHost = self::configuredRootHost();
-        $prefix = Str::lower(trim($subdomain)) . '.';
+        $prefix = Str::lower(trim($subdomain)).'.';
 
-        return $prefix . $rootHost;
+        return $prefix.$rootHost;
     }
 
     private static function configuredRootHost(): string
@@ -324,7 +328,7 @@ class Tenant extends BaseTenant
             return true;
         }
 
-        return ! Str::endsWith($domain, '.' . $rootHost);
+        return ! Str::endsWith($domain, '.'.$rootHost);
     }
 
     public function setDomainsAttribute(?array $domains): void

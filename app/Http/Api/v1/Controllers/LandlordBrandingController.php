@@ -10,13 +10,11 @@ use Illuminate\Http\JsonResponse;
 
 class LandlordBrandingController
 {
-
     use HasLogoFiles;
 
     public function __construct(
         private readonly LandlordBrandingManagementService $brandingService
-    ) {
-    }
+    ) {}
 
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
@@ -26,9 +24,9 @@ class LandlordBrandingController
         $uploadedLogoUrls = $this->processLogoUploads($request);
 
         $pwaVariants = [];
-        if ($request->hasFile("logo_settings.pwa_icon")) {
+        if ($request->hasFile('logo_settings.pwa_icon')) {
             $pwaVariants = $this->generatePwaIconVariants(
-                sourceFile: $request->file("logo_settings.pwa_icon"),
+                sourceFile: $request->file('logo_settings.pwa_icon'),
             );
         }
 

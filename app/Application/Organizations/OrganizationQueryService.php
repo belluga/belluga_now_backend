@@ -53,7 +53,7 @@ class OrganizationQueryService extends AbstractQueryService
 
     protected function baseSearchableFields(): array
     {
-        return (new Organization())->getFillable();
+        return (new Organization)->getFillable();
     }
 
     protected function stringFields(): array

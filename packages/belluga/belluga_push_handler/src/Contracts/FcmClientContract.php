@@ -10,7 +10,7 @@ use Carbon\Carbon;
 interface FcmClientContract
 {
     /**
-     * @param array<int, string> $tokens
+     * @param  array<int, string>  $tokens
      * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
     public function send(PushMessage $message, array $tokens, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array;

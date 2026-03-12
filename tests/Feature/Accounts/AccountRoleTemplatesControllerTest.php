@@ -63,7 +63,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
 
         $operator = $this->userService->create($this->account, [
             'name' => 'Operator User',
-            'email' => 'operator+' . uniqid('', true) . '@example.org',
+            'email' => 'operator+'.uniqid('', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $operatorRole->_id);
 
@@ -78,7 +78,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
         );
     }
 
-    public function testStoreCreatesRole(): void
+    public function test_store_creates_role(): void
     {
         $response = $this->postJson($this->baseUrl, [
             'name' => 'Support',
@@ -94,7 +94,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
         ], 'tenant');
     }
 
-    public function testUpdateAdjustsPermissions(): void
+    public function test_update_adjusts_permissions(): void
     {
         $role = $this->roleService->create($this->account, [
             'name' => 'Editors',
@@ -102,7 +102,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
             'permissions' => ['account-users:view'],
         ]);
 
-        $response = $this->patchJson($this->baseUrl . '/' . $role->_id, [
+        $response = $this->patchJson($this->baseUrl.'/'.$role->_id, [
             'permissions' => [
                 'add' => ['account-users:create'],
                 'remove' => ['account-users:view'],
@@ -113,7 +113,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
         $response->assertJsonPath('data.permissions', ['account-users:create']);
     }
 
-    public function testDestroyReassignsToFallback(): void
+    public function test_destroy_reassigns_to_fallback(): void
     {
         $fallback = $this->roleService->create($this->account, [
             'name' => 'Fallback',
@@ -129,7 +129,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
 
         $user = $this->createAccountUserWithRole($roleToDelete);
 
-        $response = $this->deleteJson($this->baseUrl . '/' . $roleToDelete->_id, [
+        $response = $this->deleteJson($this->baseUrl.'/'.$roleToDelete->_id, [
             'background_role_id' => (string) $fallback->_id,
         ]);
 
@@ -146,7 +146,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
     {
         return $this->userService->create($this->account, [
             'name' => 'Fixture User',
-            'email' => 'fixture+' . uniqid('', true) . '@example.org',
+            'email' => 'fixture+'.uniqid('', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
     }

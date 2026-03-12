@@ -29,8 +29,7 @@ class TicketCheckoutService
         private readonly TicketPromotionQuotaService $promotionQuota,
         private readonly TenantTransactionRunner $transactions,
         private readonly TicketOutboxEmitter $outbox,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -310,7 +309,7 @@ class TicketCheckoutService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      * @return array<int, array<string, mixed>>
      */
     private function buildPurchaseOnlyReservationLines(array $lines, string $eventId, string $defaultOccurrenceId): array
@@ -360,7 +359,7 @@ class TicketCheckoutService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $units
+     * @param  array<int, array<string, mixed>>  $units
      * @return array<string, mixed>
      */
     private function formatOrderResponse(TicketOrder $order, array $units): array

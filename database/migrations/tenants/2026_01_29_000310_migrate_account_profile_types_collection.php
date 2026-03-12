@@ -1,9 +1,9 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use MongoDB\Laravel\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use MongoDB\Laravel\Facades\DB;
+use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {

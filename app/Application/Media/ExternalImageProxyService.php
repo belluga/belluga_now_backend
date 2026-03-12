@@ -12,14 +12,16 @@ use Illuminate\Validation\ValidationException;
 final class ExternalImageProxyService
 {
     private const int MAX_BYTES = 15 * 1024 * 1024;
+
     private const int MAX_REDIRECTS = 3;
+
     private const int TIMEOUT_SECONDS = 15;
+
     private const int CONNECT_TIMEOUT_SECONDS = 5;
 
     public function __construct(
         private readonly ExternalImageDnsResolverContract $dnsResolver,
-    ) {
-    }
+    ) {}
 
     public function proxy(string $url): ExternalImageProxyResult
     {
@@ -43,10 +45,11 @@ final class ExternalImageProxyService
 
             if ($response->status() >= 300 && $response->status() < 400) {
                 $location = $response->header('Location');
-                if (!is_string($location) || trim($location) === '') {
+                if (! is_string($location) || trim($location) === '') {
                     throw ValidationException::withMessages(['url' => 'Redirect sem destino.']);
                 }
                 $currentUrl = $this->resolveRedirectUrl($currentUrl, $location);
+
                 continue;
             }
 
@@ -74,7 +77,7 @@ final class ExternalImageProxyService
             }
 
             $info = @getimagesizefromstring($body);
-            if (!is_array($info) || empty($info['mime']) || !is_string($info['mime'])) {
+            if (! is_array($info) || empty($info['mime']) || ! is_string($info['mime'])) {
                 throw ValidationException::withMessages([
                     'url' => 'Arquivo de imagem invalido. Use JPG, PNG ou WEBP.',
                 ]);
@@ -114,7 +117,7 @@ final class ExternalImageProxyService
         $lastByteAt = $startedAt;
 
         try {
-            while (!$stream->eof()) {
+            while (! $stream->eof()) {
                 $chunk = $stream->read($chunkSize);
                 if ($chunk === '') {
                     // In streamed mode, some transports can yield an empty read before EOF
@@ -129,6 +132,7 @@ final class ExternalImageProxyService
                         ]);
                     }
                     usleep(50_000);
+
                     continue;
                 }
 
@@ -153,6 +157,7 @@ final class ExternalImageProxyService
 
             rewind($temp);
             $body = stream_get_contents($temp);
+
             return is_string($body) ? $body : '';
         } finally {
             fclose($temp);
@@ -163,12 +168,12 @@ final class ExternalImageProxyService
     {
         $trimmed = trim($url);
         $parts = parse_url($trimmed);
-        if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+        if (! is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
             throw ValidationException::withMessages(['url' => 'URL invalida.']);
         }
 
         $scheme = strtolower((string) $parts['scheme']);
-        if (!in_array($scheme, ['http', 'https'], true)) {
+        if (! in_array($scheme, ['http', 'https'], true)) {
             throw ValidationException::withMessages(['url' => 'URL invalida.']);
         }
 
@@ -182,7 +187,7 @@ final class ExternalImageProxyService
     private function assertUrlIsSafe(string $url): void
     {
         $parts = parse_url($url);
-        if (!is_array($parts) || empty($parts['host'])) {
+        if (! is_array($parts) || empty($parts['host'])) {
             throw ValidationException::withMessages(['url' => 'URL invalida.']);
         }
 
@@ -193,6 +198,7 @@ final class ExternalImageProxyService
 
         if (filter_var($host, FILTER_VALIDATE_IP)) {
             $this->assertIpIsPublic($host);
+
             return;
         }
 
@@ -224,12 +230,14 @@ final class ExternalImageProxyService
         $base = new Uri($baseUrl);
         $target = new Uri($location);
         $resolved = UriResolver::resolve($base, $target);
+
         return (string) $resolved;
     }
 
     private function stripContentTypeParams(string $contentType): string
     {
         $parts = explode(';', $contentType, 2);
+
         return trim($parts[0]);
     }
 }

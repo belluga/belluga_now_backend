@@ -13,4 +13,3 @@ class InvalidCredentialsException extends RuntimeException
         parent::__construct('As credenciais fornecidas estão incorretas.');
     }
 }
-

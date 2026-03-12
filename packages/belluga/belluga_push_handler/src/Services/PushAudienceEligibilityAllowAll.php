@@ -11,8 +11,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 class PushAudienceEligibilityAllowAll implements PushAudienceEligibilityContract
 {
     /**
-     * @param array<string, mixed> $audience
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $audience
+     * @param  array<string, mixed>  $context
      */
     public function isEligible(
         Authenticatable $user,

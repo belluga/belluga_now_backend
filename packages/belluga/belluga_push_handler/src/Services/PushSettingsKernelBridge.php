@@ -12,8 +12,7 @@ class PushSettingsKernelBridge
     public function __construct(
         private readonly SettingsStoreContract $settingsStore,
         private readonly SettingsKernelService $settingsKernelService
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -26,7 +25,7 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function patchPushConfig(mixed $user, array $payload): array
@@ -52,7 +51,7 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function patchFirebaseConfig(mixed $user, array $payload): array
@@ -77,7 +76,7 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param array<int, array<string, mixed>> $routes
+     * @param  array<int, array<string, mixed>>  $routes
      * @return array<int, array<string, mixed>>
      */
     public function patchMessageRoutes(mixed $user, array $routes): array
@@ -97,7 +96,7 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param array<int, array<string, mixed>> $types
+     * @param  array<int, array<string, mixed>>  $types
      * @return array<int, array<string, mixed>>
      */
     public function patchMessageTypes(mixed $user, array $types): array
@@ -117,7 +116,7 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $firebase
+     * @param  array<string, mixed>  $firebase
      */
     public function hasRequiredFirebaseConfig(array $firebase): bool
     {
@@ -133,7 +132,7 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param array<string, mixed> $push
+     * @param  array<string, mixed>  $push
      * @return array<string, mixed>
      */
     public function extractPushSettingsForResponse(array $push): array
@@ -151,7 +150,6 @@ class PushSettingsKernelBridge
     }
 
     /**
-     * @param mixed $items
      * @return array<int, array<string, mixed>>
      */
     private function normalizeItemsList(mixed $items): array

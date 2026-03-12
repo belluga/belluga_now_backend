@@ -21,9 +21,7 @@ class UpsertMapPoiFromEventJob implements ShouldQueue
 
     public int $tries = 5;
 
-    public function __construct(private readonly string $eventId)
-    {
-    }
+    public function __construct(private readonly string $eventId) {}
 
     /**
      * @return array<int, int>
@@ -36,12 +34,12 @@ class UpsertMapPoiFromEventJob implements ShouldQueue
     public function handle(
         MapPoiProjectionService $projectionService,
         MapPoiSourceReaderContract $sourceReader,
-    ): void
-    {
+    ): void {
         $event = $sourceReader->findEventById($this->eventId);
 
         if (! $event) {
             $projectionService->deleteByRef('event', $this->eventId);
+
             return;
         }
 

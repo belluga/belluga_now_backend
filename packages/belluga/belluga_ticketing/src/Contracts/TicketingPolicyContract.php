@@ -13,4 +13,3 @@ interface TicketingPolicyContract
      */
     public function identityMode(): string;
 }
-

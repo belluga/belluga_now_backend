@@ -20,7 +20,7 @@ class TenantUserRoleManagerTest extends TestCase
         $this->refreshLandlordAndTenantDatabases();
     }
 
-    public function testAssignsAndRevokesTenantRoles(): void
+    public function test_assigns_and_revokes_tenant_roles(): void
     {
         $tenant = Tenant::create([
             'name' => 'Tenant Assign',

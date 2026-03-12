@@ -2,8 +2,8 @@
 
 namespace Tests\Api\v1\Tenants\Auth;
 
-use Tests\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
+use Tests\TestCaseTenant;
 
 class ApiV1PushRegisterTest extends TestCaseTenant
 {
@@ -13,7 +13,7 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         }
     }
 
-    public function testPushRegisterReturnsOk(): void
+    public function test_push_register_returns_ok(): void
     {
         $response = $this->json(
             method: 'post',
@@ -30,7 +30,7 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         $response->assertJsonPath('ok', true);
     }
 
-    public function testPushUnregisterReturnsOk(): void
+    public function test_push_unregister_returns_ok(): void
     {
         $this->json(
             method: 'post',

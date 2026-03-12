@@ -28,6 +28,7 @@ class SettingsSchemaValidator implements SettingsSchemaValidatorContract
         foreach ($payload as $rawPath => $value) {
             if (! is_string($rawPath) || trim($rawPath) === '') {
                 $errors['payload'][] = 'Patch keys must be non-empty strings.';
+
                 continue;
             }
 
@@ -36,6 +37,7 @@ class SettingsSchemaValidator implements SettingsSchemaValidatorContract
 
             if ($field === null) {
                 $errors[$rawPath][] = "Unknown field path [{$rawPath}] for namespace [{$definition->namespace}].";
+
                 continue;
             }
 
@@ -54,6 +56,7 @@ class SettingsSchemaValidator implements SettingsSchemaValidatorContract
 
             if (! $this->isTypeCompatible($type, $value)) {
                 $errors[$rawPath][] = "Invalid type. Expected {$type}.";
+
                 continue;
             }
 
@@ -70,7 +73,7 @@ class SettingsSchemaValidator implements SettingsSchemaValidatorContract
     private function normalizePath(string $namespace, string $rawPath): string
     {
         $trimmed = trim($rawPath);
-        $prefix = $namespace . '.';
+        $prefix = $namespace.'.';
 
         if (str_starts_with($trimmed, $prefix)) {
             return substr($trimmed, strlen($prefix));

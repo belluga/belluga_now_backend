@@ -1,8 +1,8 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use MongoDB\Laravel\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {
@@ -15,7 +15,7 @@ return new class extends Migration
             $collection->index('tenant_roles.slug');
             $collection->index('tenant_roles.account_id');
             $collection->integer('version')->default(1);
-            $collection->index(['created_at' => -1, "updated_at" => -1]);
+            $collection->index(['created_at' => -1, 'updated_at' => -1]);
 
             $collection->index(
                 ['fingerprints.hash' => 1],
@@ -23,8 +23,8 @@ return new class extends Migration
                     'unique' => true,
                     'name' => 'unique_fingerprint_if_present',
                     'partialFilterExpression' => [
-                        'fingerprints.0' => ['$exists' => true]
-                    ]
+                        'fingerprints.0' => ['$exists' => true],
+                    ],
                 ]);
 
             $collection->index(
@@ -33,8 +33,8 @@ return new class extends Migration
                     'unique' => true,
                     'name' => 'unique_emails_if_present',
                     'partialFilterExpression' => [
-                        'emails.0' => ['$exists' => true]
-                    ]
+                        'emails.0' => ['$exists' => true],
+                    ],
                 ]);
 
             $collection->index(
@@ -43,8 +43,8 @@ return new class extends Migration
                     'unique' => true,
                     'name' => 'unique_phones_if_present',
                     'partialFilterExpression' => [
-                        'phones.0' => ['$exists' => true]
-                    ]
+                        'phones.0' => ['$exists' => true],
+                    ],
                 ]);
         });
 

@@ -10,9 +10,9 @@ use App\Integration\Ticketing\OccurrencePublicationAdapter;
 use App\Integration\Ticketing\OccurrenceReadAdapter;
 use App\Integration\Ticketing\TenantTicketingPolicyAdapter;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
-use Belluga\Ticketing\Application\Guards\OccurrenceWriteGuardService;
 use Belluga\Ticketing\Application\Admission\TicketAdmissionService;
 use Belluga\Ticketing\Application\Checkout\TicketCheckoutService;
+use Belluga\Ticketing\Application\Guards\OccurrenceWriteGuardService;
 use Belluga\Ticketing\Application\Lifecycle\TicketUnitLifecycleService;
 use Belluga\Ticketing\Application\TransferReissue\TicketTransferReissueService;
 use Belluga\Ticketing\Contracts\CheckoutOrchestratorContract;
@@ -24,7 +24,7 @@ use Tests\TestCase;
 
 class TicketingPackageBindingsTest extends TestCase
 {
-    public function testTicketingContractsAreBoundToHostAdapters(): void
+    public function test_ticketing_contracts_are_bound_to_host_adapters(): void
     {
         $this->assertInstanceOf(OccurrenceReadAdapter::class, $this->app->make(OccurrenceReadContract::class));
         $this->assertInstanceOf(OccurrencePublicationAdapter::class, $this->app->make(OccurrencePublicationContract::class));
@@ -38,7 +38,7 @@ class TicketingPackageBindingsTest extends TestCase
         $this->assertInstanceOf(TicketTransferReissueService::class, $this->app->make(TicketTransferReissueService::class));
     }
 
-    public function testTicketingNamespacesAreRegisteredInSettingsRegistry(): void
+    public function test_ticketing_namespaces_are_registered_in_settings_registry(): void
     {
         $registry = $this->app->make(SettingsRegistryContract::class);
 

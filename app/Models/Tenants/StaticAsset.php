@@ -12,7 +12,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class StaticAsset extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug;
+    use HasSlug, SoftDeletes, UsesTenantConnection;
 
     protected $table = 'static_assets';
 

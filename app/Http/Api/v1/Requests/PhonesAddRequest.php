@@ -28,9 +28,9 @@ class PhonesAddRequest extends FormRequest
             'phones' => [
                 'required',
                 'array',
-                'max:' . InputConstraints::PHONE_ARRAY_MAX,
+                'max:'.InputConstraints::PHONE_ARRAY_MAX,
             ],
-            'phones.*' => 'required|string|max:' . InputConstraints::PHONE_MAX . '|phone:INTERNATIONAL,BR'
+            'phones.*' => 'required|string|max:'.InputConstraints::PHONE_MAX.'|phone:INTERNATIONAL,BR',
         ];
     }
 }

@@ -9,7 +9,6 @@ use App\Http\Api\v1\Requests\TenantStoreRequest;
 use App\Http\Api\v1\Requests\TenantUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -18,8 +17,7 @@ class TenantController extends Controller
 {
     public function __construct(
         private readonly TenantLifecycleService $tenantService
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): LengthAwarePaginator
     {

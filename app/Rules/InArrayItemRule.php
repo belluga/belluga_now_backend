@@ -11,11 +11,14 @@ use Illuminate\Support\Facades\DB;
 class InArrayItemRule implements ValidationRule
 {
     protected string $key;
+
     protected string $table;
+
     protected string $connection;
+
     protected bool $shouldExist;
 
-    public function __construct(string $connection,string $table ,string $key, $shouldExist = true)
+    public function __construct(string $connection, string $table, string $key, $shouldExist = true)
     {
         $this->key = $key;
         $this->table = $table;
@@ -31,9 +34,9 @@ class InArrayItemRule implements ValidationRule
 
         $exists = $query->exists();
 
-        if($this->shouldExist){
-            if (!$exists) {
-                $fail("The selected :attribute is not a valid option.");
+        if ($this->shouldExist) {
+            if (! $exists) {
+                $fail('The selected :attribute is not a valid option.');
             }
         }
     }

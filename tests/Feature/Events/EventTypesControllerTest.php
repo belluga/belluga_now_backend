@@ -54,7 +54,7 @@ class EventTypesControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testEventTypeIndexListsRegistry(): void
+    public function test_event_type_index_lists_registry(): void
     {
         EventType::query()->create([
             'name' => 'Show',
@@ -72,7 +72,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.description', 'Tipo de evento: Show');
     }
 
-    public function testEventTypeIndexAllowsCreateAbilityToken(): void
+    public function test_event_type_index_allows_create_ability_token(): void
     {
         EventType::query()->create([
             'name' => 'Show',
@@ -95,7 +95,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.slug', 'show');
     }
 
-    public function testEventTypeCreate(): void
+    public function test_event_type_create(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}event_types",
@@ -115,7 +115,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $this->assertNotEmpty((string) $response->json('data.id'));
     }
 
-    public function testEventTypeCreateValidatesDescriptionMinimumLength(): void
+    public function test_event_type_create_validates_description_minimum_length(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}event_types",
@@ -131,7 +131,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['description']);
     }
 
-    public function testEventTypeUpdatePropagatesSnapshotToEventsAndOccurrences(): void
+    public function test_event_type_update_propagates_snapshot_to_events_and_occurrences(): void
     {
         $eventType = EventType::query()->create([
             'name' => 'Show',
@@ -198,7 +198,7 @@ class EventTypesControllerTest extends TestCaseTenant
         );
     }
 
-    public function testEventTypeDeleteRejectsWhenReferencedByEvents(): void
+    public function test_event_type_delete_rejects_when_referenced_by_events(): void
     {
         $eventType = EventType::query()->create([
             'name' => 'Show',

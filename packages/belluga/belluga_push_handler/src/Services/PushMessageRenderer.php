@@ -10,7 +10,7 @@ use Illuminate\Support\Arr;
 class PushMessageRenderer
 {
     /**
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      * @return array<string, mixed>
      */
     public function render(PushMessage $message, array $context): array
@@ -26,7 +26,7 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      * @return array<string, string>
      */
     private function resolveVariables(PushMessage $message, array $context): array
@@ -54,8 +54,8 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $variables
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $variables
      * @return array<string, mixed>
      */
     private function applyVariables(array $payload, array $variables): array
@@ -65,12 +65,13 @@ class PushMessageRenderer
                 foreach ($value as $key => $item) {
                     $value[$key] = $walk($item);
                 }
+
                 return $value;
             }
 
             if (is_string($value)) {
                 foreach ($variables as $key => $replacement) {
-                    $value = str_replace('{{' . $key . '}}', $replacement, $value);
+                    $value = str_replace('{{'.$key.'}}', $replacement, $value);
                 }
             }
 
@@ -81,8 +82,8 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $variables
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $variables
      * @return array<string, mixed>
      */
     private function ensureCoreFields(array $payload, PushMessage $message, array $variables): array
@@ -107,7 +108,7 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<int, mixed> $steps
+     * @param  array<int, mixed>  $steps
      * @return array<int, array<string, mixed>>
      */
     private function normalizeSteps(array $steps): array
@@ -124,7 +125,7 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<int, mixed> $buttons
+     * @param  array<int, mixed>  $buttons
      * @return array<int, array<string, mixed>>
      */
     private function normalizeButtons(array $buttons): array
@@ -167,8 +168,8 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<string, mixed> $pathParameters
-     * @param array<string, mixed> $queryParameters
+     * @param  array<string, mixed>  $pathParameters
+     * @param  array<string, mixed>  $queryParameters
      */
     private function buildInternalRoute(?string $routeKey, array $pathParameters, array $queryParameters): ?string
     {
@@ -187,13 +188,13 @@ class PushMessageRenderer
         }
 
         foreach ($pathParameters as $key => $value) {
-            $path = str_replace(':' . $key, rawurlencode((string) $value), $path);
+            $path = str_replace(':'.$key, rawurlencode((string) $value), $path);
         }
 
         if ($queryParameters !== []) {
             $query = http_build_query($queryParameters);
             if ($query !== '') {
-                $path .= (str_contains($path, '?') ? '&' : '?') . $query;
+                $path .= (str_contains($path, '?') ? '&' : '?').$query;
             }
         }
 
@@ -226,12 +227,12 @@ class PushMessageRenderer
     }
 
     /**
-     * @param array<string, string> $variables
+     * @param  array<string, string>  $variables
      */
     private function applyVariablesToString(string $value, array $variables): string
     {
         foreach ($variables as $key => $replacement) {
-            $value = str_replace('{{' . $key . '}}', $replacement, $value);
+            $value = str_replace('{{'.$key.'}}', $replacement, $value);
         }
 
         return $value;

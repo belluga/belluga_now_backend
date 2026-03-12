@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Tenants;
 
-use App\Application\Accounts\AccountRoleTemplateService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Accounts\TenantUserManagementService;
 use App\Application\Initialization\InitializationPayload;
@@ -13,10 +12,10 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
-use Tests\Helpers\TenantLabels;
 
 class TenantUsersControllerTest extends TestCaseTenant
 {
@@ -40,6 +39,7 @@ class TenantUsersControllerTest extends TestCaseTenant
     private TenantUserManagementService $tenantUserService;
 
     private string $baseUrl;
+
     private array $headers;
 
     protected function setUp(): void
@@ -64,7 +64,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         $this->headers = $this->getHeaders();
     }
 
-    public function testIndexReturnsPaginatedUsers(): void
+    public function test_index_returns_paginated_users(): void
     {
         $response = $this->withHeaders($this->headers)->getJson($this->baseUrl);
 
@@ -72,7 +72,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         $response->assertJsonStructure(['data', 'total', 'per_page', 'current_page']);
     }
 
-    public function testIndexFiltersByEmail(): void
+    public function test_index_filters_by_email(): void
     {
         $target = $this->createUser('filter@example.org');
         $target->name = 'Filter Match';
@@ -81,13 +81,13 @@ class TenantUsersControllerTest extends TestCaseTenant
         $this->createUser('another@example.org');
 
         $response = $this->withHeaders($this->headers)
-            ->getJson($this->baseUrl . '?filter[emails]=' . urlencode('filter@example.org'));
+            ->getJson($this->baseUrl.'?filter[emails]='.urlencode('filter@example.org'));
 
         $response->assertOk();
         $this->assertSame('Filter Match', $response->json('data.0.name'));
     }
 
-    public function testIndexSortsByNameDescending(): void
+    public function test_index_sorts_by_name_descending(): void
     {
         $alpha = $this->createUser('alpha@example.org');
         $alpha->name = 'Alpha User';
@@ -97,7 +97,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         $zulu->name = 'Zulu User';
         $zulu->save();
 
-        $response = $this->withHeaders($this->headers)->getJson($this->baseUrl . '?sort=-name');
+        $response = $this->withHeaders($this->headers)->getJson($this->baseUrl.'?sort=-name');
 
         $response->assertOk();
         $names = array_column($response->json('data'), 'name');
@@ -106,10 +106,10 @@ class TenantUsersControllerTest extends TestCaseTenant
         $this->assertSame('Zulu User', $names[0]);
     }
 
-    public function testIndexIgnoresUnsupportedSortAndUsesDefault(): void
+    public function test_index_ignores_unsupported_sort_and_uses_default(): void
     {
         $baseline = $this->withHeaders($this->headers)->getJson($this->baseUrl);
-        $fallback = $this->withHeaders($this->headers)->getJson($this->baseUrl . '?sort=-unsupported');
+        $fallback = $this->withHeaders($this->headers)->getJson($this->baseUrl.'?sort=-unsupported');
 
         $this->assertNotNull($baseline->json('data.0.id'));
         $this->assertSame(
@@ -118,7 +118,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         );
     }
 
-    public function testShowReturnsSingleUser(): void
+    public function test_show_returns_single_user(): void
     {
         $user = $this->createUser('show@example.org');
 
@@ -129,7 +129,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.id', (string) $user->_id);
     }
 
-    public function testDestroySoftDeletesUser(): void
+    public function test_destroy_soft_deletes_user(): void
     {
         $user = $this->createUser('delete@example.org');
 
@@ -140,7 +140,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         $this->assertSoftDeleted('account_users', ['_id' => $user->_id], 'tenant');
     }
 
-    public function testRestoreRevivesUser(): void
+    public function test_restore_revives_user(): void
     {
         $user = $this->createUser('restore@example.org');
         $this->tenantUserService->delete((string) $user->_id);
@@ -152,7 +152,7 @@ class TenantUsersControllerTest extends TestCaseTenant
         $this->assertFalse($user->fresh()->trashed());
     }
 
-    public function testForceDestroyRemovesUser(): void
+    public function test_force_destroy_removes_user(): void
     {
         $user = $this->createUser('force@example.org');
         $this->tenantUserService->delete((string) $user->_id);

@@ -5,8 +5,8 @@ namespace Tests\Api\v1\Tenants\Branding;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
-use Tests\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
+use Tests\TestCaseTenant;
 
 class ApiV1EnvironmentApiTest extends TestCaseTenant
 {
@@ -26,7 +26,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         parent::tearDown();
     }
 
-    public function testEnvironmentApiReturnsTenantPayload(): void
+    public function test_environment_api_returns_tenant_payload(): void
     {
         $tenant = $this->currentTenant();
         $tenant->makeCurrent();
@@ -54,7 +54,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('telemetry.location_freshness_minutes', 5);
     }
 
-    public function testEnvironmentApiFallsBackToSubdomainWhenNoDomains(): void
+    public function test_environment_api_falls_back_to_subdomain_when_no_domains(): void
     {
         $tenant = $this->currentTenant();
         $this->snapshotTenant($tenant);
@@ -72,7 +72,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         );
     }
 
-    public function testEnvironmentApiPrefersFirstRelatedDomainWhenNoMainFlagExists(): void
+    public function test_environment_api_prefers_first_related_domain_when_no_main_flag_exists(): void
     {
         $tenant = $this->currentTenant();
         $this->snapshotTenant($tenant);
@@ -96,7 +96,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         );
     }
 
-    public function testEnvironmentApiIgnoresLegacyPersistedLandlordFallbackDomains(): void
+    public function test_environment_api_ignores_legacy_persisted_landlord_fallback_domains(): void
     {
         $tenant = $this->currentTenant();
         $this->snapshotTenant($tenant);
@@ -123,7 +123,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         );
     }
 
-    public function testEnvironmentApiUsesTelemetryFromSettingsKernel(): void
+    public function test_environment_api_uses_telemetry_from_settings_kernel(): void
     {
         $tenant = $this->currentTenant();
         $tenant->makeCurrent();
@@ -151,7 +151,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('telemetry.trackers.0.events.0', 'invite_received');
     }
 
-    public function testEnvironmentApiExposesMapUiDefaultOriginFromSettings(): void
+    public function test_environment_api_exposes_map_ui_default_origin_from_settings(): void
     {
         $tenant = $this->currentTenant();
         $tenant->makeCurrent();
@@ -169,6 +169,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
                     'lng' => -40.495395,
                     'label' => 'Praia do Morro',
                 ],
+                'filters' => [
+                    [
+                        'key' => 'event',
+                        'label' => 'Eventos',
+                        'image_uri' => 'https://tenant-alpha.test/storage/map-filters/event.png',
+                    ],
+                ],
             ],
         ]);
 
@@ -178,6 +185,12 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('settings.map_ui.default_origin.lat', -20.671339);
         $response->assertJsonPath('settings.map_ui.default_origin.lng', -40.495395);
         $response->assertJsonPath('settings.map_ui.default_origin.label', 'Praia do Morro');
+        $response->assertJsonPath('settings.map_ui.filters.0.key', 'event');
+        $response->assertJsonPath('settings.map_ui.filters.0.label', 'Eventos');
+        $response->assertJsonPath(
+            'settings.map_ui.filters.0.image_uri',
+            'https://tenant-alpha.test/storage/map-filters/event.png'
+        );
     }
 
     private function currentTenant(): Tenant
@@ -222,5 +235,4 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         return trim(str_replace(['https://', 'http://'], '', $configuredUrl), '/');
     }
-
 }

@@ -12,8 +12,7 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
 {
     public function __construct(
         private readonly EventAsyncJobSignaturesContract $jobSignatures
-    ) {
-    }
+    ) {}
 
     public function pendingAgesInSeconds(): array
     {
@@ -65,7 +64,7 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
     }
 
     /**
-     * @param array<string, mixed> $queueConnectionConfig
+     * @param  array<string, mixed>  $queueConnectionConfig
      */
     private function resolveDatabaseConnectionName(string $defaultQueueConnection, array $queueConnectionConfig): ?string
     {
@@ -94,7 +93,7 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
     }
 
     /**
-     * @param array<string, mixed> $queueConnectionConfig
+     * @param  array<string, mixed>  $queueConnectionConfig
      */
     private function resolveQueueTableOrCollection(array $queueConnectionConfig): ?string
     {

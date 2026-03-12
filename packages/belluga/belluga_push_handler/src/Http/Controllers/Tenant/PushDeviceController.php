@@ -15,8 +15,7 @@ class PushDeviceController
     public function __construct(
         private readonly PushDeviceService $service,
         private readonly PushTenantContextContract $tenantContext
-    ) {
-    }
+    ) {}
 
     public function register(PushRegisterRequest $request): JsonResponse
     {

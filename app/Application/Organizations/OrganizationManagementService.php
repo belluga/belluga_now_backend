@@ -12,7 +12,7 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class OrganizationManagementService
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload): Organization
     {
@@ -34,7 +34,7 @@ class OrganizationManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(Organization $organization, array $attributes): Organization
     {

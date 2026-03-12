@@ -16,8 +16,7 @@ class SettingsKernelService
         private readonly SettingsRegistryContract $registry,
         private readonly SettingsStoreContract $store,
         private readonly SettingsSchemaValidatorContract $validator,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -52,7 +51,7 @@ class SettingsKernelService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function patchNamespace(string $scope, mixed $user, string $namespace, array $payload): array

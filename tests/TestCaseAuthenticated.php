@@ -20,11 +20,12 @@ abstract class TestCaseAuthenticated extends TestCase
 
     protected string $base_api_url {
         get {
-            return "admin/api/v1/";
+            return 'admin/api/v1/';
         }
     }
 
-    protected function getHeaders(): array {
+    protected function getHeaders(): array
+    {
 
         if ($this->cachedAdminToken === null) {
             $user = LandlordUser::query()->find($this->landlord->user_superadmin->user_id)
@@ -36,7 +37,7 @@ abstract class TestCaseAuthenticated extends TestCase
 
         return [
             'Authorization' => "Bearer {$this->cachedAdminToken}",
-            'Content-Type' => 'application/json'
+            'Content-Type' => 'application/json',
         ];
     }
 }

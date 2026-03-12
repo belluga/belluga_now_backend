@@ -11,8 +11,7 @@ class SyncMapPoiOnEventDeleted
 {
     public function __construct(
         private readonly EventProjectionSyncContract $projectionSync
-    ) {
-    }
+    ) {}
 
     public function handle(EventDeleted $event): void
     {

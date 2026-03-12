@@ -11,8 +11,7 @@ class AccountSlugResolverAdapter implements EventAccountResolverContract
 {
     public function __construct(
         private readonly AccountQueryService $accountQueryService
-    ) {
-    }
+    ) {}
 
     public function resolveAccountIdBySlug(string $accountSlug): string
     {

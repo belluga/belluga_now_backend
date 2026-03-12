@@ -9,7 +9,6 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class EnvironmentRequest extends FormRequest
 {
-
     public function validationData(): array
     {
         $headerAppDomain = $this->header('X-App-Domain');
@@ -24,7 +23,7 @@ class EnvironmentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            "app_domain" => new InArrayItemRule(
+            'app_domain' => new InArrayItemRule(
                 connection: 'landlord',
                 table: 'tenants',
                 key: 'app_domains',

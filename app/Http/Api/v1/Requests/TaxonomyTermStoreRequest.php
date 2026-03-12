@@ -15,8 +15,8 @@ class TaxonomyTermStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'slug' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'slug' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
         ];
     }
 }

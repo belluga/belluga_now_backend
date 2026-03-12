@@ -13,8 +13,7 @@ class PushRecipientResolver
     public function __construct(
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<int, string>
@@ -22,6 +21,7 @@ class PushRecipientResolver
     public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
     {
         $result = $this->resolveTokensWithUsers($message, $scope, $accountId);
+
         return $result['tokens'];
     }
 

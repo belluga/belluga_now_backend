@@ -26,7 +26,7 @@ class LandlordUserQueryService extends AbstractQueryService
     protected function baseSearchableFields(): array
     {
         return array_diff(
-            (new LandlordUser())->getFillable(),
+            (new LandlordUser)->getFillable(),
             ['password', 'credentials', 'promotion_audit']
         );
     }

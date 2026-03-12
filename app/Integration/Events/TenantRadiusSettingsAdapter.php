@@ -10,7 +10,9 @@ use Belluga\Events\Contracts\EventRadiusSettingsContract;
 class TenantRadiusSettingsAdapter implements EventRadiusSettingsContract
 {
     private const DEFAULT_RADIUS_MIN_KM = 1.0;
+
     private const DEFAULT_RADIUS_KM = 5.0;
+
     private const DEFAULT_RADIUS_MAX_KM = 50.0;
 
     public function resolveRadiusSettings(): array

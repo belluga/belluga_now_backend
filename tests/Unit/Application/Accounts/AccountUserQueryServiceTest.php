@@ -58,7 +58,7 @@ class AccountUserQueryServiceTest extends TestCase
         $this->seedUsers($role);
     }
 
-    public function testSearchByName(): void
+    public function test_search_by_name(): void
     {
         $paginator = $this->service->paginate(
             $this->account,
@@ -71,7 +71,7 @@ class AccountUserQueryServiceTest extends TestCase
         $this->assertSame('Searchable User', $paginator->items()[0]['name']);
     }
 
-    public function testSearchByEmail(): void
+    public function test_search_by_email(): void
     {
         $paginator = $this->service->paginate(
             $this->account,
@@ -84,9 +84,9 @@ class AccountUserQueryServiceTest extends TestCase
         $this->assertSame('Email Filter', $paginator->items()[0]['name']);
     }
 
-    public function testSearchByPhoneNumber(): void
+    public function test_search_by_phone_number(): void
     {
-        $phone = '+551199999' . random_int(1000, 9999);
+        $phone = '+551199999'.random_int(1000, 9999);
         $this->attachPhoneToFixture($this->phoneFixture, $phone);
 
         $paginator = $this->service->paginate(
@@ -100,7 +100,7 @@ class AccountUserQueryServiceTest extends TestCase
         $this->assertSame('Phone Filter', $paginator->items()[0]['name']);
     }
 
-    public function testSearchByRegisteredAtRange(): void
+    public function test_search_by_registered_at_range(): void
     {
         $from = Carbon::now()->subDay()->toDateString();
         $to = Carbon::now()->addDay()->toDateString();
@@ -115,7 +115,7 @@ class AccountUserQueryServiceTest extends TestCase
         $this->assertSame(4, $paginator->total());
     }
 
-    public function testSearchByIdentityState(): void
+    public function test_search_by_identity_state(): void
     {
         $paginator = $this->service->paginate(
             $this->account,
@@ -128,18 +128,15 @@ class AccountUserQueryServiceTest extends TestCase
         $this->assertSame('Validated User', $paginator->items()[0]['name']);
     }
 
-    /**
-     * @param AccountRoleTemplate $role
-     */
     private function seedUsers(AccountRoleTemplate $role): void
     {
         $this->createUserWithRole($role, [
             'name' => 'Searchable User',
-            'emails' => ['searchable+' . uniqid('', true) . '@example.org'],
+            'emails' => ['searchable+'.uniqid('', true).'@example.org'],
             'registered_at' => Carbon::now()->subHours(4),
         ]);
 
-        $this->filterEmail = 'filter+' . uniqid('', true) . '@example.org';
+        $this->filterEmail = 'filter+'.uniqid('', true).'@example.org';
         $this->createUserWithRole($role, [
             'name' => 'Email Filter',
             'emails' => [$this->filterEmail],
@@ -148,15 +145,15 @@ class AccountUserQueryServiceTest extends TestCase
 
         $this->phoneFixture = $this->createUserWithRole($role, [
             'name' => 'Phone Filter',
-            'emails' => ['phone+' . uniqid('', true) . '@example.org'],
+            'emails' => ['phone+'.uniqid('', true).'@example.org'],
             'registered_at' => Carbon::now()->subHour(),
         ]);
 
-        $this->attachPhoneToFixture($this->phoneFixture, '+55119123' . random_int(1000, 9999));
+        $this->attachPhoneToFixture($this->phoneFixture, '+55119123'.random_int(1000, 9999));
 
         $this->createUserWithRole($role, [
             'name' => 'Validated User',
-            'emails' => ['validated+' . uniqid('', true) . '@example.org'],
+            'emails' => ['validated+'.uniqid('', true).'@example.org'],
             'identity_state' => 'validated',
             'registered_at' => Carbon::now()->subMinutes(5),
         ]);
@@ -169,12 +166,12 @@ class AccountUserQueryServiceTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createUserWithRole(AccountRoleTemplate $role, array $overrides): AccountUser
     {
         $payload = array_merge([
-            'emails' => ['user+' . uniqid('', true) . '@example.org'],
+            'emails' => ['user+'.uniqid('', true).'@example.org'],
             'password' => Hash::make('Secret!234'),
             'identity_state' => 'registered',
             'registered_at' => Carbon::now(),

@@ -24,8 +24,7 @@ class PushMessageSendController
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushAccountContextContract $accountContext,
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     public function __invoke(PushMessageSendRequest $request): JsonResponse
     {
@@ -127,7 +126,7 @@ class PushMessageSendController
     }
 
     /**
-     * @param array<string, mixed> $response
+     * @param  array<string, mixed>  $response
      * @return array<int, string>
      */
     private function extractNotFoundTokens(array $response): array
@@ -153,7 +152,7 @@ class PushMessageSendController
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function resolveUser(array $payload, string $accountId): ?\Illuminate\Contracts\Auth\Authenticatable
     {

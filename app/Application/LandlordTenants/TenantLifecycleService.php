@@ -39,7 +39,7 @@ class TenantLifecycleService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{tenant: Tenant, role: TenantRoleTemplate}
      */
     public function create(array $payload, LandlordUser $operator): array
@@ -85,7 +85,7 @@ class TenantLifecycleService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(Tenant $tenant, array $attributes): Tenant
     {
@@ -134,15 +134,14 @@ class TenantLifecycleService
         LandlordUser $operator,
         bool $includeArchived,
         bool $withTrashed
-    ): MongoBuilder
-    {
+    ): MongoBuilder {
         $accessIds = array_map(
             static fn ($id): ObjectId => new ObjectId((string) $id),
             $operator->getAccessToIds()
         );
 
         $builder = Tenant::query()
-            ->whereRaw(['_id' => ['$in' => $accessIds ?: [new ObjectId()]]]);
+            ->whereRaw(['_id' => ['$in' => $accessIds ?: [new ObjectId]]]);
 
         if ($withTrashed) {
             $builder->withTrashed();

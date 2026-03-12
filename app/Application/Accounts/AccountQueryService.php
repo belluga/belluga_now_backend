@@ -15,8 +15,7 @@ class AccountQueryService extends AbstractQueryService
 {
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService
-    ) {
-    }
+    ) {}
 
     public function paginateForUser(
         AccountUser|LandlordUser $user,
@@ -78,7 +77,7 @@ class AccountQueryService extends AbstractQueryService
 
     protected function baseSearchableFields(): array
     {
-        return array_diff((new Account())->getFillable(), ['document']);
+        return array_diff((new Account)->getFillable(), ['document']);
     }
 
     protected function stringFields(): array

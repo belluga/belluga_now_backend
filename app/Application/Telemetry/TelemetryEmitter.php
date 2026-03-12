@@ -13,12 +13,11 @@ class TelemetryEmitter implements TelemetryEmitterContract
 {
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $properties
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $properties
+     * @param  array<string, mixed>  $context
      */
     public function emit(
         string $event,
@@ -58,8 +57,8 @@ class TelemetryEmitter implements TelemetryEmitterContract
     }
 
     /**
-     * @param array<string, mixed> $properties
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $properties
+     * @param  array<string, mixed>  $context
      * @return array<string, mixed>
      */
     private function buildEnvelope(
@@ -108,7 +107,6 @@ class TelemetryEmitter implements TelemetryEmitterContract
     }
 
     /**
-     * @param mixed $candidate
      * @return array<string, string>|null
      */
     private function resolveEnvelopeEntity(mixed $candidate, string $defaultType, ?string $defaultId): ?array

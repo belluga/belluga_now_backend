@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace App\Integration\MapPois;
 
+use App\Application\Media\MapFilterImageStorageService;
 use App\Models\Tenants\TenantSettings;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 
 class MapPoiSettingsAdapter implements MapPoiSettingsContract
 {
+    public function __construct(
+        private readonly MapFilterImageStorageService $mapFilterImageStorageService,
+    ) {}
+
     public function resolveEventsSettings(): array
     {
         $settings = TenantSettings::current();
@@ -22,7 +27,44 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
         $settings = TenantSettings::current();
         $mapUi = $settings?->getAttribute('map_ui') ?? [];
 
-        return is_array($mapUi) ? $mapUi : [];
+        if (! is_array($mapUi)) {
+            return [];
+        }
+
+        $filters = $mapUi['filters'] ?? null;
+        if (! is_array($filters)) {
+            return $mapUi;
+        }
+
+        $baseUrl = request()->getSchemeAndHttpHost();
+        $normalizedFilters = [];
+
+        foreach ($filters as $filter) {
+            if (! is_array($filter)) {
+                $normalizedFilters[] = $filter;
+
+                continue;
+            }
+
+            $key = isset($filter['key']) && is_string($filter['key'])
+                ? trim($filter['key'])
+                : '';
+            if ($key !== '') {
+                $filter['image_uri'] = $this->mapFilterImageStorageService->normalizePublicUrl(
+                    baseUrl: $baseUrl,
+                    key: $key,
+                    rawImageUri: isset($filter['image_uri']) && is_string($filter['image_uri'])
+                        ? $filter['image_uri']
+                        : null,
+                );
+            }
+
+            $normalizedFilters[] = $filter;
+        }
+
+        $mapUi['filters'] = $normalizedFilters;
+
+        return $mapUi;
     }
 
     public function resolveMapIngestSettings(): array

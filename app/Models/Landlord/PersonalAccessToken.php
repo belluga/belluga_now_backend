@@ -13,5 +13,6 @@ class PersonalAccessToken extends SanctumToken
     use DocumentModel, UsesLandlordConnection;
 
     protected $table = 'personal_access_tokens';
+
     protected $keyType = 'string';
 }

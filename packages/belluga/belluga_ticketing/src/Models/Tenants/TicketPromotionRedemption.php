@@ -31,4 +31,3 @@ class TicketPromotionRedemption extends Model
         'updated_at' => 'datetime',
     ];
 }
-

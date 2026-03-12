@@ -23,13 +23,13 @@ class TenantRoleStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'description' => ['nullable', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
-            'permissions' => ['required', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX],
+            'name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'description' => ['nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'permissions' => ['required', 'array', 'max:'.InputConstraints::PERMISSIONS_ARRAY_MAX],
             'permissions.*' => [
                 'required',
                 'string',
-                'max:' . InputConstraints::PERMISSION_MAX,
+                'max:'.InputConstraints::PERMISSION_MAX,
                 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/',
             ],
         ];

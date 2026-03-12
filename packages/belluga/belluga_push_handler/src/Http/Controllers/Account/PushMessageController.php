@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Http\Requests\PushMessageStoreRequest;
 use Belluga\PushHandler\Http\Requests\PushMessageUpdateRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
-use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushMessageService;
 use Illuminate\Http\JsonResponse;
@@ -22,8 +22,7 @@ class PushMessageController
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushPlanPolicyContract $planPolicy,
         private readonly PushAccountContextContract $accountContext
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {

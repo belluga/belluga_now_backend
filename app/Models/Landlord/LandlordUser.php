@@ -14,9 +14,9 @@ use MongoDB\Laravel\Relations\BelongsTo;
 use MongoDB\Laravel\Relations\EmbedsMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
-class LandlordUser extends Authenticatable {
-
-    use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesLandlordConnection;
+class LandlordUser extends Authenticatable
+{
+    use DocumentModel, HasApiTokens, Notifiable, SoftDeletes, UsesLandlordConnection;
 
     protected $table = 'landlord_users';
 
@@ -53,11 +53,13 @@ class LandlordUser extends Authenticatable {
         });
     }
 
-    public function landlordRole(): BelongsTo {
+    public function landlordRole(): BelongsTo
+    {
         return $this->belongsTo(LandlordRole::class);
     }
 
-    public function tenantRoles(): EmbedsMany {
+    public function tenantRoles(): EmbedsMany
+    {
         return $this->embedsMany(TenantRole::class, 'tenant_roles');
     }
 
@@ -96,5 +98,4 @@ class LandlordUser extends Authenticatable {
     {
         return app(LandlordUserAccessService::class);
     }
-
 }

@@ -12,15 +12,15 @@ class PushMessageAudienceService
 {
     public function __construct(
         private readonly PushAudienceEligibilityContract $eligibilityContract
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      */
     public function isEligible(Authenticatable $user, PushMessage $message, array $context = []): bool
     {
         $audience = $message->audience ?? [];
+
         return $this->eligibilityContract->isEligible($user, $message, $audience, $context);
     }
 

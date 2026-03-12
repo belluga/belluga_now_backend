@@ -9,7 +9,5 @@ final readonly class ExternalImageProxyResult
     public function __construct(
         public string $bytes,
         public string $contentType,
-    ) {
-    }
+    ) {}
 }
-

@@ -14,9 +14,7 @@ class TicketTokenController extends Controller
 {
     use HandlesTicketingDomainExceptions;
 
-    public function __construct(private readonly TicketAdmissionService $admission)
-    {
-    }
+    public function __construct(private readonly TicketAdmissionService $admission) {}
 
     public function refresh(TokenRefreshRequest $request): JsonResponse
     {

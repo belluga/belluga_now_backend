@@ -1,8 +1,8 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use MongoDB\Laravel\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {
@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('tenant_role_templates', function (Blueprint $collection) {
             $collection->index('permissions');
             $collection->unique(['slug', 'tenant_id']);
-            $collection->index(['created_at' => -1, "updated_at" => -1], );
+            $collection->index(['created_at' => -1, 'updated_at' => -1]);
         });
     }
 

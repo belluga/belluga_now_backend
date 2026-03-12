@@ -13,8 +13,7 @@ class TenantPushRouteTypesController
 {
     public function __construct(
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     public function show(): JsonResponse
     {
@@ -63,7 +62,7 @@ class TenantPushRouteTypesController
     }
 
     /**
-     * @param array<int, array<string, mixed>> $routes
+     * @param  array<int, array<string, mixed>>  $routes
      * @return array<int, array<string, mixed>>
      */
     private function mergeRoutes(array $existing, array $incoming): array
@@ -82,7 +81,7 @@ class TenantPushRouteTypesController
     }
 
     /**
-     * @param array<int, array<string, mixed>> $routes
+     * @param  array<int, array<string, mixed>>  $routes
      * @return array<string, array<string, mixed>>
      */
     private function indexRoutes(array $routes): array
@@ -103,7 +102,7 @@ class TenantPushRouteTypesController
     }
 
     /**
-     * @param array<string, mixed> $route
+     * @param  array<string, mixed>  $route
      * @return array<string, mixed>
      */
     private function normalizeRoute(array $route): array
@@ -120,7 +119,6 @@ class TenantPushRouteTypesController
     }
 
     /**
-     * @param mixed $queryParams
      * @return array<string, string>
      */
     private function normalizeQueryParams(mixed $queryParams): array

@@ -35,4 +35,3 @@ class InMemoryEventPartyMapperRegistry implements EventPartyMapperRegistryContra
         return $this->mappers[$partyType] ?? null;
     }
 }
-

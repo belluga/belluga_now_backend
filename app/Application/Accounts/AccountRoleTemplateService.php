@@ -100,8 +100,8 @@ class AccountRoleTemplateService
     }
 
     /**
-     * @param array<int, string> $current
-     * @param array<string, mixed> $mutation
+     * @param  array<int, string>  $current
+     * @param  array<string, mixed>  $mutation
      * @return array<int, string>
      */
     private function applyPermissionMutation(array $current, array $mutation): array

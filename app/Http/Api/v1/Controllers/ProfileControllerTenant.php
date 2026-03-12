@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Accounts\AccountUserQueryService;
 use App\Application\Profiles\TenantProfileService;
 use App\Application\Telemetry\TelemetryEmitter;
-use App\Application\Accounts\AccountUserQueryService;
-use App\Http\Api\v1\Requests\EmailsAddRequest;
 use App\Http\Api\v1\Requests\EmailRemoveRequest;
+use App\Http\Api\v1\Requests\EmailsAddRequest;
 use App\Http\Api\v1\Requests\GenerateTokenRequest;
 use App\Http\Api\v1\Requests\PhoneRemoveRequest;
 use App\Http\Api\v1\Requests\PhonesAddRequest;
@@ -26,8 +26,7 @@ class ProfileControllerTenant extends Controller
         private readonly TenantProfileService $profileService,
         private readonly AccountUserQueryService $accountUserQueryService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function updateProfile(UpdateProfileRequestContract $request): JsonResponse
     {

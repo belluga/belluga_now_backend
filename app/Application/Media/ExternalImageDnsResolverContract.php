@@ -11,4 +11,3 @@ interface ExternalImageDnsResolverContract
      */
     public function resolve(string $host): array;
 }
-

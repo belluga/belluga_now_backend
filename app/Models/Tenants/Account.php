@@ -16,11 +16,11 @@ use Spatie\Sluggable\SlugOptions;
 
 class Account extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug, OwnRoles;
+    use HasSlug, OwnRoles, SoftDeletes, UsesTenantConnection;
 
-    static protected string $container_key = 'currentAccount';
+    protected static string $container_key = 'currentAccount';
 
-    static protected string $context_key = 'accountId';
+    protected static string $context_key = 'accountId';
 
     protected $fillable = [
         'name',
@@ -45,7 +45,8 @@ class Account extends Model
         return $this->hasMany(AccountUser::class);
     }
 
-    public function roleTemplates(): HasMany {
+    public function roleTemplates(): HasMany
+    {
         return $this->hasMany(AccountRoleTemplate::class);
     }
 
@@ -94,8 +95,8 @@ class Account extends Model
         return $this;
     }
 
-    public function isCurrent(): bool {
+    public function isCurrent(): bool
+    {
         return $this->id === Context::get(static::$context_key);
     }
-
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Actions\DomainTenantFinder;
 use App\Models\Landlord\Tenant;
 use Illuminate\Broadcasting\BroadcastEvent;
 use Illuminate\Events\CallQueuedListener;
@@ -9,7 +10,6 @@ use Illuminate\Queue\CallQueuedClosure;
 use Spatie\Multitenancy\Actions\ForgetCurrentTenantAction;
 use Spatie\Multitenancy\Actions\MakeQueueTenantAwareAction;
 use Spatie\Multitenancy\Actions\MakeTenantCurrentAction;
-use App\Actions\DomainTenantFinder;
 
 return [
     /*
@@ -35,7 +35,7 @@ return [
      */
     'switch_tenant_tasks' => [
         // \Spatie\Multitenancy\Tasks\PrefixCacheTask::class,
-         \App\Tasks\SwitchMongoTenantDatabaseTask::class,
+        \App\Tasks\SwitchMongoTenantDatabaseTask::class,
         // \Spatie\Multitenancy\Tasks\SwitchRouteCacheTask::class,
     ],
 

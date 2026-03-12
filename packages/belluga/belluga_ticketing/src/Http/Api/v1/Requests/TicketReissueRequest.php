@@ -26,4 +26,3 @@ class TicketReissueRequest extends FormRequest
         ];
     }
 }
-

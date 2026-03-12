@@ -8,8 +8,8 @@ use App\Application\Accounts\AccountUserAccessService;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -17,11 +17,10 @@ class PasswordIdentityRegistrar
 {
     public function __construct(
         private readonly AccountUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      *
      * @throws IdentityAlreadyExistsException
      */
@@ -84,7 +83,6 @@ class PasswordIdentityRegistrar
     }
 
     /**
-     * @param mixed $emails
      * @return Collection<int, string>
      */
     private function normalizeEmails(mixed $emails): Collection

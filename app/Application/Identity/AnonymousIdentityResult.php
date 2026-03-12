@@ -10,13 +10,12 @@ use Illuminate\Support\Carbon;
 class AnonymousIdentityResult
 {
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      */
     public function __construct(
         public readonly AccountUser $user,
         public readonly string $plainTextToken,
         public readonly array $abilities,
         public readonly ?Carbon $expiresAt
-    ) {
-    }
+    ) {}
 }

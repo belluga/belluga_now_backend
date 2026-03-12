@@ -8,10 +8,9 @@ use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
 {
-
     protected string $base_api_url {
         get{
-            return $this->base_api_account."roles";
+            return $this->base_api_account.'roles';
         }
     }
 
@@ -25,7 +24,6 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
         $this->equalTo(0, $responseData['total']);
         $this->assertArrayHasKey('data', $responseData);
 
-
         $rolesList = $this->accountRolesList();
         $rolesList->assertOk();
 
@@ -37,94 +35,91 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
 
     public function testAccountRolesCreate(): void
     {
-        $this->account->role_manager->name = "Role Manager";
+        $this->account->role_manager->name = 'Role Manager';
 
         $response = $this->accountRolesCreate(
             [
-                "name" => $this->account->role_manager->name,
-                "description" => "Role for account editing",
-                "permissions" => ["account-users:view", "account-users:create"],
+                'name' => $this->account->role_manager->name,
+                'description' => 'Role for account editing',
+                'permissions' => ['account-users:view', 'account-users:create'],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "description",
-                "permissions",
-                "account_id",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'description',
+                'permissions',
+                'account_id',
+                'created_at',
+            ],
         ]);
 
         $this->account->role_manager->id = $response->json()['data']['id'];
 
-
-        $this->account->role_user_manager->name = "Users Manager";
+        $this->account->role_user_manager->name = 'Users Manager';
         $response = $this->accountRolesCreate(
             [
-                "name" => $this->account->role_user_manager->name,
-                "description" => "Role for account editing",
-                "permissions" => ["account-users:view", "account-users:create"],
+                'name' => $this->account->role_user_manager->name,
+                'description' => 'Role for account editing',
+                'permissions' => ['account-users:view', 'account-users:create'],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "description",
-                "permissions",
-                "account_id",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'description',
+                'permissions',
+                'account_id',
+                'created_at',
+            ],
         ]);
 
         $this->account->role_user_manager->id = $response->json()['data']['id'];
 
-
-        $this->account->role_visitor->name = "Visitor";
+        $this->account->role_visitor->name = 'Visitor';
         $response = $this->accountRolesCreate(
             [
-                "name" => $this->account->role_visitor->name,
-                "description" => "Role for account editing",
-                "permissions" => ["account-users:view", "account-users:create"],
+                'name' => $this->account->role_visitor->name,
+                'description' => 'Role for account editing',
+                'permissions' => ['account-users:view', 'account-users:create'],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "description",
-                "permissions",
-                "account_id",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'description',
+                'permissions',
+                'account_id',
+                'created_at',
+            ],
         ]);
 
         $this->account->role_visitor->id = $response->json()['data']['id'];
 
-
-        $this->account->role_disposable->name = "Disposable";
+        $this->account->role_disposable->name = 'Disposable';
         $response = $this->accountRolesCreate(
             [
-                "name" => $this->account->role_disposable->name,
-                "description" => "Role for account editing",
-                "permissions" => ["account-users:view", "account-users:create"],
+                'name' => $this->account->role_disposable->name,
+                'description' => 'Role for account editing',
+                'permissions' => ['account-users:view', 'account-users:create'],
             ]
         );
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "description",
-                "permissions",
-                "account_id",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'description',
+                'permissions',
+                'account_id',
+                'created_at',
+            ],
         ]);
 
         $this->account->role_disposable->id = $response->json()['data']['id'];
@@ -136,12 +131,12 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
         $rolesShow = $this->accountRolesShow($this->account->role_disposable);
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
-            "data" => [
-                "name",
-                "description",
-                "permissions",
-                "account_id",
-                "created_at",
+            'data' => [
+                'name',
+                'description',
+                'permissions',
+                'account_id',
+                'created_at',
             ],
         ]);
     }
@@ -151,9 +146,9 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
         $roleUpdate = $this->accountRolesUpdate(
             $this->account->role_disposable,
             [
-                "name" => "Updated {$this->account->role_disposable->name}",
-                "permissions" => [
-                    "add" => ["account-users:view", "account-users:create", "account-users:update"]
+                'name' => "Updated {$this->account->role_disposable->name}",
+                'permissions' => [
+                    'add' => ['account-users:view', 'account-users:create', 'account-users:update'],
                 ],
             ]
         );
@@ -165,7 +160,7 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
 
         $this->assertEquals("Updated {$this->account->role_disposable->name}", $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["account-users:view", "account-users:create", "account-users:update"],
+            ['account-users:view', 'account-users:create', 'account-users:update'],
             $rolesShow->json()['data']['permissions']
         );
     }
@@ -183,7 +178,7 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
         $deleteResponse = $this->accountRolesDelete(
             $this->account->role_disposable,
             [
-                "background_role_id" => $this->account->role_visitor->id
+                'background_role_id' => $this->account->role_visitor->id,
             ]
         );
 
@@ -237,7 +232,7 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
         $restoreResponse = $this->accountRolesDelete(
             $this->account->role_disposable,
             [
-                "background_role_id" => $this->account->role_visitor->id
+                'background_role_id' => $this->account->role_visitor->id,
             ]
         );
         $restoreResponse->assertStatus(200);
@@ -282,7 +277,7 @@ abstract class ApiV1AccountRolesTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountRolesShow(RoleLabels $role,): TestResponse
+    protected function accountRolesShow(RoleLabels $role): TestResponse
     {
         return $this->json(
             method: 'get',

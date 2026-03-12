@@ -5,16 +5,15 @@ namespace App\Http\Api\v1\Controllers;
 use App\Application\Branding\BrandingManifestService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Response;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class BrandingController extends Controller
 {
     public function __construct(
         private readonly BrandingManifestService $brandingService
-    ) {
-    }
+    ) {}
 
     public function getManifest(Request $request): JsonResponse
     {
@@ -24,11 +23,13 @@ class BrandingController extends Controller
             ->header('Content-Type', 'application/manifest+json');
     }
 
-    public function getLogoSettingsParameter(String $parameter): String {
+    public function getLogoSettingsParameter(string $parameter): string
+    {
         return $this->brandingService->resolveLogoSetting($parameter) ?? '';
     }
 
-    public function getPwaIconParameter(String $parameter): String {
+    public function getPwaIconParameter(string $parameter): string
+    {
         return $this->brandingService->resolvePwaIcon($parameter) ?? '';
     }
 

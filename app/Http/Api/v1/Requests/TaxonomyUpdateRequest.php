@@ -15,12 +15,12 @@ class TaxonomyUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'slug' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'name' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'applies_to' => ['sometimes', 'array', 'min:1', 'max:' . InputConstraints::METADATA_MAX_ITEMS],
+            'slug' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'applies_to' => ['sometimes', 'array', 'min:1', 'max:'.InputConstraints::METADATA_MAX_ITEMS],
             'applies_to.*' => ['required', 'string', 'in:account_profile,static_asset,event'],
-            'icon' => ['nullable', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'color' => ['nullable', 'string', 'max:' . InputConstraints::NAME_MAX, 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'icon' => ['nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'color' => ['nullable', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ];
     }
 }

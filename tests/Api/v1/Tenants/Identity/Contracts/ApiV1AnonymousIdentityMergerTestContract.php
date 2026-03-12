@@ -63,7 +63,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
         $target = $this->createCanonicalUser();
         $source = $this->createAnonymousSource();
 
-        $operatorId = (string) new ObjectId();
+        $operatorId = (string) new ObjectId;
         $reason = 'manual_review';
 
         $this->merger()->merge($target, [$source], $operatorId, $reason);
@@ -142,7 +142,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
                 'from_state' => 'anonymous',
                 'to_state' => 'registered',
                 'promoted_at' => Carbon::parse('2024-08-15 11:30:00', 'UTC'),
-                'operator_id' => new ObjectId(),
+                'operator_id' => new ObjectId,
             ],
         ];
 
@@ -236,8 +236,8 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
         $firstReason = 'first_wave';
         $secondReason = 'second_wave';
 
-        $this->merger()->merge($target, [$firstSource], (string) new ObjectId(), $firstReason);
-        $this->merger()->merge($target->fresh(), [$secondSource], (string) new ObjectId(), $secondReason);
+        $this->merger()->merge($target, [$firstSource], (string) new ObjectId, $firstReason);
+        $this->merger()->merge($target->fresh(), [$secondSource], (string) new ObjectId, $secondReason);
 
         $audits = IdentityMergeAudit::query()
             ->where('canonical_user_id', new ObjectId((string) $target->_id))
@@ -276,12 +276,12 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createCanonicalUser(array $overrides = []): AccountUser
     {
         $payload = array_merge([
-            'name' => 'Canonical ' . Str::random(8),
+            'name' => 'Canonical '.Str::random(8),
             'identity_state' => 'registered',
             'emails' => [sprintf('canonical-%s@example.org', Str::uuid())],
             'first_seen_at' => Carbon::now(),
@@ -315,12 +315,12 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createAnonymousSource(array $overrides = []): AccountUser
     {
         $payload = array_merge([
-            'name' => 'Anonymous ' . Str::random(8),
+            'name' => 'Anonymous '.Str::random(8),
             'identity_state' => 'anonymous',
             'first_seen_at' => Carbon::now()->subDay(),
             'fingerprints' => [[
@@ -350,9 +350,6 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
         return $user;
     }
 
-    /**
-     * @param mixed $value
-     */
     private function toCarbon(mixed $value): Carbon
     {
         if ($value instanceof Carbon) {
@@ -375,7 +372,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     }
 
     /**
-     * @param array<int, array<string, mixed>> $entries
+     * @param  array<int, array<string, mixed>>  $entries
      * @return array<int, array<string, mixed>>
      */
     private function normalisePromotionAudit(array $entries): array
@@ -390,7 +387,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     }
 
     /**
-     * @param array{created_at:mixed|null,updated_at:mixed|null} $timestamps
+     * @param  array{created_at:mixed|null,updated_at:mixed|null}  $timestamps
      */
     private function applyTimestamps(AccountUser $user, array $timestamps): void
     {

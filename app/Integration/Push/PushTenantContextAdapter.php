@@ -22,7 +22,8 @@ class PushTenantContextAdapter implements PushTenantContextContract
 
     /**
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     public function runForTenantSlug(string $tenantSlug, callable $callback): mixed
@@ -37,4 +38,3 @@ class PushTenantContextAdapter implements PushTenantContextContract
         }
     }
 }
-

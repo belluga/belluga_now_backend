@@ -13,7 +13,7 @@ if (! is_string($mainHost) || $mainHost === '') {
 $mainHost = trim($mainHost);
 $tenantDomainPattern = $mainHost === ''
     ? '.+'
-    : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+    : '^(?!'.preg_quote($mainHost, '/').'$).+';
 
 Route::domain('{tenant_domain}')
     ->where(['tenant_domain' => $tenantDomainPattern])

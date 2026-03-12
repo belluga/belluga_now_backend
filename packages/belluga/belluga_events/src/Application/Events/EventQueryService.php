@@ -21,6 +21,7 @@ use MongoDB\Laravel\Eloquent\Collection;
 class EventQueryService
 {
     private const DEFAULT_PAGE_SIZE = 10;
+
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
 
     /** @var array<string, mixed>|null */
@@ -30,11 +31,10 @@ class EventQueryService
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventRadiusSettingsContract $eventRadiusSettings,
         private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array{items: array<int, array<string, mixed>>, has_more: bool}
      */
     public function fetchAgenda(array $queryParams, ?string $userId): array
@@ -58,7 +58,7 @@ class EventQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      */
     public function paginateManagement(
         array $queryParams,
@@ -175,6 +175,7 @@ class EventQueryService
                 return true;
             }
         }
+
         return false;
     }
 
@@ -199,7 +200,7 @@ class EventQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<int, array{event_id: string, occurrence_id: string, type: string, updated_at: string}>
      */
     public function buildStreamDeltas(array $queryParams, ?string $userId, ?string $lastEventId): array
@@ -237,7 +238,7 @@ class EventQueryService
     }
 
     /**
-     * @param array<string, mixed> $queryParams
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     private function normalizeFilters(array $queryParams): array
@@ -263,7 +264,7 @@ class EventQueryService
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<int, mixed>
      */
     private function runAgendaQuery(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
@@ -272,11 +273,12 @@ class EventQueryService
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+
         return $events->all();
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<int, mixed>
      */
     private function runStreamQuery(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
@@ -285,11 +287,12 @@ class EventQueryService
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+
         return $events->all();
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
     private function buildAgendaPipeline(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
@@ -358,7 +361,7 @@ class EventQueryService
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
     private function buildStreamPipeline(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
@@ -404,8 +407,8 @@ class EventQueryService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $pipeline
-     * @param array<int, string> $categories
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param  array<int, string>  $categories
      */
     private function applyCategoryFilter(array &$pipeline, array $categories): void
     {
@@ -414,7 +417,7 @@ class EventQueryService
         }
 
         $regexes = array_map(
-            static fn (string $value): Regex => new Regex('^' . preg_quote($value) . '$', 'i'),
+            static fn (string $value): Regex => new Regex('^'.preg_quote($value).'$', 'i'),
             $categories
         );
 
@@ -429,8 +432,8 @@ class EventQueryService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $pipeline
-     * @param array<int, string> $tags
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param  array<int, string>  $tags
      */
     private function applyTagsFilter(array &$pipeline, array $tags): void
     {
@@ -439,7 +442,7 @@ class EventQueryService
         }
 
         $regexes = array_map(
-            static fn (string $value): Regex => new Regex('^' . preg_quote($value) . '$', 'i'),
+            static fn (string $value): Regex => new Regex('^'.preg_quote($value).'$', 'i'),
             $tags
         );
 
@@ -451,8 +454,8 @@ class EventQueryService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $pipeline
-     * @param array<int, array{type: string, value: string}> $taxonomy
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param  array<int, array{type: string, value: string}>  $taxonomy
      */
     private function applyTaxonomyFilter(array &$pipeline, array $taxonomy): void
     {
@@ -505,7 +508,7 @@ class EventQueryService
     }
 
     /**
-     * @param array<int, mixed> $items
+     * @param  array<int, mixed>  $items
      * @return array<int, string>
      */
     private function normalizeStringArray(mixed $items): array
@@ -591,7 +594,6 @@ class EventQueryService
     }
 
     /**
-     * @param mixed $event
      * @return array<string, mixed>
      */
     public function formatEvent(mixed $event, ?string $userId = null): array
@@ -688,7 +690,6 @@ class EventQueryService
     }
 
     /**
-     * @param mixed $event
      * @return array{event_id: string, occurrence_id: string, type: string, updated_at: string}
      */
     private function formatStreamDelta(mixed $event, Carbon $since): array
@@ -719,7 +720,6 @@ class EventQueryService
     }
 
     /**
-     * @param mixed $value
      * @return array<int, mixed>|array<string, mixed>
      */
     private function normalizeArray(mixed $value): array
@@ -765,7 +765,6 @@ class EventQueryService
     }
 
     /**
-     * @param mixed $event
      * @return array<int, array{
      *   occurrence_id:string|null,
      *   occurrence_slug:string|null,
@@ -812,7 +811,6 @@ class EventQueryService
     }
 
     /**
-     * @param mixed $event
      * @return array<string, mixed>
      */
     private function resolveEventCapabilities(mixed $event): array
@@ -887,6 +885,7 @@ class EventQueryService
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             $query->where('_id', '__no_match__');
+
             return;
         }
 
@@ -896,7 +895,6 @@ class EventQueryService
     }
 
     /**
-     * @param mixed $value
      * @return array<int, array{
      *   party_type: string,
      *   party_ref_id: string,

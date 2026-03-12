@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
-use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -14,7 +14,7 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class StaticProfileTypeRegistryManagementService
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function create(array $payload): array
@@ -33,7 +33,7 @@ class StaticProfileTypeRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function update(string $type, array $payload): array
@@ -135,7 +135,7 @@ class StaticProfileTypeRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function buildEntry(array $payload, string $type): array
@@ -159,8 +159,7 @@ class StaticProfileTypeRegistryManagementService
     }
 
     /**
-     * @param StaticProfileType $existing
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function mergeEntry(
@@ -168,8 +167,7 @@ class StaticProfileTypeRegistryManagementService
         array $payload,
         string $resolvedType,
         string $previousType,
-    ): array
-    {
+    ): array {
         $capabilities = $payload['capabilities'] ?? [];
         $currentCapabilities = $existing->capabilities ?? [];
         $currentMapCategory = trim((string) ($existing->map_category ?? ''));
@@ -214,7 +212,6 @@ class StaticProfileTypeRegistryManagementService
     }
 
     /**
-     * @param mixed $raw
      * @return array<int, string>
      */
     private function normalizeTaxonomies(mixed $raw): array
@@ -239,7 +236,7 @@ class StaticProfileTypeRegistryManagementService
     }
 
     /**
-     * @param array<int, string> $rawIds
+     * @param  array<int, string>  $rawIds
      * @return array{0: array<int, string>, 1: array<int, ObjectId>}
      */
     private function splitMapPoiRefIds(array $rawIds): array

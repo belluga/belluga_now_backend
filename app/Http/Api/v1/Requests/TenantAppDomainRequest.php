@@ -23,9 +23,9 @@ class TenantAppDomainRequest extends FormRequest
                 'required',
                 'string',
                 'regex:/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/',
-                'max:' . InputConstraints::NAME_MAX,
+                'max:'.InputConstraints::NAME_MAX,
                 new UniqueArrayItemRule(
-                    connection: 'tenant',table: 'tenants', key: 'app_domains',
+                    connection: 'tenant', table: 'tenants', key: 'app_domains',
                 ),
             ],
         ];

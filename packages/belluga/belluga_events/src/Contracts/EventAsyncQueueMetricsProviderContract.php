@@ -11,4 +11,3 @@ interface EventAsyncQueueMetricsProviderContract
      */
     public function pendingAgesInSeconds(): array;
 }
-

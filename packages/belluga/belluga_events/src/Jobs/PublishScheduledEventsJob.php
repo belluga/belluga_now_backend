@@ -116,7 +116,8 @@ class PublishScheduledEventsJob implements ShouldQueue
 
     /**
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     private function runTenantTransaction(callable $callback): mixed

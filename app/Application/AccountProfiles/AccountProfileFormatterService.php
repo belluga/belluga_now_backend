@@ -12,8 +12,7 @@ class AccountProfileFormatterService
 {
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -44,7 +43,6 @@ class AccountProfileFormatterService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, float>|null
      */
     private function formatLocation(mixed $location): ?array

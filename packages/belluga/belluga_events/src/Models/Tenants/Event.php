@@ -12,7 +12,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class Event extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug;
+    use HasSlug, SoftDeletes, UsesTenantConnection;
 
     protected $table = 'events';
 

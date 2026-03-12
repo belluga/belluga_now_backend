@@ -17,8 +17,7 @@ class OrganizationsController extends Controller
     public function __construct(
         private readonly OrganizationManagementService $organizationService,
         private readonly OrganizationQueryService $organizationQueryService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {

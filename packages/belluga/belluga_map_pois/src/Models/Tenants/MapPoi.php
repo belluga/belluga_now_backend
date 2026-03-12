@@ -24,6 +24,7 @@ class MapPoi extends Model
         'name',
         'subtitle',
         'category',
+        'source_type',
         'tags',
         'taxonomy_terms',
         'taxonomy_terms_flat',

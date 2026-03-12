@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use App\Support\Validation\InputConstraints;
 
 class UpdateProfileRequestLandlord extends UpdateProfileRequestContract
 {
@@ -23,9 +23,10 @@ class UpdateProfileRequestLandlord extends UpdateProfileRequestContract
      *
      * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
      */
-    public function rules(): array {
+    public function rules(): array
+    {
         return [
-            'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'timezone' => 'sometimes|string|max:64',
         ];
     }
@@ -33,7 +34,7 @@ class UpdateProfileRequestLandlord extends UpdateProfileRequestContract
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'errors' => $validator->errors()
+            'errors' => $validator->errors(),
         ], 422));
     }
 }

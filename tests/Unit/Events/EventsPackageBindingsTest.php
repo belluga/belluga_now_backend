@@ -6,10 +6,8 @@ namespace Tests\Unit\Events;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
-use App\Integration\Events\EventTypeResolverAdapter;
-use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
-use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
+use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
@@ -23,16 +21,18 @@ use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
-use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
+use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
+use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use Tests\TestCase;
 
 class EventsPackageBindingsTest extends TestCase
 {
-    public function testEventsPackageContractsAreBoundToAppAdapters(): void
+    public function test_events_package_contracts_are_bound_to_app_adapters(): void
     {
         $this->assertInstanceOf(
             EventTaxonomyValidationAdapter::class,

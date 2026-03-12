@@ -9,10 +9,10 @@ use App\Models\Landlord\Landlord;
 class CreateLandlordAction
 {
     /**
-     * @param array<string, mixed> $landlordData
-     * @param array<string, mixed> $themeData
-     * @param array<string, mixed> $logoSettings
-     * @param array<string, mixed> $pwaIcon
+     * @param  array<string, mixed>  $landlordData
+     * @param  array<string, mixed>  $themeData
+     * @param  array<string, mixed>  $logoSettings
+     * @param  array<string, mixed>  $pwaIcon
      */
     public function execute(
         array $landlordData,

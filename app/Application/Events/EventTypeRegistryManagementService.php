@@ -15,11 +15,10 @@ class EventTypeRegistryManagementService
 {
     public function __construct(
         private readonly EventTypeRegistryService $registryService,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function create(array $payload): array
@@ -50,7 +49,7 @@ class EventTypeRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function update(string $eventTypeId, array $payload): array
@@ -124,7 +123,7 @@ class EventTypeRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function buildEntry(array $payload): array
@@ -139,7 +138,7 @@ class EventTypeRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function mergeEntry(EventType $existing, array $payload): array

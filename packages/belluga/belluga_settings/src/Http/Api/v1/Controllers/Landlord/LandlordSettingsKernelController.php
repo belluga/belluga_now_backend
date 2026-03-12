@@ -10,9 +10,7 @@ use Illuminate\Http\Request;
 
 class LandlordSettingsKernelController
 {
-    public function __construct(private readonly SettingsKernelService $service)
-    {
-    }
+    public function __construct(private readonly SettingsKernelService $service) {}
 
     public function schema(Request $request): JsonResponse
     {

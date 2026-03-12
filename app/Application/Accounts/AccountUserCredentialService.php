@@ -15,11 +15,10 @@ class AccountUserCredentialService
 {
     public function __construct(
         private readonly AccountUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function link(AccountUser $user, array $payload): array
     {
@@ -78,6 +77,7 @@ class AccountUserCredentialService
         $currentCredential = collect($user->credentials ?? [])
             ->first(static function (array $credential) use ($credentialId): bool {
                 $currentId = $credential['_id'] ?? $credential['id'] ?? null;
+
                 return $currentId === $credentialId;
             });
 
@@ -89,6 +89,7 @@ class AccountUserCredentialService
             $remainingPasswords = collect($user->credentials ?? [])
                 ->reject(static function (array $credential) use ($credentialId): bool {
                     $currentId = $credential['_id'] ?? $credential['id'] ?? null;
+
                     return ($credential['provider'] ?? null) === 'password' && $currentId === $credentialId;
                 })
                 ->filter(static fn (array $credential): bool => ($credential['provider'] ?? null) === 'password');

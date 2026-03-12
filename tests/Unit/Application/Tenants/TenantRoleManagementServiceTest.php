@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\Tenants;
 
-use App\Application\Tenants\TenantRoleManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Tenants\TenantRoleManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\TenantRoleTemplate;
 use Tests\TestCase;
@@ -38,14 +38,14 @@ class TenantRoleManagementServiceTest extends TestCase
         $this->service = $this->app->make(TenantRoleManagementService::class);
     }
 
-    public function testPaginateReturnsTenantRoles(): void
+    public function test_paginate_returns_tenant_roles(): void
     {
         $paginator = $this->service->paginate($this->tenant, false);
 
         $this->assertGreaterThanOrEqual(1, $paginator->total());
     }
 
-    public function testCreatePersistsRole(): void
+    public function test_create_persists_role(): void
     {
         $role = $this->service->create($this->tenant, [
             'name' => 'Support',
@@ -57,7 +57,7 @@ class TenantRoleManagementServiceTest extends TestCase
         $this->assertSame('Support', $role->name);
     }
 
-    public function testUpdateMutatesPermissions(): void
+    public function test_update_mutates_permissions(): void
     {
         $role = $this->service->create($this->tenant, [
             'name' => 'Editor',
@@ -73,7 +73,7 @@ class TenantRoleManagementServiceTest extends TestCase
         $this->assertContains('tenant-users:update', $updated->permissions);
     }
 
-    public function testDeleteReassignsLandlordUsers(): void
+    public function test_delete_reassigns_landlord_users(): void
     {
         $role = $this->service->create($this->tenant, [
             'name' => 'Temp',
@@ -90,7 +90,7 @@ class TenantRoleManagementServiceTest extends TestCase
         $this->assertSoftDeleted('tenant_role_templates', ['_id' => $role->_id], 'landlord');
     }
 
-    public function testRestoreBringsBackRole(): void
+    public function test_restore_brings_back_role(): void
     {
         $role = $this->service->create($this->tenant, [
             'name' => 'Archivable',
@@ -109,7 +109,7 @@ class TenantRoleManagementServiceTest extends TestCase
         $this->assertFalse($restored->trashed());
     }
 
-    public function testForceDeleteRemovesRole(): void
+    public function test_force_delete_removes_role(): void
     {
         $role = $this->service->create($this->tenant, [
             'name' => 'Temp Force',

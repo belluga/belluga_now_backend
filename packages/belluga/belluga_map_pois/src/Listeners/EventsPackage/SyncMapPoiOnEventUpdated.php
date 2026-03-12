@@ -11,8 +11,7 @@ class SyncMapPoiOnEventUpdated
 {
     public function __construct(
         private readonly EventProjectionSyncContract $projectionSync
-    ) {
-    }
+    ) {}
 
     public function handle(EventUpdated $event): void
     {

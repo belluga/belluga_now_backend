@@ -8,7 +8,8 @@ interface TenantScopeContextContract
 {
     /**
      * @template TReturn
-     * @param callable(): TReturn $callback
+     *
+     * @param  callable(): TReturn  $callback
      * @return TReturn
      */
     public function runForTenantSlug(string $tenantSlug, callable $callback): mixed;

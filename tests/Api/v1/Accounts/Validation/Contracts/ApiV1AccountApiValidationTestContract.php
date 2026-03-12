@@ -8,7 +8,6 @@ use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
 {
-
     use AccountProfileFunctions;
 
     protected string $base_api_url {
@@ -24,11 +23,11 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
 
         $response->assertStatus(422);
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "name",
-                "permissions"
-            ]
+            'message',
+            'errors' => [
+                'name',
+                'permissions',
+            ],
         ]);
 
     }
@@ -40,10 +39,10 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
 
         $response->assertStatus(422);
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "permissions",
-            ]
+            'message',
+            'errors' => [
+                'permissions',
+            ],
         ]);
     }
 
@@ -56,45 +55,48 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
         $deleteResponse->assertStatus(422);
 
         $deleteResponse->assertJsonStructure([
-           "message",
-           "errors" => [
-               "background_role_id"
-           ]
+            'message',
+            'errors' => [
+                'background_role_id',
+            ],
         ]);
     }
 
-    public function testAccountUserCreate(): void {
+    public function testAccountUserCreate(): void
+    {
 
         $response = $this->userCreate([]);
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "name",
-                "email",
-                "password",
-                "role_id"
+            'message',
+            'errors' => [
+                'name',
+                'email',
+                'password',
+                'role_id',
             ],
         ]);
     }
 
-    public function testAccountUserEmailRemove(): void {
+    public function testAccountUserEmailRemove(): void
+    {
 
         $response = $this->profileRemoveEmail(
             $this->account->user_visitor,
-            "");
+            '');
 
         $response->assertStatus(422);
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "email"
-            ]
+            'message',
+            'errors' => [
+                'email',
+            ],
         ]);
     }
 
-    public function testAccountUserEmailAddEmpty(): void {
+    public function testAccountUserEmailAddEmpty(): void
+    {
 
         $response = $this->profileAddEmails(
             $this->account->user_visitor,
@@ -103,9 +105,9 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "email",
+            'message',
+            'errors' => [
+                'email',
             ],
         ]);
 
@@ -116,7 +118,8 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
         $response->assertStatus(200);
     }
 
-    public function testAccountUserUpdate(): void {
+    public function testAccountUserUpdate(): void
+    {
 
         $response = $this->profileUpdate(
             $this->account->user_visitor,
@@ -124,9 +127,9 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "empty",
+            'message',
+            'errors' => [
+                'empty',
             ],
         ]);
     }
@@ -159,7 +162,8 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
         );
     }
 
-    protected function userCreate(array $data): TestResponse {
+    protected function userCreate(array $data): TestResponse
+    {
         return $this->json(
             method: 'post',
             uri: "{$this->base_api_url}users",
@@ -168,7 +172,8 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
         );
     }
 
-    protected function userDelete(array $data): TestResponse {
+    protected function userDelete(array $data): TestResponse
+    {
         return $this->json(
             method: 'delete',
             uri: "{$this->base_api_url}users",

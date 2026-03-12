@@ -26,4 +26,3 @@ enum ConditionOperator: string
         return in_array($this, [self::GT, self::GTE, self::LT, self::LTE], true);
     }
 }
-

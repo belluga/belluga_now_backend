@@ -11,7 +11,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class TenantRoleTemplate extends Model
 {
-    use UsesLandlordConnection, SoftDeletes, HasSlug;
+    use HasSlug, SoftDeletes, UsesLandlordConnection;
 
     protected $fillable = [
         'name',
@@ -20,7 +20,8 @@ class TenantRoleTemplate extends Model
         'permissions',
     ];
 
-    public function tenant(): BelongsTo {
+    public function tenant(): BelongsTo
+    {
         return $this->belongsTo(Tenant::class);
     }
 

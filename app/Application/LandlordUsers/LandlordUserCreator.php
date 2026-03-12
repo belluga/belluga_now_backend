@@ -14,11 +14,10 @@ class LandlordUserCreator
 {
     public function __construct(
         private readonly LandlordUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload, string $roleId, ?string $operatorId = null): LandlordUser
     {

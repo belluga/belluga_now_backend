@@ -10,17 +10,17 @@ use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MapPoiCapabilityHandler;
 use Belluga\Events\Capabilities\MultipleOccurrencesCapabilityHandler;
+use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
-use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilityRegistryContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
-use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Illuminate\Queue\Events\JobFailed;
@@ -33,9 +33,9 @@ class EventsServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(EventCapabilityRegistryContract::class, static function () {
-            $registry = new InMemoryEventCapabilityRegistry();
-            $registry->register(new MultipleOccurrencesCapabilityHandler());
-            $registry->register(new MapPoiCapabilityHandler());
+            $registry = new InMemoryEventCapabilityRegistry;
+            $registry->register(new MultipleOccurrencesCapabilityHandler);
+            $registry->register(new MapPoiCapabilityHandler);
 
             return $registry;
         });
@@ -57,7 +57,7 @@ class EventsServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         Queue::failing(function (JobFailed $event): void {
             $this->app->make(EventDlqAlertService::class)->handle($event);

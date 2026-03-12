@@ -15,7 +15,7 @@ use Tests\TestCaseAuthenticated;
 
 class TicketingExpirySweepTenantContextTest extends TestCaseAuthenticated
 {
-    public function testTicketExpirySweepProcessesOccurrencesAcrossTenantContexts(): void
+    public function test_ticket_expiry_sweep_processes_occurrences_across_tenant_contexts(): void
     {
         $primaryTenant = Tenant::query()
             ->where('slug', $this->landlord->tenant_primary->slug)

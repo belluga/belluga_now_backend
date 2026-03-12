@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\Ticketing;
 
+use Belluga\Settings\Contracts\SettingsRegistryContract;
+use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Belluga\Ticketing\Application\Admission\TicketAdmissionService;
 use Belluga\Ticketing\Application\Async\TicketOutboxEmitter;
 use Belluga\Ticketing\Application\Checkout\CheckoutPayloadAssembler;
@@ -18,10 +20,8 @@ use Belluga\Ticketing\Application\Queue\TicketQueueService;
 use Belluga\Ticketing\Application\Realtime\TicketRealtimeStreamService;
 use Belluga\Ticketing\Application\Security\TicketingCommandRateLimiter;
 use Belluga\Ticketing\Application\Settings\TicketingRuntimeSettingsService;
-use Belluga\Ticketing\Application\TransferReissue\TicketTransferReissueService;
 use Belluga\Ticketing\Application\Transactions\TenantTransactionRunner;
-use Belluga\Settings\Contracts\SettingsRegistryContract;
-use Belluga\Settings\Support\SettingsNamespaceDefinition;
+use Belluga\Ticketing\Application\TransferReissue\TicketTransferReissueService;
 use Belluga\Ticketing\Contracts\CheckoutOrchestratorContract;
 use Belluga\Ticketing\Contracts\EventTemplateReadContract;
 use Belluga\Ticketing\Contracts\OccurrencePublicationContract;
@@ -60,8 +60,8 @@ class TicketingServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__ . '/../routes/ticketing.php');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->loadRoutesFrom(__DIR__.'/../routes/ticketing.php');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         $this->registerTicketingSettingsNamespaces();
     }
 

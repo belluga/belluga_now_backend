@@ -25,7 +25,7 @@ class ConditionExpressionEvaluatorTest extends TestCase
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rules
+     * @param  array<int, array<string, mixed>>  $rules
      */
     private function expressionWithRules(array $rules): ConditionExpression
     {
@@ -55,7 +55,7 @@ class ConditionExpressionEvaluatorTest extends TestCase
             ],
         ], $this->references());
 
-        $evaluator = new ConditionExpressionEvaluator();
+        $evaluator = new ConditionExpressionEvaluator;
 
         $this->assertTrue($evaluator->evaluate($expression, [
             'events' => [
@@ -85,7 +85,7 @@ class ConditionExpressionEvaluatorTest extends TestCase
     #[Test]
     public function it_evaluates_equals_and_not_equals(): void
     {
-        $evaluator = new ConditionExpressionEvaluator();
+        $evaluator = new ConditionExpressionEvaluator;
         $expression = $this->expressionWithRules([
             ['field_id' => 'events.mode', 'operator' => 'equals', 'value' => 'advanced'],
             ['field_id' => 'events.stock_enabled', 'operator' => 'not_equals', 'value' => false],
@@ -103,7 +103,7 @@ class ConditionExpressionEvaluatorTest extends TestCase
     #[Test]
     public function it_evaluates_in_and_not_in(): void
     {
-        $evaluator = new ConditionExpressionEvaluator();
+        $evaluator = new ConditionExpressionEvaluator;
         $expression = $this->expressionWithRules([
             ['field_id' => 'events.mode', 'operator' => 'in', 'value' => ['advanced', 'pro']],
             ['field_id' => 'events.mode', 'operator' => 'not_in', 'value' => ['legacy']],
@@ -121,7 +121,7 @@ class ConditionExpressionEvaluatorTest extends TestCase
     #[Test]
     public function it_evaluates_numeric_comparators(): void
     {
-        $evaluator = new ConditionExpressionEvaluator();
+        $evaluator = new ConditionExpressionEvaluator;
         $expression = $this->expressionWithRules([
             ['field_id' => 'events.default_duration_hours', 'operator' => 'gt', 'value' => 3],
             ['field_id' => 'events.default_duration_hours', 'operator' => 'gte', 'value' => 4],
@@ -141,7 +141,7 @@ class ConditionExpressionEvaluatorTest extends TestCase
     #[Test]
     public function it_evaluates_exists_operator(): void
     {
-        $evaluator = new ConditionExpressionEvaluator();
+        $evaluator = new ConditionExpressionEvaluator;
         $existsExpression = $this->expressionWithRules([
             ['field_id' => 'events.priority', 'operator' => 'exists', 'value' => true],
         ]);
