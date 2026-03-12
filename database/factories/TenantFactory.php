@@ -3,7 +3,6 @@
 namespace Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
@@ -31,8 +30,8 @@ class TenantFactory extends Factory
                 fake()->domainName(),
             ],
             'app_domains' => [
-                Str::slug(fake()->company())
-            ]
+                Str::slug(fake()->company()),
+            ],
         ];
     }
 

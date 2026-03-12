@@ -15,10 +15,11 @@ class TenantRole extends Model
         'description',
         'slug',
         'permissions',
-        'tenant_id'
+        'tenant_id',
     ];
 
-    public function tenant(): BelongsTo {
+    public function tenant(): BelongsTo
+    {
         return $this->belongsTo(Tenant::class);
     }
 }

@@ -15,8 +15,8 @@ class TaxonomyTermUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'slug' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'name' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'slug' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
         ];
     }
 }

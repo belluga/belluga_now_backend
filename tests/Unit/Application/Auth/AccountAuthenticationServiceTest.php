@@ -10,11 +10,11 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
-use Illuminate\Support\Str;
-use PHPUnit\Framework\Attributes\Group;
 
 #[Group('atlas-critical')]
 class AccountAuthenticationServiceTest extends TestCase
@@ -46,7 +46,7 @@ class AccountAuthenticationServiceTest extends TestCase
         ]);
     }
 
-    public function testLoginReturnsToken(): void
+    public function test_login_returns_token(): void
     {
         $result = $this->service->login($this->user->emails[0], 'Secret!234', 'api-client');
 
@@ -54,14 +54,14 @@ class AccountAuthenticationServiceTest extends TestCase
         $this->assertNotEmpty($result->plainTextToken);
     }
 
-    public function testLoginThrowsWhenCredentialsInvalid(): void
+    public function test_login_throws_when_credentials_invalid(): void
     {
         $this->expectException(InvalidCredentialsException::class);
 
         $this->service->login($this->user->emails[0], 'wrong-password', 'api-client');
     }
 
-    public function testLogoutDeletesDeviceTokens(): void
+    public function test_logout_deletes_device_tokens(): void
     {
         $result = $this->service->login($this->user->emails[0], 'Secret!234', 'api-client');
 

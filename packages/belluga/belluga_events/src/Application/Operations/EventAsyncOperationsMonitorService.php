@@ -11,17 +11,20 @@ use Illuminate\Support\Facades\Log;
 class EventAsyncOperationsMonitorService
 {
     public const int SLO_P95_TARGET_SECONDS = 15;
+
     public const int SLO_P99_TARGET_SECONDS = 60;
+
     public const int STALENESS_MAX_AGE_SECONDS = 60;
+
     public const int STALENESS_BREACH_MINUTES = 5;
 
     public const string CACHE_BREACH_COUNT_KEY = 'events:async:staleness:breach_count';
+
     public const string CACHE_ALERT_ACTIVE_KEY = 'events:async:staleness:alert_active';
 
     public function __construct(
         private readonly EventAsyncQueueMetricsProviderContract $metricsProvider
-    ) {
-    }
+    ) {}
 
     public function evaluate(): void
     {
@@ -67,7 +70,7 @@ class EventAsyncOperationsMonitorService
     }
 
     /**
-     * @param array<int, int> $ages
+     * @param  array<int, int>  $ages
      */
     private function percentile(array $ages, int $percent): int
     {
@@ -120,4 +123,3 @@ class EventAsyncOperationsMonitorService
         }
     }
 }
-

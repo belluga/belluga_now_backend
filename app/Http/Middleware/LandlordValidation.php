@@ -12,16 +12,16 @@ class LandlordValidation
 
         $user = auth()->guard('sanctum')->user();
 
-        if(!$user){
-            abort(401, "Unauthorized");
+        if (! $user) {
+            abort(401, 'Unauthorized');
         }
 
         $class = get_class($user);
 
-        $current_user_is_landlord = LandlordUser::class == $class;
+        $current_user_is_landlord = $class == LandlordUser::class;
 
-        if(!$current_user_is_landlord) {
-            abort(401, "Unauthorized");
+        if (! $current_user_is_landlord) {
+            abort(401, 'Unauthorized');
         }
 
         return $next($request);

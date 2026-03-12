@@ -32,11 +32,11 @@ class LogoSettings
     public function toArray(): array
     {
         return [
-            'favicon_uri' => $this->faviconUri ?? "",
-            'light_logo_uri' => $this->lightLogoUri ?? "",
-            'dark_logo_uri' => $this->darkLogoUri ?? "",
-            'light_icon_uri' => $this->lightIconUri ?? "",
-            'dark_icon_uri' => $this->darkIconUri ?? "",
+            'favicon_uri' => $this->faviconUri ?? '',
+            'light_logo_uri' => $this->lightLogoUri ?? '',
+            'dark_logo_uri' => $this->darkLogoUri ?? '',
+            'light_icon_uri' => $this->lightIconUri ?? '',
+            'dark_icon_uri' => $this->darkIconUri ?? '',
         ];
     }
 }

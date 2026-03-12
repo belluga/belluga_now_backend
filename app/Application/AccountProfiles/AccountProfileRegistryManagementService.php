@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
-use Belluga\MapPois\Models\Tenants\MapPoi;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -14,7 +14,7 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class AccountProfileRegistryManagementService
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function create(array $payload): array
@@ -34,7 +34,7 @@ class AccountProfileRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function update(string $type, array $payload): array
@@ -120,7 +120,7 @@ class AccountProfileRegistryManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function buildEntry(array $payload, string $type): array
@@ -145,8 +145,7 @@ class AccountProfileRegistryManagementService
     }
 
     /**
-     * @param TenantProfileType $existing
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function mergeEntry(TenantProfileType $existing, array $payload, string $resolvedType): array
@@ -192,7 +191,6 @@ class AccountProfileRegistryManagementService
     }
 
     /**
-     * @param mixed $raw
      * @return array<int, string>
      */
     private function normalizeTaxonomies(mixed $raw): array
@@ -207,7 +205,7 @@ class AccountProfileRegistryManagementService
     }
 
     /**
-     * @param array<int, string> $rawIds
+     * @param  array<int, string>  $rawIds
      * @return array{0: array<int, string>, 1: array<int, ObjectId>}
      */
     private function splitMapPoiRefIds(array $rawIds): array

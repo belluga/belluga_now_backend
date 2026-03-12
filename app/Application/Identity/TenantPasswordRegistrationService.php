@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Application\Identity;
 
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Landlord\Tenant;
-use App\Support\Auth\AbilityCatalog;
 use App\Models\Tenants\AccountUser;
-use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Support\Auth\AbilityCatalog;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -23,11 +23,11 @@ class TenantPasswordRegistrationService
         private readonly PasswordIdentityRegistrar $registrar,
         private readonly AnonymousIdentityMerger $identityMerger,
         private readonly AccountProfileBootstrapService $profileBootstrapper,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
+     *
      * @throws IdentityAlreadyExistsException
      */
     public function register(Tenant $tenant, array $payload): TenantPasswordRegistrationResult
@@ -103,7 +103,7 @@ class TenantPasswordRegistrationService
     }
 
     /**
-     * @param Collection<int, AccountUser> $anonymousUsers
+     * @param  Collection<int, AccountUser>  $anonymousUsers
      */
     private function mergeAnonymousUsers(AccountUser $user, Collection $anonymousUsers): void
     {
@@ -125,7 +125,7 @@ class TenantPasswordRegistrationService
     }
 
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(array $abilities): array

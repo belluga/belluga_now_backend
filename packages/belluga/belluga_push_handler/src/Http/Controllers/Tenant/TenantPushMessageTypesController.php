@@ -13,8 +13,7 @@ class TenantPushMessageTypesController
 {
     public function __construct(
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     public function show(): JsonResponse
     {
@@ -63,8 +62,8 @@ class TenantPushMessageTypesController
     }
 
     /**
-     * @param array<int, array<string, mixed>> $existing
-     * @param array<int, array<string, mixed>> $incoming
+     * @param  array<int, array<string, mixed>>  $existing
+     * @param  array<int, array<string, mixed>>  $incoming
      * @return array<int, array<string, mixed>>
      */
     private function mergeTypes(array $existing, array $incoming): array
@@ -88,7 +87,7 @@ class TenantPushMessageTypesController
     }
 
     /**
-     * @param array<int, array<string, mixed>> $types
+     * @param  array<int, array<string, mixed>>  $types
      * @return array<string, array<string, mixed>>
      */
     private function indexTypes(array $types): array

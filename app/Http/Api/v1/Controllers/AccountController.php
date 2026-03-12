@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountQueryService;
 use App\Application\Accounts\AccountRoleTemplateQueryService;
 use App\Application\Accounts\AccountUserQueryService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Api\v1\Requests\AccountStoreRequest;
 use App\Http\Api\v1\Requests\AccountUpdateRequest;
 use App\Http\Api\v1\Requests\AccountUserAttachRequest;
@@ -25,8 +25,7 @@ class AccountController extends Controller
         private readonly AccountUserQueryService $accountUserQueryService,
         private readonly AccountRoleTemplateQueryService $accountRoleTemplateQueryService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -88,8 +87,7 @@ class AccountController extends Controller
 
     public function update(
         AccountUpdateRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $account_slug = (string) $request->route('account_slug');
         $account = $this->accountQueryService->findBySlugOrFail($account_slug);
 
@@ -190,8 +188,7 @@ class AccountController extends Controller
 
     public function accountUserManage(
         AccountUserAttachRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $account_slug = (string) $request->route('account_slug');
         $user_id = (string) $request->route('user_id');
         $role_id = (string) $request->route('role_id');

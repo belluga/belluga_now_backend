@@ -10,8 +10,7 @@ class TicketingRuntimeSettingsService
 {
     public function __construct(
         private readonly SettingsStoreContract $settingsStore,
-    ) {
-    }
+    ) {}
 
     public function isTicketingEnabled(): bool
     {

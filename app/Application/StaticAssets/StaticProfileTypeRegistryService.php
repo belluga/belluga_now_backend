@@ -19,6 +19,7 @@ class StaticProfileTypeRegistryService
             ->map(static function (StaticProfileType $type): array {
                 $typeKey = trim((string) ($type->type ?? ''));
                 $mapCategory = trim((string) ($type->map_category ?? ''));
+
                 return [
                     'type' => $typeKey,
                     'label' => $type->label,
@@ -74,6 +75,7 @@ class StaticProfileTypeRegistryService
         }
 
         $fallback = trim($profileType);
+
         return $fallback !== '' ? $fallback : 'static';
     }
 }

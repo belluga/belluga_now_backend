@@ -11,9 +11,8 @@ interface EventPartyMapperContract
     public function defaultCanEdit(): bool;
 
     /**
-     * @param array<string, mixed> $source
+     * @param  array<string, mixed>  $source
      * @return array<string, mixed>
      */
     public function mapMetadata(array $source): array;
 }
-

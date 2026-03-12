@@ -7,9 +7,9 @@ namespace Tests\Feature\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
-use Tests\Helpers\TenantLabels;
 
 class TenantAppDomainControllerTest extends TestCaseTenant
 {
@@ -49,7 +49,7 @@ class TenantAppDomainControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testIndexReturnsTenantAppDomains(): void
+    public function test_index_returns_tenant_app_domains(): void
     {
         $response = $this->withHeaders($this->headers)->getJson($this->baseUrl);
 
@@ -59,7 +59,7 @@ class TenantAppDomainControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testStoreAppendsDomain(): void
+    public function test_store_appends_domain(): void
     {
         $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
             'app_domain' => 'tenanttheta.mobile',
@@ -72,7 +72,7 @@ class TenantAppDomainControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testDestroyRemovesDomain(): void
+    public function test_destroy_removes_domain(): void
     {
         $this->tenantModel->update(['app_domains' => ['tenanttheta.app', 'removethis.app']]);
 

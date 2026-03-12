@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class SchedulerBootstrapTest extends TestCase
 {
-    public function testScheduleListBootstrapsWithoutClassResolutionErrors(): void
+    public function test_schedule_list_bootstraps_without_class_resolution_errors(): void
     {
         $this->assertTrue(
             class_exists(PublishScheduledEventsJob::class),
@@ -19,7 +19,7 @@ class SchedulerBootstrapTest extends TestCase
         $this->artisan('schedule:list')->assertExitCode(0);
     }
 
-    public function testConsoleScheduleRegistersPublishJobViaClassString(): void
+    public function test_console_schedule_registers_publish_job_via_class_string(): void
     {
         $routesConsole = file_get_contents(base_path('routes/console.php'));
 
@@ -34,4 +34,3 @@ class SchedulerBootstrapTest extends TestCase
         );
     }
 }
-

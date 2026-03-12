@@ -27,8 +27,7 @@ class SystemInitializationService
         private readonly CreateAdministratorRoleAction $createAdminRole,
         private readonly CreateTenantAdminTemplateAction $createTenantTemplate,
         private readonly RegisterAdministratorUserAction $registerAdminUser,
-    ) {
-    }
+    ) {}
 
     public function isInitialized(): bool
     {
@@ -107,7 +106,7 @@ class SystemInitializationService
     }
 
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(array $abilities): array
@@ -120,7 +119,7 @@ class SystemInitializationService
     }
 
     /**
-     * @param array<int, string> $permissions
+     * @param  array<int, string>  $permissions
      */
     private function warnOnWildcardRolePermissions(array $permissions): void
     {

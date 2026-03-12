@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
-use App\Application\Accounts\AccountRoleTemplateService;
 use App\Application\Accounts\AccountRoleTemplateQueryService;
-use App\Http\Api\v1\Requests\AccountRoleTemplatesStoreRequest;
+use App\Application\Accounts\AccountRoleTemplateService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Api\v1\Requests\AccountRolesDeleteRequest;
 use App\Http\Api\v1\Requests\AccountRolesUpdateRequest;
+use App\Http\Api\v1\Requests\AccountRoleTemplatesStoreRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
 use Illuminate\Http\JsonResponse;
@@ -21,8 +21,7 @@ class AccountRolesTemplatesController extends Controller
         private readonly AccountRoleTemplateService $roleTemplateService,
         private readonly AccountRoleTemplateQueryService $roleTemplateQueryService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -86,7 +85,7 @@ class AccountRolesTemplatesController extends Controller
                 'message' => 'Send at least one field to update.',
                 'errors' => [
                     'empty' => [
-                        'Send at least one field to update.'
+                        'Send at least one field to update.',
                     ],
                 ],
             ], 422);
@@ -121,7 +120,7 @@ class AccountRolesTemplatesController extends Controller
                 'message' => 'Role ID background should be different from the role ID to be deleted.',
                 'errors' => [
                     'role_id' => [
-                        'Role ID background should be different from the role ID to be deleted.'
+                        'Role ID background should be different from the role ID to be deleted.',
                     ],
                 ],
             ], 422);
@@ -145,7 +144,7 @@ class AccountRolesTemplatesController extends Controller
                 'message' => 'Erro ao excluir role. Tente novamente mais tarde.',
                 'errors' => [
                     'database' => [
-                        'Erro ao excluir role. Tente novamente mais tarde.'
+                        'Erro ao excluir role. Tente novamente mais tarde.',
                     ],
                 ],
             ], 422);

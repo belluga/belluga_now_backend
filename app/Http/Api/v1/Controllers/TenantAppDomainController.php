@@ -14,8 +14,7 @@ class TenantAppDomainController extends Controller
     public function __construct(
         private readonly TenantAppDomainManagementService $appDomainService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function index(): JsonResponse
     {

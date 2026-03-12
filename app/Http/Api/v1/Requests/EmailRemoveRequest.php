@@ -28,7 +28,7 @@ class EmailRemoveRequest extends FormRequest
             'email' => [
                 'required',
                 'email',
-                'max:' . InputConstraints::EMAIL_MAX,
+                'max:'.InputConstraints::EMAIL_MAX,
             ],
         ];
     }

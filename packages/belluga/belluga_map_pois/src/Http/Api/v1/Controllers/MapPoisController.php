@@ -13,9 +13,7 @@ use Illuminate\Routing\Controller;
 
 class MapPoisController extends Controller
 {
-    public function __construct(private readonly MapPoiQueryService $queryService)
-    {
-    }
+    public function __construct(private readonly MapPoiQueryService $queryService) {}
 
     public function index(MapPoisIndexRequest $request): JsonResponse
     {

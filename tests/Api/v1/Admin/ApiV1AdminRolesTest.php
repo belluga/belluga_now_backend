@@ -7,127 +7,127 @@ use Tests\TestCaseAuthenticated;
 
 class ApiV1AdminRolesTest extends TestCaseAuthenticated
 {
-    public function testRoleUsersManagerCreate(): void
+    public function test_role_users_manager_create(): void
     {
-        $this->landlord->role_users_manager->name = "Users Manager";
+        $this->landlord->role_users_manager->name = 'Users Manager';
 
         $response = $this->rolesCreate([
-            "name" => $this->landlord->role_users_manager->name,
-            "description" => "Users Manager Role",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
-                "landlord-user:view",
-                "landlord-user:create",
-                "landlord-user:delete",
-                "landlord-user:update"
+            'name' => $this->landlord->role_users_manager->name,
+            'description' => 'Users Manager Role',
+            'permissions' => [
+                'profile:view',
+                'profile:update',
+                'landlord-user:view',
+                'landlord-user:create',
+                'landlord-user:delete',
+                'landlord-user:update',
             ],
         ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->landlord->role_users_manager->id = $response->json()['data']['id'];
 
     }
 
-    public function testRoleTenantsManagerCreate(): void
+    public function test_role_tenants_manager_create(): void
     {
-        $this->landlord->role_tenants_manager->name = "Tenants Manager";
+        $this->landlord->role_tenants_manager->name = 'Tenants Manager';
 
         $response = $this->rolesCreate([
-            "name" => $this->landlord->role_tenants_manager->name,
-            "description" => "Tenants Manager Role",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
-                "landlord-user:view",
-                "landlord-user:create",
-                "landlord-user:delete",
-                "landlord-user:update",
-                "tenants:view",
-                "tenants:create",
-                "tenants:delete",
-                "tenants:update",
-                "tenants-roles:view",
-                "tenants-roles:create",
-                "tenants-roles:delete",
-                "tenants-roles:update",
+            'name' => $this->landlord->role_tenants_manager->name,
+            'description' => 'Tenants Manager Role',
+            'permissions' => [
+                'profile:view',
+                'profile:update',
+                'landlord-user:view',
+                'landlord-user:create',
+                'landlord-user:delete',
+                'landlord-user:update',
+                'tenants:view',
+                'tenants:create',
+                'tenants:delete',
+                'tenants:update',
+                'tenants-roles:view',
+                'tenants-roles:create',
+                'tenants-roles:delete',
+                'tenants-roles:update',
             ],
         ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->landlord->role_tenants_manager->id = $response->json()['data']['id'];
 
     }
 
-    public function testRoleVisitorCreate(): void
+    public function test_role_visitor_create(): void
     {
-        $this->landlord->role_visitor->name = "Visitor";
+        $this->landlord->role_visitor->name = 'Visitor';
 
         $response = $this->rolesCreate([
-            "name" => $this->landlord->role_visitor->name,
-            "description" => "Visitor Role",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
+            'name' => $this->landlord->role_visitor->name,
+            'description' => 'Visitor Role',
+            'permissions' => [
+                'profile:view',
+                'profile:update',
             ],
         ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->landlord->role_visitor->id = $response->json()['data']['id'];
 
     }
 
-    public function testRoleDisposableCreate(): void
+    public function test_role_disposable_create(): void
     {
-        $this->landlord->role_disposable->name = "Disposable";
+        $this->landlord->role_disposable->name = 'Disposable';
 
         $response = $this->rolesCreate([
-            "name" => $this->landlord->role_disposable->name,
-            "description" => "To be deleted",
-            "permissions" => [
-                "profile:view",
-                "profile:update",
+            'name' => $this->landlord->role_disposable->name,
+            'description' => 'To be deleted',
+            'permissions' => [
+                'profile:view',
+                'profile:update',
             ],
         ]);
 
         $response->assertStatus(201);
         $response->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
-            ]
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
+            ],
         ]);
 
         $this->landlord->role_disposable->id = $response->json()['data']['id'];
 
     }
 
-    public function testRolesList(): void
+    public function test_roles_list(): void
     {
         $rolesList = $this->rolesList();
         $rolesList->assertOk();
@@ -141,28 +141,28 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
         $this->assertArrayHasKey('per_page', $responseData);
     }
 
-    public function testRolesShow(): void
+    public function test_roles_show(): void
     {
         $rolesShow = $this->rolesShow($this->landlord->role_disposable->id);
         $rolesShow->assertOk();
         $rolesShow->assertJsonStructure([
-            "data" => [
-                "name",
-                "permissions",
-                "created_at",
+            'data' => [
+                'name',
+                'permissions',
+                'created_at',
             ],
         ]);
     }
 
-    public function testRolesUpdate(): void
+    public function test_roles_update(): void
     {
         $roleUpdate = $this->rolesUpdate(
             $this->landlord->role_disposable->id,
             [
-                "name" => "Updated Role Name",
-                "permissions" => [
-                    "add" => ["user:view", "user:create", "role:view", "role:create"],
-                    "remove" => ["profile:view", "profile:update"],
+                'name' => 'Updated Role Name',
+                'permissions' => [
+                    'add' => ['user:view', 'user:create', 'role:view', 'role:create'],
+                    'remove' => ['profile:view', 'profile:update'],
                 ],
             ]
         );
@@ -172,14 +172,14 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
         $rolesShow = $this->rolesShow($this->landlord->role_disposable->id);
         $rolesShow->assertOk();
 
-        $this->assertEquals("Updated Role Name", $rolesShow->json()['data']['name']);
+        $this->assertEquals('Updated Role Name', $rolesShow->json()['data']['name']);
         $this->assertEquals(
-            ["user:view", "user:create", "role:view", "role:create"],
+            ['user:view', 'user:create', 'role:view', 'role:create'],
             $rolesShow->json()['data']['permissions']
         );
     }
 
-    public function testRolesDelete(): void
+    public function test_roles_delete(): void
     {
         $deleteResponse = $this->rolesDelete($this->landlord->role_disposable->id);
         $deleteResponse->assertStatus(200);
@@ -188,7 +188,7 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
         $showResponse->assertStatus(404);
     }
 
-    public function testRolesRestore(): void
+    public function test_roles_restore(): void
     {
         $restoreResponse = $this->rolesRestore($this->landlord->role_disposable->id);
         $restoreResponse->assertStatus(200);
@@ -197,7 +197,7 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
         $showResponse->assertOk();
     }
 
-    public function testRolesDeleteFlow(): void
+    public function test_roles_delete_flow(): void
     {
         $deleteResponse = $this->rolesDelete($this->landlord->role_disposable->id);
         $deleteResponse->assertStatus(200);
@@ -232,7 +232,7 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/roles",
+            uri: 'admin/api/v1/roles',
             headers: $this->getHeaders(),
         );
     }
@@ -241,7 +241,7 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/roles?archived=true",
+            uri: 'admin/api/v1/roles?archived=true',
             headers: $this->getHeaders(),
         );
     }
@@ -259,7 +259,7 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
     {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/roles",
+            uri: 'admin/api/v1/roles',
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -281,7 +281,7 @@ class ApiV1AdminRolesTest extends TestCaseAuthenticated
             method: 'delete',
             uri: "admin/api/v1/roles/$roleId",
             data: [
-                "background_role_id" => $this->landlord->role_visitor->id,
+                'background_role_id' => $this->landlord->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );

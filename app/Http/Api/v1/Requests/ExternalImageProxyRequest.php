@@ -29,4 +29,3 @@ final class ExternalImageProxyRequest extends FormRequest
         ];
     }
 }
-

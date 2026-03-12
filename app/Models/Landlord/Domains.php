@@ -10,14 +10,15 @@ use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
 class Domains extends Model
 {
-    use UsesLandlordConnection, SoftDeletes;
+    use SoftDeletes, UsesLandlordConnection;
 
     protected $fillable = [
         'path',
-        'type'
+        'type',
     ];
 
-    public function tenant(): BelongsTo {
+    public function tenant(): BelongsTo
+    {
         return $this->belongsTo(Tenant::class);
     }
 

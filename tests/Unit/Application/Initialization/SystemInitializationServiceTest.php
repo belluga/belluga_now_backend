@@ -23,7 +23,7 @@ class SystemInitializationServiceTest extends TestCase
         $this->refreshLandlordAndTenantDatabases();
     }
 
-    public function testInitializeCreatesAllArtifacts(): void
+    public function test_initialize_creates_all_artifacts(): void
     {
         $service = $this->app->make(SystemInitializationService::class);
 

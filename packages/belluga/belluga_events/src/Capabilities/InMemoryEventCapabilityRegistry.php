@@ -36,4 +36,3 @@ class InMemoryEventCapabilityRegistry implements EventCapabilityRegistryContract
         return $this->handlers[$key] ?? null;
     }
 }
-

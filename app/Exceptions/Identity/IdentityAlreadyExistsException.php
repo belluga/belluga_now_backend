@@ -9,7 +9,7 @@ use RuntimeException;
 class IdentityAlreadyExistsException extends RuntimeException
 {
     /**
-     * @param array<int, string> $emails
+     * @param  array<int, string>  $emails
      */
     public function __construct(private readonly array $emails)
     {

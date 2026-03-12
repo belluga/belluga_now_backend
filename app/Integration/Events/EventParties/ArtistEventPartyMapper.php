@@ -25,4 +25,3 @@ class ArtistEventPartyMapper implements EventPartyMapperContract
         ];
     }
 }
-

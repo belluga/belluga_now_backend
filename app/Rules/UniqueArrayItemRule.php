@@ -11,10 +11,12 @@ use Illuminate\Support\Facades\DB;
 class UniqueArrayItemRule implements ValidationRule
 {
     protected string $key;
+
     protected string $table;
+
     protected string $connection;
 
-    public function __construct(string $connection,string $table ,string $key)
+    public function __construct(string $connection, string $table, string $key)
     {
         $this->key = $key;
         $this->table = $table;

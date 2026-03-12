@@ -89,7 +89,7 @@ class CheckoutPayloadAssembler
     }
 
     /**
-     * @param array<string, mixed> $checkoutPayload
+     * @param  array<string, mixed>  $checkoutPayload
      * @return array<string, mixed>
      */
     public function buildFinancialSnapshot(array $checkoutPayload): array

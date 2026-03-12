@@ -6,6 +6,7 @@ namespace Belluga\MapPois\Http\Api\v1\Requests;
 
 use Belluga\MapPois\Support\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class MapFiltersRequest extends FormRequest
 {
@@ -27,13 +28,20 @@ class MapFiltersRequest extends FormRequest
             'origin_lat' => 'sometimes|required_with:origin_lng|numeric|between:-90,90',
             'origin_lng' => 'sometimes|required_with:origin_lat|numeric|between:-180,180',
             'max_distance_meters' => 'sometimes|numeric|min:0',
-            'categories' => 'sometimes|array|max:' . InputConstraints::METADATA_MAX_ITEMS,
-            'categories.*' => 'string|max:' . InputConstraints::NAME_MAX,
-            'tags' => 'sometimes|array|max:' . InputConstraints::METADATA_MAX_ITEMS,
-            'tags.*' => 'string|max:' . InputConstraints::NAME_MAX,
-            'taxonomy' => 'sometimes|array|max:' . InputConstraints::METADATA_MAX_ITEMS,
-            'taxonomy.*' => 'string|max:' . InputConstraints::NAME_MAX,
-            'search' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'source' => [
+                'sometimes',
+                'string',
+                Rule::in(['event', 'account_profile', 'account', 'static', 'static_asset', 'asset']),
+            ],
+            'types' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
+            'types.*' => 'string|max:'.InputConstraints::NAME_MAX,
+            'categories' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
+            'categories.*' => 'string|max:'.InputConstraints::NAME_MAX,
+            'tags' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
+            'tags.*' => 'string|max:'.InputConstraints::NAME_MAX,
+            'taxonomy' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
+            'taxonomy.*' => 'string|max:'.InputConstraints::NAME_MAX,
+            'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
         ];
     }
 }

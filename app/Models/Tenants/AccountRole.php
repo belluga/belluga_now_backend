@@ -20,7 +20,8 @@ class AccountRole extends Model
         'account_id',
     ];
 
-    public function account(): BelongsTo {
+    public function account(): BelongsTo
+    {
         return $this->belongsTo(Account::class);
     }
 }

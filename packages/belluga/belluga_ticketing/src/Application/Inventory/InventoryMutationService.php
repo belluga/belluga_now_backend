@@ -50,7 +50,7 @@ class InventoryMutationService
     }
 
     /**
-     * @param array<int, array{ticket_product_id:string, quantity:int}> $items
+     * @param  array<int, array{ticket_product_id:string, quantity:int}>  $items
      * @return array<int, array<string, mixed>>
      */
     public function hydrateLines(array $items, string $eventId, string $occurrenceId): array
@@ -130,7 +130,7 @@ class InventoryMutationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      * @return array{limited:bool,insufficient:bool,available:array<int,array<string,mixed>>}
      */
     public function previewAvailability(array $lines): array
@@ -178,7 +178,7 @@ class InventoryMutationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     public function reserveLines(array $lines): void
     {
@@ -217,7 +217,7 @@ class InventoryMutationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     public function releaseLines(array $lines): void
     {
@@ -255,7 +255,7 @@ class InventoryMutationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     public function confirmSaleFromHoldLines(array $lines): void
     {
@@ -294,7 +294,7 @@ class InventoryMutationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     public function returnSoldLines(array $lines): void
     {

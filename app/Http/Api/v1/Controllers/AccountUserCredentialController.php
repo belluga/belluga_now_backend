@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountUserCredentialService;
 use App\Application\Accounts\AccountUserQueryService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Api\v1\Requests\CredentialLinkRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\Account;
@@ -19,13 +19,11 @@ class AccountUserCredentialController extends Controller
         private readonly AccountUserCredentialService $credentialService,
         private readonly AccountUserQueryService $accountUserQueryService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function store(
         CredentialLinkRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $userId = (string) $request->route('user_id');
         $account = Account::current();
 

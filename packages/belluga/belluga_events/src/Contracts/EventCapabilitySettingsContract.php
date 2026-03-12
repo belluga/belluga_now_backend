@@ -11,4 +11,3 @@ interface EventCapabilitySettingsContract
      */
     public function resolveTenantCapabilities(): array;
 }
-

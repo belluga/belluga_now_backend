@@ -48,14 +48,14 @@ class LandlordUserManagementServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function testPaginateReturnsUsers(): void
+    public function test_paginate_returns_users(): void
     {
         $paginator = $this->service->paginate(false, 15);
 
         $this->assertGreaterThanOrEqual(1, $paginator->total());
     }
 
-    public function testCreatePersistsUser(): void
+    public function test_create_persists_user(): void
     {
         $role = LandlordRole::create([
             'name' => 'Support',
@@ -72,7 +72,7 @@ class LandlordUserManagementServiceTest extends TestCase
         $this->assertEquals('support@example.org', $user->emails[0] ?? null);
     }
 
-    public function testUpdateMutatesAttributes(): void
+    public function test_update_mutates_attributes(): void
     {
         $user = LandlordUser::create([
             'name' => 'Editable User',
@@ -87,14 +87,14 @@ class LandlordUserManagementServiceTest extends TestCase
         $this->assertEquals('Edited User', $updated->name);
     }
 
-    public function testDeletePreventsSelfDeletion(): void
+    public function test_delete_prevents_self_deletion(): void
     {
         $this->expectException(ValidationException::class);
 
         $this->service->delete($this->operator, $this->operator);
     }
 
-    public function testDeleteSoftDeletesUser(): void
+    public function test_delete_soft_deletes_user(): void
     {
         $user = LandlordUser::create([
             'name' => 'Disposable User',
@@ -110,7 +110,7 @@ class LandlordUserManagementServiceTest extends TestCase
         $this->assertSoftDeleted('landlord_users', ['_id' => $user->_id], 'landlord');
     }
 
-    public function testRestoreBringsBackUser(): void
+    public function test_restore_brings_back_user(): void
     {
         $user = LandlordUser::create([
             'name' => 'Restorable User',
@@ -128,7 +128,7 @@ class LandlordUserManagementServiceTest extends TestCase
         $this->assertFalse($restored->trashed());
     }
 
-    public function testForceDeleteRemovesUser(): void
+    public function test_force_delete_removes_user(): void
     {
         $user = LandlordUser::create([
             'name' => 'Force Deletable User',

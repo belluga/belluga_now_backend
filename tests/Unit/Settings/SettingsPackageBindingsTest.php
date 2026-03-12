@@ -15,7 +15,7 @@ use Tests\TestCase;
 
 class SettingsPackageBindingsTest extends TestCase
 {
-    public function testSettingsKernelContractsAreBound(): void
+    public function test_settings_kernel_contracts_are_bound(): void
     {
         $this->assertInstanceOf(SettingsRegistryContract::class, $this->app->make(SettingsRegistryContract::class));
         $this->assertInstanceOf(SettingsStoreContract::class, $this->app->make(SettingsStoreContract::class));
@@ -25,7 +25,7 @@ class SettingsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(ConditionExpressionEvaluator::class, $this->app->make(ConditionExpressionEvaluator::class));
     }
 
-    public function testCoreAndPushNamespacesAreRegistered(): void
+    public function test_core_and_push_namespaces_are_registered(): void
     {
         $registry = $this->app->make(SettingsRegistryContract::class);
 

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Http\Requests\PushQuotaCheckRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Illuminate\Http\JsonResponse;
@@ -16,8 +16,7 @@ class PushQuotaCheckController
     public function __construct(
         private readonly PushPlanPolicyContract $planPolicy,
         private readonly PushAccountContextContract $accountContext
-    ) {
-    }
+    ) {}
 
     public function __invoke(PushQuotaCheckRequest $request): JsonResponse
     {

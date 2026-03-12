@@ -4,6 +4,20 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Application\Media\ExternalImageDnsResolverContract;
+use App\Application\Media\SystemExternalImageDnsResolver;
+use App\Application\Push\PushAudienceEligibilityService;
+use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
+use App\Application\Telemetry\TelemetryEmitter;
+use App\Application\Tenants\TenantDomainResolverService;
+use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
+use App\Http\Api\v1\Requests\ResetPasswordRequestLandlord;
+use App\Http\Api\v1\Requests\ResetPasswordRequestTenant;
+use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
+use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
+use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventParties\ArtistEventPartyMapper;
@@ -18,29 +32,16 @@ use App\Integration\MapPois\MapPoiRegistryAdapter;
 use App\Integration\MapPois\MapPoiSettingsAdapter;
 use App\Integration\MapPois\MapPoiSourceReaderAdapter;
 use App\Integration\MapPois\MapPoiTenantContextAdapter;
-use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Integration\Push\PushAccountContextAdapter;
 use App\Integration\Push\PushTelemetryEmitterAdapter;
 use App\Integration\Push\PushTenantContextAdapter;
 use App\Integration\Push\PushUserGatewayAdapter;
+use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Integration\Ticketing\CheckoutOrchestratorAdapter;
 use App\Integration\Ticketing\EventTemplateReadAdapter;
 use App\Integration\Ticketing\OccurrencePublicationAdapter;
 use App\Integration\Ticketing\OccurrenceReadAdapter;
 use App\Integration\Ticketing\TenantTicketingPolicyAdapter;
-use App\Application\Push\PushAudienceEligibilityService;
-use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
-use App\Application\Telemetry\TelemetryEmitter;
-use App\Application\Media\ExternalImageDnsResolverContract;
-use App\Application\Media\SystemExternalImageDnsResolver;
-use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
-use App\Http\Api\v1\Controllers\ProfileControllerTenant;
-use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
-use App\Http\Api\v1\Requests\ResetPasswordRequestLandlord;
-use App\Http\Api\v1\Requests\ResetPasswordRequestTenant;
-use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
-use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
-use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
@@ -49,19 +50,19 @@ use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
-use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
+use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
 use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
-use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
-use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
 use Belluga\PushHandler\Contracts\PushTenantContextContract;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
@@ -75,7 +76,6 @@ use Belluga\Ticketing\Contracts\OccurrenceReadContract;
 use Belluga\Ticketing\Contracts\TicketingPolicyContract;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
-use App\Application\Tenants\TenantDomainResolverService;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -85,7 +85,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(TenantDomainResolverService::class, function ($app) {
-            return new TenantDomainResolverService();
+            return new TenantDomainResolverService;
         });
 
         $this->app->bind(
@@ -166,9 +166,9 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(
             EventPartyMapperRegistryContract::class,
             static function () {
-                $registry = new InMemoryEventPartyMapperRegistry();
-                $registry->register(new VenueEventPartyMapper());
-                $registry->register(new ArtistEventPartyMapper());
+                $registry = new InMemoryEventPartyMapperRegistry;
+                $registry->register(new VenueEventPartyMapper);
+                $registry->register(new ArtistEventPartyMapper);
 
                 return $registry;
             }

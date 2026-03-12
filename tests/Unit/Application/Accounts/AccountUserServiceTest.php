@@ -9,7 +9,6 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
-use App\Models\Tenants\AccountUser;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -49,7 +48,7 @@ class AccountUserServiceTest extends TestCase
         $this->service = $this->app->make(AccountUserService::class);
     }
 
-    public function testCreateRegistersNewAccountUser(): void
+    public function test_create_registers_new_account_user(): void
     {
         $user = $this->service->create(
             $this->account,
@@ -71,7 +70,7 @@ class AccountUserServiceTest extends TestCase
         );
     }
 
-    public function testCreateRestoresSoftDeletedUserAndReusesIdentity(): void
+    public function test_create_restores_soft_deleted_user_and_reuses_identity(): void
     {
         $existing = $this->service->create(
             $this->account,
@@ -100,7 +99,7 @@ class AccountUserServiceTest extends TestCase
         $this->assertSame((string) $existing->_id, (string) $user->_id);
     }
 
-    public function testRemoveSoftDeletesUserWhenNoOtherAccess(): void
+    public function test_remove_soft_deletes_user_when_no_other_access(): void
     {
         $user = $this->service->create(
             $this->account,
@@ -117,7 +116,7 @@ class AccountUserServiceTest extends TestCase
         $this->assertSoftDeleted($user->getTable(), ['_id' => $user->_id]);
     }
 
-    public function testRemoveKeepsUserWhenOtherAccountAccessExists(): void
+    public function test_remove_keeps_user_when_other_account_access_exists(): void
     {
         [$secondAccount, $secondRole] = $this->seedAccountWithRole(['account-users:view']);
 
@@ -147,7 +146,7 @@ class AccountUserServiceTest extends TestCase
         $this->assertTrue($user->haveAccessTo($secondAccount));
     }
 
-    public function testUpdatePersistsAttributesAndSyncsPassword(): void
+    public function test_update_persists_attributes_and_syncs_password(): void
     {
         $user = $this->service->create(
             $this->account,

@@ -52,7 +52,7 @@ class AnonymousIdentityService
             $abilities = array_values(array_filter($abilities, static fn (string $ability): bool => $ability !== '*'));
         }
 
-        $token = $user->createToken('anonymous:' . $payload['device_name'], $abilities);
+        $token = $user->createToken('anonymous:'.$payload['device_name'], $abilities);
         $plainToken = $token->plainTextToken;
 
         $expiresAt = null;

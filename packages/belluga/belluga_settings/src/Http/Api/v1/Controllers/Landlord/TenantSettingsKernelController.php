@@ -14,8 +14,7 @@ class TenantSettingsKernelController
     public function __construct(
         private readonly SettingsKernelService $service,
         private readonly TenantScopeContextContract $tenantContext,
-    ) {
-    }
+    ) {}
 
     public function schema(Request $request, string $tenant_slug): JsonResponse
     {

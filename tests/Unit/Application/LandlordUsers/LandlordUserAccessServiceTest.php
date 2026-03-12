@@ -37,7 +37,7 @@ class LandlordUserAccessServiceTest extends TestCase
         $this->service = $this->app->make(LandlordUserAccessService::class);
     }
 
-    public function testTenantAccessIds(): void
+    public function test_tenant_access_ids(): void
     {
         $ids = $this->service->tenantAccessIds($this->user);
 
@@ -45,7 +45,7 @@ class LandlordUserAccessServiceTest extends TestCase
         $this->assertContains((string) Tenant::query()->firstOrFail()->_id, $ids);
     }
 
-    public function testPermissionsResolveFromTenantRoles(): void
+    public function test_permissions_resolve_from_tenant_roles(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -55,7 +55,7 @@ class LandlordUserAccessServiceTest extends TestCase
         $this->assertContains('*', $permissions);
     }
 
-    public function testSyncCredentialCreatesPasswordEntry(): void
+    public function test_sync_credential_creates_password_entry(): void
     {
         $credential = $this->service->syncCredential($this->user, 'password', 'sync@example.org', 'secret-hash');
 
@@ -63,7 +63,7 @@ class LandlordUserAccessServiceTest extends TestCase
         $this->assertSame('sync@example.org', $credential['subject']);
     }
 
-    public function testEnsureEmailAppendsNewContact(): void
+    public function test_ensure_email_appends_new_contact(): void
     {
         $this->service->ensureEmail($this->user, 'added@example.org');
 

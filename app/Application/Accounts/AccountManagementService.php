@@ -18,16 +18,14 @@ class AccountManagementService
     public function __construct(
         private readonly AccountQueryService $accountQueryService,
         private readonly AccountOwnershipStateService $ownershipStateService
-    ) {
-    }
+    ) {}
 
     public function paginateForUser(
         AccountUser|LandlordUser $user,
         bool $includeArchived,
         int $perPage = 15,
         array $queryParams = []
-    ): LengthAwarePaginator
-    {
+    ): LengthAwarePaginator {
         return $this->accountQueryService->paginateForUser(
             $user,
             $queryParams,
@@ -37,7 +35,7 @@ class AccountManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{account: Account, role: AccountRoleTemplate}
      */
     public function create(array $payload): array
@@ -73,7 +71,7 @@ class AccountManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function resolveOwnershipIntent(array $payload): string
     {
@@ -97,7 +95,7 @@ class AccountManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function applyOwnershipIntent(array $payload, string $intent): array
@@ -114,7 +112,7 @@ class AccountManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(Account $account, array $attributes): Account
     {

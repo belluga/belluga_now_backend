@@ -15,8 +15,7 @@ class TaxonomyTermsController extends Controller
 {
     public function __construct(
         private readonly TaxonomyTermManagementService $managementService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {

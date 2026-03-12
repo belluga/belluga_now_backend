@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountUserQueryService;
 use App\Application\Accounts\AccountUserService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -23,8 +23,7 @@ class AccountUserController extends Controller
         private readonly AccountUserService $accountUserService,
         private readonly AccountUserQueryService $accountUserQueryService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     /**
      * Lista todos os usuários de um tenant
@@ -55,6 +54,7 @@ class AccountUserController extends Controller
     public function show(Request $request): JsonResponse
     {
         $user = $this->getFirstUserByRouteOrFail();
+
         return response()->json(['data' => $user]);
     }
 
@@ -101,7 +101,7 @@ class AccountUserController extends Controller
     {
         if (empty($request->validated())) {
             throw ValidationException::withMessages([
-                'empty' => 'Nenhum dado recebido para atualizar.'
+                'empty' => 'Nenhum dado recebido para atualizar.',
             ]);
         }
 

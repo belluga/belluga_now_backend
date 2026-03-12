@@ -37,7 +37,7 @@ class TenantBrandingManagementServiceTest extends TestCase
         $this->service = $this->app->make(TenantBrandingManagementService::class);
     }
 
-    public function testUpdateCreatesBrandingDataWhenEmpty(): void
+    public function test_update_creates_branding_data_when_empty(): void
     {
         $payload = [
             'logo_settings' => [
@@ -60,7 +60,7 @@ class TenantBrandingManagementServiceTest extends TestCase
         $this->assertSame('#ffffff', $branding['theme_data_settings']['primary_seed_color']);
     }
 
-    public function testUpdateDoesNotOverwriteWithEmptyValues(): void
+    public function test_update_does_not_overwrite_with_empty_values(): void
     {
         $this->tenant->branding_data = [
             'logo_settings' => [
@@ -108,7 +108,7 @@ class TenantBrandingManagementServiceTest extends TestCase
         );
     }
 
-    public function testUpdateAppliesUploadedLogoUrls(): void
+    public function test_update_applies_uploaded_logo_urls(): void
     {
         $branding = $this->service->update(
             $this->tenant,
@@ -122,7 +122,7 @@ class TenantBrandingManagementServiceTest extends TestCase
         );
     }
 
-    public function testUpdateIncludesPwaVariants(): void
+    public function test_update_includes_pwa_variants(): void
     {
         $variants = [
             'source_uri' => 'https://cdn.example/pwa.png',

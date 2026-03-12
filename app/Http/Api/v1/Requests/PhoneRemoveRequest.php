@@ -28,8 +28,8 @@ class PhoneRemoveRequest extends FormRequest
             'phone' => [
                 'required',
                 'string',
-                'max:' . InputConstraints::PHONE_MAX,
-                'phone:INTERNATIONAL,BR'
+                'max:'.InputConstraints::PHONE_MAX,
+                'phone:INTERNATIONAL,BR',
             ],
         ];
     }

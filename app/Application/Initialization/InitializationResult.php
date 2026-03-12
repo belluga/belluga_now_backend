@@ -19,8 +19,7 @@ class InitializationResult
         public readonly TenantRoleTemplate $tenantAdminTemplate,
         public readonly LandlordUser $user,
         public readonly string $token
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>

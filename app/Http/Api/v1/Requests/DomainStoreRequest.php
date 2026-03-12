@@ -28,8 +28,8 @@ class DomainStoreRequest extends FormRequest
             'path' => [
                 'required',
                 'string',
-                'max:' . InputConstraints::NAME_MAX,
-                'regex:/^(?:localhost|(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$))/'
+                'max:'.InputConstraints::NAME_MAX,
+                'regex:/^(?:localhost|(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$))/',
             ],
         ];
     }

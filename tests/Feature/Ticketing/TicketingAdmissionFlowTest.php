@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Ticketing;
 
-use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
@@ -45,9 +45,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
+
     private AccountUserService $userService;
+
     private AccountUser $user;
+
     private Event $event;
+
     private EventOccurrence $occurrence;
 
     protected function setUp(): void
@@ -79,7 +83,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $this->event = Event::query()->create([
             'title' => 'Ticketing Event',
-            'slug' => 'ticketing-event-' . Str::random(6),
+            'slug' => 'ticketing-event-'.Str::random(6),
             'type' => ['id' => 'show', 'name' => 'Show', 'slug' => 'show'],
             'content' => 'Ticketing event content',
             'location' => ['mode' => 'physical'],
@@ -95,7 +99,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->occurrence = EventOccurrence::query()->create([
             'event_id' => (string) $this->event->_id,
             'occurrence_index' => 0,
-            'occurrence_slug' => (string) $this->event->slug . '-occ-1',
+            'occurrence_slug' => (string) $this->event->slug.'-occ-1',
             'starts_at' => Carbon::now()->addDay()->setHour(20),
             'ends_at' => Carbon::now()->addDay()->setHour(23),
             'is_event_published' => true,
@@ -104,7 +108,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->seedTicketingSettings();
     }
 
-    public function testOfferEndpointReturnsOccurrenceProducts(): void
+    public function test_offer_endpoint_returns_occurrence_products(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 5, amount: 1200);
 
@@ -116,7 +120,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $response->assertJsonPath('data.items.0.available', 5);
     }
 
-    public function testOfferAndAdmissionSupportSlugReferences(): void
+    public function test_offer_and_admission_support_slug_references(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 900);
 
@@ -128,7 +132,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionBySlugUrl(), [
-            'idempotency_key' => 'adm-slug-' . Str::random(8),
+            'idempotency_key' => 'adm-slug-'.Str::random(8),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -141,7 +145,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertNotEmpty((string) $admission->json('hold_token'));
     }
 
-    public function testOccurrenceOnlyOfferAndAdmissionEndpointsWork(): void
+    public function test_occurrence_only_offer_and_admission_endpoints_work(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 700);
 
@@ -153,7 +157,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionOccurrenceOnlyUrl(), [
-            'idempotency_key' => 'adm-occ-only-' . Str::random(8),
+            'idempotency_key' => 'adm-occ-only-'.Str::random(8),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -165,13 +169,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $admission->assertJsonPath('status', 'hold_granted');
     }
 
-    public function testAdmissionCartAndFreeCheckoutConfirmFlow(): void
+    public function test_admission_cart_and_free_checkout_confirm_flow(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 3, amount: 1500);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-' . Str::random(8),
+            'idempotency_key' => 'adm-'.Str::random(8),
             'checkout_mode' => 'free',
             'items' => [
                 [
@@ -193,7 +197,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => $holdToken,
-            'idempotency_key' => 'ord-' . Str::random(8),
+            'idempotency_key' => 'ord-'.Str::random(8),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -211,13 +215,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertSame(2, (int) $inventory->sold_count);
     }
 
-    public function testAdmissionReturnsQueuedWhenInsufficientAndQueueIsAuto(): void
+    public function test_admission_returns_queued_when_insufficient_and_queue_is_auto(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 1, amount: 500);
         Sanctum::actingAs($this->user, ['*']);
 
         $first = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-first-' . Str::random(6),
+            'idempotency_key' => 'adm-first-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -231,7 +235,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($secondUser, ['*']);
 
         $second = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-second-' . Str::random(6),
+            'idempotency_key' => 'adm-second-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -245,13 +249,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertNotEmpty((string) $second->json('queue_token'));
     }
 
-    public function testValidationConsumesIssuedTicketUnit(): void
+    public function test_validation_consumes_issued_ticket_unit(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 1000);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-consume-' . Str::random(6),
+            'idempotency_key' => 'adm-consume-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -263,7 +267,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => $holdToken,
-            'idempotency_key' => 'ord-consume-' . Str::random(6),
+            'idempotency_key' => 'ord-consume-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -272,7 +276,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $validate = $this->postJson($this->validationUrl(), [
             'checkpoint_ref' => 'gate-a',
-            'idempotency_key' => 'chk-' . Str::random(6),
+            'idempotency_key' => 'chk-'.Str::random(6),
             'ticket_unit_id' => $unitId,
         ]);
 
@@ -284,13 +288,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertSame('consumed', (string) $unit->lifecycle_state);
     }
 
-    public function testIssuedUnitExpiresAfterOccurrenceLapseAndIsNotAdmissible(): void
+    public function test_issued_unit_expires_after_occurrence_lapse_and_is_not_admissible(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 1000);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-expire-' . Str::random(6),
+            'idempotency_key' => 'adm-expire-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -303,7 +307,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => $holdToken,
-            'idempotency_key' => 'ord-expire-' . Str::random(6),
+            'idempotency_key' => 'ord-expire-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -322,7 +326,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $validate = $this->postJson($this->validationUrl(), [
             'checkpoint_ref' => 'gate-b',
-            'idempotency_key' => 'chk-expire-' . Str::random(6),
+            'idempotency_key' => 'chk-expire-'.Str::random(6),
             'ticket_unit_id' => $unitId,
         ]);
         $validate->assertStatus(200);
@@ -330,7 +334,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $validate->assertJsonPath('code', 'ticket_not_issued');
     }
 
-    public function testAdmissionReturnsNotApplicableForUnlimitedInventory(): void
+    public function test_admission_returns_not_applicable_for_unlimited_inventory(): void
     {
         $product = TicketProduct::query()->create([
             'event_id' => (string) $this->event->_id,
@@ -339,7 +343,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
             'product_type' => 'ticket',
             'status' => 'active',
             'name' => 'Unlimited Access',
-            'slug' => 'unlimited-' . Str::random(4),
+            'slug' => 'unlimited-'.Str::random(4),
             'inventory_mode' => 'unlimited',
             'capacity_total' => null,
             'price' => [
@@ -352,7 +356,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-unlimited-' . Str::random(8),
+            'idempotency_key' => 'adm-unlimited-'.Str::random(8),
             'checkout_mode' => 'free',
             'items' => [
                 [
@@ -367,7 +371,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $admission->assertJsonPath('code', 'unlimited_capacity');
     }
 
-    public function testAdmissionReturnsSoldOutWhenQueuePolicyIsOff(): void
+    public function test_admission_returns_sold_out_when_queue_policy_is_off(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 1, amount: 500);
 
@@ -381,7 +385,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         Sanctum::actingAs($this->user, ['*']);
         $first = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-off-first-' . Str::random(6),
+            'idempotency_key' => 'adm-off-first-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -394,7 +398,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $secondUser = $this->createAccountUser(['*']);
         Sanctum::actingAs($secondUser, ['*']);
         $second = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-off-second-' . Str::random(6),
+            'idempotency_key' => 'adm-off-second-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -407,13 +411,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $second->assertJsonPath('code', 'admission_required');
     }
 
-    public function testTokenRefreshReturnsQueueTokenRefreshedWithoutChangingQueuePosition(): void
+    public function test_token_refresh_returns_queue_token_refreshed_without_changing_queue_position(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 1, amount: 500);
         Sanctum::actingAs($this->user, ['*']);
 
         $first = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-refresh-first-' . Str::random(6),
+            'idempotency_key' => 'adm-refresh-first-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -427,7 +431,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($secondUser, ['*']);
 
         $queued = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-refresh-second-' . Str::random(6),
+            'idempotency_key' => 'adm-refresh-second-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -450,13 +454,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertNotSame($queueToken, (string) $refresh->json('queue_token'));
     }
 
-    public function testTokenRefreshReturnsHoldNonRenewableSignal(): void
+    public function test_token_refresh_returns_hold_non_renewable_signal(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 800);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-hold-refresh-' . Str::random(6),
+            'idempotency_key' => 'adm-hold-refresh-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -477,14 +481,14 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $refresh->assertJsonPath('hold_token', $holdToken);
     }
 
-    public function testAdmissionIsRateLimitedByCoarseGuard(): void
+    public function test_admission_is_rate_limited_by_coarse_guard(): void
     {
         config()->set('belluga_ticketing.rate_limits.admission_per_minute', 1);
         $product = $this->createOccurrenceProduct(capacityTotal: 10, amount: 300);
         Sanctum::actingAs($this->user, ['*']);
 
         $first = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-rate-1-' . Str::random(6),
+            'idempotency_key' => 'adm-rate-1-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -494,7 +498,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $first->assertStatus(200);
 
         $second = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-rate-2-' . Str::random(6),
+            'idempotency_key' => 'adm-rate-2-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -507,7 +511,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $second->assertJsonPath('code', 'rate_limited');
     }
 
-    public function testSseQueueAndHoldStreamEndpointsReturnCanonicalEnvelope(): void
+    public function test_sse_queue_and_hold_stream_endpoints_return_canonical_envelope(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 1, amount: 1000);
         $offerStream = $this->get($this->offerStreamUrl('occurrence', (string) $this->occurrence->_id), [
@@ -515,13 +519,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         ]);
         $offerStream->assertStatus(200);
         $offerContent = $offerStream->streamedContent();
-        $this->assertStringContainsString('event: ticketing.v1.offer.occurrence.' . (string) $this->occurrence->_id, $offerContent);
+        $this->assertStringContainsString('event: ticketing.v1.offer.occurrence.'.(string) $this->occurrence->_id, $offerContent);
         $this->assertStringContainsString('"event_type":"offer.snapshot"', $offerContent);
 
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-stream-1-' . Str::random(6),
+            'idempotency_key' => 'adm-stream-1-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -535,7 +539,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $queueUser = $this->createAccountUser(['*']);
         Sanctum::actingAs($queueUser, ['*']);
         $queued = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-stream-2-' . Str::random(6),
+            'idempotency_key' => 'adm-stream-2-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -550,7 +554,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         ]);
         $queueStream->assertStatus(200);
         $queueContent = $queueStream->streamedContent();
-        $this->assertStringContainsString('event: ticketing.v1.queue.occurrence.' . (string) $this->occurrence->_id, $queueContent);
+        $this->assertStringContainsString('event: ticketing.v1.queue.occurrence.'.(string) $this->occurrence->_id, $queueContent);
         $this->assertStringContainsString('"version":"v1"', $queueContent);
         $this->assertStringContainsString('"event_type":"queue.snapshot"', $queueContent);
 
@@ -560,12 +564,12 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         ]);
         $holdStream->assertStatus(200);
         $holdContent = $holdStream->streamedContent();
-        $this->assertStringContainsString('event: ticketing.v1.hold.' . $holdId, $holdContent);
+        $this->assertStringContainsString('event: ticketing.v1.hold.'.$holdId, $holdContent);
         $this->assertStringContainsString('"version":"v1"', $holdContent);
         $this->assertStringContainsString('"event_type":"hold.snapshot"', $holdContent);
     }
 
-    public function testPromotionsApplyScopePrecedenceAndPersistSnapshotOnConfirmation(): void
+    public function test_promotions_apply_scope_precedence_and_persist_snapshot_on_confirmation(): void
     {
         $this->enablePromotions();
         $product = $this->createOccurrenceProduct(capacityTotal: 3, amount: 1000);
@@ -617,7 +621,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-promo-' . Str::random(8),
+            'idempotency_key' => 'adm-promo-'.Str::random(8),
             'checkout_mode' => 'free',
             'promotion_codes' => ['EVT50', 'PROD200', 'FEE30'],
             'items' => [[
@@ -638,7 +642,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => $holdToken,
-            'idempotency_key' => 'ord-promo-' . Str::random(8),
+            'idempotency_key' => 'ord-promo-'.Str::random(8),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -658,7 +662,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertSame(2, TicketPromotionRedemption::query()->count());
     }
 
-    public function testExclusivePromotionConflictWritesStableRejectionReasonInSnapshot(): void
+    public function test_exclusive_promotion_conflict_writes_stable_rejection_reason_in_snapshot(): void
     {
         $this->enablePromotions();
         $product = $this->createOccurrenceProduct(capacityTotal: 3, amount: 1000);
@@ -694,7 +698,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-exclusive-' . Str::random(8),
+            'idempotency_key' => 'adm-exclusive-'.Str::random(8),
             'checkout_mode' => 'free',
             'promotion_codes' => ['EXC10', 'EXCFEE'],
             'items' => [[
@@ -715,7 +719,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $cart->assertJsonPath('data.snapshot.promotion_snapshot.rejected.0.reason_code', 'exclusive_conflict');
     }
 
-    public function testPromotionQuotaPreventsSecondConfirmationWhenGlobalLimitIsReached(): void
+    public function test_promotion_quota_prevents_second_confirmation_when_global_limit_is_reached(): void
     {
         $this->enablePromotions();
         $product = $this->createOccurrenceProduct(capacityTotal: 3, amount: 800);
@@ -737,7 +741,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         Sanctum::actingAs($this->user, ['*']);
         $firstAdmission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-quota-1-' . Str::random(6),
+            'idempotency_key' => 'adm-quota-1-'.Str::random(6),
             'checkout_mode' => 'free',
             'promotion_codes' => ['ONCEONLY'],
             'items' => [[
@@ -749,7 +753,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $firstConfirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => (string) $firstAdmission->json('hold_token'),
-            'idempotency_key' => 'ord-quota-1-' . Str::random(6),
+            'idempotency_key' => 'ord-quota-1-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -759,7 +763,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $secondUser = $this->createAccountUser(['*']);
         Sanctum::actingAs($secondUser, ['*']);
         $secondAdmission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-quota-2-' . Str::random(6),
+            'idempotency_key' => 'adm-quota-2-'.Str::random(6),
             'checkout_mode' => 'free',
             'promotion_codes' => ['ONCEONLY'],
             'items' => [[
@@ -771,7 +775,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $secondConfirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => (string) $secondAdmission->json('hold_token'),
-            'idempotency_key' => 'ord-quota-2-' . Str::random(6),
+            'idempotency_key' => 'ord-quota-2-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -784,13 +788,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertSame(1, TicketPromotionRedemption::query()->count());
     }
 
-    public function testTransferAndReissueAreRejectedWhenLifecycleCapabilityIsDisabled(): void
+    public function test_transfer_and_reissue_are_rejected_when_lifecycle_capability_is_disabled(): void
     {
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 1000);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-xfer-disabled-' . Str::random(6),
+            'idempotency_key' => 'adm-xfer-disabled-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -801,7 +805,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => (string) $admission->json('hold_token'),
-            'idempotency_key' => 'ord-xfer-disabled-' . Str::random(6),
+            'idempotency_key' => 'ord-xfer-disabled-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -812,7 +816,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
             'new_principal_id' => (string) Str::uuid(),
             'reason_code' => 'manual_support',
             'reason_text' => 'Disabled feature check',
-            'idempotency_key' => 'xfer-disabled-' . Str::random(6),
+            'idempotency_key' => 'xfer-disabled-'.Str::random(6),
         ]);
         $transfer->assertStatus(409);
         $transfer->assertJsonPath('status', 'rejected');
@@ -822,21 +826,21 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
             'new_principal_id' => (string) Str::uuid(),
             'reason_code' => 'manual_support',
             'reason_text' => 'Disabled feature check',
-            'idempotency_key' => 'reissue-disabled-' . Str::random(6),
+            'idempotency_key' => 'reissue-disabled-'.Str::random(6),
         ]);
         $reissue->assertStatus(409);
         $reissue->assertJsonPath('status', 'rejected');
         $reissue->assertJsonPath('code', 'transfer_reissue_disabled');
     }
 
-    public function testTransferCreatesReplacementUnitAndInvalidatesSourceUnit(): void
+    public function test_transfer_creates_replacement_unit_and_invalidates_source_unit(): void
     {
         $this->enableTransferReissue();
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 1100);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-transfer-' . Str::random(6),
+            'idempotency_key' => 'adm-transfer-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -847,14 +851,14 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => (string) $admission->json('hold_token'),
-            'idempotency_key' => 'ord-transfer-' . Str::random(6),
+            'idempotency_key' => 'ord-transfer-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
         $confirm->assertStatus(200);
         $sourceUnitId = (string) $confirm->json('units.0.ticket_unit_id');
         $newPrincipalId = (string) Str::uuid();
-        $idempotencyKey = 'xfer-' . Str::random(6);
+        $idempotencyKey = 'xfer-'.Str::random(6);
 
         $transfer = $this->postJson($this->transferUrl($sourceUnitId), [
             'new_principal_id' => $newPrincipalId,
@@ -883,7 +887,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $validation = $this->postJson($this->validationUrl(), [
             'checkpoint_ref' => 'gate-transfer',
-            'idempotency_key' => 'chk-transfer-' . Str::random(6),
+            'idempotency_key' => 'chk-transfer-'.Str::random(6),
             'ticket_unit_id' => $sourceUnitId,
         ]);
         $validation->assertStatus(200);
@@ -891,14 +895,14 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $validation->assertJsonPath('code', 'ticket_not_issued');
     }
 
-    public function testReissuePropagatesAcrossComboScopeUnitsAndKeepsAtomicAuditChain(): void
+    public function test_reissue_propagates_across_combo_scope_units_and_keeps_atomic_audit_chain(): void
     {
         $this->enableTransferReissue();
         $product = $this->createOccurrenceProduct(capacityTotal: 4, amount: 1300, participantBindingScope: 'combo_unit');
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-reissue-combo-' . Str::random(6),
+            'idempotency_key' => 'adm-reissue-combo-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -909,7 +913,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
 
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => (string) $admission->json('hold_token'),
-            'idempotency_key' => 'ord-reissue-combo-' . Str::random(6),
+            'idempotency_key' => 'ord-reissue-combo-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -917,7 +921,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertCount(2, (array) $confirm->json('units'));
         $sourceUnitId = (string) $confirm->json('units.0.ticket_unit_id');
         $sourceOrderItemId = (string) $confirm->json('units.0.order_item_id');
-        $idempotencyKey = 'reissue-combo-' . Str::random(6);
+        $idempotencyKey = 'reissue-combo-'.Str::random(6);
         $newPrincipalId = (string) Str::uuid();
 
         $reissue = $this->postJson($this->reissueUrl($sourceUnitId), [
@@ -953,14 +957,14 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $this->assertCount(2, (array) $audit->target_ticket_unit_ids);
     }
 
-    public function testTransferEndpointsRequireEventsUpdateAbility(): void
+    public function test_transfer_endpoints_require_events_update_ability(): void
     {
         $this->enableTransferReissue();
         $product = $this->createOccurrenceProduct(capacityTotal: 2, amount: 700);
         Sanctum::actingAs($this->user, ['*']);
 
         $admission = $this->postJson($this->admissionUrl(), [
-            'idempotency_key' => 'adm-auth-transfer-' . Str::random(6),
+            'idempotency_key' => 'adm-auth-transfer-'.Str::random(6),
             'checkout_mode' => 'free',
             'items' => [[
                 'ticket_product_id' => (string) $product->_id,
@@ -970,7 +974,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
         $admission->assertStatus(200);
         $confirm = $this->postJson($this->confirmUrl(), [
             'hold_token' => (string) $admission->json('hold_token'),
-            'idempotency_key' => 'ord-auth-transfer-' . Str::random(6),
+            'idempotency_key' => 'ord-auth-transfer-'.Str::random(6),
             'checkout_mode' => 'free',
             'account_id' => (string) $this->account->_id,
         ]);
@@ -984,7 +988,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
             'new_principal_id' => (string) Str::uuid(),
             'reason_code' => 'manual_support',
             'reason_text' => 'Should be blocked',
-            'idempotency_key' => 'xfer-auth-' . Str::random(6),
+            'idempotency_key' => 'xfer-auth-'.Str::random(6),
         ]);
         $transfer->assertStatus(403);
     }
@@ -998,7 +1002,7 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
             'product_type' => 'ticket',
             'status' => 'active',
             'name' => 'General Admission',
-            'slug' => 'general-' . Str::random(4),
+            'slug' => 'general-'.Str::random(4),
             'inventory_mode' => 'limited',
             'capacity_total' => $capacityTotal,
             'price' => [
@@ -1012,13 +1016,13 @@ class TicketingAdmissionFlowTest extends TestCaseTenant
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
-            'name' => 'Ticketing Role ' . Str::random(6),
+            'name' => 'Ticketing Role '.Str::random(6),
             'permissions' => $permissions,
         ]);
 
         return $this->userService->create($this->account, [
             'name' => 'Ticketing User',
-            'email' => uniqid('ticketing-user', true) . '@example.org',
+            'email' => uniqid('ticketing-user', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
     }

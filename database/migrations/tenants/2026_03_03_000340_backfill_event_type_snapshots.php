@@ -45,7 +45,6 @@ return new class extends Migration
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>|null
      */
     private function resolveSnapshot(mixed $value): ?array
@@ -78,7 +77,7 @@ return new class extends Migration
 
         $description = trim((string) ($value['description'] ?? ''));
         if (mb_strlen($description) < 10) {
-            $description = 'Tipo de evento: ' . $name;
+            $description = 'Tipo de evento: '.$name;
         }
 
         $model = EventType::query()->where('slug', $slug)->first();

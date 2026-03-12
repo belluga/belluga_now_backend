@@ -19,19 +19,17 @@ class UpsertMapPoiFromStaticAssetJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public function __construct(private readonly string $assetId)
-    {
-    }
+    public function __construct(private readonly string $assetId) {}
 
     public function handle(
         MapPoiProjectionService $projectionService,
         MapPoiSourceReaderContract $sourceReader,
-    ): void
-    {
+    ): void {
         $asset = $sourceReader->findStaticAssetById($this->assetId);
 
         if (! $asset) {
             $projectionService->deleteByRef('static', $this->assetId);
+
             return;
         }
 

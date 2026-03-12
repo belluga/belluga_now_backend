@@ -31,11 +31,10 @@ class TicketUnitLifecycleService
     public function __construct(
         private readonly TenantTransactionRunner $transactions,
         private readonly TicketOutboxEmitter $outbox,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      */
     public function transition(TicketUnit $unit, string $targetState, array $context = []): TicketUnit
     {
@@ -86,7 +85,7 @@ class TicketUnitLifecycleService
     }
 
     /**
-     * @param array<string, mixed> $actorRef
+     * @param  array<string, mixed>  $actorRef
      * @return array<string, mixed>
      */
     public function validateAndConsume(

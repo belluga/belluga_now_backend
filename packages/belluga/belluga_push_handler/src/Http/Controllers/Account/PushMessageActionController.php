@@ -19,8 +19,7 @@ class PushMessageActionController
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushAccountContextContract $accountContext,
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     public function store(PushMessageActionRequest $request): JsonResponse
     {

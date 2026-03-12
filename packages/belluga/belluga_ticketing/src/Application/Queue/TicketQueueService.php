@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 class TicketQueueService
 {
     /**
-     * @param array<int, array<string, mixed>> $lines
+     * @param  array<int, array<string, mixed>>  $lines
      */
     public function enqueue(
         string $scopeType,

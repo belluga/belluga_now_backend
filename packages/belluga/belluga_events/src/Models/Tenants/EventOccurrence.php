@@ -10,8 +10,8 @@ use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class EventOccurrence extends Model
 {
-    use UsesTenantConnection;
     use SoftDeletes;
+    use UsesTenantConnection;
 
     protected $table = 'event_occurrences';
 

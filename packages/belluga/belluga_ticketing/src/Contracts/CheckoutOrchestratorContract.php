@@ -9,7 +9,7 @@ interface CheckoutOrchestratorContract
     public function isEnabled(): bool;
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function beginCheckout(array $payload, string $idempotencyKey): array;

@@ -3,7 +3,6 @@
 namespace App\Casts;
 
 use App\DataObjects\Branding\LogoSettings;
-use App\DataObjects\Branding\ThemeDataSettings;
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use InvalidArgumentException;
 
@@ -16,17 +15,18 @@ class LogoSettingsCast implements CastsAttributes
         }
 
         $data = (array) $value;
+
         return LogoSettings::fromArray($data);
     }
 
     public function set($model, string $key, $value, array $attributes): array
     {
-        if(is_array($value)) {
-            return ["logo_settings" => $value];
+        if (is_array($value)) {
+            return ['logo_settings' => $value];
         }
 
-        if($value instanceof LogoSettings){
-            return ["logo_settings" => $value->toArray()];
+        if ($value instanceof LogoSettings) {
+            return ['logo_settings' => $value->toArray()];
         }
 
         throw new InvalidArgumentException('The given value must be a LogoSettings instance or an array.');

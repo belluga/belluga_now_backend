@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\TenantUserManagementService;
 use App\Application\Accounts\TenantUserQueryService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -19,8 +18,7 @@ class TenantUsersController extends Controller
         private readonly TenantUserManagementService $tenantUserService,
         private readonly TenantUserQueryService $tenantUserQueryService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): LengthAwarePaginator
     {

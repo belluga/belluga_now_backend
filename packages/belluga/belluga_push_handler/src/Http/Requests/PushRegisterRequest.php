@@ -17,7 +17,7 @@ class PushRegisterRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'device_id' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'device_id' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'platform' => ['required', 'string', 'in:ios,android,web'],
             'push_token' => ['required', 'string', 'max:2048'],
         ];

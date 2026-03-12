@@ -17,7 +17,7 @@ class PushUnregisterRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'device_id' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'device_id' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
         ];
     }
 }

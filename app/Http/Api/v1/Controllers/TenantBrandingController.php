@@ -16,8 +16,7 @@ class TenantBrandingController
     public function __construct(
         private readonly TenantBrandingManagementService $brandingService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function update(UpdateBrandingRequest $request): JsonResponse
     {
@@ -56,5 +55,4 @@ class TenantBrandingController
             'branding_data' => $brandingData,
         ]);
     }
-
 }

@@ -11,8 +11,7 @@ class CheckoutOrchestratorAdapter implements CheckoutOrchestratorContract
 {
     public function __construct(
         private readonly SettingsStoreContract $settingsStore,
-    ) {
-    }
+    ) {}
 
     public function isEnabled(): bool
     {

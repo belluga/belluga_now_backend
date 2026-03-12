@@ -2,17 +2,17 @@
 
 namespace App\Logging;
 
+use MongoDB\Client;
 use Monolog\Handler\MongoDBHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger;
-use MongoDB\Client;
 use Throwable;
 
 class CreateMongoLogger
 {
     /**
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     public function __invoke(array $config): Logger
     {
@@ -60,9 +60,6 @@ class CreateMongoLogger
         return $logger;
     }
 
-    /**
-     * @param int|string|Level $level
-     */
     private function normalizeLevel(int|string|Level $level): int
     {
         if ($level instanceof Level) {

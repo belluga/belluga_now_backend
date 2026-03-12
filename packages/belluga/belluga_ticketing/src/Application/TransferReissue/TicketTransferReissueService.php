@@ -19,11 +19,10 @@ class TicketTransferReissueService
         private readonly TicketingRuntimeSettingsService $settings,
         private readonly TenantTransactionRunner $transactions,
         private readonly TicketOutboxEmitter $outbox,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $actorRef
+     * @param  array<string, mixed>  $actorRef
      * @return array<string, mixed>
      */
     public function transfer(
@@ -50,7 +49,7 @@ class TicketTransferReissueService
     }
 
     /**
-     * @param array<string, mixed> $actorRef
+     * @param  array<string, mixed>  $actorRef
      * @return array<string, mixed>
      */
     public function reissue(
@@ -92,7 +91,7 @@ class TicketTransferReissueService
     }
 
     /**
-     * @param array<string, mixed> $actorRef
+     * @param  array<string, mixed>  $actorRef
      * @return array<string, mixed>
      */
     private function execute(
@@ -310,4 +309,3 @@ class TicketTransferReissueService
         return $groupUnits;
     }
 }
-

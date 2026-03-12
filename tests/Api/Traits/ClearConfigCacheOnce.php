@@ -1,6 +1,5 @@
 <?php
 
-
 namespace Tests\Api\Traits;
 
 use Illuminate\Support\Facades\Artisan;
@@ -11,7 +10,7 @@ trait ClearConfigCacheOnce
 
     public function clearConfigCacheOnce(): void
     {
-        if (!self::$cacheHasBeenCleared) {
+        if (! self::$cacheHasBeenCleared) {
             Artisan::call('config:clear');
             self::$cacheHasBeenCleared = true;
         }

@@ -83,4 +83,3 @@ class TenantAppDomainManagementService
         return array_values($tenant->app_domains ?? []);
     }
 }
-

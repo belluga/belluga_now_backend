@@ -26,7 +26,7 @@ if (! is_string($mainHost) || $mainHost === '') {
 $mainHost = trim($mainHost);
 $tenantDomainPattern = $mainHost === ''
     ? '.+'
-    : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+    : '^(?!'.preg_quote($mainHost, '/').'$).+';
 
 $registerTenantRoutes = static function () use ($tenantPrefix, $tenantSettingsPrefix): void {
     Route::prefix($tenantPrefix)

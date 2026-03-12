@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Integration\Ticketing;
 
-use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 use Belluga\Ticketing\Contracts\EventTemplateReadContract;
+use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 
 class EventTemplateReadAdapter implements EventTemplateReadContract
 {

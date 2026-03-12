@@ -77,7 +77,7 @@ class AccountUserControllerTest extends TestCase
         );
     }
 
-    public function testStoreCreatesAccountUser(): void
+    public function test_store_creates_account_user(): void
     {
         $response = $this->postJson($this->baseUrl, [
             'name' => 'New Account User',
@@ -94,27 +94,27 @@ class AccountUserControllerTest extends TestCase
         ], 'tenant');
     }
 
-    public function testUpdateRejectsEmptyPayload(): void
+    public function test_update_rejects_empty_payload(): void
     {
         $user = $this->createAccountUser();
 
-        $response = $this->patchJson($this->baseUrl . '/' . $user->_id, []);
+        $response = $this->patchJson($this->baseUrl.'/'.$user->_id, []);
 
         $response->assertStatus(422);
         $response->assertJsonPath('errors.empty.0', 'Nenhum dado recebido para atualizar.');
     }
 
-    public function testDestroyRevokesAccountAccess(): void
+    public function test_destroy_revokes_account_access(): void
     {
         $user = $this->createAccountUser();
 
-        $deleteResponse = $this->deleteJson($this->baseUrl . '/' . $user->_id);
+        $deleteResponse = $this->deleteJson($this->baseUrl.'/'.$user->_id);
         $deleteResponse->assertOk();
 
         $this->assertSoftDeleted('account_users', ['_id' => $user->_id], 'tenant');
     }
 
-    public function testIndexFiltersByName(): void
+    public function test_index_filters_by_name(): void
     {
         $target = $this->createAccountUser();
         $target->name = 'Filtered User';
@@ -122,7 +122,7 @@ class AccountUserControllerTest extends TestCase
 
         $this->createAccountUser();
 
-        $response = $this->getJson($this->baseUrl . '?filter[name]=Filtered User');
+        $response = $this->getJson($this->baseUrl.'?filter[name]=Filtered User');
 
         $response->assertOk();
         $data = $response->json('data');
@@ -132,7 +132,7 @@ class AccountUserControllerTest extends TestCase
         $this->assertSame('Filtered User', $data[0]['name']);
     }
 
-    public function testIndexSortsByNameDescending(): void
+    public function test_index_sorts_by_name_descending(): void
     {
         $alpha = $this->createAccountUser();
         $alpha->name = 'Alpha User';
@@ -142,7 +142,7 @@ class AccountUserControllerTest extends TestCase
         $zulu->name = 'Zulu User';
         $zulu->save();
 
-        $response = $this->getJson($this->baseUrl . '?sort=-name');
+        $response = $this->getJson($this->baseUrl.'?sort=-name');
 
         $response->assertOk();
         $names = array_column($response->json('data'), 'name');
@@ -155,7 +155,7 @@ class AccountUserControllerTest extends TestCase
     private function createAccountUser(): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
-            'name' => 'Account Visitor ' . uniqid(),
+            'name' => 'Account Visitor '.uniqid(),
             'permissions' => ['account-users:view'],
         ]);
 
@@ -163,7 +163,7 @@ class AccountUserControllerTest extends TestCase
             $this->account,
             [
                 'name' => 'Fixture User',
-                'email' => 'fixture+' . uniqid('', true) . '@example.org',
+                'email' => 'fixture+'.uniqid('', true).'@example.org',
                 'password' => 'Secret!234',
             ],
             (string) $role->_id

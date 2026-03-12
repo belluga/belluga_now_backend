@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Context;
 
 class CheckUserAccess
 {
-
     protected string $current_account_id {
         get {
             return Context::get('accountId');
@@ -31,11 +30,11 @@ class CheckUserAccess
 
     public function handle($request, Closure $next)
     {
-        if(!$this->user){
-            throw new AuthenticationException();
+        if (! $this->user) {
+            throw new AuthenticationException;
         }
 
-        switch (get_class($this->user)){
+        switch (get_class($this->user)) {
             case \App\Models\Landlord\LandlordUser::class:
                 $this->have_access = $this->checkUserAccess($this->current_tenant_id);
                 break;
@@ -44,14 +43,15 @@ class CheckUserAccess
                 break;
         }
 
-        if(!$this->have_access){
-            throw new AuthenticationException();
+        if (! $this->have_access) {
+            throw new AuthenticationException;
         }
 
         return $next($request);
     }
 
-    protected function checkUserAccess(string $checkId): bool {
+    protected function checkUserAccess(string $checkId): bool
+    {
         return in_array($checkId, $this->user->getAccessToIds());
     }
 }

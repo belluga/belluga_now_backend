@@ -29,7 +29,7 @@ class TenantResolutionTest extends TestCase
         }
     }
 
-    public function testReturns404WhenTenantCannotBeResolved(): void
+    public function test_returns404_when_tenant_cannot_be_resolved(): void
     {
         $payload = [
             'device_name' => 'unknown-host-device',
@@ -47,7 +47,7 @@ class TenantResolutionTest extends TestCase
             ->assertJson(['message' => 'Resource you are looking for was not found.']);
     }
 
-    public function testTenantAuthRoutesAreNotAvailableOnMainDomain(): void
+    public function test_tenant_auth_routes_are_not_available_on_main_domain(): void
     {
         $response = $this->postJson(
             sprintf('http://%s/api/v1/auth/login', $this->host),
@@ -61,7 +61,7 @@ class TenantResolutionTest extends TestCase
         $response->assertStatus(404);
     }
 
-    public function testLandlordAdminRoutesAreNotAvailableOnTenantDomain(): void
+    public function test_landlord_admin_routes_are_not_available_on_tenant_domain(): void
     {
         $response = $this->getJson(
             sprintf('http://%s.%s/admin/api/v1/tenants', 'tenant-alpha', $this->host)
@@ -70,7 +70,7 @@ class TenantResolutionTest extends TestCase
         $response->assertStatus(404);
     }
 
-    public function testUnknownHostCannotResolveTenantWhenAppDomainIsSentOnlyAsQuery(): void
+    public function test_unknown_host_cannot_resolve_tenant_when_app_domain_is_sent_only_as_query(): void
     {
         $response = $this->getJson(
             sprintf('http://%s.%s/api/v1/environment?app_domain=tenant-alpha.test', 'unknown', $this->host)
@@ -80,7 +80,7 @@ class TenantResolutionTest extends TestCase
             ->assertJson(['message' => 'Resource you are looking for was not found.']);
     }
 
-    public function testMainDomainIgnoresAppDomainQueryWithoutHeader(): void
+    public function test_main_domain_ignores_app_domain_query_without_header(): void
     {
         $response = $this->getJson(
             sprintf('http://%s/api/v1/environment?app_domain=tenant-alpha.test', $this->host)
@@ -90,7 +90,7 @@ class TenantResolutionTest extends TestCase
             ->assertJsonPath('type', 'landlord');
     }
 
-    public function testMainDomainCanResolveTenantUsingAppDomainHeader(): void
+    public function test_main_domain_can_resolve_tenant_using_app_domain_header(): void
     {
         $tenant = Tenant::query()->where('subdomain', 'tenant-alpha')->firstOrFail();
 

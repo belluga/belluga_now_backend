@@ -21,8 +21,8 @@ class DeliverTelemetryEventJob implements ShouldQueue
     public int $tries = 5;
 
     /**
-     * @param array<string, mixed> $envelope
-     * @param array<int, array<string, mixed>> $trackers
+     * @param  array<string, mixed>  $envelope
+     * @param  array<int, array<string, mixed>>  $trackers
      */
     public function __construct(
         private readonly array $envelope,
@@ -64,4 +64,3 @@ class DeliverTelemetryEventJob implements ShouldQueue
         $deliveryService->deliver($this->envelope, $this->trackers);
     }
 }
-

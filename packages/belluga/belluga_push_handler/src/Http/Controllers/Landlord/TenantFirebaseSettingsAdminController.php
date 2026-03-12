@@ -14,8 +14,7 @@ class TenantFirebaseSettingsAdminController
     public function __construct(
         private readonly PushSettingsKernelBridge $pushSettings,
         private readonly PushTenantContextContract $tenantContext
-    ) {
-    }
+    ) {}
 
     public function show(string $tenant_slug): JsonResponse
     {

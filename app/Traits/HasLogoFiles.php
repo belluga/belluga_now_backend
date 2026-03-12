@@ -21,7 +21,7 @@ trait HasLogoFiles
             return "tenants/{$tenant->slug}";
         }
 
-        return "landlord";
+        return 'landlord';
     }
 
     private function _saveContentToPublicDisk(string $content, string $path): string
@@ -31,6 +31,7 @@ trait HasLogoFiles
         }
         Storage::disk('public')->put($path, $content);
         Storage::forgetDisk('public'); // Invalidate cache after writing
+
         return Storage::disk('public')->url($path);
     }
 
@@ -40,7 +41,7 @@ trait HasLogoFiles
         foreach ($this->logoKeys as $key) {
             // This logic handles differently structured incoming requests
             $fileKey = "branding_data.logo_settings.{$key}";
-            if (!$request->hasFile($fileKey)) {
+            if (! $request->hasFile($fileKey)) {
                 $fileKey = "logo_settings.{$key}";
             }
 
@@ -48,6 +49,7 @@ trait HasLogoFiles
                 $urls[$key] = $this->storeFile($request->file($fileKey), $key);
             }
         }
+
         return $urls;
     }
 
@@ -73,8 +75,8 @@ trait HasLogoFiles
         Storage::disk('public')->makeDirectory($baseDir);
 
         $paths = [
-            'icon192'     => "{$baseDir}/icon-192x192.png",
-            'icon512'     => "{$baseDir}/icon-512x512.png",
+            'icon192' => "{$baseDir}/icon-192x192.png",
+            'icon512' => "{$baseDir}/icon-512x512.png",
             'maskable512' => "{$baseDir}/icon-maskable-512x512.png",
         ];
 
@@ -88,9 +90,9 @@ trait HasLogoFiles
         $icon512MaskablePath = $this->_saveContentToPublicDisk($canvasMaskable->toPng()->toString(), $paths['maskable512']);
 
         return [
-            'source_uri'             => $sourceUri,
-            'icon192_uri'            => $icon192Path,
-            'icon512_uri'            => $icon512Path,
+            'source_uri' => $sourceUri,
+            'icon192_uri' => $icon192Path,
+            'icon512_uri' => $icon512Path,
             'icon_maskable512_uri' => $icon512MaskablePath,
         ];
     }

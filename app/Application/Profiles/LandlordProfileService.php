@@ -126,7 +126,7 @@ class LandlordProfileService
     }
 
     /**
-     * @param array<int, string> $phones
+     * @param  array<int, string>  $phones
      */
     public function addPhones(LandlordUser $user, array $phones): LandlordUser
     {
@@ -203,7 +203,7 @@ class LandlordProfileService
     }
 
     /**
-     * @param array<int, string> $phones
+     * @param  array<int, string>  $phones
      * @return array<int, string>
      */
     private function parsePhones(array $phones): array
@@ -226,7 +226,7 @@ class LandlordProfileService
     }
 
     /**
-     * @param array<string, array<int, string>> $errors
+     * @param  array<string, array<int, string>>  $errors
      */
     private function fail(string $message, array $errors): never
     {

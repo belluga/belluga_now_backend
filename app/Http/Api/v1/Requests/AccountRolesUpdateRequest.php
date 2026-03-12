@@ -23,15 +23,15 @@ class AccountRolesUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['sometimes', 'string', 'max:' . InputConstraints::NAME_MAX],
-            'description' => ['nullable', 'string', 'max:' . InputConstraints::DESCRIPTION_MAX],
-            'permissions' => ['required', 'array', 'min:1', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX],
-            'permissions.add' => ['sometimes', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.set'],
-            'permissions.remove' => ['sometimes', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.set'],
-            'permissions.set' => ['sometimes', 'array', 'max:' . InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.add,permissions.remove'],
-            'permissions.add.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
-            'permissions.remove.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
-            'permissions.set.*' => ['required', 'string', 'max:' . InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'description' => ['nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'permissions' => ['required', 'array', 'min:1', 'max:'.InputConstraints::PERMISSIONS_ARRAY_MAX],
+            'permissions.add' => ['sometimes', 'array', 'max:'.InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.set'],
+            'permissions.remove' => ['sometimes', 'array', 'max:'.InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.set'],
+            'permissions.set' => ['sometimes', 'array', 'max:'.InputConstraints::PERMISSIONS_ARRAY_MAX, 'prohibits:permissions.add,permissions.remove'],
+            'permissions.add.*' => ['required', 'string', 'max:'.InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'permissions.remove.*' => ['required', 'string', 'max:'.InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
+            'permissions.set.*' => ['required', 'string', 'max:'.InputConstraints::PERMISSION_MAX, 'regex:/^(?:[a-z]+(?:-[a-z]+)*|\*)(?::(\\*|[a-z]+))?$/'],
         ];
     }
 }

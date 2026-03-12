@@ -18,7 +18,7 @@ class TenantTicketingPolicyAdapterTest extends TestCase
         parent::tearDown();
     }
 
-    public function testItResolvesEnabledAndIdentityModeFromSettingsKernel(): void
+    public function test_it_resolves_enabled_and_identity_mode_from_settings_kernel(): void
     {
         $store = Mockery::mock(SettingsStoreContract::class);
         $store->shouldReceive('getNamespaceValue')
@@ -39,7 +39,7 @@ class TenantTicketingPolicyAdapterTest extends TestCase
         $this->assertSame('guest_or_auth', $adapter->identityMode());
     }
 
-    public function testItFallsBackToSecureDefaultsWhenValuesAreMissingOrInvalid(): void
+    public function test_it_falls_back_to_secure_defaults_when_values_are_missing_or_invalid(): void
     {
         $store = Mockery::mock(SettingsStoreContract::class);
         $store->shouldReceive('getNamespaceValue')
@@ -59,4 +59,3 @@ class TenantTicketingPolicyAdapterTest extends TestCase
         $this->assertSame('auth_only', $adapter->identityMode());
     }
 }
-

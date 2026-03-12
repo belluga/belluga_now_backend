@@ -13,8 +13,7 @@ class TenantCapabilitySettingsAdapter implements EventCapabilitySettingsContract
     public function __construct(
         private readonly SettingsRegistryContract $registry,
         private readonly SettingsStoreContract $store,
-    ) {
-    }
+    ) {}
 
     public function resolveTenantCapabilities(): array
     {
@@ -29,4 +28,3 @@ class TenantCapabilitySettingsAdapter implements EventCapabilitySettingsContract
         return is_array($capabilities) ? $capabilities : [];
     }
 }
-

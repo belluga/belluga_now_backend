@@ -19,8 +19,7 @@ class AccountProfileQueryService extends AbstractQueryService
 {
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService
-    ) {
-    }
+    ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
@@ -99,22 +98,21 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         if (! $profile) {
-            throw (new ModelNotFoundException())->setModel(AccountProfile::class, [$profileId]);
+            throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$profileId]);
         }
 
         return $profile;
     }
 
     /**
-     * @param array<string, bool> $userOperatedLookup
+     * @param  array<string, bool>  $userOperatedLookup
      * @return array<string, mixed>
      */
     private function format(
         AccountProfile $profile,
         ?Account $account = null,
         array $userOperatedLookup = []
-    ): array
-    {
+    ): array {
         $resolvedAccount = $account
             ?? Account::query()->where('_id', $profile->account_id)->first();
 
@@ -143,7 +141,7 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
-     * @param Collection<int, AccountProfile> $profiles
+     * @param  Collection<int, AccountProfile>  $profiles
      * @return array<string, Account>
      */
     private function loadAccountsById(Collection $profiles): array
@@ -171,7 +169,6 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, float>|null
      */
     private function formatLocation(mixed $location): ?array
@@ -247,7 +244,7 @@ class AccountProfileQueryService extends AbstractQueryService
 
     protected function baseSearchableFields(): array
     {
-        return (new AccountProfile())->getFillable();
+        return (new AccountProfile)->getFillable();
     }
 
     protected function stringFields(): array

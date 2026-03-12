@@ -7,8 +7,8 @@ namespace App\Application\Telemetry\Contracts;
 interface TelemetryEmitterContract
 {
     /**
-     * @param array<string, mixed> $properties
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $properties
+     * @param  array<string, mixed>  $context
      */
     public function emit(
         string $event,
@@ -19,4 +19,3 @@ interface TelemetryEmitterContract
         array $context = []
     ): void;
 }
-

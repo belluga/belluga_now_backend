@@ -17,8 +17,7 @@ class TenantRolesController extends Controller
     public function __construct(
         private readonly TenantRoleManagementService $tenantRoleService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -66,8 +65,7 @@ class TenantRolesController extends Controller
 
     public function update(
         TenantRoleUpdateRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $validated = $request->validated();
@@ -97,8 +95,7 @@ class TenantRolesController extends Controller
 
     public function destroy(
         TenantRoleDestroyRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $this->tenantRoleService->delete(

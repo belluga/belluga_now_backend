@@ -49,7 +49,7 @@ class AccountRoleTemplateServiceTest extends TestCase
         $this->accountUserService = $this->app->make(AccountUserService::class);
     }
 
-    public function testCreateAddsRoleTemplate(): void
+    public function test_create_adds_role_template(): void
     {
         $role = $this->service->create($this->account, [
             'name' => 'Support Agent',
@@ -61,7 +61,7 @@ class AccountRoleTemplateServiceTest extends TestCase
         $this->assertSame(['account-users:view'], $role->permissions);
     }
 
-    public function testCreateRejectsDuplicate(): void
+    public function test_create_rejects_duplicate(): void
     {
         $this->expectException(HttpException::class);
         $this->expectExceptionMessage('Role already exists for this account.');
@@ -73,7 +73,7 @@ class AccountRoleTemplateServiceTest extends TestCase
         ]);
     }
 
-    public function testUpdateMutatesPermissions(): void
+    public function test_update_mutates_permissions(): void
     {
         $role = $this->service->create($this->account, [
             'name' => 'Editors',
@@ -96,7 +96,7 @@ class AccountRoleTemplateServiceTest extends TestCase
         $this->assertSame('Updated description', $updated->description);
     }
 
-    public function testDeleteReassignsUsersToFallbackRole(): void
+    public function test_delete_reassigns_users_to_fallback_role(): void
     {
         $fallback = $this->service->create($this->account, [
             'name' => 'Fallback',
@@ -112,7 +112,7 @@ class AccountRoleTemplateServiceTest extends TestCase
 
         $user = $this->accountUserService->create($this->account, [
             'name' => 'Account Operator',
-            'email' => 'operator+' . uniqid('', true) . '@example.org',
+            'email' => 'operator+'.uniqid('', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $roleToDelete->_id);
 
@@ -126,7 +126,7 @@ class AccountRoleTemplateServiceTest extends TestCase
         $this->assertSoftDeleted('account_role_templates', ['_id' => $roleToDelete->_id], 'tenant');
     }
 
-    public function testRestoreBringsRoleBack(): void
+    public function test_restore_brings_role_back(): void
     {
         $role = $this->service->create($this->account, [
             'name' => 'Archived',
@@ -142,7 +142,7 @@ class AccountRoleTemplateServiceTest extends TestCase
         $this->assertSame('Archived', $restored->name);
     }
 
-    public function testForceDeleteRemovesRole(): void
+    public function test_force_delete_removes_role(): void
     {
         $role = $this->service->create($this->account, [
             'name' => 'Removable',

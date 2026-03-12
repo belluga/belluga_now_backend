@@ -38,7 +38,7 @@ class TenantLifecycleServiceTest extends TestCase
         $this->service = $this->app->make(TenantLifecycleService::class);
     }
 
-    public function testPaginateReturnsAccessibleTenants(): void
+    public function test_paginate_returns_accessible_tenants(): void
     {
         $paginator = $this->service->paginate($this->operator, false, 15);
 
@@ -50,10 +50,10 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertContains($firstTenantId, $ids);
     }
 
-    public function testPaginateUsesFirstRelatedMainDomainWhenNoMainFlagExists(): void
+    public function test_paginate_uses_first_related_main_domain_when_no_main_flag_exists(): void
     {
         $tenant = $this->service->create($this->makeTenantPayload('Lambda Academy'), $this->operator)['tenant'];
-        $aliasDomain = 'alias-only-' . Str::lower(Str::random(8)) . '.example.test';
+        $aliasDomain = 'alias-only-'.Str::lower(Str::random(8)).'.example.test';
 
         $tenant->domains()->delete();
         $tenant->domains()->create([
@@ -67,12 +67,12 @@ class TenantLifecycleServiceTest extends TestCase
 
         $this->assertNotNull($item);
         $this->assertSame(
-            'https://' . $aliasDomain,
+            'https://'.$aliasDomain,
             $item['main_domain']
         );
     }
 
-    public function testPaginateIgnoresLegacyPersistedLandlordFallbackDomains(): void
+    public function test_paginate_ignores_legacy_persisted_landlord_fallback_domains(): void
     {
         $tenant = $this->service->create([
             ...$this->makeTenantPayload('Guarapari Tenant'),
@@ -101,7 +101,7 @@ class TenantLifecycleServiceTest extends TestCase
         );
     }
 
-    public function testCreatePersistsTenantAndAssignsRoleToOperator(): void
+    public function test_create_persists_tenant_and_assigns_role_to_operator(): void
     {
         $payload = $this->makeTenantPayload('Delta Stores');
 
@@ -118,7 +118,7 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertContains((string) $tenant->_id, $this->operator->getAccessToIds());
     }
 
-    public function testCreateDoesNotPersistImplicitFallbackDomain(): void
+    public function test_create_does_not_persist_implicit_fallback_domain(): void
     {
         $payload = $this->makeTenantPayload('No Domain Seed');
 
@@ -136,7 +136,7 @@ class TenantLifecycleServiceTest extends TestCase
         );
     }
 
-    public function testUpdateMutatesTenantAttributes(): void
+    public function test_update_mutates_tenant_attributes(): void
     {
         $payload = $this->makeTenantPayload('Gamma Retail');
         $tenant = $this->service->create($payload, $this->operator)['tenant'];
@@ -148,7 +148,7 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertSame('Updated description for Gamma Retail.', $updated->description);
     }
 
-    public function testDeleteSoftDeletesTenant(): void
+    public function test_delete_soft_deletes_tenant(): void
     {
         $tenant = $this->service->create($this->makeTenantPayload('Omega Supplies'), $this->operator)['tenant'];
 
@@ -157,7 +157,7 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertSoftDeleted('tenants', ['_id' => $tenant->_id], 'landlord');
     }
 
-    public function testRestoreRevivesTenant(): void
+    public function test_restore_revives_tenant(): void
     {
         $tenant = $this->service->create($this->makeTenantPayload('Sigma Education'), $this->operator)['tenant'];
 
@@ -167,7 +167,7 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertFalse($restored->trashed());
     }
 
-    public function testForceDeleteRemovesTenantAndRelations(): void
+    public function test_force_delete_removes_tenant_and_relations(): void
     {
         $tenant = $this->service->create($this->makeTenantPayload('Theta Finance'), $this->operator)['tenant'];
 
@@ -185,8 +185,8 @@ class TenantLifecycleServiceTest extends TestCase
     {
         return [
             'name' => $name,
-            'subdomain' => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'description' => $name . ' description',
+            'subdomain' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'description' => $name.' description',
         ];
     }
 

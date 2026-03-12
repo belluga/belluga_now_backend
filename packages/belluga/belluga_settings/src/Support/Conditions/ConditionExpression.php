@@ -9,20 +9,21 @@ use InvalidArgumentException;
 final class ConditionExpression
 {
     public const MAX_GROUPS_PER_EXPRESSION = 10;
+
     public const MAX_RULES_PER_GROUP = 10;
+
     public const MAX_TOTAL_RULES_PER_EXPRESSION = 50;
+
     public const MAX_CONDITION_PAYLOAD_BYTES = 16384;
 
     /**
-     * @param array<int, ConditionGroup> $groups
+     * @param  array<int, ConditionGroup>  $groups
      */
-    public function __construct(public readonly array $groups)
-    {
-    }
+    public function __construct(public readonly array $groups) {}
 
     /**
-     * @param array<string, mixed> $rawExpression
-     * @param array<string, array{id:string,type:string,nullable:bool}> $fieldReferences
+     * @param  array<string, mixed>  $rawExpression
+     * @param  array<string, array{id:string,type:string,nullable:bool}>  $fieldReferences
      */
     public static function fromArray(array $rawExpression, array $fieldReferences): self
     {
@@ -77,4 +78,3 @@ final class ConditionExpression
         ];
     }
 }
-

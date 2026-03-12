@@ -13,8 +13,7 @@ class MapPoiRegistryAdapter implements MapPoiRegistryContract
     public function __construct(
         private readonly AccountProfileRegistryService $accountProfiles,
         private readonly StaticProfileTypeRegistryService $staticProfiles,
-    ) {
-    }
+    ) {}
 
     public function isAccountProfilePoiEnabled(string $profileType): bool
     {

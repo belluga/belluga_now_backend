@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
-use App\Models\Landlord\Tenant;
-use App\Models\Tenants\AccountProfile;
-use Belluga\MapPois\Models\Tenants\MapPoi;
-use App\Models\Tenants\TenantProfileType;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\TenantProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -49,7 +49,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testProfileTypeIndexListsRegistry(): void
+    public function test_profile_type_index_lists_registry(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -71,7 +71,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.type', 'artist');
     }
 
-    public function testProfileTypeCreate(): void
+    public function test_profile_type_create(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profile_types",
@@ -92,7 +92,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
     }
 
-    public function testProfileTypeCreateValidation(): void
+    public function test_profile_type_create_validation(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profile_types",
@@ -103,7 +103,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testProfileTypeCreateRejectsDuplicateType(): void
+    public function test_profile_type_create_rejects_duplicate_type(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -128,7 +128,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testProfileTypeCreateValidatesAllowedTaxonomiesLength(): void
+    public function test_profile_type_create_validates_allowed_taxonomies_length(): void
     {
         $longValue = str_repeat('a', 300);
 
@@ -145,7 +145,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testProfileTypeUpdate(): void
+    public function test_profile_type_update(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -174,7 +174,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_favoritable', true);
     }
 
-    public function testProfileTypeUpdateUsesRouteParam(): void
+    public function test_profile_type_update_uses_route_param(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -200,7 +200,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.label', 'Restaurante Atualizado');
     }
 
-    public function testProfileTypeUpdateAllowsTypeRenameAndPropagatesDependents(): void
+    public function test_profile_type_update_allows_type_rename_and_propagates_dependents(): void
     {
         TenantProfileType::query()->delete();
         AccountProfile::query()->delete();
@@ -279,7 +279,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
-    public function testProfileTypeUpdateRejectsDuplicateTypeRename(): void
+    public function test_profile_type_update_rejects_duplicate_type_rename(): void
     {
         TenantProfileType::query()->delete();
 
@@ -308,7 +308,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type']);
     }
 
-    public function testProfileTypeDelete(): void
+    public function test_profile_type_delete(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([

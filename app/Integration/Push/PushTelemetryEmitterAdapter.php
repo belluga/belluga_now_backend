@@ -11,12 +11,11 @@ class PushTelemetryEmitterAdapter implements PushTelemetryEmitterContract
 {
     public function __construct(
         private readonly HostTelemetryEmitterContract $telemetry
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $properties
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $properties
+     * @param  array<string, mixed>  $context
      */
     public function emit(
         string $event,
@@ -36,4 +35,3 @@ class PushTelemetryEmitterAdapter implements PushTelemetryEmitterContract
         );
     }
 }
-

@@ -71,4 +71,3 @@ class TicketPromotionStoreRequest extends FormRequest
         });
     }
 }
-

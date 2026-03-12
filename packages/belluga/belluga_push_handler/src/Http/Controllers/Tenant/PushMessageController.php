@@ -15,8 +15,7 @@ class PushMessageController
 {
     public function __construct(
         private readonly PushMessageService $service
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {

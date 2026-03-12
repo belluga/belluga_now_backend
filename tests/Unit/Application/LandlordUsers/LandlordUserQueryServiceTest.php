@@ -36,7 +36,7 @@ class LandlordUserQueryServiceTest extends TestCase
         $this->seedUsers();
     }
 
-    public function testFiltersByName(): void
+    public function test_filters_by_name(): void
     {
         $paginator = $this->service->paginate(
             ['filter' => ['name' => 'Support Filter']],
@@ -48,9 +48,9 @@ class LandlordUserQueryServiceTest extends TestCase
         $this->assertSame('Support Filter', $paginator->items()[0]['name']);
     }
 
-    public function testFiltersByEmailAddress(): void
+    public function test_filters_by_email_address(): void
     {
-        $targetEmail = 'filter.landlord+' . uniqid('', true) . '@example.org';
+        $targetEmail = 'filter.landlord+'.uniqid('', true).'@example.org';
         $this->createUser([
             'name' => 'Email Filter',
             'emails' => [$targetEmail],
@@ -66,9 +66,9 @@ class LandlordUserQueryServiceTest extends TestCase
         $this->assertSame($targetEmail, $paginator->items()[0]['emails'][0]);
     }
 
-    public function testIncludesArchivedRecordsWhenRequested(): void
+    public function test_includes_archived_records_when_requested(): void
     {
-        $email = 'archived.landlord+' . uniqid('', true) . '@example.org';
+        $email = 'archived.landlord+'.uniqid('', true).'@example.org';
         $archived = $this->createUser([
             'name' => 'Archived Landlord',
             'emails' => [$email],
@@ -91,7 +91,7 @@ class LandlordUserQueryServiceTest extends TestCase
         $this->assertSame(1, $withArchived->total());
     }
 
-    public function testUnsupportedSortFallsBackToDefaultOrder(): void
+    public function test_unsupported_sort_falls_back_to_default_order(): void
     {
         $baseline = $this->service->paginate([], includeArchived: false, perPage: 15);
         $fallback = $this->service->paginate(['sort' => '-unsupported'], includeArchived: false, perPage: 15);
@@ -103,16 +103,16 @@ class LandlordUserQueryServiceTest extends TestCase
         );
     }
 
-    public function testSortsByNameDescending(): void
+    public function test_sorts_by_name_descending(): void
     {
         $this->createUser([
             'name' => 'Alpha Landlord',
-            'emails' => ['alpha.landlord+' . uniqid('', true) . '@example.org'],
+            'emails' => ['alpha.landlord+'.uniqid('', true).'@example.org'],
         ]);
 
         $this->createUser([
             'name' => 'Zulu Landlord',
-            'emails' => ['zulu.landlord+' . uniqid('', true) . '@example.org'],
+            'emails' => ['zulu.landlord+'.uniqid('', true).'@example.org'],
         ]);
 
         $paginator = $this->service->paginate(
@@ -129,25 +129,25 @@ class LandlordUserQueryServiceTest extends TestCase
     {
         $this->createUser([
             'name' => 'Support Filter',
-            'emails' => ['support.filter+' . uniqid('', true) . '@example.org'],
+            'emails' => ['support.filter+'.uniqid('', true).'@example.org'],
             'created_at' => Carbon::now()->subHours(2),
         ]);
 
         $this->createUser([
             'name' => 'Baseline Staff',
-            'emails' => ['baseline.staff+' . uniqid('', true) . '@example.org'],
+            'emails' => ['baseline.staff+'.uniqid('', true).'@example.org'],
             'created_at' => Carbon::now()->subHour(),
         ]);
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createUser(array $overrides): LandlordUser
     {
         $payload = array_merge([
             'name' => 'Landlord Fixture',
-            'emails' => ['landlord.fixture+' . uniqid('', true) . '@example.org'],
+            'emails' => ['landlord.fixture+'.uniqid('', true).'@example.org'],
             'phones' => [],
             'password' => Hash::make('Secret!234'),
             'identity_state' => 'registered',

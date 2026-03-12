@@ -36,7 +36,7 @@ class LandlordAuthenticationServiceTest extends TestCase
         ]);
     }
 
-    public function testLoginReturnsToken(): void
+    public function test_login_returns_token(): void
     {
         $result = $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
 
@@ -44,14 +44,14 @@ class LandlordAuthenticationServiceTest extends TestCase
         $this->assertNotEmpty($result->plainTextToken);
     }
 
-    public function testLoginThrowsOnInvalidCredentials(): void
+    public function test_login_throws_on_invalid_credentials(): void
     {
         $this->expectException(InvalidCredentialsException::class);
 
         $this->service->login('landlord@example.org', 'invalid', 'admin-client');
     }
 
-    public function testRegisterCreatesUser(): void
+    public function test_register_creates_user(): void
     {
         $result = $this->service->register([
             'name' => 'New Landlord',

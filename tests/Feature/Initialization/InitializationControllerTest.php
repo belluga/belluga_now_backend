@@ -28,7 +28,7 @@ class InitializationControllerTest extends TestCase
         parent::tearDown();
     }
 
-    public function testSystemInitializesSuccessfully(): void
+    public function test_system_initializes_successfully(): void
     {
         $initializeUrl = "http://{$this->host}/api/v1/initialize";
         $response = $this->postJson($initializeUrl, $this->payload());
@@ -40,7 +40,7 @@ class InitializationControllerTest extends TestCase
         $this->assertSame(1, Tenant::query()->count());
     }
 
-    public function testSubsequentInitializationIsRejected(): void
+    public function test_subsequent_initialization_is_rejected(): void
     {
         $initializeUrl = "http://{$this->host}/api/v1/initialize";
         $this->postJson($initializeUrl, $this->payload())->assertCreated();
@@ -49,7 +49,7 @@ class InitializationControllerTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function testInitializationRouteIsNotAvailableOnTenantDomain(): void
+    public function test_initialization_route_is_not_available_on_tenant_domain(): void
     {
         $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
         $initializeUrl = "http://{$tenantHost}/api/v1/initialize";

@@ -11,7 +11,7 @@ use Belluga\Settings\Support\Conditions\ConditionRule;
 final class ConditionExpressionEvaluator
 {
     /**
-     * @param array<string, mixed> $state
+     * @param  array<string, mixed>  $state
      */
     public function evaluate(ConditionExpression $expression, array $state): bool
     {
@@ -34,7 +34,7 @@ final class ConditionExpressionEvaluator
     }
 
     /**
-     * @param array<string, mixed> $state
+     * @param  array<string, mixed>  $state
      */
     private function evaluateRule(ConditionRule $rule, array $state): bool
     {
@@ -62,7 +62,7 @@ final class ConditionExpressionEvaluator
     }
 
     /**
-     * @param array<string, mixed> $state
+     * @param  array<string, mixed>  $state
      * @return array{0: bool, 1: mixed}
      */
     private function resolveFieldValue(array $state, string $fieldId): array
@@ -71,7 +71,7 @@ final class ConditionExpressionEvaluator
             return [true, $state[$fieldId]];
         }
 
-        $sentinel = new \stdClass();
+        $sentinel = new \stdClass;
         $value = data_get($state, $fieldId, $sentinel);
 
         if ($value === $sentinel) {
@@ -81,4 +81,3 @@ final class ConditionExpressionEvaluator
         return [true, $value];
     }
 }
-

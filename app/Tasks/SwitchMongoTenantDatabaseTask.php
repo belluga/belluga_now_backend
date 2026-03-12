@@ -27,7 +27,7 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
             "database.connections.$connectionName" => array_merge(
                 config("database.connections.$connectionName"),
                 ['database' => $tenant->getDatabaseName()]
-            )
+            ),
         ]);
 
         DB::purge($connectionName);
@@ -44,7 +44,7 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
         }
 
         config([
-            "database.connections.$connectionName.database" => null
+            "database.connections.$connectionName.database" => null,
         ]);
 
         DB::purge($connectionName);

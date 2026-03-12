@@ -20,9 +20,7 @@ class ProcessTicketOutboxJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public function __construct(private readonly int $batchSize = 100)
-    {
-    }
+    public function __construct(private readonly int $batchSize = 100) {}
 
     public function handle(): void
     {

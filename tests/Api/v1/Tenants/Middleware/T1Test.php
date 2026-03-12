@@ -5,7 +5,8 @@ namespace Tests\Api\v1\Tenants\Middleware;
 use Tests\Api\v1\Tenants\Middleware\Contracts\ApiV1TenantsMiddlewareTestContract;
 use Tests\Helpers\TenantLabels;
 
-class T1Test extends ApiV1TenantsMiddlewareTestContract {
+class T1Test extends ApiV1TenantsMiddlewareTestContract
+{
     protected TenantLabels $tenant {
         get{
             return $this->landlord->tenant_primary;

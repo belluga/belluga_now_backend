@@ -6,7 +6,6 @@ namespace Tests\Traits;
 
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Support\Str;
 
 trait SeedsTenantAccounts
@@ -17,7 +16,7 @@ trait SeedsTenantAccounts
         $tenant->makeCurrent();
 
         $account = Account::create([
-            'name' => 'Account ' . Str::uuid()->toString(),
+            'name' => 'Account '.Str::uuid()->toString(),
             'document' => strtoupper(Str::random(14)),
         ]);
 

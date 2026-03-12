@@ -17,8 +17,7 @@ class LandlordTenantTelemetrySettingsController
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings,
         private readonly TenantLifecycleService $tenantService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request, string $tenant_slug): JsonResponse
     {

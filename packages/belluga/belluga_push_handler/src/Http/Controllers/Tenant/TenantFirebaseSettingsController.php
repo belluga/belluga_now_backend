@@ -12,8 +12,7 @@ class TenantFirebaseSettingsController
 {
     public function __construct(
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     public function show(): JsonResponse
     {

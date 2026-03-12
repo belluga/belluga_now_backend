@@ -13,8 +13,7 @@ class EventStreamController extends Controller
 {
     public function __construct(
         private readonly EventQueryService $eventQueryService
-    ) {
-    }
+    ) {}
 
     public function stream(EventStreamRequest $request): StreamedResponse
     {
@@ -31,10 +30,10 @@ class EventStreamController extends Controller
             foreach ($deltas as $delta) {
                 $updatedAt = $delta['updated_at'] ?? null;
                 if ($updatedAt) {
-                    echo 'id: ' . $updatedAt . "\n";
+                    echo 'id: '.$updatedAt."\n";
                 }
-                echo 'event: ' . $delta['type'] . "\n";
-                echo 'data: ' . json_encode($delta) . "\n\n";
+                echo 'event: '.$delta['type']."\n";
+                echo 'data: '.json_encode($delta)."\n\n";
                 if (ob_get_level() > 0) {
                     ob_flush();
                 }

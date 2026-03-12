@@ -33,7 +33,7 @@ class AccountUserAccessService
         $account ??= Account::current();
 
         if (! $account) {
-            throw new AuthenticationException();
+            throw new AuthenticationException;
         }
 
         return collect($user->account_roles)
@@ -61,7 +61,7 @@ class AccountUserAccessService
     }
 
     /**
-     * @param array<string, mixed> $metadata
+     * @param  array<string, mixed>  $metadata
      * @return array<string, mixed>
      */
     public function syncCredential(
@@ -97,7 +97,7 @@ class AccountUserAccessService
         }
 
         $credential = [
-            '_id' => (string) new ObjectId(),
+            '_id' => (string) new ObjectId,
             'provider' => $provider,
             'subject' => $subject,
             'secret_hash' => $secretHash,

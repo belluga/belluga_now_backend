@@ -18,11 +18,10 @@ class EnvironmentResolverService
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings,
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     public function resolve(array $input): array
@@ -62,7 +61,7 @@ class EnvironmentResolverService
         $telemetry = $this->telemetrySettings->currentTelemetryConfig();
         $firebase = $this->pushSettings->currentFirebaseConfig();
         $push = $this->pushSettings->currentPushConfig();
-        $profileTypes = (new AccountProfileRegistryService())->registry();
+        $profileTypes = (new AccountProfileRegistryService)->registry();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
@@ -132,7 +131,7 @@ class EnvironmentResolverService
     }
 
     /**
-     * @param array<string, mixed> $branding
+     * @param  array<string, mixed>  $branding
      */
     private function resolveLogoUrl(array $branding, string $key): ?string
     {
@@ -140,7 +139,7 @@ class EnvironmentResolverService
     }
 
     /**
-     * @param array<string, mixed> $branding
+     * @param  array<string, mixed>  $branding
      */
     private function resolveIconUrl(array $branding, string $preferredKey): ?string
     {
@@ -158,7 +157,7 @@ class EnvironmentResolverService
      * Web: use current tenant host as main_domain.
      * Mobile (resolved via app_domain on landlord host): keep canonical tenant main domain.
      *
-     * @param array<int, string> $domains
+     * @param  array<int, string>  $domains
      */
     private function resolveTenantMainDomain(
         string $tenantMainDomain,
@@ -224,7 +223,7 @@ class EnvironmentResolverService
         }
 
         $host = (string) $parts['host'];
-        $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+        $port = isset($parts['port']) ? ':'.(string) $parts['port'] : '';
 
         return sprintf('%s://%s%s', $scheme, $host, $port);
     }
@@ -236,6 +235,7 @@ class EnvironmentResolverService
         }
 
         $normalized = trim(Str::lower($host));
+
         return $normalized === '' ? null : $normalized;
     }
 
@@ -248,12 +248,13 @@ class EnvironmentResolverService
         $normalized = Str::replace(['http://', 'https://'], '', $domain);
         $normalized = trim($normalized, '/');
 
-        return $normalized === '' ? null : 'https://' . $normalized;
+        return $normalized === '' ? null : 'https://'.$normalized;
     }
 
     private function defaultTelemetryLocationFreshnessMinutes(): int
     {
         $minutes = (int) config('telemetry.location_freshness_minutes', 5);
+
         return $minutes > 0 ? $minutes : 5;
     }
 }

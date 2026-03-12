@@ -17,8 +17,7 @@ class AuthControllerLandlord extends Controller
 {
     public function __construct(
         private readonly LandlordAuthenticationService $authentication
-    ) {
-    }
+    ) {}
 
     public function login(LoginEmailRequest $request): JsonResponse
     {

@@ -24,8 +24,8 @@ class CheckTenantAccess
 
     public function handle($request, Closure $next)
     {
-        if (!$this->user) {
-            throw new AuthenticationException();
+        if (! $this->user) {
+            throw new AuthenticationException;
         }
 
         if (! $this->user instanceof LandlordUser) {
@@ -35,8 +35,8 @@ class CheckTenantAccess
         $hasAccess = $this->current_tenant_id
             && in_array($this->current_tenant_id, $this->user->getAccessToIds(), true);
 
-        if (!$hasAccess) {
-            throw new AuthorizationException();
+        if (! $hasAccess) {
+            throw new AuthorizationException;
         }
 
         return $next($request);

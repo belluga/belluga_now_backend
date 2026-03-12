@@ -4,33 +4,32 @@ declare(strict_types=1);
 
 namespace App\Actions;
 
+use App\Application\Tenants\TenantDomainResolverService;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
 use Spatie\Multitenancy\TenantFinder\TenantFinder;
-use App\Application\Tenants\TenantDomainResolverService;
 
 class DomainTenantFinder extends TenantFinder
 {
     private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
+
     private ?Request $activeRequest = null;
 
-    public function __construct(private readonly TenantDomainResolverService $domainResolver)
-    {
-    }
+    public function __construct(private readonly TenantDomainResolverService $domainResolver) {}
 
     public function findForRequest(Request $request): ?IsTenant
     {
         $this->activeRequest = $request;
 
         try {
-            if($this->isRequestFromSubdomain()){
+            if ($this->isRequestFromSubdomain()) {
                 $tenant = $this->findTenantBySubdomain();
                 if ($tenant !== null) {
                     return $tenant;
                 }
             }
 
-            if($this->isRequestFromApp() && $this->isRequestToLandlordHost()){
+            if ($this->isRequestFromApp() && $this->isRequestToLandlordHost()) {
                 return $this->findTenantByAppDomain();
             }
 
@@ -65,11 +64,13 @@ class DomainTenantFinder extends TenantFinder
         return app(IsTenant::class)::where('subdomain', $subdomain)->first();
     }
 
-    protected function isRequestFromApp(): bool {
+    protected function isRequestFromApp(): bool
+    {
         return $this->resolveAppDomainFromRequest() !== null;
     }
 
-    protected function isRequestFromSubdomain(): bool {
+    protected function isRequestFromSubdomain(): bool
+    {
         $host = $this->request()->getHost();
         $parts_request = explode('.', $host, 2);
 
@@ -90,14 +91,15 @@ class DomainTenantFinder extends TenantFinder
             return false;
         }
 
-        if($this->isLocalEnvironment()){
+        if ($this->isLocalEnvironment()) {
             return in_array($parts_request[0], $this->local_environment_alternatives);
         }
 
         return false;
     }
 
-    private function isLocalEnvironment(): bool {
+    private function isLocalEnvironment(): bool
+    {
         return in_array($this->request()->getHost(), $this->local_environment_alternatives);
     }
 

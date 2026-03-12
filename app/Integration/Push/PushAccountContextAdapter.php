@@ -20,4 +20,3 @@ class PushAccountContextAdapter implements PushAccountContextContract
         return (string) $account->getAttribute('_id');
     }
 }
-

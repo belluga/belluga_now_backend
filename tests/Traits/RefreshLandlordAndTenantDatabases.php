@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 trait RefreshLandlordAndTenantDatabases
 {
     protected static bool $migrationsRan = false;
+
     protected function migrationCommand(): string
     {
         $landlordDsn = (string) env('DB_URI_LANDLORD', '');

@@ -25,7 +25,7 @@ class TenantDomainResolverServiceTest extends TestCase
         $this->service = $this->app->make(TenantDomainResolverService::class);
     }
 
-    public function testFindsTenantViaInlineDomainsRegardlessOfCase(): void
+    public function test_finds_tenant_via_inline_domains_regardless_of_case(): void
     {
         $tenant = Tenant::create([
             'name' => 'Inline Domain',
@@ -39,7 +39,7 @@ class TenantDomainResolverServiceTest extends TestCase
         $this->assertSame((string) $tenant->_id, (string) $resolved->_id);
     }
 
-    public function testFallsBackToDomainsCollectionWhenInlineDomainMissing(): void
+    public function test_falls_back_to_domains_collection_when_inline_domain_missing(): void
     {
         $tenant = Tenant::create([
             'name' => 'Collection Tenant',

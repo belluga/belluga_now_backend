@@ -22,14 +22,14 @@ class CredentialLinkRequest extends FormRequest
     {
         return [
             'provider' => ['required', 'string', 'max:50'],
-            'subject' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'subject' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'secret' => [
                 'nullable',
                 'string',
-                'min:' . InputConstraints::PASSWORD_MIN,
-                'max:' . InputConstraints::PASSWORD_MAX,
+                'min:'.InputConstraints::PASSWORD_MIN,
+                'max:'.InputConstraints::PASSWORD_MAX,
             ],
-            'metadata' => ['nullable', 'array', 'max:' . InputConstraints::METADATA_MAX_ITEMS],
+            'metadata' => ['nullable', 'array', 'max:'.InputConstraints::METADATA_MAX_ITEMS],
         ];
     }
 
@@ -37,11 +37,10 @@ class CredentialLinkRequest extends FormRequest
     {
         $validator->sometimes(
             'subject',
-            'email|max:' . InputConstraints::EMAIL_MAX,
+            'email|max:'.InputConstraints::EMAIL_MAX,
             static function ($input): bool {
                 return ($input->provider ?? null) === 'password';
             }
         );
     }
 }
-

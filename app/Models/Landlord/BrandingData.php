@@ -19,28 +19,29 @@ class BrandingData extends Model
         'pwa_icon',
     ];
 
-//    protected static $unguarded = true;
+    //    protected static $unguarded = true;
 
     protected $casts = [
-//        'theme_data_settings' => 'array',
-//        'logo_settings' => 'array',
-//        'pwa_icon' => 'array',
+        //        'theme_data_settings' => 'array',
+        //        'logo_settings' => 'array',
+        //        'pwa_icon' => 'array',
     ];
 
     public function toArray(): array
     {
         return [
-            "theme_data_settings" => $this->theme_data_settings,
-            "logo_settings" => $this->logo_settings,
-            "pwa_icon" => $this->pwa_icon,
+            'theme_data_settings' => $this->theme_data_settings,
+            'logo_settings' => $this->logo_settings,
+            'pwa_icon' => $this->pwa_icon,
         ];
     }
 
-    static public function getCurrentData(): array {
+    public static function getCurrentData(): array
+    {
         $tenant = Tenant::current();
         $landlord = Landlord::singleton();
 
-        if(!$tenant){
+        if (! $tenant) {
             return $landlord->brandingData->toArray();
         }
 

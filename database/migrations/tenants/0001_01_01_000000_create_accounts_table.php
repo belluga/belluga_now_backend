@@ -1,8 +1,8 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use MongoDB\Laravel\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {
@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('accounts', function (Blueprint $collection) {
             $collection->unique('slug');
             $collection->unique('document');
-            $collection->index(['created_at' => -1, "updated_at" => -1], );
+            $collection->index(['created_at' => -1, 'updated_at' => -1]);
         });
     }
 

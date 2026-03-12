@@ -2,8 +2,8 @@
 
 namespace Tests\Api\v1\Tenants\Auth\Contracts;
 
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Domain\Identity\AnonymousIdentityMerger;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
@@ -279,7 +279,7 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
             'email' => 'merge-candidate@example.org',
             'password' => 'SecurePass!123',
             'anonymous_user_ids' => [
-                (string) new ObjectId(),
+                (string) new ObjectId,
             ],
         ];
 

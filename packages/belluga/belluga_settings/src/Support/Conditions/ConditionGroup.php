@@ -9,15 +9,13 @@ use InvalidArgumentException;
 final class ConditionGroup
 {
     /**
-     * @param array<int, ConditionRule> $rules
+     * @param  array<int, ConditionRule>  $rules
      */
-    public function __construct(public readonly array $rules)
-    {
-    }
+    public function __construct(public readonly array $rules) {}
 
     /**
-     * @param array<string, mixed> $rawGroup
-     * @param array<string, array{id:string,type:string,nullable:bool}> $fieldReferences
+     * @param  array<string, mixed>  $rawGroup
+     * @param  array<string, array{id:string,type:string,nullable:bool}>  $fieldReferences
      */
     public static function fromArray(array $rawGroup, array $fieldReferences): self
     {
@@ -51,4 +49,3 @@ final class ConditionGroup
         ];
     }
 }
-

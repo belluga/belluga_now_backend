@@ -20,7 +20,7 @@ class LandlordUserCreatorTest extends TestCase
         $this->refreshLandlordAndTenantDatabases();
     }
 
-    public function testCreatesUserWithPromotionAudit(): void
+    public function test_creates_user_with_promotion_audit(): void
     {
         $role = LandlordRole::create([
             'name' => 'Support Role',

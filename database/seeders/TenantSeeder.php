@@ -32,10 +32,10 @@ class TenantSeeder extends Seeder
                     'file_upload' => true,
                     'api_access' => true,
                     'custom_modules' => true,
-                    'exports' => true
-                ]
+                    'exports' => true,
+                ],
             ],
-            'database_name' => 'escola_db_' . Str::random(8)
+            'database_name' => 'escola_db_'.Str::random(8),
         ]);
 
         // Criar o tenant para gerenciamento de acordes de guitarra
@@ -57,10 +57,10 @@ class TenantSeeder extends Seeder
                     'file_upload' => true,
                     'api_access' => true,
                     'custom_modules' => true,
-                    'exports' => false
-                ]
+                    'exports' => false,
+                ],
             ],
-            'database_name' => 'acordes_db_' . Str::random(8)
+            'database_name' => 'acordes_db_'.Str::random(8),
         ]);
     }
 }
