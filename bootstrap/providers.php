@@ -8,4 +8,5 @@ return [
     Belluga\PushHandler\PushHandlerServiceProvider::class,
     Belluga\Ticketing\TicketingServiceProvider::class,
     Belluga\MapPois\MapPoisServiceProvider::class,
+    Belluga\Invites\InvitesServiceProvider::class,
 ];

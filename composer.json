@@ -48,6 +48,10 @@
         {
             "type": "path",
             "url": "packages/belluga/belluga_map_pois"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_invites"
         }
     ],
     "autoload": {
@@ -57,6 +61,7 @@
             "Belluga\\Settings\\": "packages/belluga/belluga_settings/src/",
             "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",
             "Belluga\\Ticketing\\": "packages/belluga/belluga_ticketing/src/",
+            "Belluga\\Invites\\": "packages/belluga/belluga_invites/src/",
             "Belluga\\MapPois\\": "packages/belluga/belluga_map_pois/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"

@@ -10,6 +10,8 @@ use App\Application\Push\PushAudienceEligibilityService;
 use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantDomainResolverService;
+use App\Integration\Invites\InviteIdentityGatewayAdapter;
+use App\Integration\Invites\InviteTelemetryEmitterAdapter;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
@@ -55,6 +57,8 @@ use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
+use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
+use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
@@ -242,6 +246,16 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             TicketingPolicyContract::class,
             TenantTicketingPolicyAdapter::class
+        );
+
+        $this->app->bind(
+            InviteIdentityGatewayContract::class,
+            InviteIdentityGatewayAdapter::class
+        );
+
+        $this->app->bind(
+            InviteTelemetryEmitterContract::class,
+            InviteTelemetryEmitterAdapter::class
         );
 
         $this->app->when(ProfileControllerLandlord::class)
