@@ -122,6 +122,43 @@ class InvitesFlowTest extends TestCaseTenant
         $feedResponse->assertJsonPath('invites.0.message', 'Come with us');
     }
 
+    public function test_send_invite_to_multiple_recipients_updates_created_count_and_metrics(): void
+    {
+        $secondReceiver = $this->createAccountUser('Second Receiver User');
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => [
+                'event_id' => (string) $this->event->_id,
+            ],
+            'recipients' => [
+                ['receiver_user_id' => (string) $this->receiver->_id],
+                ['receiver_user_id' => (string) $secondReceiver->_id],
+            ],
+            'message' => 'Join this event',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonCount(2, 'created');
+        $response->assertJsonCount(0, 'already_invited');
+        $response->assertJsonCount(0, 'blocked');
+
+        $metric = PrincipalSocialMetric::query()
+            ->where('principal_kind', 'user')
+            ->where('principal_id', (string) $this->sender->_id)
+            ->first();
+        $this->assertNotNull($metric);
+        $this->assertSame(2, (int) $metric->invites_sent);
+
+        $this->assertSame(
+            2,
+            InviteEdge::query()
+                ->where('issued_by_user_id', (string) $this->sender->_id)
+                ->where('event_id', (string) $this->event->_id)
+                ->count(),
+        );
+    }
+
     public function test_accepting_one_invite_closes_duplicate_candidates(): void
     {
         $secondInviter = $this->createAccountUser('Second Inviter');
@@ -201,6 +238,33 @@ class InvitesFlowTest extends TestCaseTenant
         $secondResponse->assertJsonPath('status', 'accepted');
         $secondResponse->assertJsonPath('invite_id', $firstResponse->json('invite_id'));
         $secondResponse->assertJsonPath('closed_duplicate_invite_ids.0', $secondInviteId);
+
+        $metric = PrincipalSocialMetric::query()
+            ->where('principal_kind', 'user')
+            ->where('principal_id', (string) $this->sender->_id)
+            ->first();
+        $this->assertNotNull($metric);
+        $this->assertSame(1, (int) $metric->credited_invite_acceptances);
+    }
+
+    public function test_accepting_already_accepted_invite_does_not_increment_metrics_twice(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+            'recipients' => [
+                ['receiver_user_id' => (string) $this->receiver->_id],
+            ],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $firstResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+        $firstResponse->assertOk();
+        $firstResponse->assertJsonPath('status', 'accepted');
+
+        $secondResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+        $secondResponse->assertOk();
+        $secondResponse->assertJsonPath('status', 'already_accepted');
 
         $metric = PrincipalSocialMetric::query()
             ->where('principal_kind', 'user')
