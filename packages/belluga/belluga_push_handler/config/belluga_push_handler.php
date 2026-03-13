@@ -8,25 +8,6 @@ return [
         'promotional' => 60 * 24 * 7,
         'default' => 60 * 24 * 7,
     ],
-    'routes' => [
-        'account' => [
-            'prefix' => 'api/v1/accounts/{account_slug}',
-            'messages_prefix' => 'push/messages',
-        ],
-        'tenant' => [
-            'prefix' => 'api/v1',
-            'register' => 'push/register',
-            'unregister' => 'push/unregister',
-            'settings_prefix' => 'settings',
-            'settings_push' => 'push',
-            'settings_firebase' => 'firebase',
-        ],
-        'landlord' => [
-            'prefix' => 'admin/api/v1',
-            'tenant_settings_path' => '{tenant_slug}/settings/push',
-            'tenant_settings_firebase_path' => '{tenant_slug}/settings/firebase',
-        ],
-    ],
     'fcm' => [
         'max_batch_size' => 500,
         'max_ttl_days' => 28,

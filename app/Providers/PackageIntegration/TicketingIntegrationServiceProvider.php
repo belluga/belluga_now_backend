@@ -57,10 +57,6 @@ class TicketingIntegrationServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if (! $this->app->bound(SettingsRegistryContract::class)) {
-            return;
-        }
-
         /** @var SettingsRegistryContract $registry */
         $registry = $this->app->make(SettingsRegistryContract::class);
         (new TicketingSettingsNamespaceRegistrar)->register($registry);

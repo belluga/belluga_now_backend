@@ -41,6 +41,8 @@ final class ArchitectureGuardrailRunner
         $this->checkPackageArchitectureRegistry();
         $this->checkPackageRouteGuardrails();
         $this->checkPackageHostBindingGuardrails();
+        $this->checkPackageIntegrationFailFastGuardrails();
+        $this->checkHostOwnedRouteExplicitness();
         $this->checkAppServiceProviderPackageComposition();
         $this->checkTenantMigrationPathRegistration();
         $this->checkCiLocalTestRuntimeGuardrails();
@@ -574,6 +576,58 @@ final class ArchitectureGuardrailRunner
                 $index + 1,
                 'AppServiceProvider must remain package-agnostic; move package composition to dedicated host integration providers.'
             );
+        }
+    }
+
+    private function checkPackageIntegrationFailFastGuardrails(): void
+    {
+        $providerFiles = glob($this->repoRoot.'/app/Providers/PackageIntegration/*ServiceProvider.php') ?: [];
+        sort($providerFiles);
+
+        foreach ($providerFiles as $providerFile) {
+            $relativePath = $this->relativePath($providerFile);
+            $lines = @file($providerFile);
+            if (! is_array($lines)) {
+                continue;
+            }
+
+            foreach ($lines as $index => $line) {
+                if (! str_contains($line, 'bound(SettingsRegistryContract::class)')) {
+                    continue;
+                }
+
+                $this->addViolation(
+                    'LAR-PACKAGE-INTEGRATION-FAIL-FAST',
+                    $relativePath,
+                    $index + 1,
+                    'Package integration providers must fail fast on missing SettingsRegistryContract; do not guard it with bound(...).'
+                );
+            }
+        }
+    }
+
+    private function checkHostOwnedRouteExplicitness(): void
+    {
+        $routeFiles = $this->collectPhpFiles(['routes/api/packages']);
+
+        foreach ($routeFiles as $relativePath) {
+            $lines = @file($this->repoRoot.'/'.$relativePath);
+            if (! is_array($lines)) {
+                continue;
+            }
+
+            foreach ($lines as $index => $line) {
+                if (preg_match("/config\\(['\"]belluga_[A-Za-z0-9_]+\\.routes['\"]/", $line) !== 1) {
+                    continue;
+                }
+
+                $this->addViolation(
+                    'LAR-HOST-ROUTE-EXPLICITNESS',
+                    $relativePath,
+                    $index + 1,
+                    'Host-owned route partials must declare route paths explicitly; do not read package route config.'
+                );
+            }
         }
     }
 

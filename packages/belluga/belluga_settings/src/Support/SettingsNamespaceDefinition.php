@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Settings\Support;
 
 use Belluga\Settings\Support\Conditions\ConditionExpression;
+use Illuminate\Support\Arr;
 use InvalidArgumentException;
 
 final class SettingsNamespaceDefinition
@@ -80,6 +81,27 @@ final class SettingsNamespaceDefinition
     public function fieldIds(): array
     {
         return array_keys($this->fieldsById);
+    }
+
+    /**
+     * @param  array<string, mixed>  $values
+     * @return array<string, mixed>
+     */
+    public function applyDefaults(array $values): array
+    {
+        foreach ($this->fields as $path => $field) {
+            if (! array_key_exists('default', $field)) {
+                continue;
+            }
+
+            if (Arr::has($values, $path)) {
+                continue;
+            }
+
+            Arr::set($values, $path, $field['default']);
+        }
+
+        return $values;
     }
 
     /**

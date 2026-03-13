@@ -10,9 +10,7 @@ use Belluga\PushHandler\Http\Controllers\Account\PushMessageSendController;
 use Belluga\PushHandler\Http\Controllers\Account\PushQuotaCheckController;
 use Illuminate\Support\Facades\Route;
 
-$routes = config('belluga_push_handler.routes', []);
-$accountRoutes = $routes['account'] ?? [];
-$accountMessagesPrefix = (string) ($accountRoutes['messages_prefix'] ?? 'push/messages');
+$accountMessagesPrefix = 'push/messages';
 
 Route::middleware('auth:sanctum')
     ->group(function () use ($accountMessagesPrefix): void {

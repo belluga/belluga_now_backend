@@ -44,7 +44,7 @@ class SettingsKernelService
         $values = [];
 
         foreach ($this->accessibleDefinitions($scope, $user) as $definition) {
-            $values[$definition->namespace] = $this->store->getNamespaceValue($scope, $definition->namespace);
+            $values[$definition->namespace] = $this->resolvedNamespaceValue($scope, $definition);
         }
 
         return $values;
@@ -69,10 +69,12 @@ class SettingsKernelService
         $changes = $this->validator->validatePatch($definition, $payload);
 
         if ($changes === []) {
-            return $this->store->getNamespaceValue($scope, $namespace);
+            return $this->resolvedNamespaceValue($scope, $definition);
         }
 
-        return $this->store->mergeNamespace($scope, $namespace, $changes, $definition);
+        return $definition->applyDefaults(
+            $this->store->mergeNamespace($scope, $namespace, $changes, $definition)
+        );
     }
 
     /**
@@ -111,5 +113,15 @@ class SettingsKernelService
         }
 
         return (bool) $user->tokenCan($ability);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolvedNamespaceValue(string $scope, SettingsNamespaceDefinition $definition): array
+    {
+        return $definition->applyDefaults(
+            $this->store->getNamespaceValue($scope, $definition->namespace)
+        );
     }
 }

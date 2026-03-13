@@ -6,9 +6,7 @@ use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Settings\Http\Api\v1\Controllers\Tenant\SettingsKernelController;
 use Illuminate\Support\Facades\Route;
 
-$routes = (array) config('belluga_settings.routes', []);
-$tenantRoutes = (array) ($routes['tenant'] ?? []);
-$tenantSettingsPrefix = (string) ($tenantRoutes['settings_prefix'] ?? 'settings');
+$tenantSettingsPrefix = 'settings';
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () use ($tenantSettingsPrefix): void {

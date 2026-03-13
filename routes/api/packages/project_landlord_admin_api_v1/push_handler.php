@@ -6,11 +6,8 @@ use Belluga\PushHandler\Http\Controllers\Landlord\TenantFirebaseSettingsAdminCon
 use Belluga\PushHandler\Http\Controllers\Landlord\TenantPushSettingsAdminController;
 use Illuminate\Support\Facades\Route;
 
-$routes = config('belluga_push_handler.routes', []);
-$landlordRoutes = $routes['landlord'] ?? [];
-
-$landlordTenantSettingsPath = (string) ($landlordRoutes['tenant_settings_path'] ?? '{tenant_slug}/settings/push');
-$landlordTenantSettingsFirebasePath = (string) ($landlordRoutes['tenant_settings_firebase_path'] ?? '{tenant_slug}/settings/firebase');
+$landlordTenantSettingsPath = '{tenant_slug}/settings/push';
+$landlordTenantSettingsFirebasePath = '{tenant_slug}/settings/firebase';
 
 Route::middleware(['auth:sanctum'])
     ->group(function () use ($landlordTenantSettingsPath, $landlordTenantSettingsFirebasePath): void {

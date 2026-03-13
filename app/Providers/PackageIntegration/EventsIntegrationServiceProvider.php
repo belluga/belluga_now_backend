@@ -111,10 +111,6 @@ class EventsIntegrationServiceProvider extends ServiceProvider
         Event::listen(EventUpdated::class, SyncMapPoiOnEventUpdated::class);
         Event::listen(EventDeleted::class, SyncMapPoiOnEventDeleted::class);
 
-        if (! $this->app->bound(SettingsRegistryContract::class)) {
-            return;
-        }
-
         /** @var SettingsRegistryContract $registry */
         $registry = $this->app->make(SettingsRegistryContract::class);
 

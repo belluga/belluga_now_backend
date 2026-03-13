@@ -6,11 +6,8 @@ use Belluga\Settings\Http\Api\v1\Controllers\Landlord\LandlordSettingsKernelCont
 use Belluga\Settings\Http\Api\v1\Controllers\Landlord\TenantSettingsKernelController;
 use Illuminate\Support\Facades\Route;
 
-$routes = (array) config('belluga_settings.routes', []);
-$landlordRoutes = (array) ($routes['landlord'] ?? []);
-
-$landlordSettingsPrefix = (string) ($landlordRoutes['settings_prefix'] ?? 'settings');
-$landlordTenantSettingsPrefix = (string) ($landlordRoutes['tenant_settings_prefix'] ?? '{tenant_slug}/settings');
+$landlordSettingsPrefix = 'settings';
+$landlordTenantSettingsPrefix = '{tenant_slug}/settings';
 
 Route::middleware(['auth:sanctum'])
     ->group(function () use ($landlordSettingsPrefix, $landlordTenantSettingsPrefix): void {

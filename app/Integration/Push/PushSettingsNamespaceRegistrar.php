@@ -39,6 +39,7 @@ class PushSettingsNamespaceRegistrar
                     'nullable' => false,
                     'label' => 'Max TTL Days',
                     'label_i18n_key' => 'settings.push.max_ttl_days.label',
+                    'default' => 7,
                     'enabled_if' => [
                         'groups' => [
                             [

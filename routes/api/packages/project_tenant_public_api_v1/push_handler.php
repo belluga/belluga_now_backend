@@ -18,14 +18,11 @@ use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushSettingsController;
 use Belluga\PushHandler\Http\Controllers\Tenant\TenantPushStatusController;
 use Illuminate\Support\Facades\Route;
 
-$routes = config('belluga_push_handler.routes', []);
-$tenantRoutes = $routes['tenant'] ?? [];
-
-$tenantRegisterPath = (string) ($tenantRoutes['register'] ?? 'push/register');
-$tenantUnregisterPath = (string) ($tenantRoutes['unregister'] ?? 'push/unregister');
-$tenantSettingsPrefix = (string) ($tenantRoutes['settings_prefix'] ?? 'settings');
-$tenantSettingsPushPath = (string) ($tenantRoutes['settings_push'] ?? 'push');
-$tenantSettingsFirebasePath = (string) ($tenantRoutes['settings_firebase'] ?? 'firebase');
+$tenantRegisterPath = 'push/register';
+$tenantUnregisterPath = 'push/unregister';
+$tenantSettingsPrefix = 'settings';
+$tenantSettingsPushPath = 'push';
+$tenantSettingsFirebasePath = 'firebase';
 
 Route::post('/'.ltrim($tenantRegisterPath, '/'), [PushDeviceController::class, 'register'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class]);
