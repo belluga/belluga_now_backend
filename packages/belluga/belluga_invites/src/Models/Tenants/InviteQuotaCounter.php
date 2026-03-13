@@ -26,4 +26,3 @@ class InviteQuotaCounter extends Model
         'updated_at' => 'datetime',
     ];
 }
-

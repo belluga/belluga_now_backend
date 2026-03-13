@@ -22,4 +22,3 @@ return new class extends Migration
         Schema::dropIfExists('invite_quota_counters');
     }
 };
-

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Belluga\Invites\Http\Api\v1\Requests;
 
-use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 
 class InviteCreateRequest extends FormRequest

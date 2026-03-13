@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountProfilesController;
+use App\Http\Api\v1\Controllers\EventAttendanceController;
 use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Events\Http\Api\v1\Controllers\AgendaController;
@@ -13,6 +14,9 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::get('/agenda', [AgendaController::class, 'index']);
         Route::get('/events', [EventsController::class, 'index']);
         Route::get('/events/stream', [EventStreamController::class, 'stream']);
+        Route::get('/events/attendance/confirmed', [EventAttendanceController::class, 'index']);
+        Route::post('/events/{event_id}/attendance/confirm', [EventAttendanceController::class, 'confirm']);
+        Route::post('/events/{event_id}/attendance/unconfirm', [EventAttendanceController::class, 'unconfirm']);
         Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
         Route::get('/static_assets/{asset_ref}', [StaticAssetsController::class, 'showPublic']);
