@@ -20,6 +20,7 @@ use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
@@ -52,6 +53,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->ensureHostBinding(EventTenantContextContract::class);
         $this->ensureHostBinding(EventProjectionSyncContract::class);
         $this->ensureHostBinding(EventRadiusSettingsContract::class);
+        $this->ensureHostBinding(EventTemplateSnapshotReadContract::class);
         $this->ensureHostBinding(TenantExecutionContextContract::class);
     }
 

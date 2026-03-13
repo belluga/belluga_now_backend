@@ -94,6 +94,10 @@
         ],
         "architecture:guardrails": [
             "@php scripts/architecture_guardrails.php"
+        ],
+        "lint:strict": [
+            "@php ./vendor/bin/pint --test",
+            "@composer run architecture:guardrails"
         ]
     },
     "extra": {

@@ -17,6 +17,9 @@ final class ArchitectureGuardrailRunner
     /** @var list<ArchitectureViolation> */
     private array $violations = [];
 
+    /** @var array<string, string|null> */
+    private array $packageNamespaceCache = [];
+
     public function __construct(private readonly string $repoRoot) {}
 
     public function run(): int
@@ -273,24 +276,138 @@ final class ArchitectureGuardrailRunner
             }
 
             $absolutePath = $this->repoRoot.'/'.$relativePath;
-            $lines = @file($absolutePath);
-            if (! is_array($lines)) {
+            $content = @file_get_contents($absolutePath);
+            if (! is_string($content)) {
                 continue;
             }
 
-            foreach ($lines as $index => $line) {
-                if (preg_match('/\\bApp\\\\\\\\/', $line) !== 1) {
-                    continue;
-                }
+            $packageNamespace = $this->resolvePackageNamespaceFromFile($relativePath);
+            $this->collectAppNamespaceViolations($relativePath, $content);
 
-                $this->addViolation(
-                    'LAR-PACKAGE-BOUNDARY',
-                    $relativePath,
-                    $index + 1,
-                    'Package src references `App\\` namespace; use contracts/adapters boundary.'
-                );
+            if ($packageNamespace === null) {
+                continue;
             }
+
+            $this->collectCrossPackageUseViolations($relativePath, $content, $packageNamespace);
         }
+    }
+
+    private function collectAppNamespaceViolations(string $relativePath, string $content): void
+    {
+        if (preg_match_all('/\\bApp\\\\/', $content, $matches, PREG_OFFSET_CAPTURE) !== 1 && (! isset($matches[0]) || $matches[0] === [])) {
+            return;
+        }
+
+        foreach ($matches[0] as $match) {
+            $offset = (int) ($match[1] ?? 0);
+            $line = substr_count(substr($content, 0, $offset), "\n") + 1;
+            $this->addViolation(
+                'LAR-PACKAGE-BOUNDARY',
+                $relativePath,
+                $line,
+                'Package src references `App\\` namespace; use contracts/adapters boundary.'
+            );
+        }
+    }
+
+    private function collectCrossPackageUseViolations(string $relativePath, string $content, string $packageNamespace): void
+    {
+        if (preg_match_all('/^\\s*use\\s+(Belluga\\\\[A-Za-z0-9_\\\\]+)(?:\\s+as\\s+[A-Za-z_][A-Za-z0-9_]*)?\\s*;/m', $content, $matches, PREG_OFFSET_CAPTURE) < 1) {
+            return;
+        }
+
+        foreach ($matches[1] as $match) {
+            $importedNamespace = (string) ($match[0] ?? '');
+            if ($importedNamespace === '' || $this->namespaceBelongsToPackage($importedNamespace, $packageNamespace)) {
+                continue;
+            }
+
+            $offset = (int) ($match[1] ?? 0);
+            $line = substr_count(substr($content, 0, $offset), "\n") + 1;
+            $this->addViolation(
+                'LAR-PACKAGE-CROSS-COUPLING',
+                $relativePath,
+                $line,
+                "Package src imports external package namespace `{$importedNamespace}`; cross-package imports are forbidden."
+            );
+        }
+    }
+
+    private function resolvePackageNamespaceFromFile(string $relativePath): ?string
+    {
+        if (preg_match('#^(packages/[^/]+/[^/]+)/src/#', $relativePath, $matches) !== 1) {
+            return null;
+        }
+
+        $packageRoot = (string) $matches[1];
+        if (array_key_exists($packageRoot, $this->packageNamespaceCache)) {
+            return $this->packageNamespaceCache[$packageRoot];
+        }
+
+        $composerPath = $this->repoRoot.'/'.$packageRoot.'/composer.json';
+        $raw = @file_get_contents($composerPath);
+        if (! is_string($raw)) {
+            $this->addViolation(
+                'LAR-PACKAGE-CROSS-COUPLING',
+                $packageRoot.'/composer.json',
+                1,
+                'Cannot read package composer.json while resolving package namespace.'
+            );
+            $this->packageNamespaceCache[$packageRoot] = null;
+
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        if (! is_array($decoded)) {
+            $this->addViolation(
+                'LAR-PACKAGE-CROSS-COUPLING',
+                $packageRoot.'/composer.json',
+                1,
+                'Invalid JSON in package composer.json while resolving package namespace.'
+            );
+            $this->packageNamespaceCache[$packageRoot] = null;
+
+            return null;
+        }
+
+        $autoload = $decoded['autoload'] ?? null;
+        $psr4 = is_array($autoload) ? ($autoload['psr-4'] ?? null) : null;
+        if (! is_array($psr4) || $psr4 === []) {
+            $this->addViolation(
+                'LAR-PACKAGE-CROSS-COUPLING',
+                $packageRoot.'/composer.json',
+                1,
+                'Package composer.json must define autoload.psr-4 namespace.'
+            );
+            $this->packageNamespaceCache[$packageRoot] = null;
+
+            return null;
+        }
+
+        $namespace = array_key_first($psr4);
+        if (! is_string($namespace) || trim($namespace) === '') {
+            $this->addViolation(
+                'LAR-PACKAGE-CROSS-COUPLING',
+                $packageRoot.'/composer.json',
+                1,
+                'Package composer.json autoload.psr-4 key is invalid.'
+            );
+            $this->packageNamespaceCache[$packageRoot] = null;
+
+            return null;
+        }
+
+        $resolved = rtrim($namespace, '\\');
+        $this->packageNamespaceCache[$packageRoot] = $resolved;
+
+        return $resolved;
+    }
+
+    private function namespaceBelongsToPackage(string $importedNamespace, string $packageNamespace): bool
+    {
+        return $importedNamespace === $packageNamespace
+            || str_starts_with($importedNamespace, $packageNamespace.'\\');
     }
 
     private function checkTenantMigrationPathRegistration(): void

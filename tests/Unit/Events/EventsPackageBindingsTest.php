@@ -8,10 +8,13 @@ use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
+use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
+use App\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
+use App\Integration\Ticketing\EventTemplateReadAdapter;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
@@ -22,12 +25,11 @@ use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
-use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
-use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use Tests\TestCase;
 
 class EventsPackageBindingsTest extends TestCase
@@ -73,6 +75,10 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             TenantExecutionContextAdapter::class,
             $this->app->make(TenantExecutionContextContract::class)
+        );
+        $this->assertInstanceOf(
+            EventTemplateReadAdapter::class,
+            $this->app->make(EventTemplateSnapshotReadContract::class)
         );
         $this->assertInstanceOf(
             QueueEventAsyncMetricsProvider::class,

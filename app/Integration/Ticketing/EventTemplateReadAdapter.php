@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Integration\Ticketing;
 
+use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Ticketing\Contracts\EventTemplateReadContract;
 use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 
-class EventTemplateReadAdapter implements EventTemplateReadContract
+class EventTemplateReadAdapter implements EventTemplateReadContract, EventTemplateSnapshotReadContract
 {
     public function findTemplateSnapshot(string $templateId): ?array
     {

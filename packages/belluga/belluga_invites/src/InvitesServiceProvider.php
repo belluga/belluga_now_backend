@@ -18,6 +18,7 @@ use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
+use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
@@ -42,6 +43,7 @@ class InvitesServiceProvider extends ServiceProvider
 
         $this->ensureHostBinding(InviteIdentityGatewayContract::class);
         $this->ensureHostBinding(InviteTelemetryEmitterContract::class);
+        $this->ensureHostBinding(InviteTargetReadContract::class);
     }
 
     public function boot(): void

@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Belluga\Invites\Application\Targets;
 
-use Belluga\Events\Models\Tenants\Event;
-use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
+use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Support\InviteDomainException;
 use Illuminate\Support\Carbon;
-use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\UTCDateTime;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 
@@ -17,6 +16,7 @@ class InviteTargetResolverService
 {
     public function __construct(
         private readonly InviteRuntimeSettingsService $runtimeSettings,
+        private readonly InviteTargetReadContract $targetRead,
     ) {}
 
     /**
@@ -45,20 +45,20 @@ class InviteTargetResolverService
             throw new InviteDomainException('target_event_required', 422);
         }
 
-        $event = $this->findEventByIdOrSlug($eventRef);
+        $event = $this->targetRead->findEventByIdOrSlug($eventRef);
         if (! $event) {
             throw new InviteDomainException('target_not_found', 404);
         }
 
         $occurrence = $occurrenceRef !== ''
-            ? $this->findOccurrenceForEvent($event, $occurrenceRef)
+            ? $this->targetRead->findOccurrenceForEvent((string) $event['id'], $occurrenceRef)
             : null;
 
         if ($occurrenceRef !== '' && ! $occurrence) {
             throw new InviteDomainException('target_not_found', 404);
         }
 
-        if ($occurrence === null && $this->eventHasMultipleOccurrences((string) $event->_id)) {
+        if ($occurrence === null && $this->targetRead->countOccurrencesForEvent((string) $event['id'], 2) > 1) {
             throw new InviteDomainException(
                 errorCode: 'target_occurrence_required',
                 httpStatus: 422,
@@ -68,15 +68,13 @@ class InviteTargetResolverService
 
         $this->assertPublished($event, $occurrence);
 
-        $eventDate = $occurrence?->starts_at instanceof Carbon
-            ? $occurrence->starts_at
-            : ($event->date_time_start instanceof Carbon ? $event->date_time_start : null);
-        $expiresAt = $occurrence?->ends_at instanceof Carbon
-            ? $occurrence->ends_at
-            : ($event->date_time_end instanceof Carbon ? $event->date_time_end : null);
+        $eventDate = $this->normalizeCarbon($occurrence['starts_at'] ?? null)
+            ?? $this->normalizeCarbon($event['date_time_start'] ?? null);
+        $expiresAt = $this->normalizeCarbon($occurrence['ends_at'] ?? null)
+            ?? $this->normalizeCarbon($event['date_time_end'] ?? null);
 
-        $eventPayload = $this->normalizeArray($event->getAttributes());
-        $occurrencePayload = $occurrence ? $this->normalizeArray($occurrence->getAttributes()) : [];
+        $eventPayload = $this->normalizeArray($event['attributes'] ?? []);
+        $occurrencePayload = $occurrence ? $this->normalizeArray($occurrence['attributes'] ?? []) : [];
         $location = $this->resolveLocationLabel($eventPayload);
         $hostName = $this->resolveHostName($eventPayload);
         $thumb = $this->normalizeArray($eventPayload['thumb'] ?? []);
@@ -84,12 +82,12 @@ class InviteTargetResolverService
 
         return [
             'target_ref' => [
-                'event_id' => (string) $event->_id,
-                'occurrence_id' => $occurrence ? (string) $occurrence->_id : null,
+                'event_id' => (string) $event['id'],
+                'occurrence_id' => $occurrence ? (string) $occurrence['id'] : null,
             ],
             'event_snapshot' => [
-                'event_name' => (string) ($event->title ?? ''),
-                'event_slug' => (string) ($event->slug ?? ''),
+                'event_name' => (string) ($event['title'] ?? ''),
+                'event_slug' => (string) ($event['slug'] ?? ''),
                 'event_date' => $eventDate,
                 'event_image_url' => $this->resolveImageUrl($thumb, $venue),
                 'location' => $location,
@@ -104,58 +102,21 @@ class InviteTargetResolverService
         ];
     }
 
-    private function findEventByIdOrSlug(string $eventRef): ?Event
+    /**
+     * @param  array<string,mixed>  $event
+     * @param  array<string,mixed>|null  $occurrence
+     */
+    private function assertPublished(array $event, ?array $occurrence): void
     {
-        if ($this->looksLikeObjectId($eventRef)) {
-            $event = Event::query()->where('_id', new ObjectId($eventRef))->first();
-            if ($event) {
-                return $event;
-            }
-        }
-
-        return Event::query()->where('slug', $eventRef)->first();
-    }
-
-    private function findOccurrenceForEvent(Event $event, string $occurrenceRef): ?EventOccurrence
-    {
-        $query = EventOccurrence::query()->where('event_id', (string) $event->_id);
-
-        if ($this->looksLikeObjectId($occurrenceRef)) {
-            $occurrence = (clone $query)->where('_id', new ObjectId($occurrenceRef))->first();
-            if ($occurrence) {
-                return $occurrence;
-            }
-        }
-
-        return $query->where('occurrence_slug', $occurrenceRef)->first();
-    }
-
-    private function eventHasMultipleOccurrences(string $eventId): bool
-    {
-        return EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->limit(2)
-            ->count() > 1;
-    }
-
-    private function assertPublished(Event $event, ?EventOccurrence $occurrence): void
-    {
-        $publication = $this->normalizeArray($event->publication ?? []);
+        $publication = $this->normalizeArray($event['publication'] ?? []);
         $status = (string) ($publication['status'] ?? 'draft');
-        $publishAt = $publication['publish_at'] ?? null;
-
-        if ($publishAt instanceof \MongoDB\BSON\UTCDateTime) {
-            $publishAt = Carbon::instance($publishAt->toDateTime());
-        }
-        if ($publishAt instanceof \DateTimeInterface && ! $publishAt instanceof Carbon) {
-            $publishAt = Carbon::instance($publishAt);
-        }
+        $publishAt = $this->normalizeCarbon($publication['publish_at'] ?? null);
 
         if ($status !== 'published' || ($publishAt instanceof Carbon && $publishAt->isFuture())) {
             throw new InviteDomainException('target_not_available', 404);
         }
 
-        if ($occurrence !== null && ! (bool) ($occurrence->is_event_published ?? false)) {
+        if ($occurrence !== null && ! (bool) ($occurrence['is_event_published'] ?? false)) {
             throw new InviteDomainException('target_not_available', 404);
         }
     }
@@ -179,6 +140,21 @@ class InviteTargetResolverService
         }
 
         return [];
+    }
+
+    private function normalizeCarbon(mixed $value): ?Carbon
+    {
+        if ($value instanceof UTCDateTime) {
+            return Carbon::instance($value->toDateTime());
+        }
+        if ($value instanceof Carbon) {
+            return $value;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return Carbon::instance($value);
+        }
+
+        return null;
     }
 
     /**
@@ -233,10 +209,5 @@ class InviteTargetResolverService
         }
 
         return null;
-    }
-
-    private function looksLikeObjectId(string $value): bool
-    {
-        return preg_match('/^[a-f0-9]{24}$/i', $value) === 1;
     }
 }

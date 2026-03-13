@@ -22,8 +22,21 @@ class InviteCommandIdempotency extends Model
     ];
 
     protected $casts = [
-        'response_payload' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getResponsePayloadAttribute(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            $decoded = json_decode(json_encode($value), true);
+
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return is_array($value) ? $value : [];
+    }
 }

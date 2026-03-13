@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Belluga\MapPois\Integration\Events;
+namespace App\Integration\Events;
 
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 

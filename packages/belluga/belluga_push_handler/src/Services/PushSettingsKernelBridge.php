@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
-use Belluga\Settings\Application\SettingsKernelService;
-use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\PushHandler\Contracts\PushSettingsMutationContract;
+use Belluga\PushHandler\Contracts\PushSettingsStoreContract;
 
 class PushSettingsKernelBridge
 {
     public function __construct(
-        private readonly SettingsStoreContract $settingsStore,
-        private readonly SettingsKernelService $settingsKernelService
+        private readonly PushSettingsStoreContract $settingsStore,
+        private readonly PushSettingsMutationContract $settingsMutation
     ) {}
 
     /**
@@ -19,7 +19,7 @@ class PushSettingsKernelBridge
      */
     public function currentPushConfig(): array
     {
-        $value = $this->settingsStore->getNamespaceValue('tenant', 'push');
+        $value = $this->settingsStore->getNamespaceValue('push');
 
         return is_array($value) ? $value : [];
     }
@@ -30,7 +30,7 @@ class PushSettingsKernelBridge
      */
     public function patchPushConfig(mixed $user, array $payload): array
     {
-        return $this->settingsKernelService->patchNamespace('tenant', $user, 'push', $payload);
+        return $this->settingsMutation->patchNamespace($user, 'push', $payload);
     }
 
     public function resolveMaxTtlDays(int $default): int
@@ -45,7 +45,7 @@ class PushSettingsKernelBridge
      */
     public function currentFirebaseConfig(): array
     {
-        $value = $this->settingsStore->getNamespaceValue('tenant', 'firebase');
+        $value = $this->settingsStore->getNamespaceValue('firebase');
 
         return is_array($value) ? $value : [];
     }
@@ -56,7 +56,7 @@ class PushSettingsKernelBridge
      */
     public function patchFirebaseConfig(mixed $user, array $payload): array
     {
-        return $this->settingsKernelService->patchNamespace('tenant', $user, 'firebase', $payload);
+        return $this->settingsMutation->patchNamespace($user, 'firebase', $payload);
     }
 
     /**
