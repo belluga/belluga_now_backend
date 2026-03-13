@@ -9,6 +9,11 @@ use Belluga\Events\Http\Api\v1\Controllers\EventsController;
 use Belluga\Events\Http\Api\v1\Controllers\EventStreamController;
 use Illuminate\Support\Facades\Route;
 
+require base_path('routes/api/packages/project_tenant_public_api_v1/invites.php');
+require base_path('routes/api/packages/project_tenant_public_api_v1/map_pois.php');
+require base_path('routes/api/packages/project_tenant_public_api_v1/push_handler.php');
+require base_path('routes/api/packages/project_tenant_public_api_v1/ticketing.php');
+
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
         Route::get('/agenda', [AgendaController::class, 'index']);

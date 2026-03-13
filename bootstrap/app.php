@@ -109,6 +109,13 @@ return Application::configure(basePath: dirname(__DIR__))
                     );
 
                     $registerProjectRoutes(
+                        'admin/api/v1',
+                        ['tenant'],
+                        base_path('routes/api/project_tenant_package_admin_api_v1.php'),
+                        'project_tenant_package_admin_api_v1'
+                    );
+
+                    $registerProjectRoutes(
                         'api/v1/accounts/{account_slug}',
                         ['tenant'],
                         base_path('routes/api/project_account_api_v1.php'),

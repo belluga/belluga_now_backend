@@ -9,7 +9,6 @@ use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
-use App\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
@@ -22,7 +21,6 @@ use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
-use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
@@ -63,10 +61,6 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             TenantContextAdapter::class,
             $this->app->make(EventTenantContextContract::class)
-        );
-        $this->assertInstanceOf(
-            MapPoiEventProjectionSyncAdapter::class,
-            $this->app->make(EventProjectionSyncContract::class)
         );
         $this->assertInstanceOf(
             TenantRadiusSettingsAdapter::class,

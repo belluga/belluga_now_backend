@@ -9,4 +9,10 @@ return [
     Belluga\Ticketing\TicketingServiceProvider::class,
     Belluga\MapPois\MapPoisServiceProvider::class,
     Belluga\Invites\InvitesServiceProvider::class,
+    App\Providers\PackageIntegration\SettingsIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\EventsIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\MapPoisIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\PushIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\TicketingIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\InvitesIntegrationServiceProvider::class,
 ];

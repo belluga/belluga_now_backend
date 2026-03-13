@@ -23,7 +23,6 @@ class PushHandlerServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__.'/../routes/push_handler.php');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
     }
 

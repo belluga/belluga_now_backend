@@ -34,21 +34,26 @@ abstract class TestCase extends BaseTestCase
         $this->withServerVariables(['HTTP_HOST' => $this->host]);
     }
 
-    protected function normalizeTestUri(string $uri): string
+    protected function normalizeTestUri(string $uri, ?string $hostOverride = null): string
     {
         if (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://')) {
             return $uri;
         }
 
+        $host = $hostOverride;
+        if (! is_string($host) || $host === '') {
+            $host = $this->host;
+        }
+
         if ($uri === '') {
-            return "http://{$this->host}/";
+            return "http://{$host}/";
         }
 
         if ($uri[0] !== '/') {
             $uri = "/{$uri}";
         }
 
-        return "http://{$this->host}{$uri}";
+        return "http://{$host}{$uri}";
     }
 
     public function call(
@@ -60,7 +65,15 @@ abstract class TestCase extends BaseTestCase
         $server = [],
         $content = null
     ) {
-        $uri = $this->normalizeTestUri($uri);
+        $effectiveServer = array_replace($this->serverVariables, $server);
+        $hostOverride = null;
+        if (isset($effectiveServer['HTTP_HOST']) && is_string($effectiveServer['HTTP_HOST']) && $effectiveServer['HTTP_HOST'] !== '') {
+            $hostOverride = $effectiveServer['HTTP_HOST'];
+        } elseif (isset($effectiveServer['SERVER_NAME']) && is_string($effectiveServer['SERVER_NAME']) && $effectiveServer['SERVER_NAME'] !== '') {
+            $hostOverride = $effectiveServer['SERVER_NAME'];
+        }
+
+        $uri = $this->normalizeTestUri($uri, $hostOverride);
 
         return parent::call($method, $uri, $parameters, $cookies, $files, $server, $content);
     }
