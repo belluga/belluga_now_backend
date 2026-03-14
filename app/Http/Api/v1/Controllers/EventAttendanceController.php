@@ -10,6 +10,7 @@ use App\Http\Api\v1\Requests\EventAttendanceUnconfirmRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
 use Belluga\Events\Application\Events\EventQueryService;
+use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Http\JsonResponse;
@@ -43,7 +44,7 @@ class EventAttendanceController extends Controller
         string $event_id
     ): JsonResponse {
         $event = $this->resolveEventOrFail($event_id);
-        $this->eventQueryService->assertPublicVisible($event);
+        $this->assertPublicVisibleOrFail($event);
 
         $eventId = (string) $event->getAttribute('_id');
         $occurrenceId = $this->resolveOccurrenceIdOrFail(
@@ -74,7 +75,7 @@ class EventAttendanceController extends Controller
         string $event_id
     ): JsonResponse {
         $event = $this->resolveEventOrFail($event_id);
-        $this->eventQueryService->assertPublicVisible($event);
+        $this->assertPublicVisibleOrFail($event);
 
         $eventId = (string) $event->getAttribute('_id');
         $occurrenceId = $this->resolveOccurrenceIdOrFail(
@@ -144,6 +145,15 @@ class EventAttendanceController extends Controller
         }
 
         return (string) $occurrence->getAttribute('_id');
+    }
+
+    private function assertPublicVisibleOrFail(Event $event): void
+    {
+        try {
+            $this->eventQueryService->assertPublicVisible($event);
+        } catch (EventNotPubliclyVisibleException) {
+            abort(404, 'Event not found.');
+        }
     }
 
     private function assertFreeConfirmationAllowed(Event $event, ?string $occurrenceId): void

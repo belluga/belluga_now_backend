@@ -16,7 +16,7 @@ class TenantPushSettingsController
 
     public function show(): JsonResponse
     {
-        $push = $this->pushSettings->currentPushConfig();
+        $push = $this->pushSettings->resolvedPushConfig();
 
         return response()->json([
             'data' => $this->pushSettings->extractPushSettingsForResponse($push),

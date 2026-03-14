@@ -10,6 +10,7 @@ use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
+use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventPartyCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
@@ -135,7 +136,11 @@ class EventsController extends Controller
         }
 
         if (! $this->isAdminContext($request)) {
-            $this->eventQueryService->assertPublicVisible($event);
+            try {
+                $this->eventQueryService->assertPublicVisible($event);
+            } catch (EventNotPubliclyVisibleException) {
+                abort(404, 'Event not found.');
+            }
         }
 
         return response()->json([

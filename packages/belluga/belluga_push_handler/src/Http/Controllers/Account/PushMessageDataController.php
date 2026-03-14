@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use Belluga\PushHandler\Contracts\PushAccountContextContract;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
+use Belluga\PushHandler\Http\Controllers\Account\Concerns\ResolvesAccountContext;
+use Belluga\PushHandler\Http\Support\PushAccountScopeResolver;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushMessageRenderer;
@@ -15,21 +16,19 @@ use Illuminate\Http\Request;
 
 class PushMessageDataController
 {
+    use ResolvesAccountContext;
+
     public function __construct(
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushMessageRenderer $renderer,
         private readonly PushMetricsService $metricsService,
-        private readonly PushAccountContextContract $accountContext,
+        private readonly PushAccountScopeResolver $accountScope,
         private readonly PushUserGatewayContract $users
     ) {}
 
     public function show(Request $request): JsonResponse
     {
-        $accountId = $this->accountContext->currentAccountId();
-        if ($accountId === null || $accountId === '') {
-            abort(422, 'Account context not available.');
-        }
-
+        $accountId = $this->requireAccountId($this->accountScope);
         $pushMessageId = (string) $request->route('push_message_id');
         $message = PushMessage::query()->where('_id', $pushMessageId)->first();
 

@@ -122,7 +122,7 @@ class PushDeliveryService
             ]);
         }
 
-        $maxTtlDays = $this->pushSettings->resolveMaxTtlDays(30);
+        $maxTtlDays = $this->pushSettings->resolveMaxTtlDays(7);
         $fcmMaxDays = (int) config('belluga_push_handler.fcm.max_ttl_days', 28);
         $maxAllowedDays = min($maxTtlDays, $fcmMaxDays);
         $maxAllowedMinutes = $maxAllowedDays * 24 * 60;

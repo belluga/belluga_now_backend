@@ -7,6 +7,7 @@ namespace Belluga\Events\Application\Events;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -187,7 +188,7 @@ class EventQueryService
         $publishAt = $publication['publish_at'] ?? null;
 
         if ($status !== 'published') {
-            abort(404, 'Event not found.');
+            throw new EventNotPubliclyVisibleException;
         }
 
         if ($publishAt instanceof UTCDateTime) {
@@ -195,7 +196,7 @@ class EventQueryService
         }
 
         if ($publishAt instanceof \DateTimeInterface && $publishAt > Carbon::now()) {
-            abort(404, 'Event not found.');
+            throw new EventNotPubliclyVisibleException;
         }
     }
 
@@ -588,7 +589,7 @@ class EventQueryService
 
         try {
             return Carbon::parse($value);
-        } catch (\Throwable) {
+        } catch (\Exception) {
             return null;
         }
     }
@@ -751,7 +752,7 @@ class EventQueryService
         if (is_string($value) && $value !== '') {
             try {
                 return Carbon::parse($value)->format(DATE_ATOM);
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 return null;
             }
         }

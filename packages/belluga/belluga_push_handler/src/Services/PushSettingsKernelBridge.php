@@ -25,6 +25,16 @@ class PushSettingsKernelBridge
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function resolvedPushConfig(): array
+    {
+        $value = $this->settingsStore->getResolvedNamespaceValue('push');
+
+        return is_array($value) ? $value : [];
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
@@ -35,7 +45,7 @@ class PushSettingsKernelBridge
 
     public function resolveMaxTtlDays(int $default): int
     {
-        $value = $this->currentPushConfig()['max_ttl_days'] ?? null;
+        $value = $this->resolvedPushConfig()['max_ttl_days'] ?? null;
 
         return is_int($value) ? $value : $default;
     }

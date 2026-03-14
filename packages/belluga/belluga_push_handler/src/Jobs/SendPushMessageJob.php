@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Jobs;
 
+use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Services\PushDeliveryService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
@@ -34,7 +35,8 @@ class SendPushMessageJob implements ShouldQueue
 
     public function handle(
         PushDeliveryService $deliveryService,
-        PushRecipientResolver $recipientResolver
+        PushRecipientResolver $recipientResolver,
+        PushPlanPolicyContract $pushPlanPolicy,
     ): void {
         $message = PushMessage::query()->find($this->messageId);
         if (! $message || ! $message->isActive() || $message->isExpired()) {
@@ -50,7 +52,7 @@ class SendPushMessageJob implements ShouldQueue
         $tokenUserMap = $recipientPayload['token_user_map'];
         if ($this->scope === 'account' && $this->accountId !== null) {
             $audienceSize = count($recipients);
-            if (! app(\Belluga\PushHandler\Contracts\PushPlanPolicyContract::class)->canSend($this->accountId, $message, $audienceSize)) {
+            if (! $pushPlanPolicy->canSend($this->accountId, $message, $audienceSize)) {
                 return;
             }
         }

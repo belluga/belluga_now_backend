@@ -7,6 +7,7 @@ namespace Belluga\Settings\Application;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Auth\Access\AuthorizationException;
 
@@ -59,7 +60,7 @@ class SettingsKernelService
         $definition = $this->registry->find($namespace, $scope);
 
         if (! $definition) {
-            abort(404, 'Settings namespace not found.');
+            throw new SettingsNamespaceNotFoundException($namespace, $scope);
         }
 
         if (! $this->canAccess($user, $definition)) {

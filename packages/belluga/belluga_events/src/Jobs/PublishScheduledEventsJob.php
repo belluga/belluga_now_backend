@@ -169,7 +169,7 @@ class PublishScheduledEventsJob implements ShouldQueue
         if (is_string($value) && trim($value) !== '') {
             try {
                 return Carbon::parse($value)->toISOString();
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 return null;
             }
         }

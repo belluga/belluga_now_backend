@@ -28,8 +28,18 @@ class EventAsyncOperationsMonitorService
 
     public function evaluate(): void
     {
-        $ages = $this->metricsProvider->pendingAgesInSeconds();
-        if ($ages === []) {
+        $snapshot = $this->metricsProvider->snapshot();
+        if ($snapshot->isUnavailable()) {
+            Log::warning('events_async_queue_metrics_unavailable', [
+                'status' => $snapshot->status(),
+                'reason' => $snapshot->reason(),
+            ]);
+
+            return;
+        }
+
+        $ages = $snapshot->pendingAgesInSeconds();
+        if ($snapshot->isEmpty()) {
             $this->clearStalenessState(null);
 
             return;

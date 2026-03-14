@@ -8,6 +8,7 @@ use Belluga\Settings\Application\SettingsKernelService;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Mockery;
 use Tests\TestCase;
@@ -83,6 +84,25 @@ class SettingsKernelServiceTest extends TestCase
         $this->assertNull($values['throttles']);
         $this->assertSame([], $values['message_routes']);
         $this->assertSame([], $values['message_types']);
+    }
+
+    public function test_patch_namespace_throws_domain_exception_when_namespace_is_missing(): void
+    {
+        $registry = Mockery::mock(SettingsRegistryContract::class);
+        $registry->shouldReceive('find')
+            ->with('missing', 'tenant')
+            ->once()
+            ->andReturn(null);
+
+        $store = Mockery::mock(SettingsStoreContract::class);
+        $validator = Mockery::mock(SettingsSchemaValidatorContract::class);
+
+        $service = new SettingsKernelService($registry, $store, $validator);
+
+        $this->expectException(SettingsNamespaceNotFoundException::class);
+        $this->expectExceptionMessage('Settings namespace [missing] was not found for scope [tenant].');
+
+        $service->patchNamespace('tenant', null, 'missing', []);
     }
 
     private function pushDefinition(): SettingsNamespaceDefinition

@@ -43,7 +43,7 @@ class InviteRealtimeStreamService
 
         try {
             return Carbon::parse($lastEventId);
-        } catch (\Throwable) {
+        } catch (\Exception) {
             return null;
         }
     }

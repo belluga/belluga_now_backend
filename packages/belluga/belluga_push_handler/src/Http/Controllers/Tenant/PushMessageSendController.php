@@ -12,6 +12,7 @@ use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\App;
 use Illuminate\Validation\ValidationException;
 
 class PushMessageSendController
@@ -113,7 +114,7 @@ class PushMessageSendController
             $responsePayload['message_instance_id'] = $messageInstanceId;
         }
 
-        if (app()->environment('local') && isset($response)) {
+        if (App::environment('local') && isset($response)) {
             $responses = $response['responses'] ?? [];
             $sanitized = [];
             foreach ($responses as $entry) {

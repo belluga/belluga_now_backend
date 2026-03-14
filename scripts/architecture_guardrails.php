@@ -38,6 +38,8 @@ final class ArchitectureGuardrailRunner
         $this->checkTenantAuthAbilityGuardrails();
         $this->checkMongoModelCastBan();
         $this->checkPackageSourceCoupling();
+        $this->checkPackageServiceLocatorBan();
+        $this->checkPackageApplicationHttpCoupling();
         $this->checkPackageArchitectureRegistry();
         $this->checkPackageRouteGuardrails();
         $this->checkPackageHostBindingGuardrails();
@@ -373,6 +375,66 @@ final class ArchitectureGuardrailRunner
                 1,
                 "Missing package architecture registry entry for `{$packageRoot}`."
             );
+        }
+    }
+
+    private function checkPackageServiceLocatorBan(): void
+    {
+        $packageFiles = $this->collectPhpFiles(['packages']);
+
+        foreach ($packageFiles as $relativePath) {
+            if (! preg_match('#^packages/[^/]+/[^/]+/src/.+\\.php$#', $relativePath)) {
+                continue;
+            }
+
+            $absolutePath = $this->repoRoot.'/'.$relativePath;
+            $lines = @file($absolutePath);
+            if (! is_array($lines)) {
+                continue;
+            }
+
+            foreach ($lines as $index => $line) {
+                if (preg_match('/\bapp\s*\(/', $line) !== 1) {
+                    continue;
+                }
+
+                $this->addViolation(
+                    'LAR-PACKAGE-SERVICE-LOCATOR',
+                    $relativePath,
+                    $index + 1,
+                    'Package src must not use the global app(...) helper; use constructor or method injection instead.'
+                );
+            }
+        }
+    }
+
+    private function checkPackageApplicationHttpCoupling(): void
+    {
+        $packageFiles = $this->collectPhpFiles(['packages']);
+
+        foreach ($packageFiles as $relativePath) {
+            if (! preg_match('#^packages/[^/]+/[^/]+/src/Application/.+\\.php$#', $relativePath)) {
+                continue;
+            }
+
+            $absolutePath = $this->repoRoot.'/'.$relativePath;
+            $lines = @file($absolutePath);
+            if (! is_array($lines)) {
+                continue;
+            }
+
+            foreach ($lines as $index => $line) {
+                if (preg_match('/\babort\s*\(/', $line) !== 1) {
+                    continue;
+                }
+
+                $this->addViolation(
+                    'LAR-PACKAGE-APPLICATION-HTTP-COUPLING',
+                    $relativePath,
+                    $index + 1,
+                    'Package application services must not call abort(...); translate domain/application exceptions at the HTTP edge.'
+                );
+            }
         }
     }
 

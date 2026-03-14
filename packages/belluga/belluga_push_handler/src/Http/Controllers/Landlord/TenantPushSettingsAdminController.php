@@ -19,7 +19,7 @@ class TenantPushSettingsAdminController
     public function show(string $tenant_slug): JsonResponse
     {
         return $this->tenantContext->runForTenantSlug($tenant_slug, function () {
-            $push = $this->pushSettings->currentPushConfig();
+            $push = $this->pushSettings->resolvedPushConfig();
 
             return response()->json(['data' => $this->pushSettings->extractPushSettingsForResponse($push)]);
         });

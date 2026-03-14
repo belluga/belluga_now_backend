@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Settings\Http\Api\v1\Controllers\Landlord;
 
 use Belluga\Settings\Application\SettingsKernelService;
+use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -39,8 +40,12 @@ class LandlordSettingsKernelController
             ], 422);
         }
 
-        return response()->json([
-            'data' => $this->service->patchNamespace('landlord', $request->user(), $namespace, $payload),
-        ]);
+        try {
+            return response()->json([
+                'data' => $this->service->patchNamespace('landlord', $request->user(), $namespace, $payload),
+            ]);
+        } catch (SettingsNamespaceNotFoundException) {
+            abort(404, 'Settings namespace not found.');
+        }
     }
 }
