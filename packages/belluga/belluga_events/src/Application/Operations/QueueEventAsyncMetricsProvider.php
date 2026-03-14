@@ -6,6 +6,7 @@ namespace Belluga\Events\Application\Operations;
 
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
+use Belluga\Events\Support\EventAsyncQueueMetricsSnapshot;
 use Illuminate\Support\Facades\DB;
 
 class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderContract
@@ -14,21 +15,21 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
         private readonly EventAsyncJobSignaturesContract $jobSignatures
     ) {}
 
-    public function pendingAgesInSeconds(): array
+    public function snapshot(): EventAsyncQueueMetricsSnapshot
     {
         $defaultQueueConnection = (string) config('queue.default', 'sync');
         $queueConnectionConfig = config("queue.connections.{$defaultQueueConnection}");
 
         if (! is_array($queueConnectionConfig)) {
-            return [];
+            return EventAsyncQueueMetricsSnapshot::unavailable('queue_connection_config_missing');
         }
 
-        $databaseConnection = $this->resolveDatabaseConnectionName($defaultQueueConnection, $queueConnectionConfig);
+        $databaseConnection = $this->resolveDatabaseConnectionName($queueConnectionConfig);
         $queueTable = $this->resolveQueueTableOrCollection($queueConnectionConfig);
         $queueName = (string) ($queueConnectionConfig['queue'] ?? 'default');
 
         if ($databaseConnection === null || $queueTable === null) {
-            return [];
+            return EventAsyncQueueMetricsSnapshot::unavailable('queue_metrics_unsupported_for_connection');
         }
 
         $now = time();
@@ -60,24 +61,21 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
             $ages[] = max(0, $now - $availableAt);
         }
 
-        return $ages;
+        return EventAsyncQueueMetricsSnapshot::available($ages);
     }
 
     /**
      * @param  array<string, mixed>  $queueConnectionConfig
      */
-    private function resolveDatabaseConnectionName(string $defaultQueueConnection, array $queueConnectionConfig): ?string
+    private function resolveDatabaseConnectionName(array $queueConnectionConfig): ?string
     {
         $driver = (string) ($queueConnectionConfig['driver'] ?? '');
-        $fallback = (string) config('database.default', 'landlord');
 
         if ($driver === 'database') {
             $connection = $queueConnectionConfig['connection'] ?? null;
             if (is_string($connection) && $connection !== '') {
                 return $connection;
             }
-
-            return $fallback;
         }
 
         if ($driver === 'mongodb') {
@@ -85,8 +83,6 @@ class QueueEventAsyncMetricsProvider implements EventAsyncQueueMetricsProviderCo
             if (is_string($connection) && $connection !== '') {
                 return $connection;
             }
-
-            return $fallback;
         }
 
         return null;

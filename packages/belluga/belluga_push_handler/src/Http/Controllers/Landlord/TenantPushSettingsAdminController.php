@@ -19,7 +19,7 @@ class TenantPushSettingsAdminController
     public function show(string $tenant_slug): JsonResponse
     {
         return $this->tenantContext->runForTenantSlug($tenant_slug, function () {
-            $push = $this->pushSettings->currentPushConfig();
+            $push = $this->pushSettings->resolvedPushConfig();
 
             return response()->json(['data' => $this->pushSettings->extractPushSettingsForResponse($push)]);
         });
@@ -30,12 +30,6 @@ class TenantPushSettingsAdminController
         $incoming = $request->validated();
 
         return $this->tenantContext->runForTenantSlug($tenant_slug, function () use ($request, $incoming) {
-            $current = $this->pushSettings->currentPushConfig();
-            if (! array_key_exists('max_ttl_days', $incoming) && ! array_key_exists('max_ttl_days', $current)) {
-                // Keep legacy wrapper behavior while persistence moves to kernel namespace patching.
-                $incoming['max_ttl_days'] = 7;
-            }
-
             $push = $this->pushSettings->patchPushConfig($request->user(), $incoming);
 
             return response()->json(['data' => $this->pushSettings->extractPushSettingsForResponse($push)]);

@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
-use Belluga\Settings\Application\SettingsKernelService;
-use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\PushHandler\Contracts\PushSettingsMutationContract;
+use Belluga\PushHandler\Contracts\PushSettingsStoreContract;
 
 class PushSettingsKernelBridge
 {
     public function __construct(
-        private readonly SettingsStoreContract $settingsStore,
-        private readonly SettingsKernelService $settingsKernelService
+        private readonly PushSettingsStoreContract $settingsStore,
+        private readonly PushSettingsMutationContract $settingsMutation
     ) {}
 
     /**
@@ -19,7 +19,17 @@ class PushSettingsKernelBridge
      */
     public function currentPushConfig(): array
     {
-        $value = $this->settingsStore->getNamespaceValue('tenant', 'push');
+        $value = $this->settingsStore->getNamespaceValue('push');
+
+        return is_array($value) ? $value : [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function resolvedPushConfig(): array
+    {
+        $value = $this->settingsStore->getResolvedNamespaceValue('push');
 
         return is_array($value) ? $value : [];
     }
@@ -30,12 +40,12 @@ class PushSettingsKernelBridge
      */
     public function patchPushConfig(mixed $user, array $payload): array
     {
-        return $this->settingsKernelService->patchNamespace('tenant', $user, 'push', $payload);
+        return $this->settingsMutation->patchNamespace($user, 'push', $payload);
     }
 
     public function resolveMaxTtlDays(int $default): int
     {
-        $value = $this->currentPushConfig()['max_ttl_days'] ?? null;
+        $value = $this->resolvedPushConfig()['max_ttl_days'] ?? null;
 
         return is_int($value) ? $value : $default;
     }
@@ -45,7 +55,7 @@ class PushSettingsKernelBridge
      */
     public function currentFirebaseConfig(): array
     {
-        $value = $this->settingsStore->getNamespaceValue('tenant', 'firebase');
+        $value = $this->settingsStore->getNamespaceValue('firebase');
 
         return is_array($value) ? $value : [];
     }
@@ -56,7 +66,7 @@ class PushSettingsKernelBridge
      */
     public function patchFirebaseConfig(mixed $user, array $payload): array
     {
-        return $this->settingsKernelService->patchNamespace('tenant', $user, 'firebase', $payload);
+        return $this->settingsMutation->patchNamespace($user, 'firebase', $payload);
     }
 
     /**
@@ -81,16 +91,9 @@ class PushSettingsKernelBridge
      */
     public function patchMessageRoutes(mixed $user, array $routes): array
     {
-        $payload = [
+        $updated = $this->patchPushConfig($user, [
             'message_routes' => array_values($routes),
-        ];
-
-        if (! array_key_exists('max_ttl_days', $this->currentPushConfig())) {
-            // Preserve existing wrapper behavior when creating push namespace via this endpoint.
-            $payload['max_ttl_days'] = 7;
-        }
-
-        $updated = $this->patchPushConfig($user, $payload);
+        ]);
 
         return $this->normalizeItemsList($updated['message_routes'] ?? []);
     }
@@ -101,16 +104,9 @@ class PushSettingsKernelBridge
      */
     public function patchMessageTypes(mixed $user, array $types): array
     {
-        $payload = [
+        $updated = $this->patchPushConfig($user, [
             'message_types' => array_values($types),
-        ];
-
-        if (! array_key_exists('max_ttl_days', $this->currentPushConfig())) {
-            // Preserve existing wrapper behavior when creating push namespace via this endpoint.
-            $payload['max_ttl_days'] = 7;
-        }
-
-        $updated = $this->patchPushConfig($user, $payload);
+        ]);
 
         return $this->normalizeItemsList($updated['message_types'] ?? []);
     }

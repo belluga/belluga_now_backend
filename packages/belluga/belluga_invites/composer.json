@@ -1,0 +1,22 @@
+{
+  "name": "belluga/invites",
+  "description": "Belluga invites package for grouped invite feeds, attribution, and share-code acceptance.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\Invites\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\Invites\\InvitesServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}

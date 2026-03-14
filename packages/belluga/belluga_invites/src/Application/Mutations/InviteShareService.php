@@ -1,0 +1,437 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Belluga\Invites\Application\Mutations;
+
+use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
+use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
+use Belluga\Invites\Application\Targets\InviteTargetResolverService;
+use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
+use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
+use Belluga\Invites\Models\Tenants\InviteEdge;
+use Belluga\Invites\Models\Tenants\InviteShareCode;
+use Belluga\Invites\Support\InviteDomainException;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
+
+class InviteShareService
+{
+    public function __construct(
+        private readonly InviteIdentityGatewayContract $identityGateway,
+        private readonly InviteTelemetryEmitterContract $telemetry,
+        private readonly InviteTargetResolverService $targetResolver,
+        private readonly InviteMutationService $mutationService,
+        private readonly InviteRuntimeSettingsService $runtimeSettings,
+        private readonly InviteQuotaCounterService $quotaCounters,
+        private readonly InviteCommandIdempotencyService $idempotencyService,
+    ) {}
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function create(mixed $user, array $payload): array
+    {
+        $userId = $this->userId($user);
+        if ($userId === null) {
+            throw new InviteDomainException('auth_required', 401);
+        }
+
+        $inviter = $this->identityGateway->resolveInviterPrincipal(
+            $user,
+            isset($payload['account_profile_id']) ? (string) $payload['account_profile_id'] : null
+        );
+        $target = $this->targetResolver->resolve((array) ($payload['target_ref'] ?? []));
+        $expiresAt = $target['event_snapshot']['expires_at'];
+        $now = Carbon::now();
+
+        /** @var InviteShareCode|null $existing */
+        $existing = InviteShareCode::query()
+            ->where('event_id', $target['target_ref']['event_id'])
+            ->where('occurrence_id', $target['target_ref']['occurrence_id'])
+            ->where('inviter_principal.kind', $inviter['principal']['kind'])
+            ->where('inviter_principal.principal_id', $inviter['principal']['id'])
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($existing && ! $this->isExpired($existing)) {
+            return $this->shareCreateResponse($existing);
+        }
+
+        $this->enforceShareCreateLimits(
+            issuedByUserId: (string) $inviter['issued_by_user_id'],
+            targetRef: $target['target_ref'],
+            limits: $this->runtimeSettings->limits(),
+            cooldowns: $this->runtimeSettings->cooldowns(),
+            now: $now,
+        );
+
+        $share = new InviteShareCode([
+            'code' => $this->generateCode(),
+            'event_id' => $target['target_ref']['event_id'],
+            'occurrence_id' => $target['target_ref']['occurrence_id'],
+            'inviter_principal' => $this->toStoredPrincipal($inviter['principal']),
+            'issued_by_user_id' => $inviter['issued_by_user_id'],
+            'account_profile_id' => $inviter['account_profile_id'],
+            'inviter_display_name' => $inviter['display_name'],
+            'inviter_avatar_url' => $inviter['avatar_url'],
+            'expires_at' => $expiresAt,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+        $share->save();
+
+        $this->telemetry->emit(
+            event: 'invite.share_code_created',
+            userId: $userId,
+            properties: [
+                'code' => (string) $share->code,
+                'target_ref' => [
+                    'event_id' => (string) $share->event_id,
+                    'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+                ],
+                'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
+            ],
+            idempotencyKey: 'invite.share_code_created:'.(string) $share->code,
+            source: 'invite_api',
+            context: [
+                'actor' => ['type' => 'user', 'id' => $userId],
+                'target' => ['type' => 'event', 'id' => (string) $share->event_id],
+                'object' => ['type' => 'invite_share_code', 'id' => (string) $share->code],
+            ],
+        );
+
+        return $this->shareCreateResponse($share);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function accept(mixed $user, string $code, ?string $idempotencyKey = null): array
+    {
+        $userId = $this->userId($user);
+        if ($userId === null) {
+            throw new InviteDomainException('auth_required', 401);
+        }
+
+        $normalizedCode = strtoupper(trim($code));
+        if ($normalizedCode === '') {
+            throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        return $this->idempotencyService->runWithReplay(
+            command: 'invite.share_accept',
+            actorUserId: $userId,
+            idempotencyKey: $idempotencyKey,
+            fingerprintPayload: ['code' => $normalizedCode],
+            callback: fn (): array => $this->acceptWithoutReplay($userId, $normalizedCode),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function acceptWithoutReplay(string $userId, string $normalizedCode): array
+    {
+        /** @var InviteShareCode|null $share */
+        $share = InviteShareCode::query()
+            ->where('code', $normalizedCode)
+            ->first();
+        if (! $share) {
+            throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        if ($this->isExpired($share)) {
+            return [
+                'tenant_id' => $this->runtimeSettings->settingsPayload()['tenant_id'],
+                'invite_id' => null,
+                'target_ref' => [
+                    'event_id' => (string) $share->event_id,
+                    'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+                ],
+                'inviter_principal' => $share->inviter_principal,
+                'status' => 'expired',
+                'attendance_policy' => 'free_confirmation_only',
+                'next_step' => 'open_app_to_continue',
+                'attribution_bound' => false,
+                'accepted_at' => null,
+            ];
+        }
+
+        /** @var InviteEdge|null $existing */
+        $existing = InviteEdge::query()
+            ->where('receiver_user_id', $userId)
+            ->where('event_id', (string) $share->event_id)
+            ->where('occurrence_id', $share->occurrence_id ? (string) $share->occurrence_id : null)
+            ->where('inviter_principal.kind', data_get($share->inviter_principal, 'kind'))
+            ->where('inviter_principal.principal_id', data_get($share->inviter_principal, 'principal_id'))
+            ->first();
+
+        if ($existing === null) {
+            $target = $this->targetResolver->resolve([
+                'event_id' => (string) $share->event_id,
+                'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+            ]);
+
+            $recipient = $this->identityGateway->resolveUserRecipient($userId);
+            if ($recipient === null) {
+                throw new InviteDomainException('auth_required', 401);
+            }
+
+            $existing = InviteEdge::query()->create([
+                'event_id' => $target['target_ref']['event_id'],
+                'occurrence_id' => $target['target_ref']['occurrence_id'],
+                'receiver_user_id' => $recipient['user_id'],
+                'receiver_contact_hash' => null,
+                'inviter_principal' => $share->inviter_principal,
+                'account_profile_id' => $share->account_profile_id ? (string) $share->account_profile_id : null,
+                'issued_by_user_id' => (string) $share->issued_by_user_id,
+                'inviter_display_name' => $share->inviter_display_name,
+                'inviter_avatar_url' => $share->inviter_avatar_url,
+                'status' => 'pending',
+                'credited_acceptance' => false,
+                'source' => 'share_url',
+                'message' => null,
+                'event_name' => $target['event_snapshot']['event_name'],
+                'event_slug' => $target['event_snapshot']['event_slug'],
+                'event_date' => $target['event_snapshot']['event_date'],
+                'event_image_url' => $target['event_snapshot']['event_image_url'],
+                'location_label' => $target['event_snapshot']['location'],
+                'host_name' => $target['event_snapshot']['host_name'],
+                'tags' => $target['event_snapshot']['tags'],
+                'attendance_policy' => $target['event_snapshot']['attendance_policy'],
+                'expires_at' => $target['event_snapshot']['expires_at'],
+                'accepted_at' => null,
+                'declined_at' => null,
+            ]);
+        }
+
+        $acceptance = $this->mutationService->acceptForUserId(
+            $userId,
+            (string) $existing->getAttribute('_id')
+        );
+        $nextStep = (string) ($acceptance['next_step'] ?? 'none');
+        if (in_array($nextStep, ['reservation_required', 'commitment_choice_required'], true)) {
+            $nextStep = 'open_app_to_continue';
+        }
+
+        $this->telemetry->emit(
+            event: 'invite.share_code_accepted',
+            userId: $userId,
+            properties: [
+                'code' => (string) $share->code,
+                'invite_id' => (string) $acceptance['invite_id'],
+                'status' => (string) $acceptance['status'],
+                'attribution_bound' => in_array((string) $acceptance['status'], ['accepted', 'already_accepted'], true),
+                'target_ref' => $acceptance['target_ref'] ?? null,
+            ],
+            idempotencyKey: 'invite.share_code_accepted:'.(string) $share->code.':'.$userId,
+            source: 'invite_api',
+            context: [
+                'actor' => ['type' => 'user', 'id' => $userId],
+                'target' => ['type' => 'event', 'id' => (string) $share->event_id],
+                'object' => ['type' => 'invite_share_code', 'id' => (string) $share->code],
+            ],
+        );
+
+        return [
+            'tenant_id' => $acceptance['tenant_id'],
+            'invite_id' => $acceptance['invite_id'],
+            'target_ref' => $acceptance['target_ref'],
+            'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
+            'status' => $acceptance['status'],
+            'attendance_policy' => $acceptance['attendance_policy'],
+            'next_step' => $nextStep,
+            'attribution_bound' => in_array($acceptance['status'], ['accepted', 'already_accepted'], true),
+            'accepted_at' => $acceptance['accepted_at'],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function shareCreateResponse(InviteShareCode $share): array
+    {
+        return [
+            'tenant_id' => $this->runtimeSettings->settingsPayload()['tenant_id'],
+            'code' => (string) $share->code,
+            'target_ref' => [
+                'event_id' => (string) $share->event_id,
+                'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+            ],
+            'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
+        ];
+    }
+
+    private function generateCode(): string
+    {
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $code = strtoupper(Str::random(10));
+
+            $exists = InviteShareCode::query()
+                ->where('code', $code)
+                ->exists();
+
+            if (! $exists) {
+                return $code;
+            }
+        }
+
+        throw new InviteDomainException('share_code_generation_failed', 500);
+    }
+
+    private function isExpired(InviteShareCode $share): bool
+    {
+        return $share->expires_at instanceof Carbon && $share->expires_at->isPast();
+    }
+
+    /**
+     * @param  array{event_id:string,occurrence_id:?string}  $targetRef
+     * @param  array<string,int>  $limits
+     * @param  array<string,int>  $cooldowns
+     */
+    private function enforceShareCreateLimits(
+        string $issuedByUserId,
+        array $targetRef,
+        array $limits,
+        array $cooldowns,
+        Carbon $now,
+    ): void {
+        $cooldownSeconds = (int) ($cooldowns['share_code_cooldown_seconds'] ?? 0);
+        if ($cooldownSeconds > 0) {
+            /** @var InviteShareCode|null $recent */
+            $recent = InviteShareCode::query()
+                ->where('issued_by_user_id', $issuedByUserId)
+                ->where('event_id', $targetRef['event_id'])
+                ->where('occurrence_id', $targetRef['occurrence_id'])
+                ->where('created_at', '>=', $now->copy()->subSeconds($cooldownSeconds))
+                ->orderByDesc('created_at')
+                ->first();
+
+            if ($recent && $recent->created_at instanceof Carbon) {
+                $elapsed = (int) $recent->created_at->diffInSeconds($now, absolute: true);
+                $retryAfterSeconds = max(1, $cooldownSeconds - $elapsed);
+                $resetAt = $now->copy()->addSeconds($retryAfterSeconds)->toISOString();
+
+                throw new InviteDomainException(
+                    'share_rate_limited',
+                    429,
+                    'Share code cooldown active for this target.',
+                    $this->buildLimitPayload(
+                        limitKey: 'share_code_cooldown_seconds',
+                        scope: 'share_target',
+                        maxAllowed: 1,
+                        currentCount: 1,
+                        window: 'cooldown',
+                        resetAt: $resetAt,
+                        retryAfterSeconds: $retryAfterSeconds,
+                    ),
+                );
+            }
+        }
+
+        $dailyLimit = (int) ($limits['max_share_codes_per_day_per_user_actor'] ?? 30);
+        $dailyQuota = $this->quotaCounters->reserve(
+            scope: 'share_user_actor_daily',
+            scopeId: $issuedByUserId,
+            windowKey: $this->dailyWindowKey($now),
+            limit: $dailyLimit,
+            now: $now,
+        );
+
+        if ($dailyQuota['allowed']) {
+            return;
+        }
+
+        throw new InviteDomainException(
+            'rate_limited',
+            429,
+            'Daily share-code limit reached.',
+            $this->buildLimitPayload(
+                limitKey: 'max_share_codes_per_day_per_user_actor',
+                scope: 'share_user_actor',
+                maxAllowed: $dailyLimit,
+                currentCount: $dailyQuota['current_count'],
+                window: 'day',
+                resetAt: $this->runtimeSettings->resetAtForWindow('day', $now),
+                retryAfterSeconds: null,
+            ),
+        );
+    }
+
+    private function dailyWindowKey(Carbon $now): string
+    {
+        return $now->copy()->utc()->format('Y-m-d');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildLimitPayload(
+        string $limitKey,
+        string $scope,
+        int $maxAllowed,
+        int $currentCount,
+        string $window,
+        ?string $resetAt,
+        ?int $retryAfterSeconds,
+    ): array {
+        return [
+            'limit_key' => $limitKey,
+            'scope' => $scope,
+            'max_allowed' => $maxAllowed,
+            'current_count' => $currentCount,
+            'window' => $window,
+            'reset_at' => $resetAt,
+            'retry_after_seconds' => $retryAfterSeconds,
+        ];
+    }
+
+    /**
+     * @param  array{kind:string,id:string}  $principal
+     * @return array{kind:string,principal_id:string}
+     */
+    private function toStoredPrincipal(array $principal): array
+    {
+        return [
+            'kind' => (string) ($principal['kind'] ?? ''),
+            'principal_id' => (string) ($principal['id'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $principal
+     * @return array{kind:string,id:string}
+     */
+    private function fromStoredPrincipal(array $principal): array
+    {
+        return [
+            'kind' => (string) ($principal['kind'] ?? ''),
+            'id' => (string) ($principal['principal_id'] ?? $principal['id'] ?? ''),
+        ];
+    }
+
+    private function userId(mixed $user): ?string
+    {
+        if (! is_object($user)) {
+            return null;
+        }
+
+        $id = null;
+        if (method_exists($user, 'getKey')) {
+            $id = $user->getKey();
+        }
+        if ($id === null && property_exists($user, '_id')) {
+            $id = $user->_id;
+        }
+        if ($id === null && method_exists($user, 'getAttribute')) {
+            $id = $user->getAttribute('_id');
+        }
+        if ($id === null && method_exists($user, 'getAuthIdentifier')) {
+            $id = $user->getAuthIdentifier();
+        }
+
+        return is_scalar($id) ? (string) $id : null;
+    }
+}

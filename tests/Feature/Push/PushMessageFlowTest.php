@@ -2805,6 +2805,53 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
+    public function test_delivery_service_uses_schema_default_max_ttl_when_setting_is_not_persisted(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create([
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+            'push' => [
+                'message_types' => [
+                    [
+                        'key' => 'transactional',
+                        'label' => 'Transactional',
+                    ],
+                ],
+                'message_routes' => [],
+            ],
+        ]);
+
+        $originalTtl = config('belluga_push_handler.delivery_ttl_minutes.transactional');
+        config([
+            'belluga_push_handler.delivery_ttl_minutes.transactional' => 60 * 24 * 8,
+        ]);
+
+        try {
+            $this->expectException(ValidationException::class);
+            $this->expectExceptionMessage('Computed TTL exceeds max allowed TTL of 7 days.');
+
+            $message = PushMessage::create($this->buildPayload([
+                'type' => 'transactional',
+            ]));
+
+            $service = $this->app->make(PushDeliveryService::class);
+            $service->deliver($message, ['token-1']);
+        } finally {
+            config([
+                'belluga_push_handler.delivery_ttl_minutes.transactional' => $originalTtl,
+            ]);
+        }
+    }
+
     public function test_delivery_service_batches_tokens_by_config(): void
     {
         config(['belluga_push_handler.fcm.max_batch_size' => 500]);
@@ -2911,7 +2958,8 @@ class PushMessageFlowTest extends TestCase
         $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
         $job->handle(
             $this->app->make(PushDeliveryService::class),
-            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class)
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
         );
 
         $message->refresh();

@@ -30,7 +30,6 @@ class SettingsServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__.'/../routes/settings.php');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations_landlord');
     }

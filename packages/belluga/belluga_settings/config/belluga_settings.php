@@ -8,15 +8,4 @@ return [
         'additive_changes' => 'no_version_bump_required',
         'breaking_changes' => 'version_bump_required',
     ],
-    'routes' => [
-        'tenant' => [
-            'prefix' => 'admin/api/v1',
-            'settings_prefix' => 'settings',
-        ],
-        'landlord' => [
-            'prefix' => 'admin/api/v1',
-            'settings_prefix' => 'settings',
-            'tenant_settings_prefix' => '{tenant_slug}/settings',
-        ],
-    ],
 ];
