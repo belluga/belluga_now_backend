@@ -18,20 +18,33 @@ final class StaticAssetMediaController extends Controller
         private readonly StaticAssetQueryService $assetQueryService,
     ) {}
 
-    public function avatar(Request $request, string $static_asset_id): Response
+    public function avatar(Request $request): Response
     {
-        return $this->serve($request, $static_asset_id, 'avatar');
+        return $this->serve($request, 'avatar');
     }
 
-    public function cover(Request $request, string $static_asset_id): Response
+    public function cover(Request $request): Response
     {
-        return $this->serve($request, $static_asset_id, 'cover');
+        return $this->serve($request, 'cover');
     }
 
-    private function serve(Request $request, string $staticAssetId, string $kind): Response
+    private function serve(Request $request, string $kind): Response
     {
+        $assetId = $request->route('static_asset_id');
+        if (! is_string($assetId) || trim($assetId) === '') {
+            $assetId = $request->route('static_asset');
+        }
+        if (! is_string($assetId) || trim($assetId) === '') {
+            abort(404);
+        }
+
+        $staticAssetId = trim($assetId);
         $asset = $this->assetQueryService->findOrFail($staticAssetId);
-        $path = $this->mediaService->resolveMediaPath($asset, $kind);
+        $path = $this->mediaService->resolveMediaPathForBaseUrl(
+            $asset,
+            $kind,
+            $request->getSchemeAndHttpHost(),
+        );
 
         if ($path === null) {
             abort(404);

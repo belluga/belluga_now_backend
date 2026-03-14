@@ -653,13 +653,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $this->assertNotEmpty($url);
         $this->assertStringContainsString(
-            "{$this->base_tenant_url}account-profiles/",
+            "{$this->base_tenant_url}api/v1/media/account-profiles/",
             $url
         );
         $this->assertStringContainsString('v=', $url);
 
-        $response = $this->get($url);
-        $response->assertStatus(200);
+        $canonicalResponse = $this->get($url);
+        $canonicalResponse->assertStatus(200);
+
+        $path = parse_url((string) $url, PHP_URL_PATH);
+        $this->assertTrue(is_string($path) && $path !== '');
+        preg_match('#^/api/v1/media/account-profiles/([^/]+)/(avatar|cover)$#', (string) $path, $matches);
+        $this->assertCount(3, $matches);
+
+        $legacyPath = "account-profiles/{$matches[1]}/{$matches[2]}";
+        $query = parse_url((string) $url, PHP_URL_QUERY);
+        $legacyUrl = "{$this->base_tenant_url}{$legacyPath}";
+        if (is_string($query) && trim($query) !== '') {
+            $legacyUrl .= "?{$query}";
+        }
+
+        $legacyResponse = $this->get($legacyUrl);
+        $legacyResponse->assertStatus(200);
     }
 
     private function assertMediaStored(string $profileId, string $kind): string

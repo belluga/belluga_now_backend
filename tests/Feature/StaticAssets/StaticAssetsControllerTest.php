@@ -257,11 +257,13 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $avatarUrl = (string) $response->json('data.avatar_url');
         $coverUrl = (string) $response->json('data.cover_url');
 
-        $this->assertStringContainsString("/static-assets/{$assetId}/avatar", $avatarUrl);
-        $this->assertStringContainsString("/static-assets/{$assetId}/cover", $coverUrl);
+        $this->assertStringContainsString("/api/v1/media/static-assets/{$assetId}/avatar", $avatarUrl);
+        $this->assertStringContainsString("/api/v1/media/static-assets/{$assetId}/cover", $coverUrl);
 
-        $this->get("/static-assets/{$assetId}/avatar")->assertOk();
-        $this->get("/static-assets/{$assetId}/cover")->assertOk();
+        $this->get("{$this->base_tenant_url}api/v1/media/static-assets/{$assetId}/avatar")->assertOk();
+        $this->get("{$this->base_tenant_url}api/v1/media/static-assets/{$assetId}/cover")->assertOk();
+        $this->get("{$this->base_tenant_url}static-assets/{$assetId}/avatar")->assertOk();
+        $this->get("{$this->base_tenant_url}static-assets/{$assetId}/cover")->assertOk();
     }
 
     public function test_static_asset_update(): void
