@@ -14,18 +14,12 @@ if ($queueConnection === '') {
 $databaseQueueConnection = env('DB_QUEUE_CONNECTION');
 $databaseQueueConnection = is_string($databaseQueueConnection) ? trim($databaseQueueConnection) : '';
 
-$mongodbQueueConnection = env('MONGODB_QUEUE_CONNECTION');
+$mongodbQueueConnection = env('MONGODB_QUEUE_CONNECTION', $databaseConnection);
 $mongodbQueueConnection = is_string($mongodbQueueConnection) ? trim($mongodbQueueConnection) : '';
 
 if ($queueConnection === 'database' && $databaseQueueConnection === '') {
     throw new \RuntimeException(
         'Queue configuration requires DB_QUEUE_CONNECTION when QUEUE_CONNECTION=database.'
-    );
-}
-
-if ($queueConnection === 'mongodb' && $mongodbQueueConnection === '') {
-    throw new \RuntimeException(
-        'Queue configuration requires MONGODB_QUEUE_CONNECTION when QUEUE_CONNECTION=mongodb.'
     );
 }
 

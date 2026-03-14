@@ -72,14 +72,14 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('mongodb', $config['default']);
     }
 
-    public function test_fails_closed_when_mongodb_queue_connection_is_not_explicitly_set(): void
+    public function test_falls_back_to_primary_database_connection_when_mongodb_queue_connection_is_not_explicitly_set(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Queue configuration requires MONGODB_QUEUE_CONNECTION');
+        $config = $this->loadQueueConfig();
 
-        $this->loadQueueConfig();
+        $this->assertSame('mongodb', $config['default']);
+        $this->assertSame('mongodb', $config['connections']['mongodb']['connection']);
     }
 
     public function test_fails_closed_when_database_queue_connection_is_not_explicitly_set(): void
