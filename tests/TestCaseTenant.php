@@ -10,21 +10,26 @@ abstract class TestCaseTenant extends TestCaseAuthenticated
         get;
     }
 
-    protected function normalizeTestUri(string $uri): string
+    protected function normalizeTestUri(string $uri, ?string $hostOverride = null): string
     {
         if (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://')) {
             return $uri;
         }
 
+        $host = $hostOverride;
+        if (! is_string($host) || $host === '') {
+            $host = "{$this->tenant->subdomain}.{$this->host}";
+        }
+
         if ($uri === '') {
-            return "http://{$this->tenant->subdomain}.{$this->host}/";
+            return "http://{$host}/";
         }
 
         if ($uri[0] !== '/') {
             $uri = "/{$uri}";
         }
 
-        return "http://{$this->tenant->subdomain}.{$this->host}{$uri}";
+        return "http://{$host}{$uri}";
     }
 
     protected function setUp(): void

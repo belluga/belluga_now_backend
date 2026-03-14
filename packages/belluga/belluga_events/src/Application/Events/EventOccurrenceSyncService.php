@@ -161,7 +161,7 @@ class EventOccurrenceSyncService
         if (is_string($value) && $value !== '') {
             try {
                 return Carbon::parse($value);
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 return null;
             }
         }

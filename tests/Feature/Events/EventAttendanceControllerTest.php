@@ -1,0 +1,254 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Events;
+
+use App\Application\Accounts\AccountUserService;
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\AttendanceCommitment;
+use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
+use Illuminate\Support\Carbon;
+use Laravel\Sanctum\Sanctum;
+use Tests\Helpers\TenantLabels;
+use Tests\TestCaseTenant;
+use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\SeedsTenantAccounts;
+
+class EventAttendanceControllerTest extends TestCaseTenant
+{
+    use RefreshLandlordAndTenantDatabases;
+    use SeedsTenantAccounts;
+
+    protected TenantLabels $tenant {
+        get {
+            return $this->landlord->tenant_primary;
+        }
+    }
+
+    private static bool $bootstrapped = false;
+
+    private Account $account;
+
+    private AccountUserService $userService;
+
+    private AccountUser $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if (! self::$bootstrapped) {
+            $this->refreshLandlordAndTenantDatabases();
+            $this->initializeSystem();
+            self::$bootstrapped = true;
+        }
+
+        $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
+        $tenant->makeCurrent();
+
+        AttendanceCommitment::query()->delete();
+        EventOccurrence::query()->delete();
+        Event::query()->delete();
+
+        [$this->account] = $this->seedAccountWithRole(['*']);
+        $this->userService = $this->app->make(AccountUserService::class);
+        $this->user = $this->createAccountUser('Attendance User');
+        Sanctum::actingAs($this->user, ['*']);
+    }
+
+    public function test_confirm_creates_active_commitment_and_lists_confirmed_events(): void
+    {
+        $event = $this->createEvent();
+
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+        $response->assertOk();
+        $response->assertJsonPath('event_id', (string) $event->_id);
+        $response->assertJsonPath('kind', 'free_confirmation');
+        $response->assertJsonPath('status', 'active');
+
+        $this->assertDatabaseCount('attendance_commitments', 1);
+
+        $list = $this->getJson("{$this->base_api_tenant}events/attendance/confirmed");
+        $list->assertOk();
+        $list->assertJsonPath('data.confirmed_event_ids.0', (string) $event->_id);
+    }
+
+    public function test_unconfirm_cancels_commitment_and_removes_from_confirmed_list(): void
+    {
+        $event = $this->createEvent();
+
+        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [])
+            ->assertOk();
+
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/unconfirm", []);
+        $response->assertOk();
+        $response->assertJsonPath('event_id', (string) $event->_id);
+        $response->assertJsonPath('status', 'canceled');
+
+        $commitment = AttendanceCommitment::query()
+            ->where('user_id', (string) $this->user->_id)
+            ->where('event_id', (string) $event->_id)
+            ->first();
+        $this->assertNotNull($commitment);
+        $this->assertSame('canceled', (string) $commitment->status);
+
+        $list = $this->getJson("{$this->base_api_tenant}events/attendance/confirmed");
+        $list->assertOk();
+        $this->assertSame([], $list->json('data.confirmed_event_ids'));
+    }
+
+    public function test_confirm_requires_authentication(): void
+    {
+        auth('sanctum')->forgetUser();
+        auth()->forgetGuards();
+
+        $event = $this->createEvent();
+
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+        $response->assertStatus(401);
+    }
+
+    public function test_confirm_returns_404_for_unknown_event(): void
+    {
+        $response = $this->postJson("{$this->base_api_tenant}events/missing-event/attendance/confirm", []);
+        $response->assertStatus(404);
+    }
+
+    public function test_confirm_rejects_occurrence_from_another_event(): void
+    {
+        $firstEvent = $this->createEvent(['title' => 'First event']);
+        $secondEvent = $this->createEvent(['title' => 'Second event']);
+
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $secondEvent->_id)
+            ->first();
+        $this->assertNotNull($secondOccurrence);
+
+        $response = $this->postJson("{$this->base_api_tenant}events/{$firstEvent->_id}/attendance/confirm", [
+            'occurrence_id' => (string) $secondOccurrence?->_id,
+        ]);
+
+        $response->assertStatus(404);
+    }
+
+    private function createAccountUser(string $name): AccountUser
+    {
+        $role = $this->account->roleTemplates()->create([
+            'name' => 'Attendance Test Role',
+            'permissions' => ['*'],
+        ]);
+
+        return $this->userService->create($this->account, [
+            'name' => $name,
+            'email' => uniqid('attendance-user', true).'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
+    }
+
+    private function createEvent(array $overrides = []): Event
+    {
+        $now = Carbon::now();
+
+        $event = Event::create(array_merge([
+            'title' => 'Attendance Test Event',
+            'content' => 'Event content',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => 'venue-1',
+                'metadata' => [
+                    'display_name' => 'Venue Name',
+                ],
+            ],
+            'type' => [
+                'id' => 'type-1',
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Show desc',
+                'icon' => null,
+                'color' => null,
+            ],
+            'venue' => [
+                'id' => 'venue-1',
+                'display_name' => 'Venue Name',
+                'tagline' => 'Tag',
+                'hero_image_url' => null,
+                'logo_url' => null,
+                'taxonomy_terms' => [],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => 'https://example.org/thumb.jpg',
+                ],
+            ],
+            'date_time_start' => $now->copy()->addDay(),
+            'date_time_end' => $now->copy()->addDay()->addHours(2),
+            'artists' => [],
+            'tags' => ['music'],
+            'categories' => ['culture'],
+            'taxonomy_terms' => [],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subMinute(),
+            ],
+            'is_active' => true,
+        ], $overrides));
+
+        $occurrences = [[
+            'date_time_start' => Carbon::instance($event->date_time_start),
+            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
+        ]];
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+
+        return $event->fresh();
+    }
+
+    private function initializeSystem(): void
+    {
+        $service = $this->app->make(SystemInitializationService::class);
+
+        $payload = new InitializationPayload(
+            landlord: ['name' => 'Landlord HQ'],
+            tenant: ['name' => 'Tenant Zeta', 'subdomain' => 'tenant-zeta'],
+            role: ['name' => 'Root', 'permissions' => ['*']],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            themeDataSettings: [
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#fff',
+                'secondary_seed_color' => '#000',
+            ],
+            logoSettings: ['light_logo_uri' => '/logos/light.png'],
+            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
+            tenantDomains: ['tenant-zeta.test']
+        );
+
+        $service->initialize($payload);
+
+        $tenant = Tenant::query()->first();
+        if ($tenant) {
+            $this->landlord->tenant_primary->slug = $tenant->slug;
+            $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
+            $this->landlord->tenant_primary->id = (string) $tenant->_id;
+            $this->landlord->tenant_primary->role_admin->id = (string) ($tenant->roleTemplates()->first()?->_id ?? '');
+        }
+    }
+}

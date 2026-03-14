@@ -730,7 +730,7 @@ class MapPoiProjectionService
         if (is_string($value) && trim($value) !== '') {
             try {
                 return Carbon::parse($value);
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 return null;
             }
         }

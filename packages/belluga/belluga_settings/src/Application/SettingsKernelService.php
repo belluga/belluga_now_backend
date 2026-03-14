@@ -7,6 +7,7 @@ namespace Belluga\Settings\Application;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Auth\Access\AuthorizationException;
 
@@ -44,7 +45,7 @@ class SettingsKernelService
         $values = [];
 
         foreach ($this->accessibleDefinitions($scope, $user) as $definition) {
-            $values[$definition->namespace] = $this->store->getNamespaceValue($scope, $definition->namespace);
+            $values[$definition->namespace] = $this->resolvedNamespaceValue($scope, $definition);
         }
 
         return $values;
@@ -59,7 +60,7 @@ class SettingsKernelService
         $definition = $this->registry->find($namespace, $scope);
 
         if (! $definition) {
-            abort(404, 'Settings namespace not found.');
+            throw new SettingsNamespaceNotFoundException($namespace, $scope);
         }
 
         if (! $this->canAccess($user, $definition)) {
@@ -69,10 +70,12 @@ class SettingsKernelService
         $changes = $this->validator->validatePatch($definition, $payload);
 
         if ($changes === []) {
-            return $this->store->getNamespaceValue($scope, $namespace);
+            return $this->resolvedNamespaceValue($scope, $definition);
         }
 
-        return $this->store->mergeNamespace($scope, $namespace, $changes, $definition);
+        return $definition->applyDefaults(
+            $this->store->mergeNamespace($scope, $namespace, $changes, $definition)
+        );
     }
 
     /**
@@ -111,5 +114,15 @@ class SettingsKernelService
         }
 
         return (bool) $user->tokenCan($ability);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolvedNamespaceValue(string $scope, SettingsNamespaceDefinition $definition): array
+    {
+        return $definition->applyDefaults(
+            $this->store->getNamespaceValue($scope, $definition->namespace)
+        );
     }
 }

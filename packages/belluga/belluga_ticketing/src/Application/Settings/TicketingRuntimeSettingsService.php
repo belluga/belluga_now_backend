@@ -4,24 +4,24 @@ declare(strict_types=1);
 
 namespace Belluga\Ticketing\Application\Settings;
 
-use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\Ticketing\Contracts\TicketingSettingsStoreContract;
 
 class TicketingRuntimeSettingsService
 {
     public function __construct(
-        private readonly SettingsStoreContract $settingsStore,
+        private readonly TicketingSettingsStoreContract $settingsStore,
     ) {}
 
     public function isTicketingEnabled(): bool
     {
-        $core = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_core');
+        $core = $this->settingsStore->getNamespaceValue('ticketing_core');
 
         return (bool) ($core['enabled'] ?? false);
     }
 
     public function identityMode(): string
     {
-        $core = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_core');
+        $core = $this->settingsStore->getNamespaceValue('ticketing_core');
         $mode = (string) ($core['identity_mode'] ?? 'auth_only');
 
         return in_array($mode, ['auth_only', 'guest_or_auth'], true) ? $mode : 'auth_only';
@@ -29,7 +29,7 @@ class TicketingRuntimeSettingsService
 
     public function queueMode(): string
     {
-        $queue = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_hold_queue');
+        $queue = $this->settingsStore->getNamespaceValue('ticketing_hold_queue');
         $mode = (string) ($queue['policy'] ?? 'auto');
 
         return in_array($mode, ['auto', 'off'], true) ? $mode : 'auto';
@@ -37,14 +37,14 @@ class TicketingRuntimeSettingsService
 
     public function maxPerPrincipal(): int
     {
-        $queue = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_hold_queue');
+        $queue = $this->settingsStore->getNamespaceValue('ticketing_hold_queue');
 
         return $this->clampInt($queue['max_per_principal'] ?? 10, 1, 100);
     }
 
     public function defaultHoldMinutes(): int
     {
-        $queue = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_hold_queue');
+        $queue = $this->settingsStore->getNamespaceValue('ticketing_hold_queue');
 
         return $this->clampInt($queue['default_hold_minutes'] ?? 10, 1, 120);
     }
@@ -60,7 +60,7 @@ class TicketingRuntimeSettingsService
 
     public function defaultCheckoutMode(): string
     {
-        $checkout = $this->settingsStore->getNamespaceValue('tenant', 'checkout_core');
+        $checkout = $this->settingsStore->getNamespaceValue('checkout_core');
         $mode = (string) ($checkout['mode'] ?? 'free');
 
         return in_array($mode, ['free', 'paid'], true) ? $mode : 'free';
@@ -68,14 +68,14 @@ class TicketingRuntimeSettingsService
 
     public function promotionsEnabled(): bool
     {
-        $promotions = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_promotions');
+        $promotions = $this->settingsStore->getNamespaceValue('ticketing_promotions');
 
         return (bool) ($promotions['enabled'] ?? false);
     }
 
     public function allowTransferReissue(): bool
     {
-        $lifecycle = $this->settingsStore->getNamespaceValue('tenant', 'ticketing_lifecycle');
+        $lifecycle = $this->settingsStore->getNamespaceValue('ticketing_lifecycle');
 
         return (bool) ($lifecycle['allow_transfer_reissue'] ?? false);
     }

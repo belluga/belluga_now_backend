@@ -65,16 +65,38 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
     public function test_defaults_to_mongo_queue_when_primary_database_is_mongo_and_queue_not_explicitly_set(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');
+        $this->setEnv('MONGODB_QUEUE_CONNECTION', 'mongodb');
 
         $config = $this->loadQueueConfig();
 
         $this->assertSame('mongodb', $config['default']);
     }
 
+    public function test_fails_closed_when_mongodb_queue_connection_is_not_explicitly_set(): void
+    {
+        $this->setEnv('DB_CONNECTION', 'mongodb');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Queue configuration requires MONGODB_QUEUE_CONNECTION');
+
+        $this->loadQueueConfig();
+    }
+
+    public function test_fails_closed_when_database_queue_connection_is_not_explicitly_set(): void
+    {
+        $this->setEnv('QUEUE_CONNECTION', 'database');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Queue configuration requires DB_QUEUE_CONNECTION');
+
+        $this->loadQueueConfig();
+    }
+
     public function test_fails_closed_for_mongo_primary_database_with_unsafe_database_queue_fallback(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');
         $this->setEnv('QUEUE_CONNECTION', 'database');
+        $this->setEnv('DB_QUEUE_CONNECTION', 'landlord');
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Unsafe queue configuration detected');

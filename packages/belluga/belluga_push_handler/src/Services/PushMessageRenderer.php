@@ -9,6 +9,10 @@ use Illuminate\Support\Arr;
 
 class PushMessageRenderer
 {
+    public function __construct(
+        private readonly PushSettingsKernelBridge $pushSettings
+    ) {}
+
     /**
      * @param  array<string, mixed>  $context
      * @return array<string, mixed>
@@ -206,7 +210,7 @@ class PushMessageRenderer
      */
     private function routesByKey(): array
     {
-        $routes = app(PushSettingsKernelBridge::class)->currentMessageRoutes();
+        $routes = $this->pushSettings->currentMessageRoutes();
         if (! is_array($routes)) {
             return [];
         }

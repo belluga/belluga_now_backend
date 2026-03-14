@@ -376,7 +376,6 @@ Host app must bind:
 - `EventCapabilitySettingsContract`
 - `EventPartyMapperRegistryContract`
 - `EventTenantContextContract`
-- `EventProjectionSyncContract`
 - `EventRadiusSettingsContract`
 - `TenantExecutionContextContract`
 
