@@ -18,20 +18,33 @@ class AccountProfileMediaController extends Controller
         private readonly AccountProfileQueryService $profileQueryService
     ) {}
 
-    public function avatar(Request $request, string $account_profile_id): Response
+    public function avatar(Request $request): Response
     {
-        return $this->serve($request, $account_profile_id, 'avatar');
+        return $this->serve($request, 'avatar');
     }
 
-    public function cover(Request $request, string $account_profile_id): Response
+    public function cover(Request $request): Response
     {
-        return $this->serve($request, $account_profile_id, 'cover');
+        return $this->serve($request, 'cover');
     }
 
-    private function serve(Request $request, string $accountProfileId, string $kind): Response
+    private function serve(Request $request, string $kind): Response
     {
+        $profileId = $request->route('account_profile_id');
+        if (! is_string($profileId) || trim($profileId) === '') {
+            $profileId = $request->route('account_profile');
+        }
+        if (! is_string($profileId) || trim($profileId) === '') {
+            abort(404);
+        }
+
+        $accountProfileId = trim($profileId);
         $profile = $this->profileQueryService->findOrFail($accountProfileId);
-        $path = $this->mediaService->resolveMediaPath($profile, $kind);
+        $path = $this->mediaService->resolveMediaPathForBaseUrl(
+            $profile,
+            $kind,
+            $request->getSchemeAndHttpHost(),
+        );
 
         if ($path === null) {
             abort(404);
