@@ -12,6 +12,10 @@ use MongoDB\BSON\ObjectId;
 
 class StaticAssetQueryService extends AbstractQueryService
 {
+    public function __construct(
+        private readonly StaticAssetMediaService $mediaService
+    ) {}
+
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         $query = StaticAsset::query();
@@ -67,6 +71,8 @@ class StaticAssetQueryService extends AbstractQueryService
      */
     public function format(StaticAsset $asset): array
     {
+        $baseUrl = request()->getSchemeAndHttpHost();
+
         return [
             'id' => (string) $asset->_id,
             'profile_type' => $asset->profile_type,
@@ -74,8 +80,18 @@ class StaticAssetQueryService extends AbstractQueryService
             'slug' => $asset->slug,
             'bio' => $asset->bio,
             'content' => $asset->content,
-            'avatar_url' => $asset->avatar_url,
-            'cover_url' => $asset->cover_url,
+            'avatar_url' => $this->mediaService->normalizePublicUrl(
+                $baseUrl,
+                $asset,
+                'avatar',
+                is_string($asset->avatar_url) ? $asset->avatar_url : null
+            ),
+            'cover_url' => $this->mediaService->normalizePublicUrl(
+                $baseUrl,
+                $asset,
+                'cover',
+                is_string($asset->cover_url) ? $asset->cover_url : null
+            ),
             'tags' => $asset->tags ?? [],
             'categories' => $asset->categories ?? [],
             'taxonomy_terms' => $asset->taxonomy_terms ?? [],

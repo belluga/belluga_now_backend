@@ -18,7 +18,8 @@ use MongoDB\BSON\ObjectId;
 class AccountProfileQueryService extends AbstractQueryService
 {
     public function __construct(
-        private readonly AccountOwnershipStateService $ownershipStateService
+        private readonly AccountOwnershipStateService $ownershipStateService,
+        private readonly AccountProfileMediaService $mediaService,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
@@ -113,6 +114,7 @@ class AccountProfileQueryService extends AbstractQueryService
         ?Account $account = null,
         array $userOperatedLookup = []
     ): array {
+        $baseUrl = request()->getSchemeAndHttpHost();
         $resolvedAccount = $account
             ?? Account::query()->where('_id', $profile->account_id)->first();
 
@@ -122,8 +124,18 @@ class AccountProfileQueryService extends AbstractQueryService
             'profile_type' => $profile->profile_type,
             'display_name' => $profile->display_name,
             'slug' => $profile->slug,
-            'avatar_url' => $profile->avatar_url,
-            'cover_url' => $profile->cover_url,
+            'avatar_url' => $this->mediaService->normalizePublicUrl(
+                $baseUrl,
+                $profile,
+                'avatar',
+                is_string($profile->avatar_url) ? $profile->avatar_url : null
+            ),
+            'cover_url' => $this->mediaService->normalizePublicUrl(
+                $baseUrl,
+                $profile,
+                'cover',
+                is_string($profile->cover_url) ? $profile->cover_url : null
+            ),
             'bio' => $profile->bio,
             'content' => $profile->content,
             'taxonomy_terms' => $profile->taxonomy_terms ?? [],
