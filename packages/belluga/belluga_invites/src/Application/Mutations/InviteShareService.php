@@ -114,6 +114,9 @@ class InviteShareService
         if ($userId === null) {
             throw new InviteDomainException('auth_required', 401);
         }
+        if ($this->isAnonymousIdentity($user)) {
+            throw new InviteDomainException('auth_required', 401, 'Authenticated account required for invite share acceptance.');
+        }
 
         $normalizedCode = strtoupper(trim($code));
         if ($normalizedCode === '') {
@@ -209,7 +212,7 @@ class InviteShareService
 
         $acceptance = $this->mutationService->acceptForUserId(
             $userId,
-            (string) $existing->getAttribute('_id')
+            $this->inviteEdgeId($existing)
         );
         $nextStep = (string) ($acceptance['next_step'] ?? 'none');
         if (in_array($nextStep, ['reservation_required', 'commitment_choice_required'], true)) {
@@ -433,5 +436,35 @@ class InviteShareService
         }
 
         return is_scalar($id) ? (string) $id : null;
+    }
+
+    private function inviteEdgeId(InviteEdge $edge): string
+    {
+        $id = null;
+        if (method_exists($edge, 'getKey')) {
+            $id = $edge->getKey();
+        }
+        if ($id === null) {
+            $id = $edge->getAttribute('_id');
+        }
+
+        return (string) $id;
+    }
+
+    private function isAnonymousIdentity(mixed $user): bool
+    {
+        if (! is_object($user)) {
+            return false;
+        }
+
+        $identityState = null;
+        if (property_exists($user, 'identity_state')) {
+            $identityState = $user->identity_state;
+        }
+        if (($identityState === null || $identityState === '') && method_exists($user, 'getAttribute')) {
+            $identityState = $user->getAttribute('identity_state');
+        }
+
+        return is_string($identityState) && trim($identityState) === 'anonymous';
     }
 }

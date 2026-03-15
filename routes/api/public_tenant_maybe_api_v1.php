@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AccountProfileMediaController;
+use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\EnvironmentController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;

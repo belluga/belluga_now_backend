@@ -90,8 +90,7 @@ class AccountQueryService extends AbstractQueryService
         Account $account,
         ?string $avatarUrl = null,
         bool $avatarResolved = false
-    ): array
-    {
+    ): array {
         return [
             'id' => (string) $account->_id,
             'name' => $account->name,

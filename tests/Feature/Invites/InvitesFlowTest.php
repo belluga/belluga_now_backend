@@ -363,7 +363,7 @@ class InvitesFlowTest extends TestCaseTenant
         $sendResponse->assertJsonPath('created.0.receiver_user_id', (string) $this->receiver->_id);
     }
 
-    public function test_share_accept_works_for_anonymous_user(): void
+    public function test_share_accept_rejects_anonymous_user(): void
     {
         Sanctum::actingAs($this->sender, ['*']);
 
@@ -386,13 +386,38 @@ class InvitesFlowTest extends TestCaseTenant
 
         $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
 
+        $acceptResponse->assertStatus(401);
+        $acceptResponse->assertJsonPath('status', 'rejected');
+        $acceptResponse->assertJsonPath('code', 'auth_required');
+
+        $edge = InviteEdge::query()
+            ->where('receiver_user_id', (string) $anonymous->_id)
+            ->where('source', 'share_url')
+            ->first();
+        $this->assertNull($edge);
+    }
+
+    public function test_share_accept_works_for_authenticated_user(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+        $this->assertNotSame('', $code);
+
+        $authenticated = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($authenticated, []);
+        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
         $acceptResponse->assertOk();
         $acceptResponse->assertJsonPath('status', 'accepted');
         $acceptResponse->assertJsonPath('attribution_bound', true);
         $acceptResponse->assertJsonPath('inviter_principal.kind', 'user');
 
         $edge = InviteEdge::query()
-            ->where('receiver_user_id', (string) $anonymous->_id)
+            ->where('receiver_user_id', (string) $authenticated->_id)
             ->where('source', 'share_url')
             ->first();
         $this->assertNotNull($edge);
@@ -409,15 +434,8 @@ class InvitesFlowTest extends TestCaseTenant
         $shareResponse->assertOk();
         $code = (string) $shareResponse->json('code');
 
-        $anonymous = AccountUser::query()->create([
-            'identity_state' => 'anonymous',
-            'emails' => [],
-            'phones' => [],
-            'fingerprints' => [],
-            'credentials' => [],
-            'consents' => [],
-        ]);
-        Sanctum::actingAs($anonymous, []);
+        $authenticated = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($authenticated, []);
 
         $firstResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", [
             'idempotency_key' => 'share-accept-replay-001',
@@ -664,6 +682,19 @@ class InvitesFlowTest extends TestCaseTenant
             'email' => Str::slug($name).'-'.Str::random(6).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
+    }
+
+    private function createVerifiedIdentityUser(): AccountUser
+    {
+        return AccountUser::query()->create([
+            'identity_state' => 'verified',
+            'name' => 'Share Accept Auth '.Str::random(6),
+            'emails' => [Str::random(10).'@example.org'],
+            'phones' => [],
+            'fingerprints' => [],
+            'credentials' => [],
+            'consents' => [],
+        ]);
     }
 
     private function createEvent(): Event
