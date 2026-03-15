@@ -397,6 +397,62 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertNull($edge);
     }
 
+    public function test_share_preview_resolves_without_authentication(): void
+    {
+        $code = 'PREVIEW1234';
+        InviteShareCode::query()->create([
+            'code' => $code,
+            'event_id' => (string) $this->event->_id,
+            'occurrence_id' => null,
+            'inviter_principal' => [
+                'kind' => 'user',
+                'principal_id' => (string) $this->sender->_id,
+            ],
+            'issued_by_user_id' => (string) $this->sender->_id,
+            'account_profile_id' => null,
+            'inviter_display_name' => 'Sender User',
+            'inviter_avatar_url' => 'https://example.com/sender.png',
+            'expires_at' => Carbon::now()->addDay(),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}invites/share/{$code}");
+
+        $response->assertOk();
+        $response->assertJsonPath('code', $code);
+        $response->assertJsonPath('inviter_principal.kind', 'user');
+        $response->assertJsonPath('invite.target_ref.event_id', (string) $this->event->_id);
+        $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Sender User');
+        $response->assertJsonPath('invite.inviter_candidates.0.status', 'pending');
+    }
+
+    public function test_share_preview_rejects_unknown_or_expired_code(): void
+    {
+        $missingResponse = $this->getJson("{$this->base_api_tenant}invites/share/MISSING1234");
+        $missingResponse->assertStatus(404);
+        $missingResponse->assertJsonPath('status', 'rejected');
+        $missingResponse->assertJsonPath('code', 'invite_share_not_found');
+
+        InviteShareCode::query()->create([
+            'code' => 'EXPIRED123',
+            'event_id' => (string) $this->event->_id,
+            'occurrence_id' => null,
+            'inviter_principal' => [
+                'kind' => 'user',
+                'principal_id' => (string) $this->sender->_id,
+            ],
+            'issued_by_user_id' => (string) $this->sender->_id,
+            'account_profile_id' => null,
+            'inviter_display_name' => 'Sender User',
+            'inviter_avatar_url' => null,
+            'expires_at' => Carbon::now()->subMinute(),
+        ]);
+
+        $expiredResponse = $this->getJson("{$this->base_api_tenant}invites/share/EXPIRED123");
+        $expiredResponse->assertStatus(404);
+        $expiredResponse->assertJsonPath('status', 'rejected');
+        $expiredResponse->assertJsonPath('code', 'invite_share_not_found');
+    }
+
     public function test_share_accept_works_for_authenticated_user(): void
     {
         Sanctum::actingAs($this->sender, ['*']);

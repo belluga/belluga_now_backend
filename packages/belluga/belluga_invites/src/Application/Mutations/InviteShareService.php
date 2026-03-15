@@ -108,6 +108,89 @@ class InviteShareService
     /**
      * @return array<string, mixed>
      */
+    public function preview(string $code): array
+    {
+        $normalizedCode = strtoupper(trim($code));
+        if ($normalizedCode === '') {
+            throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        /** @var InviteShareCode|null $share */
+        $share = InviteShareCode::query()
+            ->where('code', $normalizedCode)
+            ->first();
+        if (! $share || $this->isExpired($share)) {
+            throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        $target = $this->targetResolver->resolve([
+            'event_id' => (string) $share->event_id,
+            'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+        ]);
+        $principal = $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []);
+        $inviterDisplayName = trim((string) ($share->inviter_display_name ?? ''));
+        if ($inviterDisplayName === '') {
+            $inviterDisplayName = 'Um amigo';
+        }
+        $targetRef = [
+            'event_id' => (string) $target['target_ref']['event_id'],
+            'occurrence_id' => $target['target_ref']['occurrence_id'],
+        ];
+        $eventDate = $target['event_snapshot']['event_date'] instanceof Carbon
+            ? $target['event_snapshot']['event_date']
+            : Carbon::now();
+        $eventImageUrl = trim((string) ($target['event_snapshot']['event_image_url'] ?? ''));
+        if ($eventImageUrl === '') {
+            $eventImageUrl = 'https://example.com/invite-preview.jpg';
+        }
+        $location = trim((string) ($target['event_snapshot']['location'] ?? ''));
+        if (mb_strlen($location) < 3) {
+            $location = 'Guarapari';
+        }
+        $hostName = trim((string) ($target['event_snapshot']['host_name'] ?? ''));
+        if (mb_strlen($hostName) < 3) {
+            $hostName = 'Belluga';
+        }
+        $eventName = trim((string) ($target['event_snapshot']['event_name'] ?? ''));
+        if (mb_strlen($eventName) < 5) {
+            $eventName = 'Convite Belluga';
+        }
+
+        return [
+            'tenant_id' => $this->runtimeSettings->settingsPayload()['tenant_id'],
+            'code' => $normalizedCode,
+            'target_ref' => $targetRef,
+            'inviter_principal' => $principal,
+            'invite' => [
+                'id' => 'share:'.$normalizedCode,
+                'target_ref' => $targetRef,
+                'event_name' => $eventName,
+                'event_date' => $eventDate->toISOString(),
+                'event_image_url' => $eventImageUrl,
+                'location' => $location,
+                'host_name' => $hostName,
+                'message' => 'Entre para aceitar ou recusar o convite.',
+                'tags' => is_array($target['event_snapshot']['tags'] ?? null)
+                    ? array_values(array_map('strval', $target['event_snapshot']['tags']))
+                    : [],
+                'attendance_policy' => (string) ($target['event_snapshot']['attendance_policy'] ?? 'free_confirmation_only'),
+                'inviter_candidates' => [[
+                    'invite_id' => 'share:'.$normalizedCode,
+                    'inviter_principal' => $principal,
+                    'display_name' => $inviterDisplayName,
+                    'avatar_url' => $share->inviter_avatar_url,
+                    'status' => 'pending',
+                ]],
+                'social_proof' => [
+                    'additional_inviter_count' => 0,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     public function accept(mixed $user, string $code, ?string $idempotencyKey = null): array
     {
         $userId = $this->userId($user);

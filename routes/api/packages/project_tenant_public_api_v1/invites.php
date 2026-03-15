@@ -10,6 +10,8 @@ use Belluga\Invites\Http\Api\v1\Controllers\InviteRealtimeStreamController;
 use Belluga\Invites\Http\Api\v1\Controllers\InviteShareController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/invites/share/{code}', [InviteShareController::class, 'show']);
+
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function (): void {
         Route::get('/invites', [InviteFeedController::class, 'index']);
