@@ -13,6 +13,7 @@ class TenantSettings extends PackageTenantSettings
         'map_ingest',
         'map_security',
         'events',
+        'app_links',
     ];
 
     /**
@@ -43,6 +44,14 @@ class TenantSettings extends PackageTenantSettings
      * @return array<string, mixed>
      */
     public function getMapSecurityAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getAppLinksAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

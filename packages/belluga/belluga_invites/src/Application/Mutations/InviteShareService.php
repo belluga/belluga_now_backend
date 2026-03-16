@@ -297,6 +297,7 @@ class InviteShareService
             $userId,
             $this->inviteEdgeId($existing)
         );
+        $attributionBound = (bool) ($acceptance['credited_acceptance'] ?? false);
         $nextStep = (string) ($acceptance['next_step'] ?? 'none');
         if (in_array($nextStep, ['reservation_required', 'commitment_choice_required'], true)) {
             $nextStep = 'open_app_to_continue';
@@ -309,7 +310,7 @@ class InviteShareService
                 'code' => (string) $share->code,
                 'invite_id' => (string) $acceptance['invite_id'],
                 'status' => (string) $acceptance['status'],
-                'attribution_bound' => in_array((string) $acceptance['status'], ['accepted', 'already_accepted'], true),
+                'attribution_bound' => $attributionBound,
                 'target_ref' => $acceptance['target_ref'] ?? null,
             ],
             idempotencyKey: 'invite.share_code_accepted:'.(string) $share->code.':'.$userId,
@@ -329,7 +330,8 @@ class InviteShareService
             'status' => $acceptance['status'],
             'attendance_policy' => $acceptance['attendance_policy'],
             'next_step' => $nextStep,
-            'attribution_bound' => in_array($acceptance['status'], ['accepted', 'already_accepted'], true),
+            'attribution_bound' => $attributionBound,
+            'superseded_invite_ids' => array_values($acceptance['superseded_invite_ids'] ?? []),
             'accepted_at' => $acceptance['accepted_at'],
         ];
     }

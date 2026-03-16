@@ -15,6 +15,8 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('tenant-maybe')->group(function () {
+    Route::get('/.well-known/assetlinks.json', [BrandingController::class, 'getAssetLinks']);
+    Route::get('/.well-known/apple-app-site-association', [BrandingController::class, 'getAppleAppSiteAssociation']);
     Route::get('/account-profiles/{account_profile}/avatar', [AccountProfileMediaController::class, 'avatar']);
     Route::get('/account-profiles/{account_profile}/cover', [AccountProfileMediaController::class, 'cover']);
     Route::get('/static-assets/{static_asset}/avatar', [StaticAssetMediaController::class, 'avatar']);

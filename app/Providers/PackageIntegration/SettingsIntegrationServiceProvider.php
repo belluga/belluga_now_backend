@@ -55,5 +55,60 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
             descriptionI18nKey: 'settings.telemetry.namespace.description',
             icon: 'analytics',
         ));
+
+        $registry->register(new SettingsNamespaceDefinition(
+            namespace: 'app_links',
+            scope: 'tenant',
+            label: 'App Links',
+            groupLabel: 'Mobile',
+            ability: 'push-settings:update',
+            fields: [
+                'android.package_name' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'Android Package Name',
+                    'label_i18n_key' => 'settings.app_links.android.package_name.label',
+                    'default' => '',
+                    'order' => 10,
+                ],
+                'android.sha256_cert_fingerprints' => [
+                    'type' => 'array',
+                    'nullable' => false,
+                    'label' => 'Android SHA-256 Fingerprints',
+                    'label_i18n_key' => 'settings.app_links.android.sha256_cert_fingerprints.label',
+                    'default' => [],
+                    'order' => 20,
+                ],
+                'ios.team_id' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'label' => 'Apple Team ID',
+                    'label_i18n_key' => 'settings.app_links.ios.team_id.label',
+                    'default' => null,
+                    'order' => 30,
+                ],
+                'ios.bundle_id' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'label' => 'iOS Bundle ID',
+                    'label_i18n_key' => 'settings.app_links.ios.bundle_id.label',
+                    'default' => null,
+                    'order' => 40,
+                ],
+                'ios.paths' => [
+                    'type' => 'array',
+                    'nullable' => false,
+                    'label' => 'iOS Universal Link Paths',
+                    'label_i18n_key' => 'settings.app_links.ios.paths.label',
+                    'default' => ['/invite*', '/convites*'],
+                    'order' => 50,
+                ],
+            ],
+            order: 40,
+            labelI18nKey: 'settings.app_links.namespace.label',
+            description: 'Per-tenant Android App Links and iOS Universal Links association credentials.',
+            descriptionI18nKey: 'settings.app_links.namespace.description',
+            icon: 'link',
+        ));
     }
 }

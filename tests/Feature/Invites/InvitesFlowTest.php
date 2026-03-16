@@ -184,13 +184,14 @@ class InvitesFlowTest extends TestCaseTenant
         $acceptResponse->assertOk();
         $acceptResponse->assertJsonPath('status', 'accepted');
         $acceptResponse->assertJsonPath('credited_acceptance', true);
-        $acceptResponse->assertJsonPath('closed_duplicate_invite_ids.0', $secondInviteId);
+        $acceptResponse->assertJsonPath('superseded_invite_ids.0', $secondInviteId);
 
         $firstEdge = InviteEdge::query()->find($firstInviteId);
         $secondEdge = InviteEdge::query()->find($secondInviteId);
         $this->assertSame('accepted', (string) $firstEdge?->status);
         $this->assertTrue((bool) $firstEdge?->credited_acceptance);
-        $this->assertSame('closed_duplicate', (string) $secondEdge?->status);
+        $this->assertSame('superseded', (string) $secondEdge?->status);
+        $this->assertSame('other_invite_credited', (string) $secondEdge?->supersession_reason);
 
         $metric = PrincipalSocialMetric::query()
             ->where('principal_kind', 'user')
@@ -237,7 +238,7 @@ class InvitesFlowTest extends TestCaseTenant
         $secondResponse->assertOk();
         $secondResponse->assertJsonPath('status', 'accepted');
         $secondResponse->assertJsonPath('invite_id', $firstResponse->json('invite_id'));
-        $secondResponse->assertJsonPath('closed_duplicate_invite_ids.0', $secondInviteId);
+        $secondResponse->assertJsonPath('superseded_invite_ids.0', $secondInviteId);
 
         $metric = PrincipalSocialMetric::query()
             ->where('principal_kind', 'user')
@@ -272,6 +273,38 @@ class InvitesFlowTest extends TestCaseTenant
             ->first();
         $this->assertNotNull($metric);
         $this->assertSame(1, (int) $metric->credited_invite_acceptances);
+    }
+
+    public function test_direct_confirmation_superseded_invite_cannot_late_bind_attribution(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+            'recipients' => [
+                ['receiver_user_id' => (string) $this->receiver->_id],
+            ],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $this->postJson("{$this->base_api_tenant}events/{$this->event->_id}/attendance/confirm", [])
+            ->assertOk();
+
+        $inviteAfterConfirmation = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($inviteAfterConfirmation);
+        $this->assertSame('superseded', (string) $inviteAfterConfirmation->status);
+        $this->assertSame('direct_confirmation', (string) $inviteAfterConfirmation->supersession_reason);
+        $this->assertFalse((bool) $inviteAfterConfirmation->credited_acceptance);
+
+        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+        $acceptResponse->assertOk();
+        $acceptResponse->assertJsonPath('status', 'already_accepted');
+        $acceptResponse->assertJsonPath('credited_acceptance', false);
+
+        $inviteAfterLateAccept = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($inviteAfterLateAccept);
+        $this->assertSame('superseded', (string) $inviteAfterLateAccept->status);
+        $this->assertSame('direct_confirmation', (string) $inviteAfterLateAccept->supersession_reason);
+        $this->assertFalse((bool) $inviteAfterLateAccept->credited_acceptance);
     }
 
     public function test_accept_invite_rejects_idempotency_key_reused_for_another_invite(): void

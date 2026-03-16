@@ -99,6 +99,19 @@ class SettingsKernelControllerTest extends TestCaseTenant
                 'location_freshness_minutes' => 5,
                 'trackers' => [],
             ],
+            'app_links' => [
+                'android' => [
+                    'package_name' => 'com.tenant.omega',
+                    'sha256_cert_fingerprints' => [
+                        'AA:BB:CC:DD',
+                    ],
+                ],
+                'ios' => [
+                    'team_id' => 'ABCDE12345',
+                    'bundle_id' => 'com.tenant.omega',
+                    'paths' => ['/invite*'],
+                ],
+            ],
         ]);
 
         [$this->account] = $this->seedAccountWithRole([
@@ -136,6 +149,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('events', $namespaces);
         $this->assertContains('push', $namespaces);
         $this->assertContains('telemetry', $namespaces);
+        $this->assertContains('app_links', $namespaces);
     }
 
     public function test_settings_values_endpoint_returns_namespace_values(): void
@@ -155,6 +169,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
+        $response->assertJsonPath('data.app_links.android.package_name', 'com.tenant.omega');
+        $response->assertJsonPath('data.app_links.android.sha256_cert_fingerprints.0', 'AA:BB:CC:DD');
+        $response->assertJsonPath('data.app_links.ios.team_id', 'ABCDE12345');
     }
 
     public function test_patch_namespace_applies_partial_merge_by_field_presence(): void
