@@ -84,7 +84,6 @@ class DeepLinkAssociationService
     }
 
     /**
-     * @param  mixed  $value
      * @return array<int, string>
      */
     private function normalizeFingerprints(mixed $value): array
@@ -109,7 +108,6 @@ class DeepLinkAssociationService
     }
 
     /**
-     * @param  mixed  $value
      * @return array<int, string>
      */
     private function normalizePaths(mixed $value): array
@@ -167,4 +165,3 @@ class DeepLinkAssociationService
         return [];
     }
 }
-
