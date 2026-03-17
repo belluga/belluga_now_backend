@@ -22,12 +22,12 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.app');
 
         TenantSettings::query()->delete();
         TenantSettings::create([
             'app_links' => [
                 'android' => [
-                    'package_name' => 'com.guarappari.app',
                     'sha256_cert_fingerprints' => [
                         '3e:72:4c:54:e9:53:26:7d:e6:e1:9b:f8:dc:53:30:2a:08:01:8e:36:40:4d:0c:ca:98:3b:46:84:53:e7:a9:a9',
                     ],
@@ -52,13 +52,13 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_IOS, 'com.guarappari.app');
 
         TenantSettings::query()->delete();
         TenantSettings::create([
             'app_links' => [
                 'ios' => [
                     'team_id' => 'ABCDE12345',
-                    'bundle_id' => 'com.guarappari.app',
                     'paths' => ['/invite*', '/convites*'],
                 ],
             ],
@@ -78,6 +78,9 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        $tenant->domains()
+            ->whereIn('type', [Tenant::DOMAIN_TYPE_APP_ANDROID, Tenant::DOMAIN_TYPE_APP_IOS])
+            ->delete();
 
         TenantSettings::query()->delete();
         TenantSettings::create([
@@ -102,13 +105,13 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.tenant.priority');
 
         LandlordSettings::query()->delete();
         LandlordSettings::query()->create([
             '_id' => LandlordSettings::ROOT_ID,
             'app_links' => [
                 'android' => [
-                    'package_name' => 'com.landlord.fallback',
                     'sha256_cert_fingerprints' => [
                         '00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF',
                     ],
@@ -120,7 +123,6 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
         TenantSettings::create([
             'app_links' => [
                 'android' => [
-                    'package_name' => 'com.tenant.priority',
                     'sha256_cert_fingerprints' => [
                         'FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00:FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00',
                     ],
@@ -137,5 +139,24 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
             '0.target.sha256_cert_fingerprints.0',
             'FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00:FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00'
         );
+    }
+
+    private function upsertTypedAppDomain(Tenant $tenant, string $type, string $identifier): void
+    {
+        $existing = $tenant->domains()
+            ->where('type', $type)
+            ->first();
+
+        if ($existing === null) {
+            $tenant->domains()->create([
+                'type' => $type,
+                'path' => $identifier,
+            ]);
+
+            return;
+        }
+
+        $existing->path = $identifier;
+        $existing->save();
     }
 }

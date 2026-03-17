@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Settings\Application;
 
+use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
@@ -17,6 +18,7 @@ class SettingsKernelService
         private readonly SettingsRegistryContract $registry,
         private readonly SettingsStoreContract $store,
         private readonly SettingsSchemaValidatorContract $validator,
+        private readonly SettingsNamespacePatchGuardContract $patchGuard,
     ) {}
 
     /**
@@ -66,6 +68,8 @@ class SettingsKernelService
         if (! $this->canAccess($user, $definition)) {
             throw new AuthorizationException('Not authorized for this settings namespace.');
         }
+
+        $this->patchGuard->guard($scope, $user, $namespace, $payload, $definition);
 
         $changes = $this->validator->validatePatch($definition, $payload);
 

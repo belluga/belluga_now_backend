@@ -396,7 +396,7 @@ class InvitesFlowTest extends TestCaseTenant
         $sendResponse->assertJsonPath('created.0.receiver_user_id', (string) $this->receiver->_id);
     }
 
-    public function test_share_accept_rejects_anonymous_user(): void
+    public function test_share_materialize_rejects_anonymous_user(): void
     {
         Sanctum::actingAs($this->sender, ['*']);
 
@@ -417,11 +417,11 @@ class InvitesFlowTest extends TestCaseTenant
         ]);
         Sanctum::actingAs($anonymous, []);
 
-        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
 
-        $acceptResponse->assertStatus(401);
-        $acceptResponse->assertJsonPath('status', 'rejected');
-        $acceptResponse->assertJsonPath('code', 'auth_required');
+        $materializeResponse->assertStatus(401);
+        $materializeResponse->assertJsonPath('status', 'rejected');
+        $materializeResponse->assertJsonPath('code', 'auth_required');
 
         $edge = InviteEdge::query()
             ->where('receiver_user_id', (string) $anonymous->_id)
@@ -486,7 +486,7 @@ class InvitesFlowTest extends TestCaseTenant
         $expiredResponse->assertJsonPath('code', 'invite_share_not_found');
     }
 
-    public function test_share_accept_works_for_authenticated_user(): void
+    public function test_share_materialize_creates_pending_invite_for_authenticated_user(): void
     {
         Sanctum::actingAs($this->sender, ['*']);
 
@@ -499,22 +499,111 @@ class InvitesFlowTest extends TestCaseTenant
 
         $authenticated = $this->createVerifiedIdentityUser();
         Sanctum::actingAs($authenticated, []);
-        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
-        $acceptResponse->assertOk();
-        $acceptResponse->assertJsonPath('status', 'accepted');
-        $acceptResponse->assertJsonPath('attribution_bound', true);
-        $acceptResponse->assertJsonPath('inviter_principal.kind', 'user');
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+        $materializeResponse->assertOk();
+        $materializeResponse->assertJsonPath('status', 'pending');
+        $materializeResponse->assertJsonPath('credited_acceptance', false);
+        $materializeResponse->assertJsonPath('inviter_principal.kind', 'user');
 
         $edge = InviteEdge::query()
             ->where('receiver_user_id', (string) $authenticated->_id)
             ->where('source', 'share_url')
             ->first();
         $this->assertNotNull($edge);
+        $this->assertSame('pending', (string) $edge->status);
+        $this->assertFalse((bool) $edge->credited_acceptance);
+    }
+
+    public function test_share_materialize_reuses_existing_invite_edge_for_same_user_inviter_and_target(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+        $this->assertNotSame('', $code);
+
+        $authenticated = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($authenticated, []);
+
+        $firstResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+        $firstResponse->assertOk();
+        $firstResponse->assertJsonPath('status', 'pending');
+
+        $secondResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+        $secondResponse->assertOk();
+        $secondResponse->assertJsonPath('status', 'pending');
+        $secondResponse->assertJsonPath('invite_id', $firstResponse->json('invite_id'));
+
+        $edges = InviteEdge::query()
+            ->where('receiver_user_id', (string) $authenticated->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('source', 'share_url')
+            ->get();
+
+        $this->assertCount(1, $edges);
+    }
+
+    public function test_share_materialize_then_standard_accept_is_canonical(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+
+        $authenticated = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($authenticated, []);
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+        $materializeResponse->assertOk();
+        $materializeResponse->assertJsonPath('status', 'pending');
+
+        $inviteId = (string) $materializeResponse->json('invite_id');
+        $this->assertNotSame('', $inviteId);
+
+        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+        $acceptResponse->assertOk();
+        $acceptResponse->assertJsonPath('status', 'accepted');
+        $acceptResponse->assertJsonPath('credited_acceptance', true);
+
+        $edge = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($edge);
         $this->assertSame('accepted', (string) $edge->status);
         $this->assertTrue((bool) $edge->credited_acceptance);
     }
 
-    public function test_share_accept_replays_by_idempotency_key(): void
+    public function test_share_materialize_then_standard_decline_is_canonical(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+
+        $authenticated = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($authenticated, []);
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+        $materializeResponse->assertOk();
+        $materializeResponse->assertJsonPath('status', 'pending');
+
+        $inviteId = (string) $materializeResponse->json('invite_id');
+        $this->assertNotSame('', $inviteId);
+
+        $declineResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/decline", []);
+        $declineResponse->assertOk();
+        $declineResponse->assertJsonPath('status', 'declined');
+
+        $edge = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($edge);
+        $this->assertSame('declined', (string) $edge->status);
+        $this->assertFalse((bool) $edge->credited_acceptance);
+    }
+
+    public function test_share_materialize_replays_by_idempotency_key(): void
     {
         Sanctum::actingAs($this->sender, ['*']);
         $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
@@ -526,18 +615,52 @@ class InvitesFlowTest extends TestCaseTenant
         $authenticated = $this->createVerifiedIdentityUser();
         Sanctum::actingAs($authenticated, []);
 
-        $firstResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", [
-            'idempotency_key' => 'share-accept-replay-001',
+        $firstResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", [
+            'idempotency_key' => 'share-materialize-replay-001',
         ]);
         $firstResponse->assertOk();
-        $firstResponse->assertJsonPath('status', 'accepted');
+        $firstResponse->assertJsonPath('status', 'pending');
 
-        $secondResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", [
-            'idempotency_key' => 'share-accept-replay-001',
+        $secondResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", [
+            'idempotency_key' => 'share-materialize-replay-001',
         ]);
         $secondResponse->assertOk();
-        $secondResponse->assertJsonPath('status', 'accepted');
+        $secondResponse->assertJsonPath('status', 'pending');
         $secondResponse->assertJsonPath('invite_id', $firstResponse->json('invite_id'));
+    }
+
+    public function test_share_materialize_after_direct_confirmation_stays_superseded_and_cannot_late_bind_credit(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => ['event_id' => (string) $this->event->_id],
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+
+        $authenticated = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($authenticated, []);
+        $this->postJson("{$this->base_api_tenant}events/{$this->event->_id}/attendance/confirm", [])
+            ->assertOk();
+
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+        $materializeResponse->assertOk();
+        $materializeResponse->assertJsonPath('status', 'superseded');
+        $materializeResponse->assertJsonPath('credited_acceptance', false);
+
+        $inviteId = (string) $materializeResponse->json('invite_id');
+        $this->assertNotSame('', $inviteId);
+
+        $inviteEdge = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($inviteEdge);
+        $this->assertSame('superseded', (string) $inviteEdge->status);
+        $this->assertSame('direct_confirmation', (string) $inviteEdge->supersession_reason);
+        $this->assertFalse((bool) $inviteEdge->credited_acceptance);
+
+        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+        $acceptResponse->assertOk();
+        $acceptResponse->assertJsonPath('status', 'already_accepted');
+        $acceptResponse->assertJsonPath('credited_acceptance', false);
     }
 
     public function test_send_invite_requires_authentication(): void

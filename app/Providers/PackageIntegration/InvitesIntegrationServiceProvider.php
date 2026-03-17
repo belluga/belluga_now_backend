@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
+use App\Integration\Invites\InviteAttendanceGatewayAdapter;
 use App\Integration\Invites\InviteIdentityGatewayAdapter;
 use App\Integration\Invites\InviteTargetReadAdapter;
 use App\Integration\Invites\InviteTelemetryEmitterAdapter;
+use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
@@ -19,6 +21,11 @@ class InvitesIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             InviteIdentityGatewayContract::class,
             InviteIdentityGatewayAdapter::class
+        );
+
+        $this->app->bind(
+            InviteAttendanceGatewayContract::class,
+            InviteAttendanceGatewayAdapter::class
         );
 
         $this->app->bind(

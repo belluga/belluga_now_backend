@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Settings;
 
 use Belluga\Settings\Application\SettingsKernelService;
+use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
@@ -38,8 +39,9 @@ class SettingsKernelServiceTest extends TestCase
             ->andReturn([]);
 
         $validator = Mockery::mock(SettingsSchemaValidatorContract::class);
+        $patchGuard = Mockery::mock(SettingsNamespacePatchGuardContract::class);
 
-        $service = new SettingsKernelService($registry, $store, $validator);
+        $service = new SettingsKernelService($registry, $store, $validator, $patchGuard);
 
         $values = $service->values('tenant', null);
 
@@ -73,8 +75,12 @@ class SettingsKernelServiceTest extends TestCase
             ->andReturn([
                 'throttles' => null,
             ]);
+        $patchGuard = Mockery::mock(SettingsNamespacePatchGuardContract::class);
+        $patchGuard->shouldReceive('guard')
+            ->with('tenant', null, 'push', ['throttles' => null], $definition)
+            ->once();
 
-        $service = new SettingsKernelService($registry, $store, $validator);
+        $service = new SettingsKernelService($registry, $store, $validator, $patchGuard);
 
         $values = $service->patchNamespace('tenant', null, 'push', [
             'throttles' => null,
@@ -96,8 +102,9 @@ class SettingsKernelServiceTest extends TestCase
 
         $store = Mockery::mock(SettingsStoreContract::class);
         $validator = Mockery::mock(SettingsSchemaValidatorContract::class);
+        $patchGuard = Mockery::mock(SettingsNamespacePatchGuardContract::class);
 
-        $service = new SettingsKernelService($registry, $store, $validator);
+        $service = new SettingsKernelService($registry, $store, $validator, $patchGuard);
 
         $this->expectException(SettingsNamespaceNotFoundException::class);
         $this->expectExceptionMessage('Settings namespace [missing] was not found for scope [tenant].');

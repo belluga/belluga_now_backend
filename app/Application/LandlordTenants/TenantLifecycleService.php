@@ -31,7 +31,7 @@ class TenantLifecycleService
                 'main_domain' => $tenant->getMainDomain(),
                 'domains' => $tenant->resolvedDomains(),
                 'database' => $tenant->database,
-                'app_domains' => $tenant->app_domains,
+                'app_domains' => $tenant->resolvedAppDomains(),
                 'created_at' => $tenant->created_at?->toJSON(),
                 'updated_at' => $tenant->updated_at?->toJSON(),
                 'deleted_at' => $tenant->deleted_at?->toJSON(),

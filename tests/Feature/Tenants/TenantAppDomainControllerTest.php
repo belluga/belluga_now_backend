@@ -40,7 +40,19 @@ class TenantAppDomainControllerTest extends TestCaseTenant
         }
 
         $this->tenantModel = Tenant::query()->firstOrFail();
-        $this->tenantModel->update(['app_domains' => ['tenanttheta.app']]);
+        $existingAndroid = $this->tenantModel->domains()
+            ->where('type', Tenant::DOMAIN_TYPE_APP_ANDROID)
+            ->first();
+
+        if ($existingAndroid === null) {
+            $this->tenantModel->domains()->create([
+                'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+                'path' => 'tenanttheta.app',
+            ]);
+        } else {
+            $existingAndroid->path = 'tenanttheta.app';
+            $existingAndroid->save();
+        }
         $this->tenantModel->makeCurrent();
         $this->baseUrl = "{$this->base_tenant_api_admin}appdomains";
 
@@ -55,36 +67,82 @@ class TenantAppDomainControllerTest extends TestCaseTenant
 
         $response->assertOk();
         $response->assertJson([
-            'app_domains' => ['tenanttheta.app'],
+            'app_domains' => [
+                'android' => 'tenanttheta.app',
+                'ios' => null,
+            ],
         ]);
     }
 
-    public function test_store_appends_domain(): void
+    public function test_store_upserts_domain_for_platform(): void
     {
         $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
-            'app_domain' => 'tenanttheta.mobile',
+            'platform' => 'android',
+            'identifier' => 'tenanttheta.mobile',
         ]);
 
         $response->assertOk();
         $response->assertJson([
-            'message' => 'App domains added successfully.',
-            'app_domains' => ['tenanttheta.app', 'tenanttheta.mobile'],
+            'message' => 'App domain identifier saved successfully.',
+            'app_domains' => [
+                'android' => 'tenanttheta.mobile',
+                'ios' => null,
+            ],
         ]);
     }
 
-    public function test_destroy_removes_domain(): void
+    public function test_store_sets_ios_identifier(): void
     {
-        $this->tenantModel->update(['app_domains' => ['tenanttheta.app', 'removethis.app']]);
-
-        $response = $this->withHeaders($this->headers)->deleteJson($this->baseUrl, [
-            'app_domain' => 'removethis.app',
+        $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
+            'platform' => 'ios',
+            'identifier' => 'com.boora.tenanttheta',
         ]);
 
         $response->assertOk();
         $response->assertJson([
-            'message' => 'App domains deleted successfully.',
-            'app_domains' => ['tenanttheta.app'],
+            'message' => 'App domain identifier saved successfully.',
+            'app_domains' => [
+                'android' => 'tenanttheta.app',
+                'ios' => 'com.boora.tenanttheta',
+            ],
         ]);
+    }
+
+    public function test_destroy_removes_domain_for_platform(): void
+    {
+        $this->upsertTypedAppDomain(Tenant::DOMAIN_TYPE_APP_IOS, 'com.boora.tenanttheta');
+
+        $response = $this->withHeaders($this->headers)->deleteJson($this->baseUrl, [
+            'platform' => 'ios',
+        ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'message' => 'App domain identifier removed successfully.',
+            'app_domains' => [
+                'android' => 'tenanttheta.app',
+                'ios' => null,
+            ],
+        ]);
+    }
+
+    private function upsertTypedAppDomain(string $type, string $identifier): void
+    {
+        $existing = $this->tenantModel->domains()
+            ->where('type', $type)
+            ->first();
+
+        if ($existing === null) {
+            $this->tenantModel->domains()->create([
+                'type' => $type,
+                'path' => $identifier,
+            ]);
+
+            return;
+        }
+
+        $existing->path = $identifier;
+        $existing->save();
     }
 
     private function initializeSystem(): void

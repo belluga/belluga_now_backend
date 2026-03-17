@@ -10,6 +10,7 @@ use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
+use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
@@ -25,6 +26,7 @@ class InviteMutationService
 
     public function __construct(
         private readonly InviteTransactionRunner $transactions,
+        private readonly InviteAttendanceGatewayContract $attendanceGateway,
         private readonly InviteIdentityGatewayContract $identityGateway,
         private readonly InviteTelemetryEmitterContract $telemetry,
         private readonly InviteTargetResolverService $targetResolver,
@@ -312,6 +314,42 @@ class InviteMutationService
             (string) $edge->status === 'superseded' &&
             (string) ($edge->supersession_reason ?? '') === self::SUPERSESSION_REASON_DIRECT_CONFIRMATION
         ) {
+            $this->telemetry->emit(
+                event: 'invite.accepted',
+                userId: $userId,
+                properties: [
+                    'invite_id' => (string) $edge->getAttribute('_id'),
+                    'status' => 'already_accepted',
+                    'credited_acceptance' => false,
+                    'target_ref' => $this->targetRef($edge),
+                ],
+                idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
+                source: 'invite_api',
+                context: [
+                    'actor' => ['type' => 'user', 'id' => $userId],
+                    'target' => ['type' => 'user', 'id' => $userId],
+                    'object' => ['type' => 'event', 'id' => (string) $edge->event_id],
+                ],
+            );
+
+            return $this->acceptResponse($edge, 'already_accepted', [], false);
+        }
+
+        if ($this->attendanceGateway->hasActiveAttendanceConfirmation(
+            $userId,
+            (string) $edge->event_id,
+            $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+        )) {
+            if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
+                $edge->fill([
+                    'status' => 'superseded',
+                    'supersession_reason' => self::SUPERSESSION_REASON_DIRECT_CONFIRMATION,
+                    'credited_acceptance' => false,
+                ]);
+                $edge->save();
+                $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($edge));
+            }
+
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,

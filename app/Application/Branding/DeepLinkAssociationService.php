@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Branding;
 
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Illuminate\Support\Arr;
@@ -17,7 +18,7 @@ class DeepLinkAssociationService
     {
         $settings = $this->resolveAppLinksSettings();
 
-        $packageName = trim((string) data_get($settings, 'android.package_name', ''));
+        $packageName = $this->resolveAndroidPackageName($settings);
         $fingerprints = $this->normalizeFingerprints(data_get($settings, 'android.sha256_cert_fingerprints', []));
 
         if ($packageName === '' || $fingerprints === []) {
@@ -42,7 +43,7 @@ class DeepLinkAssociationService
         $settings = $this->resolveAppLinksSettings();
 
         $teamId = trim((string) data_get($settings, 'ios.team_id', ''));
-        $bundleId = trim((string) data_get($settings, 'ios.bundle_id', ''));
+        $bundleId = $this->resolveIosBundleId($settings);
         $paths = $this->normalizePaths(data_get($settings, 'ios.paths', ['/invite*', '/convites*']));
 
         if ($teamId === '' || $bundleId === '') {
@@ -81,6 +82,38 @@ class DeepLinkAssociationService
         }
 
         return [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     */
+    private function resolveAndroidPackageName(array $settings): string
+    {
+        $tenant = Tenant::current();
+        if ($tenant !== null) {
+            $typed = $tenant->appDomainIdentifierForPlatform(Tenant::APP_PLATFORM_ANDROID);
+            if (is_string($typed) && trim($typed) !== '') {
+                return trim($typed);
+            }
+        }
+
+        return trim((string) data_get($settings, 'android.package_name', ''));
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     */
+    private function resolveIosBundleId(array $settings): string
+    {
+        $tenant = Tenant::current();
+        if ($tenant !== null) {
+            $typed = $tenant->appDomainIdentifierForPlatform(Tenant::APP_PLATFORM_IOS);
+            if (is_string($typed) && trim($typed) !== '') {
+                return trim($typed);
+            }
+        }
+
+        return trim((string) data_get($settings, 'ios.bundle_id', ''));
     }
 
     /**
