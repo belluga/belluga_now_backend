@@ -17,6 +17,7 @@ use Belluga\Invites\Application\Realtime\InviteRealtimeStreamService;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
+use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
@@ -42,6 +43,7 @@ class InvitesServiceProvider extends ServiceProvider
         $this->app->singleton(ContactImportService::class);
 
         $this->ensureHostBinding(InviteIdentityGatewayContract::class);
+        $this->ensureHostBinding(InviteAttendanceGatewayContract::class);
         $this->ensureHostBinding(InviteTelemetryEmitterContract::class);
         $this->ensureHostBinding(InviteTargetReadContract::class);
     }

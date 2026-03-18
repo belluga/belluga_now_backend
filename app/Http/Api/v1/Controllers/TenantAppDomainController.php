@@ -28,8 +28,14 @@ class TenantAppDomainController extends Controller
     public function store(TenantAppDomainRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $appDomain = $request->validated()['app_domain'];
-        $domains = $this->appDomainService->add($tenant, $appDomain);
+        $validated = $request->validated();
+        $platform = isset($validated['platform']) && is_string($validated['platform'])
+            ? $validated['platform']
+            : Tenant::APP_PLATFORM_ANDROID;
+        $identifier = isset($validated['identifier']) && is_string($validated['identifier'])
+            ? $validated['identifier']
+            : (string) ($validated['app_domain'] ?? '');
+        $domains = $this->appDomainService->upsert($tenant, $platform, $identifier);
 
         $user = $request->user();
         if ($user) {
@@ -37,14 +43,15 @@ class TenantAppDomainController extends Controller
                 event: 'app_domain_added',
                 userId: (string) $user->_id,
                 properties: [
-                    'domain' => $appDomain,
+                    'platform' => $platform,
+                    'identifier' => $identifier,
                 ],
                 idempotencyKey: $request->header('X-Request-Id')
             );
         }
 
         return response()->json([
-            'message' => 'App domains added successfully.',
+            'message' => 'App domain identifier saved successfully.',
             'app_domains' => $domains,
         ]);
     }
@@ -52,8 +59,11 @@ class TenantAppDomainController extends Controller
     public function destroy(TenantAppDomainRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $appDomain = $request->validated()['app_domain'];
-        $domains = $this->appDomainService->remove($tenant, $appDomain);
+        $validated = $request->validated();
+        $platform = isset($validated['platform']) && is_string($validated['platform'])
+            ? $validated['platform']
+            : Tenant::APP_PLATFORM_ANDROID;
+        $domains = $this->appDomainService->remove($tenant, $platform);
 
         $user = $request->user();
         if ($user) {
@@ -61,14 +71,14 @@ class TenantAppDomainController extends Controller
                 event: 'app_domain_removed',
                 userId: (string) $user->_id,
                 properties: [
-                    'domain' => $appDomain,
+                    'platform' => $platform,
                 ],
                 idempotencyKey: $request->header('X-Request-Id')
             );
         }
 
         return response()->json([
-            'message' => 'App domains deleted successfully.',
+            'message' => 'App domain identifier removed successfully.',
             'app_domains' => $domains,
         ]);
     }

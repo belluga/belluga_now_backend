@@ -177,6 +177,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,
             'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
+            'invite-stage-test-support' => \App\Http\Middleware\EnsureInviteStageTestSupport::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

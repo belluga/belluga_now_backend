@@ -110,8 +110,7 @@ class AccountProfileMediaService
         AccountProfile $profile,
         string $kind,
         string|int|null $version = null,
-    ): string
-    {
+    ): string {
         $profileId = (string) $profile->_id;
         $base = rtrim($baseUrl, '/');
         $resolvedVersion = $version ?? ($profile->updated_at?->getTimestamp() ?? time());

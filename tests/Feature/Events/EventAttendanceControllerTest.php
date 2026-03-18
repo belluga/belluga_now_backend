@@ -14,7 +14,9 @@ use App\Models\Tenants\AttendanceCommitment;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Invites\Models\Tenants\InviteEdge;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -54,6 +56,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         AttendanceCommitment::query()->delete();
+        InviteEdge::query()->delete();
         EventOccurrence::query()->delete();
         Event::query()->delete();
 
@@ -113,6 +116,47 @@ class EventAttendanceControllerTest extends TestCaseTenant
 
         $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
         $response->assertStatus(401);
+        $this->assertDatabaseCount('attendance_commitments', 0);
+    }
+
+    public function test_confirm_supersedes_pending_invites_without_crediting_any_inviter(): void
+    {
+        $event = $this->createEvent();
+        $firstInviter = $this->createAccountUser('First Inviter');
+        $secondInviter = $this->createAccountUser('Second Inviter');
+
+        $firstInvite = $this->createPendingInvite(
+            inviter: $firstInviter,
+            receiver: $this->user,
+            event: $event,
+        );
+        $secondInvite = $this->createPendingInvite(
+            inviter: $secondInviter,
+            receiver: $this->user,
+            event: $event,
+        );
+
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+        $response->assertOk();
+        $response->assertJsonPath('status', 'active');
+
+        $firstInvite = $firstInvite->fresh();
+        $secondInvite = $secondInvite->fresh();
+
+        $this->assertSame('superseded', (string) $firstInvite?->status);
+        $this->assertSame('direct_confirmation', (string) $firstInvite?->supersession_reason);
+        $this->assertFalse((bool) $firstInvite?->credited_acceptance);
+
+        $this->assertSame('superseded', (string) $secondInvite?->status);
+        $this->assertSame('direct_confirmation', (string) $secondInvite?->supersession_reason);
+        $this->assertFalse((bool) $secondInvite?->credited_acceptance);
+
+        $creditedCount = InviteEdge::query()
+            ->where('receiver_user_id', (string) $this->user->_id)
+            ->where('event_id', (string) $event->_id)
+            ->where('credited_acceptance', true)
+            ->count();
+        $this->assertSame(0, $creditedCount);
     }
 
     public function test_confirm_returns_404_for_unknown_event(): void
@@ -141,7 +185,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
     private function createAccountUser(string $name): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
-            'name' => 'Attendance Test Role',
+            'name' => 'Attendance Test Role '.Str::random(6),
             'permissions' => ['*'],
         ]);
 
@@ -150,6 +194,39 @@ class EventAttendanceControllerTest extends TestCaseTenant
             'email' => uniqid('attendance-user', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
+    }
+
+    private function createPendingInvite(AccountUser $inviter, AccountUser $receiver, Event $event): InviteEdge
+    {
+        return InviteEdge::query()->create([
+            'event_id' => (string) $event->_id,
+            'occurrence_id' => null,
+            'receiver_user_id' => (string) $receiver->_id,
+            'receiver_contact_hash' => null,
+            'inviter_principal' => [
+                'kind' => 'user',
+                'principal_id' => (string) $inviter->_id,
+            ],
+            'account_profile_id' => null,
+            'issued_by_user_id' => (string) $inviter->_id,
+            'inviter_display_name' => (string) $inviter->name,
+            'inviter_avatar_url' => null,
+            'status' => 'pending',
+            'credited_acceptance' => false,
+            'source' => 'direct_invite',
+            'message' => 'Bora sim',
+            'event_name' => (string) $event->title,
+            'event_slug' => (string) $event->slug,
+            'event_date' => $event->date_time_start,
+            'event_image_url' => 'https://example.org/invite.jpg',
+            'location_label' => 'Venue Name',
+            'host_name' => 'Host Name',
+            'tags' => ['music'],
+            'attendance_policy' => 'free_confirmation_only',
+            'expires_at' => Carbon::now()->addDay(),
+            'accepted_at' => null,
+            'declined_at' => null,
+        ]);
     }
 
     private function createEvent(array $overrides = []): Event

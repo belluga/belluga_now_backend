@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions;
 
+use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Application\Tenants\TenantDomainResolverService;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
@@ -15,7 +16,10 @@ class DomainTenantFinder extends TenantFinder
 
     private ?Request $activeRequest = null;
 
-    public function __construct(private readonly TenantDomainResolverService $domainResolver) {}
+    public function __construct(
+        private readonly TenantDomainResolverService $domainResolver,
+        private readonly TenantAppDomainResolverService $appDomainResolver,
+    ) {}
 
     public function findForRequest(Request $request): ?IsTenant
     {
@@ -46,7 +50,7 @@ class DomainTenantFinder extends TenantFinder
             return null;
         }
 
-        return app(IsTenant::class)::where('app_domains', 'all', [$appDomain])->first();
+        return $this->appDomainResolver->findTenantByIdentifier($appDomain);
     }
 
     protected function findTenantByWebDomain(): ?IsTenant

@@ -6,6 +6,8 @@ storage/
 /public/build
 /public/hot
 /public/storage
+/public/.well-known/assetlinks.json
+/public/.well-known/apple-app-site-association
 /storage/*.key
 /storage/pail
 /vendor
@@ -23,6 +25,7 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+/.composer/
 
 # AI Local helper
 AGENTS.md

@@ -32,6 +32,16 @@ class Tenant extends BaseTenant
 {
     use DocumentModel, HasOwner, HasSlug, OwnRoles, SoftDeletes, UsesLandlordConnection;
 
+    public const DOMAIN_TYPE_WEB = 'web';
+
+    public const DOMAIN_TYPE_APP_ANDROID = 'app_android';
+
+    public const DOMAIN_TYPE_APP_IOS = 'app_ios';
+
+    public const APP_PLATFORM_ANDROID = 'android';
+
+    public const APP_PLATFORM_IOS = 'ios';
+
     protected $fillable = [
         'name',
         'slug',
@@ -94,6 +104,72 @@ class Tenant extends BaseTenant
     public function domains(): HasMany
     {
         return $this->hasMany(Domains::class);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function resolvedAppDomains(): array
+    {
+        $typed = array_values(array_filter($this->typedAppDomainIdentifiers()));
+        if ($typed !== []) {
+            return array_values(array_unique($typed));
+        }
+
+        return $this->legacyAppDomains();
+    }
+
+    /**
+     * @return array{android: ?string, ios: ?string}
+     */
+    public function typedAppDomainIdentifiers(): array
+    {
+        $domains = $this->domains()
+            ->whereIn('type', [
+                self::DOMAIN_TYPE_APP_ANDROID,
+                self::DOMAIN_TYPE_APP_IOS,
+            ])
+            ->orderBy('created_at')
+            ->get()
+            ->all();
+
+        $resolved = [
+            self::APP_PLATFORM_ANDROID => null,
+            self::APP_PLATFORM_IOS => null,
+        ];
+
+        foreach ($domains as $domain) {
+            if (! $domain instanceof Domains) {
+                continue;
+            }
+
+            $path = $this->normalizeDomainPath($domain->path);
+            if ($path === null) {
+                continue;
+            }
+
+            if ($domain->type === self::DOMAIN_TYPE_APP_ANDROID
+                && $resolved[self::APP_PLATFORM_ANDROID] === null) {
+                $resolved[self::APP_PLATFORM_ANDROID] = $path;
+            }
+
+            if ($domain->type === self::DOMAIN_TYPE_APP_IOS
+                && $resolved[self::APP_PLATFORM_IOS] === null) {
+                $resolved[self::APP_PLATFORM_IOS] = $path;
+            }
+        }
+
+        return $resolved;
+    }
+
+    public function appDomainIdentifierForPlatform(string $platform): ?string
+    {
+        $normalizedPlatform = Str::lower(trim($platform));
+        if (! in_array($normalizedPlatform, [self::APP_PLATFORM_ANDROID, self::APP_PLATFORM_IOS], true)) {
+            return null;
+        }
+
+        return $this->typedAppDomainIdentifiers()[$normalizedPlatform];
     }
 
     public static function resolve(): static
@@ -219,6 +295,7 @@ class Tenant extends BaseTenant
     private function explicitDomainsFromRelation(): array
     {
         $domains = $this->domains()
+            ->where('type', self::DOMAIN_TYPE_WEB)
             ->orderBy('created_at')
             ->get()
             ->pluck('path')
@@ -329,6 +406,33 @@ class Tenant extends BaseTenant
         }
 
         return ! Str::endsWith($domain, '.'.$rootHost);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function legacyAppDomains(): array
+    {
+        $domains = $this->attributes['app_domains'] ?? $this->getRawOriginal('app_domains') ?? [];
+        if (! is_array($domains)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($domains as $domain) {
+            if (! is_string($domain)) {
+                continue;
+            }
+
+            $candidate = $this->normalizeDomainPath($domain);
+            if ($candidate === null) {
+                continue;
+            }
+
+            $normalized[] = $candidate;
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     public function setDomainsAttribute(?array $domains): void
