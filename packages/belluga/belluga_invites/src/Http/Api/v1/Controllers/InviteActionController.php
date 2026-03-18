@@ -24,7 +24,7 @@ class InviteActionController extends Controller
         return $this->runWithDomainGuard(fn (): array => $this->mutations->send($request->user(), $request->validated()));
     }
 
-    public function accept(InviteActionRequest $request, string $invite_id): JsonResponse
+    public function accept(InviteActionRequest $request, string $tenant_domain, string $invite_id): JsonResponse
     {
         $payload = $request->validated();
 
@@ -35,7 +35,7 @@ class InviteActionController extends Controller
         ));
     }
 
-    public function decline(InviteActionRequest $request, string $invite_id): JsonResponse
+    public function decline(InviteActionRequest $request, string $tenant_domain, string $invite_id): JsonResponse
     {
         $payload = $request->validated();
 

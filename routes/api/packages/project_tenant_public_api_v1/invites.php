@@ -10,6 +10,8 @@ use Belluga\Invites\Http\Api\v1\Controllers\InviteRealtimeStreamController;
 use Belluga\Invites\Http\Api\v1\Controllers\InviteShareController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/invites/share/{code}', [InviteShareController::class, 'show']);
+
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function (): void {
         Route::get('/invites', [InviteFeedController::class, 'index']);
@@ -19,6 +21,6 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::post('/invites/{invite_id}/accept', [InviteActionController::class, 'accept']);
         Route::post('/invites/{invite_id}/decline', [InviteActionController::class, 'decline']);
         Route::post('/invites/share', [InviteShareController::class, 'store']);
-        Route::post('/invites/share/{code}/accept', [InviteShareController::class, 'accept']);
+        Route::post('/invites/share/{code}/materialize', [InviteShareController::class, 'materialize']);
         Route::post('/contacts/import', [ContactImportController::class, 'store']);
     });

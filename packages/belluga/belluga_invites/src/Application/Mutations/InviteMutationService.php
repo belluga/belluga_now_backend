@@ -10,6 +10,7 @@ use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
+use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
@@ -19,8 +20,13 @@ use Illuminate\Support\Carbon;
 
 class InviteMutationService
 {
+    private const SUPERSESSION_REASON_OTHER_INVITE_CREDITED = 'other_invite_credited';
+
+    private const SUPERSESSION_REASON_DIRECT_CONFIRMATION = 'direct_confirmation';
+
     public function __construct(
         private readonly InviteTransactionRunner $transactions,
+        private readonly InviteAttendanceGatewayContract $attendanceGateway,
         private readonly InviteIdentityGatewayContract $identityGateway,
         private readonly InviteTelemetryEmitterContract $telemetry,
         private readonly InviteTargetResolverService $targetResolver,
@@ -199,6 +205,32 @@ class InviteMutationService
     }
 
     /**
+     * @return array<int, string>
+     */
+    public function supersedePendingInvitesForDirectConfirmation(
+        string $userId,
+        string $eventId,
+        ?string $occurrenceId = null,
+    ): array {
+        $targetRef = [
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+        ];
+
+        $supersededIds = $this->supersedePendingInvites(
+            receiverUserId: $userId,
+            targetRef: $targetRef,
+            reason: self::SUPERSESSION_REASON_DIRECT_CONFIRMATION,
+        );
+
+        if ($supersededIds !== []) {
+            $this->projectionService->rebuildReceiverTargetProjection($userId, $targetRef);
+        }
+
+        return $supersededIds;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function acceptForUserIdWithoutReplay(string $userId, string $inviteId): array
@@ -226,7 +258,11 @@ class InviteMutationService
 
         if ($existingWinner !== null && (string) $existingWinner->getAttribute('_id') !== (string) $edge->getAttribute('_id')) {
             if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
-                $edge->status = 'closed_duplicate';
+                $edge->fill([
+                    'status' => 'superseded',
+                    'supersession_reason' => self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED,
+                    'credited_acceptance' => false,
+                ]);
                 $edge->save();
                 $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($edge));
             }
@@ -274,46 +310,90 @@ class InviteMutationService
             return $this->acceptResponse($edge, 'already_accepted', [], true);
         }
 
+        if (
+            (string) $edge->status === 'superseded' &&
+            (string) ($edge->supersession_reason ?? '') === self::SUPERSESSION_REASON_DIRECT_CONFIRMATION
+        ) {
+            $this->telemetry->emit(
+                event: 'invite.accepted',
+                userId: $userId,
+                properties: [
+                    'invite_id' => (string) $edge->getAttribute('_id'),
+                    'status' => 'already_accepted',
+                    'credited_acceptance' => false,
+                    'target_ref' => $this->targetRef($edge),
+                ],
+                idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
+                source: 'invite_api',
+                context: [
+                    'actor' => ['type' => 'user', 'id' => $userId],
+                    'target' => ['type' => 'user', 'id' => $userId],
+                    'object' => ['type' => 'event', 'id' => (string) $edge->event_id],
+                ],
+            );
+
+            return $this->acceptResponse($edge, 'already_accepted', [], false);
+        }
+
+        if ($this->attendanceGateway->hasActiveAttendanceConfirmation(
+            $userId,
+            (string) $edge->event_id,
+            $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+        )) {
+            if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
+                $edge->fill([
+                    'status' => 'superseded',
+                    'supersession_reason' => self::SUPERSESSION_REASON_DIRECT_CONFIRMATION,
+                    'credited_acceptance' => false,
+                ]);
+                $edge->save();
+                $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($edge));
+            }
+
+            $this->telemetry->emit(
+                event: 'invite.accepted',
+                userId: $userId,
+                properties: [
+                    'invite_id' => (string) $edge->getAttribute('_id'),
+                    'status' => 'already_accepted',
+                    'credited_acceptance' => false,
+                    'target_ref' => $this->targetRef($edge),
+                ],
+                idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
+                source: 'invite_api',
+                context: [
+                    'actor' => ['type' => 'user', 'id' => $userId],
+                    'target' => ['type' => 'user', 'id' => $userId],
+                    'object' => ['type' => 'event', 'id' => (string) $edge->event_id],
+                ],
+            );
+
+            return $this->acceptResponse($edge, 'already_accepted', [], false);
+        }
+
         $result = $this->transactions->run(function () use ($edge, $userId): array {
             $acceptedAt = Carbon::now();
-            $groupQuery = InviteEdge::query()
-                ->where('receiver_user_id', $userId)
-                ->where('event_id', (string) $edge->event_id)
-                ->where('occurrence_id', $edge->occurrence_id ? (string) $edge->occurrence_id : null);
-
-            /** @var \Illuminate\Support\Collection<int, InviteEdge> $candidates */
-            $candidates = $groupQuery
-                ->whereIn('status', ['pending', 'viewed'])
-                ->get();
 
             $edge->fill([
                 'status' => 'accepted',
+                'supersession_reason' => null,
                 'credited_acceptance' => true,
                 'accepted_at' => $acceptedAt,
             ]);
             $edge->save();
 
-            $closedIds = [];
-            foreach ($candidates as $candidate) {
-                $candidateId = (string) $candidate->getAttribute('_id');
+            $supersededIds = $this->supersedePendingInvites(
+                receiverUserId: $userId,
+                targetRef: $this->targetRef($edge),
+                reason: self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED,
+                exceptInviteId: (string) $edge->getAttribute('_id'),
+            );
 
-                if ($candidateId === (string) $edge->getAttribute('_id')) {
-                    continue;
-                }
-
-                $candidate->fill([
-                    'status' => 'closed_duplicate',
-                    'credited_acceptance' => false,
-                ]);
-                $candidate->save();
-                $closedIds[] = $candidateId;
-            }
-
-            return [$edge, $closedIds];
+            return [$edge, $supersededIds];
         });
 
         /** @var InviteEdge $acceptedEdge */
-        [$acceptedEdge, $closedDuplicateIds] = $result;
+        [$acceptedEdge, $supersededIds] = $result;
         $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($acceptedEdge));
         $this->metricsService->incrementCreditedAcceptances($this->fromStoredPrincipal((array) $acceptedEdge->inviter_principal));
 
@@ -324,8 +404,8 @@ class InviteMutationService
                 'invite_id' => (string) $acceptedEdge->getAttribute('_id'),
                 'status' => 'accepted',
                 'credited_acceptance' => true,
-                'closed_duplicate_count' => count($closedDuplicateIds),
-                'closed_duplicate_invite_ids' => array_values($closedDuplicateIds),
+                'superseded_count' => count($supersededIds),
+                'superseded_invite_ids' => array_values($supersededIds),
                 'target_ref' => $this->targetRef($acceptedEdge),
             ],
             idempotencyKey: 'invite.accepted:'.(string) $acceptedEdge->getAttribute('_id').':accepted',
@@ -337,7 +417,7 @@ class InviteMutationService
             ],
         );
 
-        return $this->acceptResponse($acceptedEdge, 'accepted', $closedDuplicateIds, true);
+        return $this->acceptResponse($acceptedEdge, 'accepted', $supersededIds, true);
     }
 
     /**
@@ -555,10 +635,10 @@ class InviteMutationService
     }
 
     /**
-     * @param  array<int, string>  $closedDuplicateIds
+     * @param  array<int, string>  $supersededIds
      * @return array<string, mixed>
      */
-    private function acceptResponse(InviteEdge $edge, string $status, array $closedDuplicateIds, bool $creditedAcceptance): array
+    private function acceptResponse(InviteEdge $edge, string $status, array $supersededIds, bool $creditedAcceptance): array
     {
         $attendancePolicy = (string) ($edge->attendance_policy ?? 'free_confirmation_only');
 
@@ -570,9 +650,46 @@ class InviteMutationService
             'credited_acceptance' => $creditedAcceptance,
             'attendance_policy' => $attendancePolicy,
             'next_step' => $this->runtimeSettings->nextStepForPolicy($attendancePolicy),
-            'closed_duplicate_invite_ids' => array_values($closedDuplicateIds),
+            'superseded_invite_ids' => array_values($supersededIds),
             'accepted_at' => $edge->accepted_at?->toISOString(),
         ];
+    }
+
+    /**
+     * @param  array{event_id:string,occurrence_id:?string}  $targetRef
+     * @return array<int, string>
+     */
+    private function supersedePendingInvites(
+        string $receiverUserId,
+        array $targetRef,
+        string $reason,
+        ?string $exceptInviteId = null,
+    ): array {
+        /** @var \Illuminate\Support\Collection<int, InviteEdge> $candidates */
+        $candidates = InviteEdge::query()
+            ->where('receiver_user_id', $receiverUserId)
+            ->where('event_id', $targetRef['event_id'])
+            ->where('occurrence_id', $targetRef['occurrence_id'])
+            ->whereIn('status', ['pending', 'viewed'])
+            ->get();
+
+        $supersededIds = [];
+        foreach ($candidates as $candidate) {
+            $candidateId = (string) $candidate->getAttribute('_id');
+            if ($exceptInviteId !== null && $candidateId === $exceptInviteId) {
+                continue;
+            }
+
+            $candidate->fill([
+                'status' => 'superseded',
+                'supersession_reason' => $reason,
+                'credited_acceptance' => false,
+            ]);
+            $candidate->save();
+            $supersededIds[] = $candidateId;
+        }
+
+        return $supersededIds;
     }
 
     /**

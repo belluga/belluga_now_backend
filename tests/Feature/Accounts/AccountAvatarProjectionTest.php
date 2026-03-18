@@ -109,4 +109,3 @@ class AccountAvatarProjectionTest extends TestCase
         $service->initialize($payload);
     }
 }
-

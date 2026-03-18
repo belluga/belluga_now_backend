@@ -75,7 +75,6 @@ class AppServiceProvider extends ServiceProvider
             ->give(function ($app) {
                 return $app->make(ResetPasswordRequestTenant::class);
             });
-
     }
 
     /**

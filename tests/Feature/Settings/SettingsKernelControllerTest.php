@@ -60,6 +60,10 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
         $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
         $tenant->makeCurrent();
+        $tenant->domains()
+            ->whereIn('type', [Tenant::DOMAIN_TYPE_APP_ANDROID, Tenant::DOMAIN_TYPE_APP_IOS])
+            ->delete();
+        $tenant->update(['app_domains' => []]);
 
         TenantSettings::query()->delete();
         TenantSettings::create([
@@ -99,6 +103,17 @@ class SettingsKernelControllerTest extends TestCaseTenant
                 'location_freshness_minutes' => 5,
                 'trackers' => [],
             ],
+            'app_links' => [
+                'android' => [
+                    'sha256_cert_fingerprints' => [
+                        'AA:BB:CC:DD',
+                    ],
+                ],
+                'ios' => [
+                    'team_id' => 'ABCDE12345',
+                    'paths' => ['/invite*'],
+                ],
+            ],
         ]);
 
         [$this->account] = $this->seedAccountWithRole([
@@ -136,6 +151,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('events', $namespaces);
         $this->assertContains('push', $namespaces);
         $this->assertContains('telemetry', $namespaces);
+        $this->assertContains('app_links', $namespaces);
     }
 
     public function test_settings_values_endpoint_returns_namespace_values(): void
@@ -155,6 +171,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
+        $response->assertJsonPath('data.app_links.android.sha256_cert_fingerprints.0', 'AA:BB:CC:DD');
+        $response->assertJsonPath('data.app_links.ios.team_id', 'ABCDE12345');
+        $response->assertJsonPath('data.app_links.ios.paths.0', '/invite*');
     }
 
     public function test_patch_namespace_applies_partial_merge_by_field_presence(): void
@@ -235,6 +254,59 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['events']);
+    }
+
+    public function test_patch_app_links_rejects_android_fingerprint_without_android_identifier(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $tenant->domains()->where('type', Tenant::DOMAIN_TYPE_APP_ANDROID)->delete();
+        $tenant = $tenant->fresh();
+        $this->assertNull($tenant?->appDomainIdentifierForPlatform(Tenant::APP_PLATFORM_ANDROID));
+
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/app_links", [
+            'android.sha256_cert_fingerprints' => [
+                '3E:72:4C:54:E9:53:26:7D:E6:E1:9B:F8:DC:53:30:2A:08:01:8E:36:40:4D:0C:CA:98:3B:46:84:53:E7:A9:A9',
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['android.sha256_cert_fingerprints']);
+    }
+
+    public function test_patch_app_links_rejects_ios_team_id_without_ios_identifier(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $tenant->domains()->where('type', Tenant::DOMAIN_TYPE_APP_IOS)->delete();
+
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/app_links", [
+            'ios.team_id' => 'ABCDE12345',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['ios.team_id']);
+    }
+
+    public function test_patch_app_links_accepts_credentials_when_typed_identifiers_exist(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.tenant.omega');
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_IOS, 'com.tenant.omega');
+
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/app_links", [
+            'android.sha256_cert_fingerprints' => [
+                '3E:72:4C:54:E9:53:26:7D:E6:E1:9B:F8:DC:53:30:2A:08:01:8E:36:40:4D:0C:CA:98:3B:46:84:53:E7:A9:A9',
+            ],
+            'ios.team_id' => 'ABCDE12345',
+            'ios.paths' => ['/invite*', '/accounts*'],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath(
+            'data.android.sha256_cert_fingerprints.0',
+            '3E:72:4C:54:E9:53:26:7D:E6:E1:9B:F8:DC:53:30:2A:08:01:8E:36:40:4D:0C:CA:98:3B:46:84:53:E7:A9:A9'
+        );
+        $response->assertJsonPath('data.ios.team_id', 'ABCDE12345');
+        $response->assertJsonPath('data.ios.paths.1', '/accounts*');
     }
 
     public function test_schema_exposes_navigation_nodes_and_conditional_metadata(): void
@@ -606,6 +678,25 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'HTTP_HOST' => $tenantHost,
             'SERVER_NAME' => $tenantHost,
         ]);
+    }
+
+    private function upsertTypedAppDomain(Tenant $tenant, string $type, string $identifier): void
+    {
+        $existing = $tenant->domains()
+            ->where('type', $type)
+            ->first();
+
+        if ($existing === null) {
+            $tenant->domains()->create([
+                'type' => $type,
+                'path' => $identifier,
+            ]);
+
+            return;
+        }
+
+        $existing->path = $identifier;
+        $existing->save();
     }
 
     private function ensureLandlordTestNamespaceRegistered(): void

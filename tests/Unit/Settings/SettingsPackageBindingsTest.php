@@ -34,5 +34,6 @@ class SettingsPackageBindingsTest extends TestCase
         $this->assertNotNull($registry->find('push', 'tenant'));
         $this->assertNotNull($registry->find('firebase', 'tenant'));
         $this->assertNotNull($registry->find('telemetry', 'tenant'));
+        $this->assertNotNull($registry->find('app_links', 'tenant'));
     }
 }

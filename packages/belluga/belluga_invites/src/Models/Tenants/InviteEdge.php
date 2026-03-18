@@ -24,6 +24,7 @@ class InviteEdge extends Model
         'inviter_display_name',
         'inviter_avatar_url',
         'status',
+        'supersession_reason',
         'credited_acceptance',
         'source',
         'message',

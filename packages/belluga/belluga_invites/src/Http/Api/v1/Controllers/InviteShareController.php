@@ -24,11 +24,16 @@ class InviteShareController extends Controller
         return $this->runWithDomainGuard(fn (): array => $this->shareService->create($request->user(), $request->validated()));
     }
 
-    public function accept(InviteActionRequest $request, string $code): JsonResponse
+    public function show(string $tenant_domain, string $code): JsonResponse
+    {
+        return $this->runWithDomainGuard(fn (): array => $this->shareService->preview((string) $code));
+    }
+
+    public function materialize(InviteActionRequest $request, string $tenant_domain, string $code): JsonResponse
     {
         $payload = $request->validated();
 
-        return $this->runWithDomainGuard(fn (): array => $this->shareService->accept(
+        return $this->runWithDomainGuard(fn (): array => $this->shareService->materialize(
             $request->user(),
             (string) $code,
             isset($payload['idempotency_key']) ? (string) $payload['idempotency_key'] : null,

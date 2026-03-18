@@ -5,10 +5,15 @@ declare(strict_types=1);
 namespace App\Application\Events;
 
 use App\Models\Tenants\AttendanceCommitment;
+use Belluga\Invites\Application\Mutations\InviteMutationService;
 use Illuminate\Support\Carbon;
 
 class AttendanceCommitmentService
 {
+    public function __construct(
+        private readonly InviteMutationService $inviteMutationService,
+    ) {}
+
     /**
      * @return array<int, string>
      */
@@ -47,6 +52,12 @@ class AttendanceCommitmentService
             'canceled_at' => null,
         ]);
         $commitment->save();
+
+        $this->inviteMutationService->supersedePendingInvitesForDirectConfirmation(
+            userId: $userId,
+            eventId: $eventId,
+            occurrenceId: $occurrenceId,
+        );
 
         return $commitment->fresh();
     }

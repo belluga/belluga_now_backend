@@ -93,8 +93,7 @@ class StaticAssetMediaService
         StaticAsset $asset,
         string $kind,
         ?string $baseUrl,
-    ): ?string
-    {
+    ): ?string {
         $baseDir = $this->baseDirectory($asset, $baseUrl);
         foreach ($this->allowedExtensions() as $extension) {
             $path = "{$baseDir}/{$kind}.{$extension}";
@@ -111,8 +110,7 @@ class StaticAssetMediaService
         StaticAsset $asset,
         string $kind,
         string|int|null $version = null,
-    ): string
-    {
+    ): string {
         $assetId = (string) $asset->_id;
         $base = rtrim($baseUrl, '/');
         $resolvedVersion = $version ?? ($asset->updated_at?->getTimestamp() ?? time());

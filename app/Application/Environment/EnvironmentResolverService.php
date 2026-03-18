@@ -6,6 +6,7 @@ namespace App\Application\Environment;
 
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
+use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
@@ -17,7 +18,8 @@ class EnvironmentResolverService
 {
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings,
-        private readonly PushSettingsKernelBridge $pushSettings
+        private readonly PushSettingsKernelBridge $pushSettings,
+        private readonly TenantAppDomainResolverService $appDomainResolver,
     ) {}
 
     /**
@@ -48,7 +50,7 @@ class EnvironmentResolverService
             return null;
         }
 
-        return Tenant::where('app_domains', $appDomain)->first();
+        return $this->appDomainResolver->findTenantByIdentifier($appDomain);
     }
 
     /**
@@ -83,7 +85,7 @@ class EnvironmentResolverService
             'main_domain' => $mainDomain,
             'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
             'domains' => $resolvedDomains,
-            'app_domains' => $tenant->app_domains,
+            'app_domains' => $tenant->resolvedAppDomains(),
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
