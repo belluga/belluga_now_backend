@@ -51,7 +51,7 @@ class AccountUserCredentialServiceTest extends TestCase
         $this->userService = $this->app->make(AccountUserService::class);
     }
 
-    public function testLinkPasswordCredentialPersistsSecret(): void
+    public function test_link_password_credential_persists_secret(): void
     {
         $user = $this->createUser();
 
@@ -72,7 +72,7 @@ class AccountUserCredentialServiceTest extends TestCase
         );
     }
 
-    public function testLinkRejectsDuplicateSubject(): void
+    public function test_link_rejects_duplicate_subject(): void
     {
         $existing = $this->createUser();
         $this->credentialService->link($existing, [
@@ -92,7 +92,7 @@ class AccountUserCredentialServiceTest extends TestCase
         ]);
     }
 
-    public function testUnlinkRemovesCredential(): void
+    public function test_unlink_removes_credential(): void
     {
         $user = $this->createUser();
 
@@ -109,12 +109,13 @@ class AccountUserCredentialServiceTest extends TestCase
         $this->assertFalse(
             collect($updated->credentials)->contains(static function (array $credential) use ($credentialId): bool {
                 $currentId = $credential['_id'] ?? $credential['id'] ?? null;
+
                 return $currentId === $credentialId;
             })
         );
     }
 
-    public function testUnlinkMissingCredentialThrows(): void
+    public function test_unlink_missing_credential_throws(): void
     {
         $user = $this->createUser();
 

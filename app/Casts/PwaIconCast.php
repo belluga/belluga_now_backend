@@ -15,17 +15,18 @@ class PwaIconCast implements CastsAttributes
         }
 
         $data = (array) $value;
+
         return PwaIcon::fromArray($data);
     }
 
     public function set($model, string $key, $value, array $attributes): array
     {
-        if(is_array($value)) {
-            return ["pwa_icon" => $value];
+        if (is_array($value)) {
+            return ['pwa_icon' => $value];
         }
 
-        if($value instanceof PwaIcon){
-            return ["pwa_icon" => $value->toArray()];
+        if ($value instanceof PwaIcon) {
+            return ['pwa_icon' => $value->toArray()];
         }
 
         throw new InvalidArgumentException('The given value must be a PwaIcon instance or an array.');

@@ -7,11 +7,11 @@ use Tests\Api\Traits\ClearConfigCacheOnce;
 use Tests\Api\Traits\MigrateFreshSeedOnce;
 use Tests\Helpers\Landlord;
 
-abstract class TestCase extends BaseTestCase {
+abstract class TestCase extends BaseTestCase
+{
+    use ClearConfigCacheOnce, MigrateFreshSeedOnce;
 
-    use MigrateFreshSeedOnce, ClearConfigCacheOnce;
-
-    protected string $prefix = "default";
+    protected string $prefix = 'default';
 
     protected string $host {
         get {
@@ -34,21 +34,26 @@ abstract class TestCase extends BaseTestCase {
         $this->withServerVariables(['HTTP_HOST' => $this->host]);
     }
 
-    protected function normalizeTestUri(string $uri): string
+    protected function normalizeTestUri(string $uri, ?string $hostOverride = null): string
     {
         if (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://')) {
             return $uri;
         }
 
+        $host = $hostOverride;
+        if (! is_string($host) || $host === '') {
+            $host = $this->host;
+        }
+
         if ($uri === '') {
-            return "http://{$this->host}/";
+            return "http://{$host}/";
         }
 
         if ($uri[0] !== '/') {
             $uri = "/{$uri}";
         }
 
-        return "http://{$this->host}{$uri}";
+        return "http://{$host}{$uri}";
     }
 
     public function call(
@@ -60,35 +65,46 @@ abstract class TestCase extends BaseTestCase {
         $server = [],
         $content = null
     ) {
-        $uri = $this->normalizeTestUri($uri);
+        $effectiveServer = array_replace($this->serverVariables, $server);
+        $hostOverride = null;
+        if (isset($effectiveServer['HTTP_HOST']) && is_string($effectiveServer['HTTP_HOST']) && $effectiveServer['HTTP_HOST'] !== '') {
+            $hostOverride = $effectiveServer['HTTP_HOST'];
+        } elseif (isset($effectiveServer['SERVER_NAME']) && is_string($effectiveServer['SERVER_NAME']) && $effectiveServer['SERVER_NAME'] !== '') {
+            $hostOverride = $effectiveServer['SERVER_NAME'];
+        }
+
+        $uri = $this->normalizeTestUri($uri, $hostOverride);
 
         return parent::call($method, $uri, $parameters, $cookies, $files, $server, $content);
     }
 
     protected string $api_url_admin {
         get {
-            return "admin/api/v1";
+            return 'admin/api/v1';
         }
     }
 
     protected Landlord $landlord {
         get {
-            return new Landlord("landlord");
+            return new Landlord('landlord');
         }
     }
 
-    protected function getGlobal($key): mixed{
+    protected function getGlobal($key): mixed
+    {
         global $params;
 
-        if(!isset($params)){
+        if (! isset($params)) {
             return null;
         }
 
         $key_to_retrieve = "{$this->prefix}.$key";
+
         return array_key_exists($key_to_retrieve, $params) ? $params[$key_to_retrieve] : null;
     }
 
-    protected function setGlobal($key, $value): void{
+    protected function setGlobal($key, $value): void
+    {
         global $params;
         $params["{$this->prefix}.$key"] = $value;
     }

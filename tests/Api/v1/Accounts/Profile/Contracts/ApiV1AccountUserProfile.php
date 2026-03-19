@@ -8,42 +8,44 @@ use Tests\Api\Traits\AccountProfileFunctions;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseAccount;
 
-abstract class ApiV1AccountUserProfile extends TestCaseAccount{
+abstract class ApiV1AccountUserProfile extends TestCaseAccount
+{
+    use AccountAuthFunctions, AccountProfileFunctions;
 
-    use AccountProfileFunctions, AccountAuthFunctions;
+    private string $temporary_email_1 = 'temporaryemail1@gmail.com';
 
-    private string $temporary_email_1 = "temporaryemail1@gmail.com";
+    private string $temporary_email_2 = 'temporaryemail2@gmail.com';
 
-    private string $temporary_email_2 = "temporaryemail2@gmail.com";
+    private string $temporary_phone_1 = '5531996419823';
 
-    private string $temporary_phone_1 = "5531996419823";
-
-    private string $temporary_phone_2 = "5533999999999";
+    private string $temporary_phone_2 = '5533999999999';
 
     protected string $base_api_url {
         get{
-            return "http://{$this->tenant->subdomain}.".env('APP_HOST')."/api/v1/";
+            return "http://{$this->tenant->subdomain}.".env('APP_HOST').'/api/v1/';
         }
     }
 
-    public function testAccountUserUpdate(): void {
+    public function testAccountUserUpdate(): void
+    {
 
         $this->accountLogin($this->account->user_visitor);
 
         $roleUpdate = $this->profileUpdate(
             $this->account->user_visitor,
             [
-                "name" => "Updated Account Name",
+                'name' => 'Updated Account Name',
             ]
         );
 
         $roleUpdate->assertStatus(200);
 
-        $this->assertEquals("Updated Account Name", $roleUpdate->json()['name']);
+        $this->assertEquals('Updated Account Name', $roleUpdate->json()['name']);
 
     }
 
-    public function testAccountUserAddEmail(): void {
+    public function testAccountUserAddEmail(): void
+    {
 
         $firstUpdate = $this->profileAddEmails(
             $this->account->user_visitor,
@@ -62,7 +64,8 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
         $this->assertContains($this->temporary_email_2, $secondUpdate->json()['data']['emails']);
     }
 
-    public function testAccountUserAddEmailRepeated(): void {
+    public function testAccountUserAddEmailRepeated(): void
+    {
 
         $this->accountLogin($this->account->user_users_manager);
 
@@ -73,10 +76,10 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
 
         $userUpdate->assertStatus(422);
 
-        $userUpdate ->assertJsonStructure([
-            "errors" => [
-                "email"
-            ]
+        $userUpdate->assertJsonStructure([
+            'errors' => [
+                'email',
+            ],
         ]);
     }
 
@@ -125,18 +128,19 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
         $addEmailsResponse->assertStatus(422);
 
         $this->assertEquals(
-            "Você não pode remover o único email da conta. Adicione outro email antes de remover esse.",
+            'Você não pode remover o único email da conta. Adicione outro email antes de remover esse.',
             $addEmailsResponse->json()['message']);
 
         $addEmailsResponse->assertJsonStructure([
-            "message",
-            "errors" => [
-                "email"
-            ]
+            'message',
+            'errors' => [
+                'email',
+            ],
         ]);
     }
 
-    public function testAccountUserAddPhonesFirstUser(): void {
+    public function testAccountUserAddPhonesFirstUser(): void
+    {
 
         $update = $this->profileAddPhones(
             $this->account->user_visitor,
@@ -149,7 +153,8 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
         $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_1), $update->json()['data']['phones']);
     }
 
-    public function testAccountUserAddPhonesSecondUser(): void {
+    public function testAccountUserAddPhonesSecondUser(): void
+    {
 
         $update = $this->profileAddPhones(
             $this->account->user_users_manager,
@@ -162,7 +167,8 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
         $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_2), $update->json()['data']['phones']);
     }
 
-    public function testAccountUserAddPhoneRepeated(): void {
+    public function testAccountUserAddPhoneRepeated(): void
+    {
 
         $this->accountLogin($this->account->user_users_manager);
 
@@ -175,10 +181,10 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
 
         $update->assertStatus(422);
 
-        $update ->assertJsonStructure([
-            "errors" => [
-                "phones"
-            ]
+        $update->assertJsonStructure([
+            'errors' => [
+                'phones',
+            ],
         ]);
     }
 
@@ -215,6 +221,7 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount{
                 strtolower($email),
                 array_map('strtolower', $response->json('data.emails') ?? [])
             );
+
             return;
         }
 

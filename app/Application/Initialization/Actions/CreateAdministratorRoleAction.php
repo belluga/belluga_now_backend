@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 class CreateAdministratorRoleAction
 {
     /**
-     * @param array<string, mixed> $roleData
+     * @param  array<string, mixed>  $roleData
      */
     public function execute(array $roleData): LandlordRole
     {

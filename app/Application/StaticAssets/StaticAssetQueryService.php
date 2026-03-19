@@ -6,12 +6,16 @@ namespace App\Application\StaticAssets;
 
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\StaticAsset;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Pagination\LengthAwarePaginator;
 use MongoDB\BSON\ObjectId;
 
 class StaticAssetQueryService extends AbstractQueryService
 {
+    public function __construct(
+        private readonly StaticAssetMediaService $mediaService
+    ) {}
+
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         $query = StaticAsset::query();
@@ -36,7 +40,7 @@ class StaticAssetQueryService extends AbstractQueryService
         }
 
         if (! $asset) {
-            throw (new ModelNotFoundException())->setModel(StaticAsset::class, [$assetId]);
+            throw (new ModelNotFoundException)->setModel(StaticAsset::class, [$assetId]);
         }
 
         return $asset;
@@ -47,7 +51,7 @@ class StaticAssetQueryService extends AbstractQueryService
         $asset = StaticAsset::query()->where('slug', $slug)->first();
 
         if (! $asset) {
-            throw (new ModelNotFoundException())->setModel(StaticAsset::class, [$slug]);
+            throw (new ModelNotFoundException)->setModel(StaticAsset::class, [$slug]);
         }
 
         return $asset;
@@ -67,6 +71,8 @@ class StaticAssetQueryService extends AbstractQueryService
      */
     public function format(StaticAsset $asset): array
     {
+        $baseUrl = request()->getSchemeAndHttpHost();
+
         return [
             'id' => (string) $asset->_id,
             'profile_type' => $asset->profile_type,
@@ -74,8 +80,18 @@ class StaticAssetQueryService extends AbstractQueryService
             'slug' => $asset->slug,
             'bio' => $asset->bio,
             'content' => $asset->content,
-            'avatar_url' => $asset->avatar_url,
-            'cover_url' => $asset->cover_url,
+            'avatar_url' => $this->mediaService->normalizePublicUrl(
+                $baseUrl,
+                $asset,
+                'avatar',
+                is_string($asset->avatar_url) ? $asset->avatar_url : null
+            ),
+            'cover_url' => $this->mediaService->normalizePublicUrl(
+                $baseUrl,
+                $asset,
+                'cover',
+                is_string($asset->cover_url) ? $asset->cover_url : null
+            ),
             'tags' => $asset->tags ?? [],
             'categories' => $asset->categories ?? [],
             'taxonomy_terms' => $asset->taxonomy_terms ?? [],
@@ -88,7 +104,6 @@ class StaticAssetQueryService extends AbstractQueryService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, float>|null
      */
     private function formatLocation(mixed $location): ?array
@@ -110,7 +125,7 @@ class StaticAssetQueryService extends AbstractQueryService
 
     protected function baseSearchableFields(): array
     {
-        return (new StaticAsset())->getFillable();
+        return (new StaticAsset)->getFillable();
     }
 
     protected function stringFields(): array

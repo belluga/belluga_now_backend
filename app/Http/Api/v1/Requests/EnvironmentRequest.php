@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use App\Rules\InArrayItemRule;
+use App\Application\Tenants\TenantAppDomainResolverService;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 class EnvironmentRequest extends FormRequest
 {
-
     public function validationData(): array
     {
         $headerAppDomain = $this->header('X-App-Domain');
@@ -24,12 +24,28 @@ class EnvironmentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            "app_domain" => new InArrayItemRule(
-                connection: 'landlord',
-                table: 'tenants',
-                key: 'app_domains',
-                shouldExist: false
-            ),
+            'app_domain' => [
+                'nullable',
+                'string',
+                'max:255',
+            ],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $appDomain = $this->validated('app_domain');
+            if (! is_string($appDomain) || trim($appDomain) === '') {
+                return;
+            }
+
+            $resolver = app(TenantAppDomainResolverService::class);
+            if ($resolver->findTenantByIdentifier($appDomain) !== null) {
+                return;
+            }
+
+            $validator->errors()->add('app_domain', 'Unknown app_domain.');
+        });
     }
 }

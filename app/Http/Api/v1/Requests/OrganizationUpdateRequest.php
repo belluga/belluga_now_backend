@@ -20,14 +20,14 @@ class OrganizationUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'slug' => [
                 'sometimes',
                 'string',
-                'max:' . InputConstraints::NAME_MAX,
+                'max:'.InputConstraints::NAME_MAX,
                 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             ],
-            'description' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'description' => 'sometimes|string|max:'.InputConstraints::DESCRIPTION_MAX,
         ];
     }
 }

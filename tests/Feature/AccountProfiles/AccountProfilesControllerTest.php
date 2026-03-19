@@ -10,20 +10,19 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
-use Tests\Helpers\TenantLabels;
 
 class AccountProfilesControllerTest extends TestCaseTenant
 {
@@ -39,7 +38,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
+
     private AccountRoleTemplate $accountRoleTemplate;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -97,7 +98,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testAccountProfileIndexAccessibleForAccountUser(): void
+    public function test_account_profile_index_accessible_for_account_user(): void
     {
         $user = $this->createAccountUser([]);
 
@@ -115,7 +116,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue(collect($response->json('data'))->every(static fn (array $item): bool => array_key_exists('ownership_state', $item)));
     }
 
-    public function testPublicAccountProfileIndexFiltersByProfileType(): void
+    public function test_public_account_profile_index_filters_by_profile_type(): void
     {
         $this->createAccountUser([]);
 
@@ -147,7 +148,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue($items->every(fn (array $item): bool => $item['profile_type'] === 'venue'));
     }
 
-    public function testPublicAccountProfileIndexReturnsEmptyWhenNone(): void
+    public function test_public_account_profile_index_returns_empty_when_none(): void
     {
         $this->createAccountUser([]);
 
@@ -159,7 +160,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
-    public function testAdminAccountProfileIndexFiltersByOwnershipState(): void
+    public function test_admin_account_profile_index_filters_by_ownership_state(): void
     {
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -192,7 +193,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function testAccountProfileTypesReturnsRegistry(): void
+    public function test_account_profile_types_returns_registry(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}account_profile_types", $this->getHeaders());
 
@@ -201,7 +202,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('data'));
     }
 
-    public function testAccountProfileTypesForbiddenWithoutAbility(): void
+    public function test_account_profile_types_forbidden_without_ability(): void
     {
         $user = LandlordUser::query()->firstOrFail();
 
@@ -212,14 +213,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(403);
     }
 
-    public function testAccountProfileCreateRequiresLocationWhenPoiEnabled(): void
+    public function test_account_profile_create_requires_location_when_poi_enabled(): void
     {
         $response = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Test Venue Missing Location',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'venue',
-                'display_name' => 'Test Venue',
             ],
             $this->getHeaders()
         );
@@ -227,11 +228,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
 
         $created = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Test Venue',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'venue',
-                'display_name' => 'Test Venue',
                 'location' => [
                     'lat' => -20.0,
                     'lng' => -40.0,
@@ -241,46 +242,45 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $created->assertStatus(201);
-        $created->assertJsonPath('data.account_id', (string) $this->account->_id);
-        $created->assertJsonPath('data.profile_type', 'venue');
+        $created->assertJsonPath('data.account_profile.profile_type', 'venue');
     }
 
-    public function testAccountProfileCreateStoresAvatarAndCoverUploads(): void
+    public function test_account_profile_create_stores_avatar_and_cover_uploads(): void
     {
         Storage::fake('public');
 
         $response = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Profile Media',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
-                'display_name' => 'Profile Media',
                 'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
                 'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
             ],
         );
 
         $response->assertStatus(201);
-        $avatarUrl = $response->json('data.avatar_url');
-        $coverUrl = $response->json('data.cover_url');
+        $avatarUrl = $response->json('data.account_profile.avatar_url');
+        $coverUrl = $response->json('data.account_profile.cover_url');
         $this->assertNotEmpty($avatarUrl);
         $this->assertNotEmpty($coverUrl);
 
-        $profileId = (string) $response->json('data.id');
+        $profileId = (string) $response->json('data.account_profile.id');
         $this->assertMediaUrlHealthy($avatarUrl);
         $this->assertMediaUrlHealthy($coverUrl);
         $this->assertMediaStored($profileId, 'avatar');
         $this->assertMediaStored($profileId, 'cover');
     }
 
-    public function testAccountProfileCreateRejectsUnknownTaxonomy(): void
+    public function test_account_profile_create_rejects_unknown_taxonomy(): void
     {
         $response = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Venue Taxonomy',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'venue',
-                'display_name' => 'Venue Taxonomy',
                 'location' => [
                     'lat' => -20.0,
                     'lng' => -40.0,
@@ -295,14 +295,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testAccountProfileCreateRejectsDisallowedTaxonomy(): void
+    public function test_account_profile_create_rejects_disallowed_taxonomy(): void
     {
         $response = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Personal Taxonomy',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
-                'display_name' => 'Personal Taxonomy',
                 'taxonomy_terms' => [
                     ['type' => 'cuisine', 'value' => 'italian'],
                 ],
@@ -313,14 +313,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testAccountProfileCreateAcceptsAllowedTaxonomy(): void
+    public function test_account_profile_create_accepts_allowed_taxonomy(): void
     {
         $response = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Venue Taxonomy',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'venue',
-                'display_name' => 'Venue Taxonomy',
                 'location' => [
                     'lat' => -20.0,
                     'lng' => -40.0,
@@ -333,27 +333,27 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.taxonomy_terms.0.type', 'cuisine');
-        $response->assertJsonPath('data.taxonomy_terms.0.value', 'italian');
+        $response->assertJsonPath('data.account_profile.taxonomy_terms.0.type', 'cuisine');
+        $response->assertJsonPath('data.account_profile.taxonomy_terms.0.value', 'italian');
     }
 
-    public function testAccountProfileUpdateReplacesAvatarUpload(): void
+    public function test_account_profile_update_replaces_avatar_upload(): void
     {
         Storage::fake('public');
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Profile Replace',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
-                'display_name' => 'Profile Replace',
                 'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
             ],
         );
 
         $createResponse->assertStatus(201);
-        $profileId = (string) $createResponse->json('data.id');
-        $originalAvatarUrl = $createResponse->json('data.avatar_url');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $originalAvatarUrl = $createResponse->json('data.account_profile.avatar_url');
         $this->assertNotEmpty($originalAvatarUrl);
         $originalPath = $this->assertMediaStored($profileId, 'avatar');
 
@@ -376,23 +376,23 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
-    public function testAccountProfileUpdateReplacesCoverUpload(): void
+    public function test_account_profile_update_replaces_cover_upload(): void
     {
         Storage::fake('public');
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Profile Replace Cover',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
-                'display_name' => 'Profile Replace Cover',
                 'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
             ],
         );
 
         $createResponse->assertStatus(201);
-        $profileId = (string) $createResponse->json('data.id');
-        $originalCoverUrl = $createResponse->json('data.cover_url');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $originalCoverUrl = $createResponse->json('data.account_profile.cover_url');
         $this->assertNotEmpty($originalCoverUrl);
         $originalPath = $this->assertMediaStored($profileId, 'cover');
 
@@ -415,23 +415,23 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
-    public function testAccountProfileRemoveAvatarAndCoverClearsMedia(): void
+    public function test_account_profile_remove_avatar_and_cover_clears_media(): void
     {
         Storage::fake('public');
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Profile Remove',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
-                'display_name' => 'Profile Remove',
                 'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
                 'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
             ],
         );
 
         $createResponse->assertStatus(201);
-        $profileId = (string) $createResponse->json('data.id');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
         $avatarPath = $this->assertMediaStored($profileId, 'avatar');
         $coverPath = $this->assertMediaStored($profileId, 'cover');
 
@@ -451,14 +451,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         Storage::disk('public')->assertMissing($coverPath);
     }
 
-    public function testAccountProfileCreateRejectsUnknownProfileType(): void
+    public function test_account_profile_create_rejects_unknown_profile_type(): void
     {
         $response = $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
+            "{$this->base_tenant_api_admin}account_onboardings",
             [
-                'account_id' => (string) $this->account->_id,
+                'name' => 'Unknown Profile',
+                'ownership_state' => 'tenant_owned',
                 'profile_type' => 'unknown_type',
-                'display_name' => 'Unknown Profile',
             ],
             $this->getHeaders()
         );
@@ -467,7 +467,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('errors.profile_type'));
     }
 
-    public function testAccountProfileCreateRejectsMissingAccount(): void
+    public function test_legacy_account_profile_create_route_returns_policy_rejection(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profiles",
@@ -479,26 +479,27 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(422);
-        $this->assertNotEmpty($response->json('errors.account_id'));
+        $response->assertStatus(409);
+        $response->assertJsonPath('error_code', 'tenant_admin_onboarding_required');
+        $response->assertJsonPath('meta.use_endpoint', '/admin/api/v1/account_onboardings');
     }
 
-    public function testAccountProfileCreateForbiddenWithoutAbility(): void
+    public function test_account_profile_create_forbidden_without_ability(): void
     {
         $user = LandlordUser::query()->firstOrFail();
 
         Sanctum::actingAs($user, ['account-users:view']);
 
-        $response = $this->postJson("{$this->base_tenant_api_admin}account_profiles", [
-            'account_id' => (string) $this->account->_id,
+        $response = $this->postJson("{$this->base_tenant_api_admin}account_onboardings", [
+            'name' => 'Personal',
+            'ownership_state' => 'tenant_owned',
             'profile_type' => 'personal',
-            'display_name' => 'Personal',
         ]);
 
         $response->assertStatus(403);
     }
 
-    public function testAccountProfileUpdateRejectsInvalidProfileType(): void
+    public function test_account_profile_update_rejects_invalid_profile_type(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -523,7 +524,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('errors.profile_type'));
     }
 
-    public function testAccountProfileUpdateAllowsSlugChange(): void
+    public function test_account_profile_update_allows_slug_change(): void
     {
         $profile = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -546,7 +547,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.slug', 'profile-slug-custom');
     }
 
-    public function testAccountProfileUpdateRejectsDuplicateSlug(): void
+    public function test_account_profile_update_rejects_duplicate_slug(): void
     {
         $primary = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -567,7 +568,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ])->fresh();
 
         $response = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/" . (string) $primary->_id,
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $primary->_id,
             [
                 'slug' => (string) ($secondary->slug ?? ''),
             ],
@@ -578,35 +579,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['slug']);
     }
 
-    public function testAccountProfileIndexFiltersByAccount(): void
+    public function test_account_profile_index_filters_by_account(): void
     {
         $otherAccount = Account::create([
             'name' => 'Account B',
             'document' => 'DOC-B',
         ]);
 
-        $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
-            [
-                'account_id' => (string) $this->account->_id,
-                'profile_type' => 'personal',
-                'display_name' => 'Profile A',
-            ],
-            $this->getHeaders()
-        )->assertStatus(201);
-
-        $this->postJson(
-            "{$this->base_tenant_api_admin}account_profiles",
-            [
-                'account_id' => (string) $otherAccount->_id,
-                'profile_type' => 'personal',
-                'display_name' => 'Profile B',
-            ],
-            $this->getHeaders()
-        )->assertStatus(201);
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile A',
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $otherAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile B',
+            'is_active' => true,
+        ]);
 
         $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles?account_id=" . (string) $this->account->_id,
+            "{$this->base_tenant_api_admin}account_profiles?account_id=".(string) $this->account->_id,
             $this->getHeaders()
         );
 
@@ -644,7 +638,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->account,
             [
                 'name' => 'Account Viewer',
-                'email' => uniqid('account-viewer', true) . '@example.org',
+                'email' => uniqid('account-viewer', true).'@example.org',
                 'password' => 'Secret!234',
             ],
             (string) $this->accountRoleTemplate->_id
@@ -659,13 +653,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $this->assertNotEmpty($url);
         $this->assertStringContainsString(
-            "{$this->base_tenant_url}account-profiles/",
+            "{$this->base_tenant_url}api/v1/media/account-profiles/",
             $url
         );
         $this->assertStringContainsString('v=', $url);
 
-        $response = $this->get($url);
-        $response->assertStatus(200);
+        $canonicalResponse = $this->get($url);
+        $canonicalResponse->assertStatus(200);
+
+        $path = parse_url((string) $url, PHP_URL_PATH);
+        $this->assertTrue(is_string($path) && $path !== '');
+        preg_match('#^/api/v1/media/account-profiles/([^/]+)/(avatar|cover)$#', (string) $path, $matches);
+        $this->assertCount(3, $matches);
+
+        $legacyPath = "account-profiles/{$matches[1]}/{$matches[2]}";
+        $query = parse_url((string) $url, PHP_URL_QUERY);
+        $legacyUrl = "{$this->base_tenant_url}{$legacyPath}";
+        if (is_string($query) && trim($query) !== '') {
+            $legacyUrl .= "?{$query}";
+        }
+
+        $legacyResponse = $this->get($legacyUrl);
+        $legacyResponse->assertStatus(200);
     }
 
     private function assertMediaStored(string $profileId, string $kind): string

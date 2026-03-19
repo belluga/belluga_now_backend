@@ -13,11 +13,10 @@ class TaxonomyValidationService
 {
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      */
     public function assertTermsAllowedForAccountProfile(string $profileType, array $terms): void
     {
@@ -47,7 +46,7 @@ class TaxonomyValidationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      */
     public function assertTermsAllowedForEvent(array $terms): void
     {
@@ -59,7 +58,7 @@ class TaxonomyValidationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      */
     public function assertTermsAllowedForStaticAsset(array $terms): void
     {
@@ -71,7 +70,7 @@ class TaxonomyValidationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      */
     private function assertTermsValid(array $terms, string $appliesTo): void
     {
@@ -116,7 +115,7 @@ class TaxonomyValidationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      * @return array<int, string>
      */
     private function extractTypes(array $terms): array
@@ -137,7 +136,7 @@ class TaxonomyValidationService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      * @return array<int, string>
      */
     private function extractValuesForType(array $terms, string $type): array
@@ -162,7 +161,7 @@ class TaxonomyValidationService
     }
 
     /**
-     * @param array<int, string> $slugs
+     * @param  array<int, string>  $slugs
      * @return array<string, Taxonomy>
      */
     private function loadTaxonomies(array $slugs): array

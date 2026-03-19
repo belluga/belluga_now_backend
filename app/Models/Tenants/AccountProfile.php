@@ -13,7 +13,7 @@ use Spatie\Sluggable\SlugOptions;
 
 class AccountProfile extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug;
+    use HasSlug, SoftDeletes, UsesTenantConnection;
 
     protected $table = 'account_profiles';
 

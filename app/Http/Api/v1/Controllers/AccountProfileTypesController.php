@@ -6,9 +6,9 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileRegistryManagementService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
-use App\Http\Controllers\Controller;
 use App\Http\Api\v1\Requests\AccountProfileTypeStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileTypeUpdateRequest;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,8 +17,7 @@ class AccountProfileTypesController extends Controller
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly AccountProfileRegistryManagementService $managementService,
-    ) {
-    }
+    ) {}
 
     public function index(): JsonResponse
     {

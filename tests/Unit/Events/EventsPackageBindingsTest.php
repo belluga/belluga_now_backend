@@ -6,14 +6,14 @@ namespace Tests\Unit\Events;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
-use App\Integration\Events\EventTypeResolverAdapter;
-use Belluga\MapPois\Integration\Events\MapPoiEventProjectionSyncAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
-use Belluga\MapPois\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
+use App\Integration\Events\EventTypeResolverAdapter;
+use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
+use App\Integration\Ticketing\EventTemplateReadAdapter;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
@@ -21,10 +21,10 @@ use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
-use Belluga\Events\Contracts\EventProjectionSyncContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
-use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
+use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
@@ -32,7 +32,7 @@ use Tests\TestCase;
 
 class EventsPackageBindingsTest extends TestCase
 {
-    public function testEventsPackageContractsAreBoundToAppAdapters(): void
+    public function test_events_package_contracts_are_bound_to_app_adapters(): void
     {
         $this->assertInstanceOf(
             EventTaxonomyValidationAdapter::class,
@@ -63,16 +63,16 @@ class EventsPackageBindingsTest extends TestCase
             $this->app->make(EventTenantContextContract::class)
         );
         $this->assertInstanceOf(
-            MapPoiEventProjectionSyncAdapter::class,
-            $this->app->make(EventProjectionSyncContract::class)
-        );
-        $this->assertInstanceOf(
             TenantRadiusSettingsAdapter::class,
             $this->app->make(EventRadiusSettingsContract::class)
         );
         $this->assertInstanceOf(
             TenantExecutionContextAdapter::class,
             $this->app->make(TenantExecutionContextContract::class)
+        );
+        $this->assertInstanceOf(
+            EventTemplateReadAdapter::class,
+            $this->app->make(EventTemplateSnapshotReadContract::class)
         );
         $this->assertInstanceOf(
             QueueEventAsyncMetricsProvider::class,

@@ -12,10 +12,11 @@ use Tests\TestCase;
 
 class OccurrenceWriteGuardServiceTest extends TestCase
 {
-    public function testItRejectsWhenTicketingIsDisabled(): void
+    public function test_it_rejects_when_ticketing_is_disabled(): void
     {
         $service = new OccurrenceWriteGuardService(
-            new class implements TicketingPolicyContract {
+            new class implements TicketingPolicyContract
+            {
                 public function isTicketingEnabled(): bool
                 {
                     return false;
@@ -26,7 +27,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return 'auth_only';
                 }
             },
-            new class implements OccurrenceReadContract {
+            new class implements OccurrenceReadContract
+            {
                 public function findOccurrence(string $eventId, string $occurrenceId): ?array
                 {
                     return ['id' => $occurrenceId, 'event_id' => $eventId];
@@ -37,7 +39,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return ['event_id' => (string) $eventRef, 'occurrence_id' => $occurrenceRef];
                 }
             },
-            new class implements OccurrencePublicationContract {
+            new class implements OccurrencePublicationContract
+            {
                 public function isOccurrencePublished(string $eventId, string $occurrenceId): bool
                 {
                     return true;
@@ -51,10 +54,11 @@ class OccurrenceWriteGuardServiceTest extends TestCase
         $this->assertSame('ticketing_disabled', $result['code']);
     }
 
-    public function testItRejectsWhenAuthIsRequiredAndActorIsAnonymous(): void
+    public function test_it_rejects_when_auth_is_required_and_actor_is_anonymous(): void
     {
         $service = new OccurrenceWriteGuardService(
-            new class implements TicketingPolicyContract {
+            new class implements TicketingPolicyContract
+            {
                 public function isTicketingEnabled(): bool
                 {
                     return true;
@@ -65,7 +69,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return 'auth_only';
                 }
             },
-            new class implements OccurrenceReadContract {
+            new class implements OccurrenceReadContract
+            {
                 public function findOccurrence(string $eventId, string $occurrenceId): ?array
                 {
                     return ['id' => $occurrenceId, 'event_id' => $eventId];
@@ -76,7 +81,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return ['event_id' => (string) $eventRef, 'occurrence_id' => $occurrenceRef];
                 }
             },
-            new class implements OccurrencePublicationContract {
+            new class implements OccurrencePublicationContract
+            {
                 public function isOccurrencePublished(string $eventId, string $occurrenceId): bool
                 {
                     return true;
@@ -90,10 +96,11 @@ class OccurrenceWriteGuardServiceTest extends TestCase
         $this->assertSame('auth_required', $result['code']);
     }
 
-    public function testItRejectsWhenOccurrenceDoesNotExist(): void
+    public function test_it_rejects_when_occurrence_does_not_exist(): void
     {
         $service = new OccurrenceWriteGuardService(
-            new class implements TicketingPolicyContract {
+            new class implements TicketingPolicyContract
+            {
                 public function isTicketingEnabled(): bool
                 {
                     return true;
@@ -104,7 +111,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return 'guest_or_auth';
                 }
             },
-            new class implements OccurrenceReadContract {
+            new class implements OccurrenceReadContract
+            {
                 public function findOccurrence(string $eventId, string $occurrenceId): ?array
                 {
                     return null;
@@ -115,7 +123,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return ['event_id' => (string) $eventRef, 'occurrence_id' => $occurrenceRef];
                 }
             },
-            new class implements OccurrencePublicationContract {
+            new class implements OccurrencePublicationContract
+            {
                 public function isOccurrencePublished(string $eventId, string $occurrenceId): bool
                 {
                     return true;
@@ -129,10 +138,11 @@ class OccurrenceWriteGuardServiceTest extends TestCase
         $this->assertSame('occurrence_not_found', $result['code']);
     }
 
-    public function testItRejectsSoftDeletedOccurrence(): void
+    public function test_it_rejects_soft_deleted_occurrence(): void
     {
         $service = new OccurrenceWriteGuardService(
-            new class implements TicketingPolicyContract {
+            new class implements TicketingPolicyContract
+            {
                 public function isTicketingEnabled(): bool
                 {
                     return true;
@@ -143,7 +153,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return 'guest_or_auth';
                 }
             },
-            new class implements OccurrenceReadContract {
+            new class implements OccurrenceReadContract
+            {
                 public function findOccurrence(string $eventId, string $occurrenceId): ?array
                 {
                     return [
@@ -158,7 +169,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return ['event_id' => (string) $eventRef, 'occurrence_id' => $occurrenceRef];
                 }
             },
-            new class implements OccurrencePublicationContract {
+            new class implements OccurrencePublicationContract
+            {
                 public function isOccurrencePublished(string $eventId, string $occurrenceId): bool
                 {
                     return true;
@@ -172,10 +184,11 @@ class OccurrenceWriteGuardServiceTest extends TestCase
         $this->assertSame('occurrence_deleted', $result['code']);
     }
 
-    public function testItRejectsWhenOccurrenceIsUnpublished(): void
+    public function test_it_rejects_when_occurrence_is_unpublished(): void
     {
         $service = new OccurrenceWriteGuardService(
-            new class implements TicketingPolicyContract {
+            new class implements TicketingPolicyContract
+            {
                 public function isTicketingEnabled(): bool
                 {
                     return true;
@@ -186,7 +199,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return 'guest_or_auth';
                 }
             },
-            new class implements OccurrenceReadContract {
+            new class implements OccurrenceReadContract
+            {
                 public function findOccurrence(string $eventId, string $occurrenceId): ?array
                 {
                     return ['id' => $occurrenceId, 'event_id' => $eventId];
@@ -197,7 +211,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return ['event_id' => (string) $eventRef, 'occurrence_id' => $occurrenceRef];
                 }
             },
-            new class implements OccurrencePublicationContract {
+            new class implements OccurrencePublicationContract
+            {
                 public function isOccurrencePublished(string $eventId, string $occurrenceId): bool
                 {
                     return false;
@@ -211,10 +226,11 @@ class OccurrenceWriteGuardServiceTest extends TestCase
         $this->assertSame('occurrence_unpublished', $result['code']);
     }
 
-    public function testItAllowsWhenGuardConditionsPass(): void
+    public function test_it_allows_when_guard_conditions_pass(): void
     {
         $service = new OccurrenceWriteGuardService(
-            new class implements TicketingPolicyContract {
+            new class implements TicketingPolicyContract
+            {
                 public function isTicketingEnabled(): bool
                 {
                     return true;
@@ -225,7 +241,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return 'guest_or_auth';
                 }
             },
-            new class implements OccurrenceReadContract {
+            new class implements OccurrenceReadContract
+            {
                 public function findOccurrence(string $eventId, string $occurrenceId): ?array
                 {
                     return [
@@ -242,7 +259,8 @@ class OccurrenceWriteGuardServiceTest extends TestCase
                     return ['event_id' => (string) $eventRef, 'occurrence_id' => $occurrenceRef];
                 }
             },
-            new class implements OccurrencePublicationContract {
+            new class implements OccurrencePublicationContract
+            {
                 public function isOccurrencePublished(string $eventId, string $occurrenceId): bool
                 {
                     return true;

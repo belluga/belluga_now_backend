@@ -26,7 +26,7 @@ class TaxonomyTermManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function create(string $taxonomyId, array $payload): array
@@ -53,7 +53,7 @@ class TaxonomyTermManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function update(string $taxonomyId, string $termId, array $payload): array

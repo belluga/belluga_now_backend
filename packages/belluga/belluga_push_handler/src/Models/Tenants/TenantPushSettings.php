@@ -4,10 +4,19 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Models\Tenants;
 
-use Belluga\Settings\Models\Tenants\TenantSettings as PackageTenantSettings;
+use MongoDB\Laravel\Eloquent\Model;
+use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
-class TenantPushSettings extends PackageTenantSettings
+class TenantPushSettings extends Model
 {
+    use UsesTenantConnection;
+
+    public const ROOT_ID = 'settings_root';
+
+    protected $table = 'settings';
+
+    protected $guarded = [];
+
     protected $hidden = [
         'firebase_credentials_id',
     ];
@@ -23,8 +32,17 @@ class TenantPushSettings extends PackageTenantSettings
         'updated_at' => 'datetime',
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $model): void {
+            if (! $model->getAttribute('_id')) {
+                $model->setAttribute('_id', self::ROOT_ID);
+            }
+        });
+    }
+
     /**
-     * @param mixed $value
+     * @param  mixed  $value
      * @return array<int, array<string, mixed>>
      */
     public function getTelemetryAttribute($value): array
@@ -45,7 +63,7 @@ class TenantPushSettings extends PackageTenantSettings
     }
 
     /**
-     * @param array<mixed> $telemetry
+     * @param  array<mixed>  $telemetry
      * @return array<int, array<string, mixed>>
      */
     private function normalizeTelemetry(array $telemetry): array
@@ -119,7 +137,7 @@ class TenantPushSettings extends PackageTenantSettings
     public static function current(): ?self
     {
         /** @var self|null $current */
-        $current = parent::current();
+        $current = static::query()->where('_id', self::ROOT_ID)->first();
 
         return $current;
     }

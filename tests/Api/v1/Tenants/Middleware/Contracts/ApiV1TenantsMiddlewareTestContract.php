@@ -12,13 +12,14 @@ use Tests\TestCaseTenant;
 
 abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
 {
-    use AdminRoleFunctions, AdminAuthFunctions, AccountAuthFunctions;
+    use AccountAuthFunctions, AdminAuthFunctions, AdminRoleFunctions;
 
     abstract protected TenantLabels $tenant_cross {
         get;
     }
 
-    public function testLoginAllAdminUsers(): void {
+    public function testLoginAllAdminUsers(): void
+    {
         $response = $this->adminLogin($this->landlord->user_superadmin);
         $response->assertStatus(200);
 
@@ -29,7 +30,8 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $response->assertStatus(200);
     }
 
-    public function testLoginTenantUsers(): void {
+    public function testLoginTenantUsers(): void
+    {
         $response = $this->adminLogin($this->tenant->user_admin);
         $response->assertStatus(200);
 
@@ -37,7 +39,8 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $response->assertStatus(200);
     }
 
-    public function testLoginCrossTenantUsers(): void {
+    public function testLoginCrossTenantUsers(): void
+    {
         $response = $this->adminLogin($this->tenant_cross->user_admin);
         $response->assertStatus(200);
 
@@ -45,12 +48,14 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $response->assertStatus(200);
     }
 
-    public function testLoginAccountUser():void {
+    public function testLoginAccountUser(): void
+    {
         $response = $this->accountLogin($this->tenant->account_primary->user_admin);
         $response->assertStatus(200);
     }
 
-    public function testLoginAccountUserCross():void {
+    public function testLoginAccountUserCross(): void
+    {
 
         $response = $this->accountLogin($this->tenant_cross->account_primary->user_admin);
         $response->assertStatus(403);
@@ -61,7 +66,8 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $response->assertStatus(200);
     }
 
-    public function testListWithAdmin(): void {
+    public function testListWithAdmin(): void
+    {
         $rolesList = $this->list(
             $this->getHeader($this->tenant->user_admin)
         );
@@ -69,7 +75,8 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $rolesList->assertStatus(200);
     }
 
-    public function testListCrossNoPermission(): void {
+    public function testListCrossNoPermission(): void
+    {
         $rolesList = $this->list(
             $this->getHeader($this->landlord->user_cross_tenant_visitor)
         );
@@ -77,15 +84,17 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $rolesList->assertStatus(403);
     }
 
-    public function testListWithPermissionCrossTenant(): void {
+    public function testListWithPermissionCrossTenantStillRequiresTenantAccess(): void
+    {
         $rolesList = $this->list(
             $this->getHeader($this->landlord->user_cross_tenant_admin)
         );
 
-        $rolesList->assertStatus(200);
+        $rolesList->assertStatus(403);
     }
 
-    public function testListWithAccountPermission(): void {
+    public function testListWithAccountPermission(): void
+    {
         $rolesList = $this->list(
             $this->getHeader($this->tenant->account_primary->user_admin)
         );
@@ -93,7 +102,8 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $rolesList->assertStatus(401);
     }
 
-    public function testListWithPermissionWithoutTenant(): void {
+    public function testListWithPermissionWithoutTenant(): void
+    {
         $rolesList = $this->list(
             $this->getHeader($this->tenant_cross->user_admin)
         );
@@ -101,10 +111,11 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
         $rolesList->assertStatus(403);
     }
 
-    protected function getHeader(UserLabels $user): array {
+    protected function getHeader(UserLabels $user): array
+    {
         return [
             'Authorization' => "Bearer $user->token",
-            'Content-Type' => 'application/json'
+            'Content-Type' => 'application/json',
         ];
     }
 
@@ -126,5 +137,4 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
             headers: $headers,
         );
     }
-
 }

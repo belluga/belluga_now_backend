@@ -36,10 +36,10 @@ class TenantPushMessageTypesRequest extends FormRequest
         ];
     }
 
-    public function withValidator(Validator $validator): void
+    public function after(PushSettingsKernelBridge $pushSettings): array
     {
-        $validator->after(function (Validator $validator): void {
-            $routes = $this->currentRouteKeys();
+        return [function (Validator $validator) use ($pushSettings): void {
+            $routes = $this->currentRouteKeys($pushSettings);
             $types = $this->all();
             if (! is_array($types)) {
                 return;
@@ -64,15 +64,15 @@ class TenantPushMessageTypesRequest extends FormRequest
                     }
                 }
             }
-        });
+        }];
     }
 
     /**
      * @return array<int, string>
      */
-    private function currentRouteKeys(): array
+    private function currentRouteKeys(PushSettingsKernelBridge $pushSettings): array
     {
-        $routes = app(PushSettingsKernelBridge::class)->currentMessageRoutes();
+        $routes = $pushSettings->currentMessageRoutes();
         if (! is_array($routes)) {
             return [];
         }

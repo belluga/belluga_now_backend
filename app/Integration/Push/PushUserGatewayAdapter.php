@@ -83,7 +83,7 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function registerDevice(Authenticatable $user, array $payload): void
     {
@@ -101,11 +101,11 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
             'push_token' => (string) $payload['push_token'],
             'is_active' => true,
             'invalidated_at' => null,
-            'updated_at' => new UTCDateTime(),
+            'updated_at' => new UTCDateTime,
         ];
 
         if ($index === false) {
-            $record['created_at'] = new UTCDateTime();
+            $record['created_at'] = new UTCDateTime;
             $devices->push($record);
         } else {
             $devices->put($index, array_merge($devices->get($index), $record));
@@ -116,7 +116,7 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
     }
 
     /**
-     * @param array<int, string> $tokens
+     * @param  array<int, string>  $tokens
      */
     public function invalidateTokens(Authenticatable $user, array $tokens): void
     {
@@ -126,7 +126,7 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
 
         $tokensLookup = array_fill_keys($tokens, true);
         $devices = collect($user->devices ?? []);
-        $now = new UTCDateTime();
+        $now = new UTCDateTime;
 
         $devices = $devices->map(static function (array $device) use ($tokensLookup, $now): array {
             $token = $device['push_token'] ?? null;
@@ -146,7 +146,7 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function unregisterDevice(Authenticatable $user, array $payload): void
     {
@@ -202,7 +202,7 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
     }
 
     /**
-     * @param callable(Authenticatable): void $callback
+     * @param  callable(Authenticatable): void  $callback
      */
     public function chunkUsers(?string $accountId, int $chunkSize, callable $callback): void
     {
@@ -221,4 +221,3 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
         });
     }
 }
-

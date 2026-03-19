@@ -34,7 +34,7 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->service = $this->app->make(EnvironmentResolverService::class);
     }
 
-    public function testResolveReturnsTenantEnvironmentWhenAvailable(): void
+    public function test_resolve_returns_tenant_environment_when_available(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -52,7 +52,7 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
     }
 
-    public function testResolveTenantOnLandlordHostKeepsCanonicalTenantMainDomain(): void
+    public function test_resolve_tenant_on_landlord_host_keeps_canonical_tenant_main_domain(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -66,7 +66,7 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->assertSame($tenant->getMainDomain(), $result['main_domain']);
     }
 
-    public function testResolveFallsBackToLandlordEnvironment(): void
+    public function test_resolve_falls_back_to_landlord_environment(): void
     {
         Tenant::forgetCurrent();
 

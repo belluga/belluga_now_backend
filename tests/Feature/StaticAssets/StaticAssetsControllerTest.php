@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\StaticAssets;
 
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
-use App\Application\Initialization\InitializationPayload;
-use App\Application\Initialization\SystemInitializationService;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -50,7 +52,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function testStaticAssetCreateAndPublicRead(): void
+    public function test_static_asset_create_and_public_read(): void
     {
         StaticAsset::query()->delete();
         StaticProfileType::query()->delete();
@@ -113,7 +115,47 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $publicBySlug->assertJsonPath('data.slug', $slug);
     }
 
-    public function testStaticAssetRejectsDisallowedTaxonomy(): void
+    public function test_static_asset_create_persists_avatar_and_cover_urls_without_file_upload(): void
+    {
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia URL',
+                'location' => ['lat' => -20.0, 'lng' => -40.0],
+                'avatar_url' => 'https://cdn.example.com/avatar.png',
+                'cover_url' => 'https://cdn.example.com/cover.png',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $assetId = (string) $response->json('data.id');
+        $response->assertJsonPath('data.avatar_url', 'https://cdn.example.com/avatar.png');
+        $response->assertJsonPath('data.cover_url', 'https://cdn.example.com/cover.png');
+
+        $publicById = $this->getJson(
+            "{$this->base_api_tenant}static_assets/{$assetId}",
+            $this->getHeaders()
+        );
+        $publicById->assertStatus(200);
+        $publicById->assertJsonPath('data.avatar_url', 'https://cdn.example.com/avatar.png');
+        $publicById->assertJsonPath('data.cover_url', 'https://cdn.example.com/cover.png');
+    }
+
+    public function test_static_asset_rejects_disallowed_taxonomy(): void
     {
         StaticAsset::query()->delete();
         StaticProfileType::query()->delete();
@@ -158,7 +200,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testStaticAssetRequiresLocationWhenPoiEnabled(): void
+    public function test_static_asset_requires_location_when_poi_enabled(): void
     {
         StaticAsset::query()->delete();
         StaticProfileType::query()->delete();
@@ -184,7 +226,47 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testStaticAssetUpdate(): void
+    public function test_static_asset_create_stores_avatar_and_cover_uploads_with_retrievable_media_urls(): void
+    {
+        Storage::fake('public');
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia com Midia',
+                'location' => ['lat' => -20.0, 'lng' => -40.0],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 512, 512),
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $assetId = (string) $response->json('data.id');
+        $avatarUrl = (string) $response->json('data.avatar_url');
+        $coverUrl = (string) $response->json('data.cover_url');
+
+        $this->assertStringContainsString("/api/v1/media/static-assets/{$assetId}/avatar", $avatarUrl);
+        $this->assertStringContainsString("/api/v1/media/static-assets/{$assetId}/cover", $coverUrl);
+
+        $this->get("{$this->base_tenant_url}api/v1/media/static-assets/{$assetId}/avatar")->assertOk();
+        $this->get("{$this->base_tenant_url}api/v1/media/static-assets/{$assetId}/cover")->assertOk();
+        $this->get("{$this->base_tenant_url}static-assets/{$assetId}/avatar")->assertOk();
+        $this->get("{$this->base_tenant_url}static-assets/{$assetId}/cover")->assertOk();
+    }
+
+    public function test_static_asset_update(): void
     {
         StaticAsset::query()->delete();
         StaticProfileType::query()->delete();
@@ -225,6 +307,15 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $updated->assertStatus(200);
         $updated->assertJsonPath('data.display_name', 'Praia Leste Atualizada');
         $updated->assertJsonPath('data.is_active', false);
+    }
+
+    private function getMultipartHeaders(): array
+    {
+        $headers = $this->getHeaders();
+        unset($headers['Content-Type']);
+        $headers['Accept'] = 'application/json';
+
+        return $headers;
     }
 
     private function initializeSystem(): void

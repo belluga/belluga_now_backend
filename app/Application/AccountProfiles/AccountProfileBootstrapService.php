@@ -15,8 +15,7 @@ class AccountProfileBootstrapService
         private readonly AccountManagementService $accountService,
         private readonly AccountProfileManagementService $profileService,
         private readonly AccountProfileRegistrySeeder $registrySeeder,
-    ) {
-    }
+    ) {}
 
     public function ensurePersonalAccount(AccountUser $user): void
     {
@@ -27,7 +26,7 @@ class AccountProfileBootstrapService
         $this->registrySeeder->ensureDefaults();
 
         $displayName = $user->name ?: 'Personal';
-        $documentNumber = 'PERSONAL-' . (string) $user->_id;
+        $documentNumber = 'PERSONAL-'.(string) $user->_id;
 
         $result = $this->accountService->create([
             'name' => $displayName,
@@ -57,5 +56,4 @@ class AccountProfileBootstrapService
             'updated_by_type' => 'tenant',
         ]);
     }
-
 }

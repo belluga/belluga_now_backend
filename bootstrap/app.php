@@ -6,9 +6,9 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use Symfony\Component\HttpFoundation\Request;
-use \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -36,13 +36,13 @@ return Application::configure(basePath: dirname(__DIR__))
             };
 
             $mainHost = parse_url(config('app.url'), PHP_URL_HOST);
-            if (!is_string($mainHost) || $mainHost === '') {
+            if (! is_string($mainHost) || $mainHost === '') {
                 $mainHost = (string) config('app.url');
             }
             $mainHost = trim($mainHost);
             $tenantDomainPattern = $mainHost === ''
                 ? '.+'
-                : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+                : '^(?!'.preg_quote($mainHost, '/').'$).+';
 
             Route::domain($mainHost)->group(function () use ($registerProjectRoutes): void {
                 Route::prefix('api/v1/initialize')
@@ -109,6 +109,13 @@ return Application::configure(basePath: dirname(__DIR__))
                     );
 
                     $registerProjectRoutes(
+                        'admin/api/v1',
+                        ['tenant'],
+                        base_path('routes/api/project_tenant_package_admin_api_v1.php'),
+                        'project_tenant_package_admin_api_v1'
+                    );
+
+                    $registerProjectRoutes(
                         'api/v1/accounts/{account_slug}',
                         ['tenant'],
                         base_path('routes/api/project_account_api_v1.php'),
@@ -118,17 +125,22 @@ return Application::configure(basePath: dirname(__DIR__))
         }
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Cloudflare (Flexible SSL) terminates HTTPS at the edge and forwards to origin via HTTP.
-        // We only trust proxy headers from private network ranges (Docker bridge / host->container),
-        // and we only need X-Forwarded-Proto for correct scheme detection (avoid mixed-content).
+        // Cloudflare terminates TLS at the edge and forwards traffic through trusted proxies.
+        // We trust forwarding headers only from configured proxy ranges.
         $middleware->trustProxies(
             at: env('TRUSTED_PROXIES', '172.16.0.0/12'),
-            headers: Request::HEADER_X_FORWARDED_PROTO
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO
         );
+
+        // Platform-wide API security baseline (L1/L2/L3 + idempotency + edge/origin controls).
+        $middleware->append(\App\Http\Middleware\ApiSecurityHardening::class);
 
         $middleware
             ->group(
-                "landlord",
+                'landlord',
                 [
                     \App\Http\Middleware\LandlordValidation::class,
                 ]
@@ -136,7 +148,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware
             ->group(
-                "account",
+                'account',
                 [
                     StartSession::class,
                     \App\Http\Middleware\InitializeAccount::class,

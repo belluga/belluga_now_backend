@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\DB;
 
 trait MigrateFreshSeedOnce
 {
-
     protected static bool $migrationHasRunOnce = false;
 
     protected function migrationCommand(): string
@@ -27,7 +26,7 @@ trait MigrateFreshSeedOnce
 
     protected function migrateOnce(): void
     {
-        if (!static::$migrationHasRunOnce) {
+        if (! static::$migrationHasRunOnce) {
 
             $command = $this->migrationCommand();
             $tenantPaths = $this->tenantMigrationPathArgs();

@@ -15,9 +15,7 @@ use RuntimeException;
 
 class MongoSettingsStore implements SettingsStoreContract
 {
-    public function __construct(private readonly SettingsMergePolicyContract $mergePolicy)
-    {
-    }
+    public function __construct(private readonly SettingsMergePolicyContract $mergePolicy) {}
 
     public function getNamespaceValue(string $scope, string $namespace): array
     {
@@ -43,7 +41,7 @@ class MongoSettingsStore implements SettingsStoreContract
 
         if (! $settings) {
             /** @var SettingsDocument $settings */
-            $settings = new $modelClass();
+            $settings = new $modelClass;
             $settings->setAttribute('_id', SettingsDocument::ROOT_ID);
         }
 

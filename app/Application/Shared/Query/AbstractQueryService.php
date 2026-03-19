@@ -50,7 +50,7 @@ abstract class AbstractQueryService
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
     private function sanitizeFilters(array $filters): array
@@ -118,7 +118,7 @@ abstract class AbstractQueryService
 
     private function applyStringFilter(Builder $query, string $field, string $value): void
     {
-        $pattern = '%' . addcslashes($value, '%_\\') . '%';
+        $pattern = '%'.addcslashes($value, '%_\\').'%';
         $query->where($field, 'like', $pattern);
     }
 
@@ -179,7 +179,6 @@ abstract class AbstractQueryService
     }
 
     /**
-     * @param mixed $sortParam
      * @return array{field: string|null, direction: string}
      */
     private function resolveSort(mixed $sortParam): array

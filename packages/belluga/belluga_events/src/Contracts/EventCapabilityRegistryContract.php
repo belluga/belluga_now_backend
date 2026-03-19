@@ -15,4 +15,3 @@ interface EventCapabilityRegistryContract
 
     public function find(string $key): ?EventCapabilityHandlerContract;
 }
-

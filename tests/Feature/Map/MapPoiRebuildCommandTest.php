@@ -45,7 +45,7 @@ class MapPoiRebuildCommandTest extends TestCaseTenant
         TenantSettings::query()->delete();
     }
 
-    public function testRebuildCommandRespectsMapIngestEnableToggle(): void
+    public function test_rebuild_command_respects_map_ingest_enable_toggle(): void
     {
         TenantSettings::create([
             'map_ingest' => [
@@ -63,7 +63,7 @@ class MapPoiRebuildCommandTest extends TestCaseTenant
             ->assertExitCode(1);
     }
 
-    public function testRebuildCommandRebuildsStaticAssetProjections(): void
+    public function test_rebuild_command_rebuilds_static_asset_projections(): void
     {
         TenantSettings::create([
             'map_ingest' => [

@@ -15,8 +15,7 @@ class AgendaController extends Controller
     public function __construct(
         private readonly EventQueryService $eventQueryService,
         private readonly EventTenantContextContract $tenantContext
-    ) {
-    }
+    ) {}
 
     public function index(AgendaIndexRequest $request): JsonResponse
     {

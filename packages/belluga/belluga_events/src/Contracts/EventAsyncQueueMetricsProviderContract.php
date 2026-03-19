@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Contracts;
 
+use Belluga\Events\Support\EventAsyncQueueMetricsSnapshot;
+
 interface EventAsyncQueueMetricsProviderContract
 {
-    /**
-     * @return array<int, int> Pending job ages (seconds)
-     */
-    public function pendingAgesInSeconds(): array;
+    public function snapshot(): EventAsyncQueueMetricsSnapshot;
 }
-

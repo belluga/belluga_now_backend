@@ -8,16 +8,17 @@ use Belluga\Events\Application\Events\EventManagementService;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
-use Belluga\Ticketing\Contracts\EventTemplateReadContract;
+use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventPartyCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
-use Illuminate\Support\Arr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 
 class EventsController extends Controller
@@ -28,9 +29,8 @@ class EventsController extends Controller
         private readonly EventAccountResolverContract $accountResolver,
         private readonly EventProfileResolverContract $profileResolver,
         private readonly EventTenantContextContract $tenantContext,
-        private readonly EventTemplateReadContract $eventTemplateRead,
-    ) {
-    }
+        private readonly EventTemplateSnapshotReadContract $eventTemplateRead,
+    ) {}
 
     public function index(EventIndexRequest $request): JsonResponse
     {
@@ -136,7 +136,11 @@ class EventsController extends Controller
         }
 
         if (! $this->isAdminContext($request)) {
-            $this->eventQueryService->assertPublicVisible($event);
+            try {
+                $this->eventQueryService->assertPublicVisible($event);
+            } catch (EventNotPubliclyVisibleException) {
+                abort(404, 'Event not found.');
+            }
         }
 
         return response()->json([
@@ -207,7 +211,7 @@ class EventsController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function applyTemplateToPayload(array $payload): array

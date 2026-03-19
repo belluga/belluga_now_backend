@@ -26,7 +26,7 @@ class TenantUserQueryService extends AbstractQueryService
     protected function baseSearchableFields(): array
     {
         return array_diff(
-            (new AccountUser())->getFillable(),
+            (new AccountUser)->getFillable(),
             [
                 'password',
                 'credentials',

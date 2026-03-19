@@ -17,7 +17,7 @@ class T3AnonymousIdentityMergerFailureTest extends ApiV1AnonymousIdentityMergerT
         }
     }
 
-    public function testMergeFailsWhenAnonymousUserDoesNotExist(): void
+    public function test_merge_fails_when_anonymous_user_does_not_exist(): void
     {
         $target = $this->createCanonicalUser();
         $source = $this->createAnonymousSource();
@@ -37,7 +37,7 @@ class T3AnonymousIdentityMergerFailureTest extends ApiV1AnonymousIdentityMergerT
         );
     }
 
-    public function testMergeFailsWhenNotAnonymousIdentity(): void
+    public function test_merge_fails_when_not_anonymous_identity(): void
     {
         $target = $this->createCanonicalUser();
         $source = $this->createCanonicalUser();
@@ -57,7 +57,7 @@ class T3AnonymousIdentityMergerFailureTest extends ApiV1AnonymousIdentityMergerT
         );
     }
 
-    public function testConcurrencyConflictThrowsException(): void
+    public function test_concurrency_conflict_throws_exception(): void
     {
         $this->expectException(ConcurrencyConflictException::class);
 

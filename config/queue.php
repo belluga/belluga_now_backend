@@ -14,14 +14,23 @@ if ($queueConnection === '') {
 $databaseQueueConnection = env('DB_QUEUE_CONNECTION');
 $databaseQueueConnection = is_string($databaseQueueConnection) ? trim($databaseQueueConnection) : '';
 
+$mongodbQueueConnection = env('MONGODB_QUEUE_CONNECTION', $databaseConnection);
+$mongodbQueueConnection = is_string($mongodbQueueConnection) ? trim($mongodbQueueConnection) : '';
+
+if ($queueConnection === 'database' && $databaseQueueConnection === '') {
+    throw new \RuntimeException(
+        'Queue configuration requires DB_QUEUE_CONNECTION when QUEUE_CONNECTION=database.'
+    );
+}
+
 if (
     $isMongoPrimaryConnection
     && $queueConnection === 'database'
-    && in_array($databaseQueueConnection, ['', 'mongodb', 'landlord', 'tenant'], true)
+    && in_array($databaseQueueConnection, ['mongodb', 'landlord', 'tenant'], true)
 ) {
     throw new \RuntimeException(
-        'Unsafe queue configuration detected: DB_CONNECTION is MongoDB but QUEUE_CONNECTION=database ' .
-        'without a dedicated SQL DB_QUEUE_CONNECTION. Use QUEUE_CONNECTION=mongodb or set DB_QUEUE_CONNECTION ' .
+        'Unsafe queue configuration detected: DB_CONNECTION is MongoDB but QUEUE_CONNECTION=database '.
+        'without a dedicated SQL DB_QUEUE_CONNECTION. Use QUEUE_CONNECTION=mongodb or set DB_QUEUE_CONNECTION '.
         'to a SQL connection.'
     );
 }
@@ -62,7 +71,7 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION'),
+            'connection' => $databaseQueueConnection,
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
@@ -71,7 +80,7 @@ return [
 
         'mongodb' => [
             'driver' => 'mongodb',
-            'connection' => env('MONGODB_QUEUE_CONNECTION', $databaseConnection),
+            'connection' => $mongodbQueueConnection,
             'collection' => env('MONGODB_QUEUE_COLLECTION', 'jobs'),
             'queue' => env('MONGODB_QUEUE', 'default'),
             'retry_after' => (int) env('MONGODB_QUEUE_RETRY_AFTER', 90),

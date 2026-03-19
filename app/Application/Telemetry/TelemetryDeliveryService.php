@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Http;
 class TelemetryDeliveryService
 {
     /**
-     * @param array<string, mixed> $envelope
-     * @param array<int, array<string, mixed>> $trackers
+     * @param  array<string, mixed>  $envelope
+     * @param  array<int, array<string, mixed>>  $trackers
      */
     public function deliver(array $envelope, array $trackers): void
     {
@@ -32,6 +32,7 @@ class TelemetryDeliveryService
             $type = $tracker['type'] ?? null;
             if ($type === 'mixpanel') {
                 $this->deliverMixpanel($tracker, $envelope);
+
                 continue;
             }
 
@@ -42,7 +43,7 @@ class TelemetryDeliveryService
     }
 
     /**
-     * @param array<string, mixed> $tracker
+     * @param  array<string, mixed>  $tracker
      */
     private function shouldTrack(array $tracker, string $event): bool
     {
@@ -60,8 +61,8 @@ class TelemetryDeliveryService
     }
 
     /**
-     * @param array<string, mixed> $tracker
-     * @param array<string, mixed> $envelope
+     * @param  array<string, mixed>  $tracker
+     * @param  array<string, mixed>  $envelope
      */
     private function deliverMixpanel(array $tracker, array $envelope): void
     {
@@ -94,8 +95,8 @@ class TelemetryDeliveryService
     }
 
     /**
-     * @param array<string, mixed> $tracker
-     * @param array<string, mixed> $envelope
+     * @param  array<string, mixed>  $tracker
+     * @param  array<string, mixed>  $envelope
      */
     private function deliverWebhook(array $tracker, array $envelope): void
     {
@@ -136,4 +137,3 @@ class TelemetryDeliveryService
         }
     }
 }
-

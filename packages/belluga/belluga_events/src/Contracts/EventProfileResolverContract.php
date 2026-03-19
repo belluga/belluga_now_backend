@@ -15,7 +15,7 @@ interface EventProfileResolverContract
     public function resolveVenueByProfileId(string $profileId): array;
 
     /**
-     * @param array<int, string> $artistProfileIds
+     * @param  array<int, string>  $artistProfileIds
      * @return array<int, array<string, mixed>>
      */
     public function resolveArtistsByProfileIds(array $artistProfileIds): array;

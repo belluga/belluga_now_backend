@@ -13,10 +13,10 @@ class TenantSettings extends PackageTenantSettings
         'map_ingest',
         'map_security',
         'events',
+        'app_links',
     ];
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     public function getMapUiAttribute(mixed $value): array
@@ -25,7 +25,6 @@ class TenantSettings extends PackageTenantSettings
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     public function getEventsAttribute(mixed $value): array
@@ -34,7 +33,6 @@ class TenantSettings extends PackageTenantSettings
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     public function getMapIngestAttribute(mixed $value): array
@@ -43,10 +41,17 @@ class TenantSettings extends PackageTenantSettings
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     public function getMapSecurityAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getAppLinksAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }
@@ -60,7 +65,6 @@ class TenantSettings extends PackageTenantSettings
     }
 
     /**
-     * @param mixed $value
      * @return array<string, mixed>
      */
     private function normalizeArray(mixed $value): array

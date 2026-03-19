@@ -19,19 +19,17 @@ class UpsertMapPoiFromAccountProfileJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public function __construct(private readonly string $profileId)
-    {
-    }
+    public function __construct(private readonly string $profileId) {}
 
     public function handle(
         MapPoiProjectionService $projectionService,
         MapPoiSourceReaderContract $sourceReader,
-    ): void
-    {
+    ): void {
         $profile = $sourceReader->findAccountProfileById($this->profileId);
 
         if (! $profile) {
             $projectionService->deleteByRef('account_profile', $this->profileId);
+
             return;
         }
 

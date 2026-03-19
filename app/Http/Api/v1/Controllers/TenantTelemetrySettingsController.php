@@ -13,8 +13,7 @@ class TenantTelemetrySettingsController
 {
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings
-    ) {
-    }
+    ) {}
 
     public function index(): JsonResponse
     {
@@ -52,4 +51,3 @@ class TenantTelemetrySettingsController
         ]);
     }
 }
-

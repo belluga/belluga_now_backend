@@ -71,7 +71,7 @@ class LandlordUserAccessService
     }
 
     /**
-     * @param array<string, mixed> $metadata
+     * @param  array<string, mixed>  $metadata
      * @return array<string, mixed>
      */
     public function syncCredential(
@@ -107,7 +107,7 @@ class LandlordUserAccessService
         }
 
         $credential = [
-            '_id' => (string) new ObjectId(),
+            '_id' => (string) new ObjectId,
             'provider' => $provider,
             'subject' => $subject,
             'secret_hash' => $secretHash,

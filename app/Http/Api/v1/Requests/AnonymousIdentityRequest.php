@@ -20,11 +20,11 @@ class AnonymousIdentityRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'device_name' => ['required', 'string', 'max:' . InputConstraints::NAME_MAX],
+            'device_name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'fingerprint.hash' => ['required', 'regex:/^[A-Fa-f0-9]{64}$/'],
             'fingerprint.user_agent' => ['nullable', 'string', 'max:1024'],
             'fingerprint.locale' => ['nullable', 'string', 'max:16'],
-            'metadata' => ['nullable', 'array', 'max:' . InputConstraints::METADATA_MAX_ITEMS],
+            'metadata' => ['nullable', 'array', 'max:'.InputConstraints::METADATA_MAX_ITEMS],
         ];
     }
 }

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
 use App\Rules\UniqueSubdomainRule;
 use App\Support\Validation\InputConstraints;
+use Illuminate\Foundation\Http\FormRequest;
 
 class TenantStoreRequest extends FormRequest
 {
@@ -26,7 +26,7 @@ class TenantStoreRequest extends FormRequest
     public function rules(): array
     {
         $rules = [
-            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'required|string|max:'.InputConstraints::NAME_MAX,
         ];
 
         if ($this->isUpdateRequest()) {
@@ -37,7 +37,7 @@ class TenantStoreRequest extends FormRequest
                 'string',
                 'regex:/^[a-z][a-z0-9-]*[a-z0-9]$/',
                 'max:63',
-                new UniqueSubdomainRule($current_tenant_slug)
+                new UniqueSubdomainRule($current_tenant_slug),
 
             ];
         } else {
@@ -46,7 +46,7 @@ class TenantStoreRequest extends FormRequest
                 'string',
                 'regex:/^[a-z][a-z0-9-]*[a-z0-9]$/',
                 'max:63',
-                new UniqueSubdomainRule()
+                new UniqueSubdomainRule,
             ];
         }
 
@@ -66,7 +66,7 @@ class TenantStoreRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'name.required' => 'O nome do tenant é obrigatório'
+            'name.required' => 'O nome do tenant é obrigatório',
         ];
     }
 }

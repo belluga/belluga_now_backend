@@ -28,7 +28,7 @@ class TenantRoleManagementService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(Tenant $tenant, array $payload): TenantRoleTemplate
     {
@@ -63,7 +63,7 @@ class TenantRoleManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(Tenant $tenant, string $roleId, array $attributes): TenantRoleTemplate
     {
@@ -129,8 +129,8 @@ class TenantRoleManagementService
     }
 
     /**
-     * @param array<int, string> $current
-     * @param array<string, mixed> $mutation
+     * @param  array<int, string>  $current
+     * @param  array<string, mixed>  $mutation
      * @return array<int, string>
      */
     private function mutatePermissions(array $current, array $mutation): array

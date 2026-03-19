@@ -116,7 +116,8 @@ class PublishScheduledEventsJob implements ShouldQueue
 
     /**
      * @template T
-     * @param callable(): T $callback
+     *
+     * @param  callable(): T  $callback
      * @return T
      */
     private function runTenantTransaction(callable $callback): mixed
@@ -168,7 +169,7 @@ class PublishScheduledEventsJob implements ShouldQueue
         if (is_string($value) && trim($value) !== '') {
             try {
                 return Carbon::parse($value)->toISOString();
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 return null;
             }
         }

@@ -11,4 +11,3 @@ interface EventAsyncJobSignaturesContract
      */
     public function signatures(): array;
 }
-

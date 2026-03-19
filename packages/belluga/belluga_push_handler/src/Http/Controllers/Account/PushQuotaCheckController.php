@@ -4,38 +4,35 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use Belluga\PushHandler\Contracts\PushAccountContextContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Belluga\PushHandler\Http\Controllers\Account\Concerns\ResolvesAccountContext;
 use Belluga\PushHandler\Http\Requests\PushQuotaCheckRequest;
+use Belluga\PushHandler\Http\Support\PushAccountScopeResolver;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Illuminate\Http\JsonResponse;
 
 class PushQuotaCheckController
 {
+    use ResolvesAccountContext;
+
     public function __construct(
         private readonly PushPlanPolicyContract $planPolicy,
-        private readonly PushAccountContextContract $accountContext
-    ) {
-    }
+        private readonly PushAccountScopeResolver $accountScope
+    ) {}
 
     public function __invoke(PushQuotaCheckRequest $request): JsonResponse
     {
-        $accountId = $this->accountContext->currentAccountId();
-        if ($accountId === null || $accountId === '') {
-            abort(422, 'Account context not available.');
-        }
-
+        $accountId = $this->requireAccountId($this->accountScope);
         $payload = $request->validated();
         $audienceSize = (int) $payload['audience_size'];
 
         $message = null;
         if (! empty($payload['push_message_id'])) {
-            $message = PushMessage::query()
-                ->where('scope', 'account')
-                ->where('partner_id', $accountId)
-                ->where('_id', (string) $payload['push_message_id'])
-                ->first();
+            $message = $this->accountScope->findMessage(
+                $accountId,
+                (string) $payload['push_message_id']
+            );
         }
 
         $message ??= new PushMessage([

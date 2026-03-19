@@ -8,7 +8,7 @@ use Tests\TestCase;
 
 class EventsPackageDecouplingTest extends TestCase
 {
-    public function testPackageAsyncOperationalServicesDoNotReferenceHostMapJobs(): void
+    public function test_package_async_operational_services_do_not_reference_host_map_jobs(): void
     {
         $services = [
             base_path('packages/belluga/belluga_events/src/Application/Operations/EventDlqAlertService.php'),
@@ -26,4 +26,3 @@ class EventsPackageDecouplingTest extends TestCase
         }
     }
 }
-

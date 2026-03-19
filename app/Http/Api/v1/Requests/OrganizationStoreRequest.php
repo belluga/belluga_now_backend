@@ -20,8 +20,8 @@ class OrganizationStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
-            'description' => 'sometimes|string|max:' . InputConstraints::DESCRIPTION_MAX,
+            'name' => 'required|string|max:'.InputConstraints::NAME_MAX,
+            'description' => 'sometimes|string|max:'.InputConstraints::DESCRIPTION_MAX,
         ];
     }
 }

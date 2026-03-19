@@ -14,7 +14,7 @@ interface SettingsStoreContract
     public function getNamespaceValue(string $scope, string $namespace): array;
 
     /**
-     * @param array<string, mixed> $changes
+     * @param  array<string, mixed>  $changes
      * @return array<string, mixed>
      */
     public function mergeNamespace(

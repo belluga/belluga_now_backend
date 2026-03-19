@@ -16,8 +16,7 @@ class MapPoiProjectionService
         private readonly MapPoiRegistryContract $registry,
         private readonly MapPoiSourceReaderContract $sourceReader,
         private readonly MapPoiSettingsContract $settings,
-    ) {
-    }
+    ) {}
 
     public function deleteByRef(string $refType, string $refId): void
     {
@@ -31,17 +30,20 @@ class MapPoiProjectionService
     {
         if (! $profile->profile_type) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
+
             return;
         }
 
         if (! $this->registry->isAccountProfilePoiEnabled((string) $profile->profile_type)) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
+
             return;
         }
 
         $location = $this->normalizePoint($profile->location ?? null);
         if (! $location) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
+
             return;
         }
 
@@ -55,6 +57,7 @@ class MapPoiProjectionService
             'name' => (string) ($profile->display_name ?? ''),
             'subtitle' => $profile->bio ?? null,
             'category' => $profile->profile_type,
+            'source_type' => $this->normalizeSourceType($profile->profile_type ?? null),
             'tags' => [],
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($profile->taxonomy_terms ?? []),
             'taxonomy_terms_flat' => $this->flattenTaxonomyTerms($profile->taxonomy_terms ?? []),
@@ -81,17 +84,20 @@ class MapPoiProjectionService
     {
         if (! $asset->profile_type) {
             $this->deleteByRef('static', (string) $asset->_id);
+
             return;
         }
 
         if (! $this->registry->isStaticAssetPoiEnabled((string) $asset->profile_type)) {
             $this->deleteByRef('static', (string) $asset->_id);
+
             return;
         }
 
         $location = $this->normalizePoint($asset->location ?? null);
         if (! $location) {
             $this->deleteByRef('static', (string) $asset->_id);
+
             return;
         }
 
@@ -109,6 +115,7 @@ class MapPoiProjectionService
             'name' => (string) ($asset->display_name ?? ''),
             'subtitle' => $asset->bio ?? null,
             'category' => $mapCategory,
+            'source_type' => $this->normalizeSourceType($asset->profile_type ?? null),
             'tags' => $this->normalizeStringArray($asset->tags ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($asset->taxonomy_terms ?? []),
             'taxonomy_terms_flat' => $this->flattenTaxonomyTerms($asset->taxonomy_terms ?? []),
@@ -147,17 +154,20 @@ class MapPoiProjectionService
 
         if (! ($eventCapability['effective_enabled'] ?? false)) {
             $this->deactivateByRef('event', $eventId, $checkpoint);
+
             return;
         }
 
         if (! ($occurrenceProjection['has_active_facets'] ?? false)) {
             $this->deactivateByRef('event', $eventId, $checkpoint);
+
             return;
         }
 
         $geometry = $this->resolveEventGeometry($event, $eventCapability['discovery_scope'] ?? null);
         if ($geometry === null) {
             $this->deactivateByRef('event', $eventId, $checkpoint);
+
             return;
         }
 
@@ -182,6 +192,7 @@ class MapPoiProjectionService
             'name' => (string) ($event->title ?? ''),
             'subtitle' => $placeMetadata['display_name'] ?? ($venue['display_name'] ?? null),
             'category' => $categories[0] ?? 'event',
+            'source_type' => $this->resolveEventSourceType($event),
             'tags' => $this->normalizeStringArray($event->tags ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($event->taxonomy_terms ?? []),
             'taxonomy_terms_flat' => $this->flattenTaxonomyTerms($event->taxonomy_terms ?? []),
@@ -236,7 +247,7 @@ class MapPoiProjectionService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function upsertIdempotent(array $payload): void
     {
@@ -321,6 +332,7 @@ class MapPoiProjectionService
             $effectiveEnd = $endsAt?->copy() ?? $startsAt->copy()->addHours($defaultDuration);
             if ($effectiveEnd->lessThanOrEqualTo($now)) {
                 $checkpoint = max($checkpoint, $this->toCheckpoint($occurrence->updated_at ?? null));
+
                 continue;
             }
 
@@ -352,7 +364,7 @@ class MapPoiProjectionService
     }
 
     /**
-     * @param array<string, mixed>|null $discoveryScope
+     * @param  array<string, mixed>|null  $discoveryScope
      * @return array{location: array<string, mixed>, discovery_scope: array<string, mixed>|null}|null
      */
     private function resolveEventGeometry(object $event, ?array $discoveryScope): ?array
@@ -417,6 +429,33 @@ class MapPoiProjectionService
     private function resolveEventPriority(bool $isHappeningNow): int
     {
         return $isHappeningNow ? 80 : 60;
+    }
+
+    private function resolveEventSourceType(object $event): ?string
+    {
+        $type = $this->normalizeArray($event->type ?? null);
+        $candidate = $type['slug'] ?? $type['type'] ?? $type['name'] ?? $type['id'] ?? null;
+        $normalized = $this->normalizeSourceType($candidate);
+        if ($normalized !== null) {
+            return $normalized;
+        }
+
+        $categories = $this->normalizeStringArray($this->normalizeArray($event->categories ?? []));
+        if ($categories === []) {
+            return null;
+        }
+
+        return $this->normalizeSourceType($categories[0]);
+    }
+
+    private function normalizeSourceType(mixed $raw): ?string
+    {
+        $value = strtolower(trim((string) $raw));
+        if ($value === '') {
+            return null;
+        }
+
+        return $value;
     }
 
     /**
@@ -562,7 +601,7 @@ class MapPoiProjectionService
     }
 
     /**
-     * @param array<string, mixed> $location
+     * @param  array<string, mixed>  $location
      */
     private function exactKey(array $location): string
     {
@@ -570,11 +609,11 @@ class MapPoiProjectionService
         $lng = number_format((float) ($coordinates[0] ?? 0.0), 5, '.', '');
         $lat = number_format((float) ($coordinates[1] ?? 0.0), 5, '.', '');
 
-        return $lat . ',' . $lng;
+        return $lat.','.$lng;
     }
 
     /**
-     * @param array<int, mixed> $terms
+     * @param  array<int, mixed>  $terms
      * @return array<int, array<string, string>>
      */
     private function normalizeTaxonomyTerms(array $terms): array
@@ -600,7 +639,7 @@ class MapPoiProjectionService
     }
 
     /**
-     * @param array<int, mixed> $terms
+     * @param  array<int, mixed>  $terms
      * @return array<int, string>
      */
     private function flattenTaxonomyTerms(array $terms): array
@@ -616,14 +655,14 @@ class MapPoiProjectionService
             if ($type === '' || $value === '') {
                 continue;
             }
-            $flattened[] = $type . ':' . $value;
+            $flattened[] = $type.':'.$value;
         }
 
         return array_values(array_unique($flattened));
     }
 
     /**
-     * @param array<int, mixed> $values
+     * @param  array<int, mixed>  $values
      * @return array<int, string>
      */
     private function normalizeStringArray(array $values): array
@@ -654,7 +693,7 @@ class MapPoiProjectionService
             return null;
         }
 
-        return '/' . $refType . '/' . $slug;
+        return '/'.$refType.'/'.$slug;
     }
 
     private function projectionKey(string $refType, string $refId): string
@@ -691,7 +730,7 @@ class MapPoiProjectionService
         if (is_string($value) && trim($value) !== '') {
             try {
                 return Carbon::parse($value);
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 return null;
             }
         }

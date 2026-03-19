@@ -16,15 +16,14 @@ class LandlordAuthenticationService
 {
     public function __construct(
         private readonly LandlordUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     public function login(string $email, string $password, string $deviceName): AuthenticationResult
     {
         $user = $this->findUserByEmail($email);
 
         if (! $user || ! Hash::check($password, (string) $user->password)) {
-            throw new InvalidCredentialsException();
+            throw new InvalidCredentialsException;
         }
 
         $abilities = $user->getPermissions();
@@ -56,7 +55,7 @@ class LandlordAuthenticationService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function register(array $payload): AuthenticationResult
     {
@@ -98,7 +97,7 @@ class LandlordAuthenticationService
     }
 
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(LandlordUser $user, array $abilities): array

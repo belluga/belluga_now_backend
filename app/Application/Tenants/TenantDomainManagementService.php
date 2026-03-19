@@ -14,7 +14,7 @@ use MongoDB\Driver\Exception\BulkWriteException;
 class TenantDomainManagementService
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(Tenant $tenant, array $payload): Domains
     {

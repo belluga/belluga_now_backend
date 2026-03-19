@@ -32,4 +32,3 @@ class TicketUnitAuditEvent extends Model
         'updated_at' => 'datetime',
     ];
 }
-

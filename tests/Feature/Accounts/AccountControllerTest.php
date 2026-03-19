@@ -34,6 +34,8 @@ class AccountControllerTest extends TestCase
 
     private string $tenantAccountsAdminUrl;
 
+    private string $tenantAccountOnboardingsAdminUrl;
+
     private string $baseUrl;
 
     private string $baseAdminUrl;
@@ -70,22 +72,18 @@ class AccountControllerTest extends TestCase
         $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
         $tenantHost = "{$tenant->subdomain}.{$this->host}";
         $this->tenantAccountsAdminUrl = "http://{$tenantHost}/admin/api/v1/accounts";
+        $this->tenantAccountOnboardingsAdminUrl = "http://{$tenantHost}/admin/api/v1/account_onboardings";
         $this->baseUrl = "http://{$tenantHost}/api/v1/accounts/{$this->account->slug}";
         $this->baseAdminUrl = "http://{$tenantHost}/admin/api/v1/accounts/{$this->account->slug}";
     }
 
-    public function testStoreCreatesAccount(): void
+    public function test_store_creates_account(): void
     {
         $name = fake()->unique()->company();
-        $documentNumber = fake()->unique()->numerify('###################');
-
-        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+        $response = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $name,
-            'document' => [
-                'type' => 'cpf',
-                'number' => $documentNumber,
-            ],
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ]);
 
         $response->assertCreated();
@@ -95,31 +93,23 @@ class AccountControllerTest extends TestCase
         Account::where('name', $name)->first()?->forceDelete();
     }
 
-    public function testStoreAllowsDuplicateDocumentAcrossAccounts(): void
+    public function test_store_allows_duplicate_document_across_accounts(): void
     {
         $firstName = fake()->unique()->company();
         $secondName = fake()->unique()->company();
-        $documentNumber = fake()->unique()->numerify('###################');
-
-        $firstResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+        $firstResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $firstName,
-            'document' => [
-                'type' => 'cpf',
-                'number' => $documentNumber,
-            ],
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ]);
 
         $firstResponse->assertCreated();
         $firstResponse->assertJsonPath('data.account.name', $firstName);
 
-        $secondResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+        $secondResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $secondName,
-            'document' => [
-                'type' => 'cpf',
-                'number' => $documentNumber,
-            ],
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ]);
 
         $secondResponse->assertCreated();
@@ -129,18 +119,13 @@ class AccountControllerTest extends TestCase
         Account::where('name', $secondName)->first()?->forceDelete();
     }
 
-    public function testStoreCreatesUnmanagedAccountWithoutOrganization(): void
+    public function test_store_creates_unmanaged_account_without_organization(): void
     {
         $name = fake()->unique()->company();
-        $documentNumber = fake()->unique()->numerify('###################');
-
-        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+        $response = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $name,
-            'document' => [
-                'type' => 'cpf',
-                'number' => $documentNumber,
-            ],
             'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
         ]);
 
         $response->assertCreated();
@@ -151,22 +136,17 @@ class AccountControllerTest extends TestCase
         Account::where('name', $name)->first()?->forceDelete();
     }
 
-    public function testStoreCreatesTenantOwnedAccountWithoutTenantOrganizationContext(): void
+    public function test_store_creates_tenant_owned_account_without_tenant_organization_context(): void
     {
         $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
         $tenant->organization_id = null;
         $tenant->save();
 
         $name = fake()->unique()->company();
-        $documentNumber = fake()->unique()->numerify('###################');
-
-        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+        $response = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $name,
-            'document' => [
-                'type' => 'cpf',
-                'number' => $documentNumber,
-            ],
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ]);
 
         $response->assertCreated();
@@ -176,18 +156,13 @@ class AccountControllerTest extends TestCase
         Account::where('name', $name)->first()?->forceDelete();
     }
 
-    public function testUnmanagedAccountWithOperatorIsReturnedAsUserOwned(): void
+    public function test_unmanaged_account_with_operator_is_returned_as_user_owned(): void
     {
         $name = fake()->unique()->company();
-        $documentNumber = fake()->unique()->numerify('###################');
-
-        $createResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $name,
-            'document' => [
-                'type' => 'cpf',
-                'number' => $documentNumber,
-            ],
             'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
         ]);
 
         $createResponse->assertCreated();
@@ -212,14 +187,15 @@ class AccountControllerTest extends TestCase
         $showResponse->assertJsonPath('data.ownership_state', 'user_owned');
     }
 
-    public function testStoreAllowsMissingDocument(): void
+    public function test_store_allows_missing_document(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
 
         $name = fake()->unique()->company();
-        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+        $response = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $name,
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ]);
 
         $response->assertCreated();
@@ -228,39 +204,33 @@ class AccountControllerTest extends TestCase
         Account::where('name', $name)->first()?->forceDelete();
     }
 
-    public function testStoreRejectsInvalidOwnershipState(): void
+    public function test_store_rejects_invalid_ownership_state(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
 
-        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+        $response = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => 'Account Invalid Ownership',
-            'document' => [
-                'type' => 'cpf',
-                'number' => fake()->unique()->numerify('###################'),
-            ],
             'ownership_state' => 'user_owned',
+            'profile_type' => 'personal',
         ]);
 
         $response->assertStatus(422);
     }
 
-    public function testStoreForbiddenWithoutCreateAbility(): void
+    public function test_store_forbidden_without_create_ability(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
-        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+        $response = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => 'Account Forbidden',
-            'document' => [
-                'type' => 'cpf',
-                'number' => fake()->unique()->numerify('###################'),
-            ],
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ]);
 
         $response->assertStatus(403);
     }
 
-    public function testIndexFiltersByCurrentUser(): void
+    public function test_index_filters_by_current_user(): void
     {
         $response = $this->getJson($this->tenantAccountsAdminUrl);
 
@@ -275,37 +245,28 @@ class AccountControllerTest extends TestCase
         );
     }
 
-    public function testIndexFiltersByUnmanagedOwnershipState(): void
+    public function test_index_filters_by_unmanaged_ownership_state(): void
     {
         $unmanagedName = fake()->unique()->company();
         $tenantOwnedName = fake()->unique()->company();
         $userOwnedName = fake()->unique()->company();
 
-        $this->postJson($this->tenantAccountsAdminUrl, [
+        $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $unmanagedName,
-            'document' => [
-                'type' => 'cpf',
-                'number' => fake()->unique()->numerify('###################'),
-            ],
             'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
         ])->assertCreated();
 
-        $this->postJson($this->tenantAccountsAdminUrl, [
+        $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $tenantOwnedName,
-            'document' => [
-                'type' => 'cpf',
-                'number' => fake()->unique()->numerify('###################'),
-            ],
             'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
         ])->assertCreated();
 
-        $userOwnedCreateResponse = $this->postJson($this->tenantAccountsAdminUrl, [
+        $userOwnedCreateResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
             'name' => $userOwnedName,
-            'document' => [
-                'type' => 'cpf',
-                'number' => fake()->unique()->numerify('###################'),
-            ],
             'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
         ]);
         $userOwnedCreateResponse->assertCreated();
 
@@ -353,7 +314,7 @@ class AccountControllerTest extends TestCase
         );
     }
 
-    public function testIndexForbiddenWithoutViewAbility(): void
+    public function test_index_forbidden_without_view_ability(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
 
@@ -362,7 +323,7 @@ class AccountControllerTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function testUpdateForbiddenWithoutUpdateAbility(): void
+    public function test_update_forbidden_without_update_ability(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
@@ -373,7 +334,7 @@ class AccountControllerTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function testDeleteForbiddenWithoutDeleteAbility(): void
+    public function test_delete_forbidden_without_delete_ability(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
@@ -382,7 +343,7 @@ class AccountControllerTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function testAccountUserManageAttachesAndDetaches(): void
+    public function test_account_user_manage_attaches_and_detaches(): void
     {
         $user = $this->userService->create($this->account, [
             'name' => 'Member',
@@ -406,6 +367,18 @@ class AccountControllerTest extends TestCase
         );
 
         $detachResponse->assertOk();
+    }
+
+    public function test_legacy_accounts_create_route_returns_policy_rejection(): void
+    {
+        $response = $this->postJson($this->tenantAccountsAdminUrl, [
+            'name' => fake()->company(),
+            'ownership_state' => 'tenant_owned',
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('error_code', 'tenant_admin_onboarding_required');
+        $response->assertJsonPath('meta.use_endpoint', '/admin/api/v1/account_onboardings');
     }
 
     private function initializeSystem(): void

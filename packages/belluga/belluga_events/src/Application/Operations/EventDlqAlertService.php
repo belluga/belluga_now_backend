@@ -12,8 +12,7 @@ class EventDlqAlertService
 {
     public function __construct(
         private readonly EventAsyncJobSignaturesContract $jobSignatures
-    ) {
-    }
+    ) {}
 
     public function handle(JobFailed $event): void
     {

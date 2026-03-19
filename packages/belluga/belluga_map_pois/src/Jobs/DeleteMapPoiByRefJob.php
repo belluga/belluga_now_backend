@@ -23,8 +23,7 @@ class DeleteMapPoiByRefJob implements ShouldQueue
     public function __construct(
         private readonly string $refType,
         private readonly string $refId
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<int, int>

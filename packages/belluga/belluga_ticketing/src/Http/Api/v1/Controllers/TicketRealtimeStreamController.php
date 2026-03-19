@@ -17,8 +17,7 @@ class TicketRealtimeStreamController extends Controller
 {
     public function __construct(
         private readonly TicketRealtimeStreamService $streams,
-    ) {
-    }
+    ) {}
 
     public function offer(string $scope_type, string $scope_id): StreamedResponse|JsonResponse
     {
@@ -98,7 +97,7 @@ class TicketRealtimeStreamController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function streamEnvelope(string $channel, string $eventType, array $payload): StreamedResponse
     {
@@ -111,9 +110,9 @@ class TicketRealtimeStreamController extends Controller
         ];
 
         return response()->stream(function () use ($channel, $envelope): void {
-            echo 'id: ' . $envelope['occurred_at'] . "\n";
-            echo 'event: ' . $channel . "\n";
-            echo 'data: ' . json_encode($envelope) . "\n\n";
+            echo 'id: '.$envelope['occurred_at']."\n";
+            echo 'event: '.$channel."\n";
+            echo 'data: '.json_encode($envelope)."\n\n";
             if (ob_get_level() > 0) {
                 ob_flush();
             }
@@ -126,4 +125,3 @@ class TicketRealtimeStreamController extends Controller
         ]);
     }
 }
-

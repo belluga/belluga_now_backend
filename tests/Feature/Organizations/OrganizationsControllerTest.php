@@ -30,6 +30,7 @@ class OrganizationsControllerTest extends TestCaseTenant
     private static bool $bootstrapped = false;
 
     private Account $account;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -52,7 +53,7 @@ class OrganizationsControllerTest extends TestCaseTenant
 
     }
 
-    public function testOrganizationCreateAndShow(): void
+    public function test_organization_create_and_show(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}organizations",
@@ -74,7 +75,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $show->assertJsonPath('data.name', 'Org Alpha');
     }
 
-    public function testOrganizationCreateValidation(): void
+    public function test_organization_create_validation(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}organizations",
@@ -85,7 +86,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function testOrganizationIndexLists(): void
+    public function test_organization_index_lists(): void
     {
         Organization::query()->delete();
 
@@ -106,7 +107,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $this->assertGreaterThanOrEqual(2, count($response->json('data')));
     }
 
-    public function testOrganizationUpdate(): void
+    public function test_organization_update(): void
     {
         $created = $this->postJson(
             "{$this->base_tenant_api_admin}organizations",
@@ -127,7 +128,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $updated->assertJsonPath('data.name', 'Org Updated');
     }
 
-    public function testOrganizationDeleteRestore(): void
+    public function test_organization_delete_restore(): void
     {
         $created = $this->postJson(
             "{$this->base_tenant_api_admin}organizations",
@@ -151,7 +152,7 @@ class OrganizationsControllerTest extends TestCaseTenant
             ->assertStatus(200);
     }
 
-    public function testOrganizationForceDelete(): void
+    public function test_organization_force_delete(): void
     {
         $created = $this->postJson(
             "{$this->base_tenant_api_admin}organizations",
@@ -172,7 +173,7 @@ class OrganizationsControllerTest extends TestCaseTenant
             ->assertStatus(404);
     }
 
-    public function testOrganizationCreateForbiddenWithoutAbility(): void
+    public function test_organization_create_forbidden_without_ability(): void
     {
         $user = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($user, ['account-users:view']);

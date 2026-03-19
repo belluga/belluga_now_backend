@@ -7,6 +7,7 @@ namespace App\Application\Accounts;
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Pagination\LengthAwarePaginator;
 use MongoDB\BSON\ObjectId;
@@ -15,8 +16,7 @@ class AccountQueryService extends AbstractQueryService
 {
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService
-    ) {
-    }
+    ) {}
 
     public function paginateForUser(
         AccountUser|LandlordUser $user,
@@ -43,12 +43,37 @@ class AccountQueryService extends AbstractQueryService
             );
         }
 
-        return $this->buildPaginator(
+        $paginator = $this->buildPaginator(
             $query,
             $this->withoutOwnershipState($queryParams),
             $includeArchived,
             $perPage
-        )->through(fn (Account $account): array => $this->format($account));
+        );
+
+        $accounts = $paginator->getCollection()
+            ->filter(static fn ($item): bool => $item instanceof Account)
+            ->values();
+        $avatarUrlsByAccountId = $this->loadAvatarUrlsByAccountId(
+            $accounts
+                ->map(static fn (Account $account): string => (string) $account->_id)
+                ->all()
+        );
+
+        $paginator->setCollection(
+            $accounts
+                ->map(function (Account $account) use ($avatarUrlsByAccountId): array {
+                    $accountId = (string) $account->_id;
+
+                    return $this->format(
+                        $account,
+                        $avatarUrlsByAccountId[$accountId] ?? null,
+                        true
+                    );
+                })
+                ->values()
+        );
+
+        return $paginator;
     }
 
     public function findBySlugOrFail(string $slug, bool $onlyTrashed = false): Account
@@ -61,8 +86,11 @@ class AccountQueryService extends AbstractQueryService
     /**
      * @return array<string, mixed>
      */
-    public function format(Account $account): array
-    {
+    public function format(
+        Account $account,
+        ?string $avatarUrl = null,
+        bool $avatarResolved = false
+    ): array {
         return [
             'id' => (string) $account->_id,
             'name' => $account->name,
@@ -70,15 +98,80 @@ class AccountQueryService extends AbstractQueryService
             'document' => $account->document,
             'organization_id' => $account->organization_id ?? null,
             'ownership_state' => $this->ownershipStateService->deriveOwnershipState($account),
+            'avatar_url' => $avatarResolved
+                ? $avatarUrl
+                : ($avatarUrl ?? $this->resolveAvatarUrlForAccount($account)),
             'created_at' => $account->created_at?->toJSON(),
             'updated_at' => $account->updated_at?->toJSON(),
             'deleted_at' => $account->deleted_at?->toJSON(),
         ];
     }
 
+    /**
+     * @param  array<int, string>  $accountIds
+     * @return array<string, string|null>
+     */
+    private function loadAvatarUrlsByAccountId(array $accountIds): array
+    {
+        $normalizedIds = array_values(
+            array_filter(
+                array_map(static fn (string $id): string => trim($id), $accountIds),
+                static fn (string $id): bool => $id !== ''
+            )
+        );
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        $avatarsByAccountId = array_fill_keys($normalizedIds, null);
+        $profiles = AccountProfile::query()
+            ->whereIn('account_id', $normalizedIds)
+            ->orderByDesc('updated_at')
+            ->get(['account_id', 'avatar_url']);
+
+        foreach ($profiles as $profile) {
+            $accountId = trim((string) $profile->account_id);
+            if ($accountId === '' || ! array_key_exists($accountId, $avatarsByAccountId)) {
+                continue;
+            }
+            if ($avatarsByAccountId[$accountId] !== null) {
+                continue;
+            }
+            $avatarsByAccountId[$accountId] = $this->normalizeAvatarUrl($profile->avatar_url);
+        }
+
+        return $avatarsByAccountId;
+    }
+
+    private function resolveAvatarUrlForAccount(Account $account): ?string
+    {
+        $profile = AccountProfile::query()
+            ->where('account_id', (string) $account->_id)
+            ->orderByDesc('updated_at')
+            ->first();
+        if (! $profile) {
+            return null;
+        }
+
+        return $this->normalizeAvatarUrl($profile->avatar_url);
+    }
+
+    private function normalizeAvatarUrl(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return $trimmed;
+    }
+
     protected function baseSearchableFields(): array
     {
-        return array_diff((new Account())->getFillable(), ['document']);
+        return array_diff((new Account)->getFillable(), ['document']);
     }
 
     protected function stringFields(): array

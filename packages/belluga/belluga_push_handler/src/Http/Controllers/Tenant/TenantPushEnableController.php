@@ -12,8 +12,7 @@ class TenantPushEnableController
 {
     public function __construct(
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     public function __invoke(Request $request): JsonResponse
     {

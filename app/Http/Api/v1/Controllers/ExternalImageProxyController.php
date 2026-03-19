@@ -13,8 +13,7 @@ final class ExternalImageProxyController extends Controller
 {
     public function __construct(
         private readonly ExternalImageProxyService $proxyService,
-    ) {
-    }
+    ) {}
 
     public function store(ExternalImageProxyRequest $request): Response
     {
@@ -28,4 +27,3 @@ final class ExternalImageProxyController extends Controller
             ->header('Cache-Control', 'no-store');
     }
 }
-

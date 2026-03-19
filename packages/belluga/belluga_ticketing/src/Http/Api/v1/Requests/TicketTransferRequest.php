@@ -26,4 +26,3 @@ class TicketTransferRequest extends FormRequest
         ];
     }
 }
-

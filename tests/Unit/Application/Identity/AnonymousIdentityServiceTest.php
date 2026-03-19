@@ -38,7 +38,7 @@ class AnonymousIdentityServiceTest extends TestCase
         $this->service = $this->app->make(AnonymousIdentityService::class);
     }
 
-    public function testRegisterCreatesNewAnonymousIdentity(): void
+    public function test_register_creates_new_anonymous_identity(): void
     {
         $result = $this->service->register($this->tenant, [
             'device_name' => 'test-device',
@@ -54,7 +54,7 @@ class AnonymousIdentityServiceTest extends TestCase
         $this->assertNotEmpty($result->plainTextToken);
     }
 
-    public function testRegisterUpdatesExistingFingerprint(): void
+    public function test_register_updates_existing_fingerprint(): void
     {
         $payload = [
             'device_name' => 'test-device',

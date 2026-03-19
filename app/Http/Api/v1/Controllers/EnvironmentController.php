@@ -11,8 +11,7 @@ class EnvironmentController extends Controller
 {
     public function __construct(
         private readonly EnvironmentResolverService $environmentService
-    ) {
-    }
+    ) {}
 
     public function showEnvironmentData(EnvironmentRequest $request): JsonResponse
     {

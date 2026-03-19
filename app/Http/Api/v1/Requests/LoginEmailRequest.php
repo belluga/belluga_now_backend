@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Support\Validation\InputConstraints;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
 class LoginEmailRequest extends FormRequest
@@ -27,21 +27,21 @@ class LoginEmailRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
+            'email' => 'required|email|max:'.InputConstraints::EMAIL_MAX,
             'password' => [
                 'required',
                 'string',
-                'min:' . InputConstraints::PASSWORD_MIN,
-                'max:' . InputConstraints::PASSWORD_MAX,
+                'min:'.InputConstraints::PASSWORD_MIN,
+                'max:'.InputConstraints::PASSWORD_MAX,
             ],
-            'device_name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'device_name' => 'required|string|max:'.InputConstraints::NAME_MAX,
         ];
     }
 
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'errors' => $validator->errors()
+            'errors' => $validator->errors(),
         ], 422));
     }
 }

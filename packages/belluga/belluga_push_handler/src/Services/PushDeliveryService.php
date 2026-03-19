@@ -9,8 +9,8 @@ use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Carbon\Carbon;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PushDeliveryService
 {
@@ -18,12 +18,11 @@ class PushDeliveryService
         private readonly FcmClientContract $fcmClient,
         private readonly PushTelemetryEmitterContract $telemetryEmitter,
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<int, string> $tokens
-     * @param array<string, string> $tokenUserMap
+     * @param  array<int, string>  $tokens
+     * @param  array<string, string>  $tokenUserMap
      * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
     public function deliver(PushMessage $message, array $tokens, array $tokenUserMap = []): array
@@ -123,7 +122,7 @@ class PushDeliveryService
             ]);
         }
 
-        $maxTtlDays = $this->pushSettings->resolveMaxTtlDays(30);
+        $maxTtlDays = $this->pushSettings->resolveMaxTtlDays(7);
         $fcmMaxDays = (int) config('belluga_push_handler.fcm.max_ttl_days', 28);
         $maxAllowedDays = min($maxTtlDays, $fcmMaxDays);
         $maxAllowedMinutes = $maxAllowedDays * 24 * 60;

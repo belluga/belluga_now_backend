@@ -21,7 +21,7 @@ class InMemorySettingsRegistry implements SettingsRegistryContract
             throw new RuntimeException("Invalid namespace [{$definition->namespace}]. Use snake_case.");
         }
 
-        $key = $definition->scope . ':' . $definition->namespace;
+        $key = $definition->scope.':'.$definition->namespace;
 
         if (array_key_exists($key, $this->definitions)) {
             throw new RuntimeException("Settings namespace already registered [{$key}].");
@@ -36,7 +36,7 @@ class InMemorySettingsRegistry implements SettingsRegistryContract
             return array_values($this->definitions);
         }
 
-        $prefix = $scope . ':';
+        $prefix = $scope.':';
 
         return array_values(array_filter(
             $this->definitions,
@@ -48,13 +48,13 @@ class InMemorySettingsRegistry implements SettingsRegistryContract
     public function find(string $namespace, ?string $scope = null): ?SettingsNamespaceDefinition
     {
         if ($scope !== null) {
-            $key = $scope . ':' . $namespace;
+            $key = $scope.':'.$namespace;
 
             return $this->definitions[$key] ?? null;
         }
 
         foreach ($this->definitions as $key => $definition) {
-            if (str_ends_with($key, ':' . $namespace)) {
+            if (str_ends_with($key, ':'.$namespace)) {
                 return $definition;
             }
         }

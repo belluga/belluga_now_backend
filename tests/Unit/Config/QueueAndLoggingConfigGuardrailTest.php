@@ -50,6 +50,7 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
 
             if ($previous === false) {
                 $this->clearEnv($key);
+
                 continue;
             }
 
@@ -61,19 +62,41 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         parent::tearDown();
     }
 
-    public function testDefaultsToMongoQueueWhenPrimaryDatabaseIsMongoAndQueueNotExplicitlySet(): void
+    public function test_defaults_to_mongo_queue_when_primary_database_is_mongo_and_queue_not_explicitly_set(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');
+        $this->setEnv('MONGODB_QUEUE_CONNECTION', 'mongodb');
 
         $config = $this->loadQueueConfig();
 
         $this->assertSame('mongodb', $config['default']);
     }
 
-    public function testFailsClosedForMongoPrimaryDatabaseWithUnsafeDatabaseQueueFallback(): void
+    public function test_falls_back_to_primary_database_connection_when_mongodb_queue_connection_is_not_explicitly_set(): void
+    {
+        $this->setEnv('DB_CONNECTION', 'mongodb');
+
+        $config = $this->loadQueueConfig();
+
+        $this->assertSame('mongodb', $config['default']);
+        $this->assertSame('mongodb', $config['connections']['mongodb']['connection']);
+    }
+
+    public function test_fails_closed_when_database_queue_connection_is_not_explicitly_set(): void
+    {
+        $this->setEnv('QUEUE_CONNECTION', 'database');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Queue configuration requires DB_QUEUE_CONNECTION');
+
+        $this->loadQueueConfig();
+    }
+
+    public function test_fails_closed_for_mongo_primary_database_with_unsafe_database_queue_fallback(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');
         $this->setEnv('QUEUE_CONNECTION', 'database');
+        $this->setEnv('DB_QUEUE_CONNECTION', 'landlord');
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Unsafe queue configuration detected');
@@ -81,7 +104,7 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->loadQueueConfig();
     }
 
-    public function testAllowsDatabaseQueueWhenDedicatedSqlQueueConnectionIsDeclared(): void
+    public function test_allows_database_queue_when_dedicated_sql_queue_connection_is_declared(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');
         $this->setEnv('QUEUE_CONNECTION', 'database');
@@ -92,7 +115,7 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('database', $config['default']);
     }
 
-    public function testLoggingStackDefaultsToMongoAndStderrWithFiniteRetention(): void
+    public function test_logging_stack_defaults_to_mongo_and_stderr_with_finite_retention(): void
     {
         $config = $this->loadLoggingConfig();
 
@@ -107,7 +130,7 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
      */
     private function loadQueueConfig(): array
     {
-        return require __DIR__ . '/../../../config/queue.php';
+        return require __DIR__.'/../../../config/queue.php';
     }
 
     /**
@@ -119,14 +142,15 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         {
             public function storagePath($path = ''): string
             {
-                $storage = __DIR__ . '/../../../storage';
-                return $path !== '' ? $storage . DIRECTORY_SEPARATOR . $path : $storage;
+                $storage = __DIR__.'/../../../storage';
+
+                return $path !== '' ? $storage.DIRECTORY_SEPARATOR.$path : $storage;
             }
         };
 
         Container::setInstance($container);
 
-        return require __DIR__ . '/../../../config/logging.php';
+        return require __DIR__.'/../../../config/logging.php';
     }
 
     private function setEnv(string $key, string $value): void

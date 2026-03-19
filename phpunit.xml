@@ -30,6 +30,9 @@
         <testsuite name="Feature-Tenants">
             <directory>tests/Feature/Tenants</directory>
         </testsuite>
+        <testsuite name="Feature-Security">
+            <directory>tests/Feature/Security</directory>
+        </testsuite>
         <testsuite name="Feature-Push">
             <directory>tests/Feature/Push</directory>
         </testsuite>

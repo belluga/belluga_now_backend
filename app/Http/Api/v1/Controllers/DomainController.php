@@ -17,8 +17,7 @@ class DomainController extends Controller
     public function __construct(
         private readonly TenantDomainManagementService $domainService,
         private readonly TelemetryEmitter $telemetry
-    ) {
-    }
+    ) {}
 
     public function store(DomainStoreRequest $request): JsonResponse
     {

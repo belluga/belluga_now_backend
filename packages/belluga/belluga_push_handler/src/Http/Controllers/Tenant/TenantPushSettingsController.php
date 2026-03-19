@@ -12,12 +12,11 @@ class TenantPushSettingsController
 {
     public function __construct(
         private readonly PushSettingsKernelBridge $pushSettings
-    ) {
-    }
+    ) {}
 
     public function show(): JsonResponse
     {
-        $push = $this->pushSettings->currentPushConfig();
+        $push = $this->pushSettings->resolvedPushConfig();
 
         return response()->json([
             'data' => $this->pushSettings->extractPushSettingsForResponse($push),
@@ -26,15 +25,7 @@ class TenantPushSettingsController
 
     public function update(TenantPushSettingsRequest $request): JsonResponse
     {
-        $incoming = $request->validated();
-        $current = $this->pushSettings->currentPushConfig();
-
-        if (! array_key_exists('max_ttl_days', $incoming) && ! array_key_exists('max_ttl_days', $current)) {
-            // Keep legacy wrapper behavior while persistence moves to kernel namespace patching.
-            $incoming['max_ttl_days'] = 7;
-        }
-
-        $push = $this->pushSettings->patchPushConfig($request->user(), $incoming);
+        $push = $this->pushSettings->patchPushConfig($request->user(), $request->validated());
 
         return response()->json([
             'data' => $this->pushSettings->extractPushSettingsForResponse($push),

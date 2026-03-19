@@ -17,8 +17,7 @@ class TaxonomiesController extends Controller
     public function __construct(
         private readonly TaxonomyQueryService $queryService,
         private readonly TaxonomyManagementService $managementService,
-    ) {
-    }
+    ) {}
 
     public function index(): JsonResponse
     {

@@ -35,7 +35,7 @@ class PasswordRegistrationControllerTest extends TestCase
         Tenant::query()->firstOrFail()->makeCurrent();
     }
 
-    public function testRegistersNewIdentity(): void
+    public function test_registers_new_identity(): void
     {
         $email = sprintf(
             'feature-registered-%s@example.org',

@@ -15,4 +15,3 @@ class PackageEventAsyncJobSignatures implements EventAsyncJobSignaturesContract
         ];
     }
 }
-

@@ -12,6 +12,7 @@ use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\App;
 use Illuminate\Validation\ValidationException;
 
 class PushMessageSendController
@@ -22,8 +23,7 @@ class PushMessageSendController
         private readonly PushDeviceService $pushDeviceService,
         private readonly PushMessageAudienceService $audienceService,
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     public function __invoke(PushMessageSendRequest $request): JsonResponse
     {
@@ -114,7 +114,7 @@ class PushMessageSendController
             $responsePayload['message_instance_id'] = $messageInstanceId;
         }
 
-        if (app()->environment('local') && isset($response)) {
+        if (App::environment('local') && isset($response)) {
             $responses = $response['responses'] ?? [];
             $sanitized = [];
             foreach ($responses as $entry) {
@@ -139,7 +139,7 @@ class PushMessageSendController
     }
 
     /**
-     * @param array<string, mixed> $response
+     * @param  array<string, mixed>  $response
      * @return array<int, string>
      */
     private function extractNotFoundTokens(array $response): array
@@ -165,7 +165,7 @@ class PushMessageSendController
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function resolveUser(array $payload): ?\Illuminate\Contracts\Auth\Authenticatable
     {

@@ -21,8 +21,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -120,5 +119,4 @@ class AccountProfilesController extends Controller
 
         return response()->json();
     }
-
 }

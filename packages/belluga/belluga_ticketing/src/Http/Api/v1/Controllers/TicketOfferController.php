@@ -13,9 +13,7 @@ class TicketOfferController extends Controller
 {
     use HandlesTicketingDomainExceptions;
 
-    public function __construct(private readonly TicketAdmissionService $admission)
-    {
-    }
+    public function __construct(private readonly TicketAdmissionService $admission) {}
 
     public function occurrence(string $event_ref, string $occurrence_ref): JsonResponse
     {

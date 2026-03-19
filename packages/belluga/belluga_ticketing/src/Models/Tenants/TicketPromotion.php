@@ -42,4 +42,3 @@ class TicketPromotion extends Model
         'updated_at' => 'datetime',
     ];
 }
-

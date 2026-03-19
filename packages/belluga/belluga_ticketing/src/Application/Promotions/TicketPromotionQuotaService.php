@@ -11,7 +11,7 @@ use Belluga\Ticketing\Support\TicketingDomainException;
 class TicketPromotionQuotaService
 {
     /**
-     * @param array<string, mixed> $promotionSnapshot
+     * @param  array<string, mixed>  $promotionSnapshot
      */
     public function consumeForOrder(
         string $orderId,
@@ -98,4 +98,3 @@ class TicketPromotionQuotaService
         }
     }
 }
-

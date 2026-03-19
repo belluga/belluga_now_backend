@@ -8,4 +8,3 @@ final class InputConstraints
 {
     public const NAME_MAX = 255;
 }
-

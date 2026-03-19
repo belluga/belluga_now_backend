@@ -10,8 +10,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 interface PushAudienceEligibilityContract
 {
     /**
-     * @param array<string, mixed> $audience
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $audience
+     * @param  array<string, mixed>  $context
      */
     public function isEligible(
         Authenticatable $user,

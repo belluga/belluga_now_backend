@@ -11,9 +11,9 @@ class InitializeAccount
     {
 
         $account_slug = $request->route('account_slug');
-        $account = Account::where("slug", $account_slug)->first();
+        $account = Account::where('slug', $account_slug)->first();
 
-        if(!$account){
+        if (! $account) {
             abort(
                 404,
                 "Account doesn't exists",
@@ -25,6 +25,4 @@ class InitializeAccount
         return $next($request);
 
     }
-
-
 }

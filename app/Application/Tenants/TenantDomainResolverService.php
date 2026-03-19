@@ -19,6 +19,9 @@ class TenantDomainResolverService
             return $tenant;
         }
 
-        return Domains::where('path', $normalized)->first()?->tenant;
+        return Domains::query()
+            ->where('path', $normalized)
+            ->where('type', Tenant::DOMAIN_TYPE_WEB)
+            ->first()?->tenant;
     }
 }

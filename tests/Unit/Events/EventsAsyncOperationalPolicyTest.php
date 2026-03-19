@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Events;
 
+use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
-use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Tests\TestCase;
 
 class EventsAsyncOperationalPolicyTest extends TestCase
 {
-    public function testEventsAsyncJobsUseFiveAttemptsWithExponentialBackoff(): void
+    public function test_events_async_jobs_use_five_attempts_with_exponential_backoff(): void
     {
-        $publishJob = new PublishScheduledEventsJob();
+        $publishJob = new PublishScheduledEventsJob;
         $upsertJob = new UpsertMapPoiFromEventJob('event-id');
         $deleteJob = new DeleteMapPoiByRefJob('event', 'event-id');
 
@@ -27,4 +27,3 @@ class EventsAsyncOperationalPolicyTest extends TestCase
         $this->assertSame([5, 10, 20, 40], $deleteJob->backoff());
     }
 }
-

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
-use Belluga\PushHandler\Contracts\PushAccountContextContract;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
+use Belluga\PushHandler\Http\Controllers\Account\Concerns\ResolvesAccountContext;
 use Belluga\PushHandler\Http\Requests\PushMessageSendRequest;
-use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Belluga\PushHandler\Http\Support\PushAccountScopeResolver;
 use Belluga\PushHandler\Services\PushDeliveryService;
 use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
@@ -17,36 +17,25 @@ use Illuminate\Validation\ValidationException;
 
 class PushMessageSendController
 {
+    use ResolvesAccountContext;
+
     public function __construct(
         private readonly PushRecipientResolver $recipientResolver,
         private readonly PushDeliveryService $deliveryService,
         private readonly PushDeviceService $pushDeviceService,
         private readonly PushMessageAudienceService $audienceService,
-        private readonly PushAccountContextContract $accountContext,
+        private readonly PushAccountScopeResolver $accountScope,
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     public function __invoke(PushMessageSendRequest $request): JsonResponse
     {
-        $accountId = $this->accountContext->currentAccountId();
-        if ($accountId === null || $accountId === '') {
-            abort(422, 'Account context not available.');
-        }
-
+        $accountId = $this->requireAccountId($this->accountScope);
         $pushMessageId = (string) $request->route('push_message_id');
-        $message = PushMessage::query()
-            ->where('scope', 'account')
-            ->where('partner_id', $accountId)
-            ->where('_id', $pushMessageId)
-            ->first();
+        $message = $this->accountScope->findMessage($accountId, $pushMessageId);
 
         if (! $message) {
-            $exists = PushMessage::query()
-                ->where('_id', $pushMessageId)
-                ->exists();
-
-            if ($exists) {
+            if ($this->accountScope->anyMessageExists($pushMessageId)) {
                 return response()->json(['ok' => false, 'reason' => 'inactive'], 422);
             }
 
@@ -127,7 +116,7 @@ class PushMessageSendController
     }
 
     /**
-     * @param array<string, mixed> $response
+     * @param  array<string, mixed>  $response
      * @return array<int, string>
      */
     private function extractNotFoundTokens(array $response): array
@@ -153,7 +142,7 @@ class PushMessageSendController
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function resolveUser(array $payload, string $accountId): ?\Illuminate\Contracts\Auth\Authenticatable
     {

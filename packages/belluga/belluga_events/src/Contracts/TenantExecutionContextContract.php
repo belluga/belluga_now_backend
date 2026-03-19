@@ -7,7 +7,7 @@ namespace Belluga\Events\Contracts;
 interface TenantExecutionContextContract
 {
     /**
-     * @param callable(): void $callback
+     * @param  callable(): void  $callback
      */
     public function runForEachTenant(callable $callback): void;
 }

@@ -11,12 +11,10 @@ class PushDeviceService
 {
     public function __construct(
         private readonly PushUserGatewayContract $users
-    ) {
-    }
+    ) {}
 
     /**
-     * @param Authenticatable $user
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function register(Authenticatable $user, array $payload): void
     {
@@ -28,8 +26,7 @@ class PushDeviceService
     }
 
     /**
-     * @param Authenticatable $user
-     * @param array<int, string> $tokens
+     * @param  array<int, string>  $tokens
      */
     public function invalidateTokens(Authenticatable $user, array $tokens): void
     {
@@ -41,8 +38,7 @@ class PushDeviceService
     }
 
     /**
-     * @param Authenticatable $user
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function unregister(Authenticatable $user, array $payload): void
     {

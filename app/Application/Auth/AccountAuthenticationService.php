@@ -18,7 +18,7 @@ class AccountAuthenticationService
         $user = $this->findUserByEmail($email);
 
         if (! $user || ! Hash::check($password, (string) $user->password)) {
-            throw new InvalidCredentialsException();
+            throw new InvalidCredentialsException;
         }
 
         $account = Account::current();
@@ -62,7 +62,7 @@ class AccountAuthenticationService
     }
 
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(AccountUser $user, array $abilities): array

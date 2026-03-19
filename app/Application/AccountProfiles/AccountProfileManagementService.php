@@ -18,11 +18,10 @@ class AccountProfileManagementService
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload): AccountProfile
     {
@@ -86,7 +85,7 @@ class AccountProfileManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(AccountProfile $profile, array $attributes): AccountProfile
     {
@@ -170,7 +169,6 @@ class AccountProfileManagementService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, mixed>|null
      */
     private function formatLocation(mixed $location): ?array

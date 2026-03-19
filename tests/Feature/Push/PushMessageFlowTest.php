@@ -12,28 +12,28 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
-use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
+use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
+use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
-use Belluga\PushHandler\Contracts\FcmClientContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Belluga\PushHandler\Services\PushDeliveryService;
 use Belluga\PushHandler\Services\PushDeviceService;
+use Belluga\PushHandler\Services\PushRecipientResolver;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Carbon\Carbon;
-use Illuminate\Support\Str;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
-use Belluga\PushHandler\Jobs\SendPushMessageJob;
-use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
-use Belluga\PushHandler\Services\PushDeliveryService;
-use Belluga\PushHandler\Services\PushRecipientResolver;
-use Belluga\Settings\Models\Tenants\TenantSettings;
 use MongoDB\BSON\UTCDateTime;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -55,6 +55,7 @@ class PushMessageFlowTest extends TestCase
     private AccountUserService $userService;
 
     private string $baseUrl;
+
     private string $tenantHost;
 
     protected function setUp(): void
@@ -85,7 +86,8 @@ class PushMessageFlowTest extends TestCase
         ], (string) $this->operatorRole->_id);
 
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
-            return new class implements PushAudienceEligibilityContract {
+            return new class implements PushAudienceEligibilityContract
+            {
                 public function isEligible(
                     Authenticatable $user,
                     PushMessage $message,
@@ -99,6 +101,7 @@ class PushMessageFlowTest extends TestCase
                     $type = $audience['type'] ?? 'all';
                     if ($type === 'users') {
                         $ids = $audience['user_ids'] ?? [];
+
                         return in_array((string) $user->_id, $ids, true);
                     }
 
@@ -125,25 +128,25 @@ class PushMessageFlowTest extends TestCase
         TenantSettings::query()->delete();
     }
 
-    public function testPushMessageDataRequiresAuth(): void
+    public function test_push_message_data_requires_auth(): void
     {
-        $response = $this->getJson($this->baseUrl . '/missing/data');
+        $response = $this->getJson($this->baseUrl.'/missing/data');
         $response->assertStatus(401);
     }
 
-    public function testPushMessageDataMissingReturnsOkFalse(): void
+    public function test_push_message_data_missing_returns_ok_false(): void
     {
         $this->actingAsOperator();
 
-        $missingId = (string) new \MongoDB\BSON\ObjectId();
+        $missingId = (string) new \MongoDB\BSON\ObjectId;
 
-        $data = $this->getJson($this->baseUrl . '/' . $missingId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$missingId.'/data');
         $data->assertOk();
         $data->assertJsonPath('ok', false);
         $data->assertJsonPath('reason', 'not_found');
     }
 
-    public function testPushMessageCreateAndFetchData(): void
+    public function test_push_message_create_and_fetch_data(): void
     {
         $this->actingAsOperator();
 
@@ -165,13 +168,13 @@ class PushMessageFlowTest extends TestCase
         $this->withServerVariables([
             'HTTP_HOST' => $this->tenantHost,
         ]);
-        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$messageId.'/data');
         $data->assertOk();
         $data->assertJsonPath('ok', true);
         $data->assertJsonPath('push_message_id', $messageId);
     }
 
-    public function testPushMessageDataForbiddenWhenNotInAudience(): void
+    public function test_push_message_data_forbidden_when_not_in_audience(): void
     {
         $this->actingAsOperator();
 
@@ -187,13 +190,13 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$messageId.'/data');
         $data->assertStatus(404);
         $data->assertJsonPath('ok', false);
         $data->assertJsonPath('reason', 'not_found');
     }
 
-    public function testPushMessageDataInactiveReturnsOkFalse(): void
+    public function test_push_message_data_inactive_returns_ok_false(): void
     {
         $this->actingAsOperator();
 
@@ -210,13 +213,13 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$messageId.'/data');
         $data->assertOk();
         $data->assertJsonPath('ok', false);
         $data->assertJsonPath('reason', 'inactive');
     }
 
-    public function testPushMessageDataExpiredReturnsOkFalse(): void
+    public function test_push_message_data_expired_returns_ok_false(): void
     {
         $this->actingAsOperator();
 
@@ -237,13 +240,13 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = (string) $message->_id;
 
-        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$messageId.'/data');
         $data->assertOk();
         $data->assertJsonPath('ok', false);
         $data->assertJsonPath('reason', 'expired');
     }
 
-    public function testPushMessageDeleteArchivesWhenSent(): void
+    public function test_push_message_delete_archives_when_sent(): void
     {
         $this->actingAsOperator();
 
@@ -263,13 +266,13 @@ class PushMessageFlowTest extends TestCase
             'sent_at' => now(),
         ]);
 
-        $delete = $this->deleteJson($this->baseUrl . '/' . $messageId);
+        $delete = $this->deleteJson($this->baseUrl.'/'.$messageId);
         $delete->assertOk();
         $delete->assertJsonPath('data.status', 'archived');
         $delete->assertJsonPath('data.active', false);
     }
 
-    public function testPushMessageDeleteHardWhenScheduled(): void
+    public function test_push_message_delete_hard_when_scheduled(): void
     {
         $this->actingAsOperator();
 
@@ -284,12 +287,12 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $delete = $this->deleteJson($this->baseUrl . '/' . $messageId);
+        $delete = $this->deleteJson($this->baseUrl.'/'.$messageId);
         $delete->assertOk();
         $delete->assertJsonPath('ok', true);
     }
 
-    public function testPushMessageActionsRecordMetrics(): void
+    public function test_push_message_actions_record_metrics(): void
     {
         $this->actingAsOperator();
 
@@ -309,13 +312,13 @@ class PushMessageFlowTest extends TestCase
             'action' => 'clicked',
             'step_index' => 0,
             'button_key' => 'cta',
-            'idempotency_key' => 'click:' . $messageId,
+            'idempotency_key' => 'click:'.$messageId,
         ];
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', $actionPayload);
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', $actionPayload);
         $action->assertOk();
 
-        $duplicate = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', $actionPayload);
+        $duplicate = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', $actionPayload);
         $duplicate->assertOk();
 
         $message = PushMessage::query()->find($messageId);
@@ -325,7 +328,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertEquals(1, $metrics['unique_clicked_count'] ?? 0);
     }
 
-    public function testPushMessageActionsRecordOpenedMetrics(): void
+    public function test_push_message_actions_record_opened_metrics(): void
     {
         $this->actingAsOperator();
 
@@ -341,10 +344,10 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'opened',
             'step_index' => 0,
-            'idempotency_key' => 'opened:' . $messageId,
+            'idempotency_key' => 'opened:'.$messageId,
         ]);
 
         $action->assertOk();
@@ -356,7 +359,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertEquals(1, $metrics['unique_opened_count'] ?? 0);
     }
 
-    public function testPushMessageActionsRecordDismissedMetrics(): void
+    public function test_push_message_actions_record_dismissed_metrics(): void
     {
         $this->actingAsOperator();
 
@@ -372,10 +375,10 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'dismissed',
             'step_index' => 0,
-            'idempotency_key' => 'dismissed:' . $messageId,
+            'idempotency_key' => 'dismissed:'.$messageId,
         ]);
 
         $action->assertOk();
@@ -387,7 +390,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertEquals(1, $metrics['unique_dismissed_count'] ?? 0);
     }
 
-    public function testPushMessageActionsRecordStepViewedMetrics(): void
+    public function test_push_message_actions_record_step_viewed_metrics(): void
     {
         $this->actingAsOperator();
 
@@ -403,10 +406,10 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'step_viewed',
             'step_index' => 1,
-            'idempotency_key' => 'step_viewed:' . $messageId,
+            'idempotency_key' => 'step_viewed:'.$messageId,
         ]);
 
         $action->assertOk();
@@ -417,7 +420,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertEquals(1, $metrics['step_view_counts'][1] ?? 0);
     }
 
-    public function testPushMessageActionsRecordDeliveredMetrics(): void
+    public function test_push_message_actions_record_delivered_metrics(): void
     {
         $this->actingAsOperator();
 
@@ -433,10 +436,10 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'delivered',
             'step_index' => 0,
-            'idempotency_key' => 'delivered:' . $messageId,
+            'idempotency_key' => 'delivered:'.$messageId,
         ]);
 
         $action->assertOk();
@@ -447,7 +450,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertEquals(1, $metrics['delivered_count'] ?? 0);
     }
 
-    public function testPushMessageActionsRequireStepIndex(): void
+    public function test_push_message_actions_require_step_index(): void
     {
         $this->actingAsOperator();
 
@@ -463,16 +466,16 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'opened',
-            'idempotency_key' => 'opened-missing-step:' . $messageId,
+            'idempotency_key' => 'opened-missing-step:'.$messageId,
         ]);
 
         $action->assertStatus(422);
         $action->assertJsonValidationErrors(['step_index']);
     }
 
-    public function testPushMessageActionsClickedRequiresButtonKey(): void
+    public function test_push_message_actions_clicked_requires_button_key(): void
     {
         $this->actingAsOperator();
 
@@ -488,17 +491,17 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'clicked',
             'step_index' => 0,
-            'idempotency_key' => 'clicked-missing-button:' . $messageId,
+            'idempotency_key' => 'clicked-missing-button:'.$messageId,
         ]);
 
         $action->assertStatus(422);
         $action->assertJsonValidationErrors(['button_key']);
     }
 
-    public function testPushMessageActionsForbiddenWhenNotEligible(): void
+    public function test_push_message_actions_forbidden_when_not_eligible(): void
     {
         $this->actingAsOperator();
 
@@ -514,19 +517,19 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+        $action = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', [
             'action' => 'opened',
             'step_index' => 0,
-            'idempotency_key' => 'opened:' . $messageId,
+            'idempotency_key' => 'opened:'.$messageId,
         ]);
 
         $action->assertStatus(403);
         $action->assertJsonPath('reason', 'forbidden');
     }
 
-    public function testPushMessageActionsRequireAuth(): void
+    public function test_push_message_actions_require_auth(): void
     {
-        $response = $this->postJson($this->baseUrl . '/missing/actions', [
+        $response = $this->postJson($this->baseUrl.'/missing/actions', [
             'action' => 'opened',
             'step_index' => 0,
             'idempotency_key' => 'opened:missing',
@@ -535,7 +538,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(401);
     }
 
-    public function testPushMessageListAndUpdate(): void
+    public function test_push_message_list_and_update(): void
     {
         $this->actingAsOperator();
 
@@ -549,14 +552,14 @@ class PushMessageFlowTest extends TestCase
         $list->assertOk();
         $this->assertNotEmpty($list->json('data'));
 
-        $update = $this->patchJson($this->baseUrl . '/' . $messageId, [
+        $update = $this->patchJson($this->baseUrl.'/'.$messageId, [
             'body_template' => 'Updated body',
         ]);
         $update->assertOk();
         $update->assertJsonPath('data.body_template', 'Updated body');
     }
 
-    public function testPushMessageListRequiresTenantAccess(): void
+    public function test_push_message_list_requires_tenant_access(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -574,7 +577,7 @@ class PushMessageFlowTest extends TestCase
         $list->assertStatus(401);
     }
 
-    public function testAccountPushCrudRequiresAuth(): void
+    public function test_account_push_crud_requires_auth(): void
     {
         $this->withServerVariables([
             'HTTP_HOST' => $this->tenantHost,
@@ -587,7 +590,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertStatus(401);
     }
 
-    public function testAccountPushCreateRequiresAbility(): void
+    public function test_account_push_create_requires_ability(): void
     {
         $this->withServerVariables([
             'HTTP_HOST' => $this->tenantHost,
@@ -598,7 +601,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertStatus(403);
     }
 
-    public function testTenantPushCrudRequiresAuth(): void
+    public function test_tenant_push_crud_requires_auth(): void
     {
         $list = $this->getJson('api/v1/push/messages');
         $list->assertStatus(401);
@@ -607,7 +610,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertStatus(401);
     }
 
-    public function testTenantPushCreateRequiresAbility(): void
+    public function test_tenant_push_create_requires_ability(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-messages:read']);
 
@@ -615,7 +618,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertStatus(403);
     }
 
-    public function testTenantPushListRequiresTenantAccess(): void
+    public function test_tenant_push_list_requires_tenant_access(): void
     {
         $restricted = LandlordUser::create([
             'name' => 'Restricted Tenant',
@@ -630,7 +633,7 @@ class PushMessageFlowTest extends TestCase
         $list->assertStatus(403);
     }
 
-    public function testTenantCrossTenantDataAndActionsReturnNotFound(): void
+    public function test_tenant_cross_tenant_data_and_actions_return_not_found(): void
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
@@ -652,22 +655,22 @@ class PushMessageFlowTest extends TestCase
         $this->withServerVariables(['HTTP_HOST' => $this->tenantHost]);
         Sanctum::actingAs($this->operator, ['tenant-push-messages:read']);
 
-        $data = $this->getJson('api/v1/push/messages/' . $messageId . '/data');
+        $data = $this->getJson('api/v1/push/messages/'.$messageId.'/data');
         $data->assertOk();
         $data->assertJsonPath('ok', false);
         $data->assertJsonPath('reason', 'not_found');
 
-        $action = $this->postJson('api/v1/push/messages/' . $messageId . '/actions', [
+        $action = $this->postJson('api/v1/push/messages/'.$messageId.'/actions', [
             'action' => 'opened',
             'step_index' => 0,
-            'idempotency_key' => 'opened:' . $messageId,
+            'idempotency_key' => 'opened:'.$messageId,
         ]);
         $action->assertStatus(404);
 
         $secondaryTenant->forgetCurrent();
     }
 
-    public function testTenantCrossTenantCrudReturnsNotFound(): void
+    public function test_tenant_cross_tenant_crud_returns_not_found(): void
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
@@ -689,13 +692,13 @@ class PushMessageFlowTest extends TestCase
         $this->withServerVariables(['HTTP_HOST' => $this->tenantHost]);
         Sanctum::actingAs($this->operator, ['tenant-push-messages:read']);
 
-        $show = $this->getJson('api/v1/push/messages/' . $messageId);
+        $show = $this->getJson('api/v1/push/messages/'.$messageId);
         $show->assertStatus(404);
 
         $secondaryTenant->forgetCurrent();
     }
 
-    public function testTenantCrossTenantCredentialUpsertIsTenantScoped(): void
+    public function test_tenant_cross_tenant_credential_upsert_is_tenant_scoped(): void
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
@@ -717,7 +720,7 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $primaryTenant->subdomain, $this->host);
-        $update = $this->putJson($baseApiTenant . 'settings/push/credentials', [
+        $update = $this->putJson($baseApiTenant.'settings/push/credentials', [
             'project_id' => 'primary-project',
             'client_email' => 'primary@example.org',
             'private_key' => 'primary-key',
@@ -732,7 +735,7 @@ class PushMessageFlowTest extends TestCase
         $secondaryTenant->forgetCurrent();
     }
 
-    public function testPushMessageSchedulingDispatchesWithDelay(): void
+    public function test_push_message_scheduling_dispatches_with_delay(): void
     {
         $this->actingAsOperator();
 
@@ -752,7 +755,7 @@ class PushMessageFlowTest extends TestCase
         });
     }
 
-    public function testPushMessageCreateValidatesRouteParams(): void
+    public function test_push_message_create_validates_route_params(): void
     {
         $this->actingAsOperator();
 
@@ -788,7 +791,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateAllowsEventAudienceWithoutQualifier(): void
+    public function test_push_message_create_allows_event_audience_without_qualifier(): void
     {
         $this->actingAsOperator();
 
@@ -803,7 +806,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertCreated();
     }
 
-    public function testPushMessageCreateValidatesQueryParams(): void
+    public function test_push_message_create_validates_query_params(): void
     {
         $this->actingAsOperator();
 
@@ -844,7 +847,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRequiresCoreTemplates(): void
+    public function test_push_message_create_requires_core_templates(): void
     {
         $this->actingAsOperator();
 
@@ -859,7 +862,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRequiresSteps(): void
+    public function test_push_message_create_requires_steps(): void
     {
         $this->actingAsOperator();
 
@@ -873,7 +876,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRequiresStepContent(): void
+    public function test_push_message_create_requires_step_content(): void
     {
         $this->actingAsOperator();
 
@@ -899,7 +902,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateAcceptsImageOnlyStep(): void
+    public function test_push_message_create_accepts_image_only_step(): void
     {
         $this->actingAsOperator();
 
@@ -925,16 +928,16 @@ class PushMessageFlowTest extends TestCase
         $response->assertCreated();
     }
 
-    public function testPushMessageCreateSanitizesHtmlBody(): void
+    public function test_push_message_create_sanitizes_html_body(): void
     {
         $this->actingAsOperator();
 
         $body = '<p>Hello <strong>World</strong><script>alert(1)</script>'
-            . '<span style="color: #ff0000; font-weight: 700; font-size: 18px; background: blue;">Hi</span>'
-            . '<img src="javascript:alert(1)" />'
-            . '<img src="https://example.com/hero.png" width="120" height="80" onclick="nope" />'
-            . '<ul><li>One</li></ul>'
-            . '</p>';
+            .'<span style="color: #ff0000; font-weight: 700; font-size: 18px; background: blue;">Hi</span>'
+            .'<img src="javascript:alert(1)" />'
+            .'<img src="https://example.com/hero.png" width="120" height="80" onclick="nope" />'
+            .'<ul><li>One</li></ul>'
+            .'</p>';
 
         $payload = $this->buildPayload([
             'payload_template' => [
@@ -966,7 +969,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertStringNotContainsString('onclick', $sanitized);
     }
 
-    public function testPushMessageCreateRequiresCloseBehavior(): void
+    public function test_push_message_create_requires_close_behavior(): void
     {
         $this->actingAsOperator();
 
@@ -980,7 +983,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageUpdateRejectsCloseOnLastStepAction(): void
+    public function test_push_message_update_rejects_close_on_last_step_action(): void
     {
         $this->actingAsOperator();
 
@@ -990,7 +993,7 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $update = $this->patchJson($this->baseUrl . '/' . $messageId, [
+        $update = $this->patchJson($this->baseUrl.'/'.$messageId, [
             'payload_template' => [
                 'layoutType' => 'fullScreen',
                 'closeBehavior' => 'after_action',
@@ -1012,7 +1015,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRejectsNonTextQuestions(): void
+    public function test_push_message_create_rejects_non_text_questions(): void
     {
         $this->actingAsOperator();
 
@@ -1045,7 +1048,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRejectsSelectionModeOnQuestions(): void
+    public function test_push_message_create_rejects_selection_mode_on_questions(): void
     {
         $this->actingAsOperator();
 
@@ -1074,7 +1077,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateDefaultsSelectorSelectionMode(): void
+    public function test_push_message_create_defaults_selector_selection_mode(): void
     {
         $this->actingAsOperator();
 
@@ -1105,7 +1108,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertJsonPath('data.payload_template.steps.0.config.selection_mode', 'single');
     }
 
-    public function testPushMessageCreatePersistsPayloadTemplateDisplayFields(): void
+    public function test_push_message_create_persists_payload_template_display_fields(): void
     {
         $this->actingAsOperator();
 
@@ -1158,7 +1161,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertJsonPath('data.payload_template.steps.0.buttons.0.continue_after_action', true);
     }
 
-    public function testPushMessageUpdatePersistsPayloadTemplateDisplayFields(): void
+    public function test_push_message_update_persists_payload_template_display_fields(): void
     {
         $this->actingAsOperator();
 
@@ -1168,7 +1171,7 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $update = $this->patchJson($this->baseUrl . '/' . $messageId, [
+        $update = $this->patchJson($this->baseUrl.'/'.$messageId, [
             'payload_template' => [
                 'layoutType' => 'fullScreen',
                 'closeBehavior' => 'after_action',
@@ -1214,7 +1217,7 @@ class PushMessageFlowTest extends TestCase
         $update->assertJsonPath('data.payload_template.steps.0.buttons.0.continue_after_action', false);
     }
 
-    public function testPushMessageCreateRequiresAudienceType(): void
+    public function test_push_message_create_requires_audience_type(): void
     {
         $this->actingAsOperator();
 
@@ -1228,7 +1231,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateUsersAudienceRequiresUserIds(): void
+    public function test_push_message_create_users_audience_requires_user_ids(): void
     {
         $this->actingAsOperator();
 
@@ -1245,7 +1248,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRejectsDeliveryExpiresAt(): void
+    public function test_push_message_create_rejects_delivery_expires_at(): void
     {
         $this->actingAsOperator();
 
@@ -1262,7 +1265,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRejectsPastDeadline(): void
+    public function test_push_message_create_rejects_past_deadline(): void
     {
         $this->actingAsOperator();
 
@@ -1277,7 +1280,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testTenantPushSettingsUpdateRequiresTenantAccess(): void
+    public function test_tenant_push_settings_update_requires_tenant_access(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1297,11 +1300,11 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push', $payload);
         $response->assertStatus(403);
     }
 
-    public function testTenantPushSettingsRequiresPushConfig(): void
+    public function test_tenant_push_settings_requires_push_config(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1312,14 +1315,14 @@ class PushMessageFlowTest extends TestCase
         $payload = [];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push', $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
             'payload',
         ]);
     }
 
-    public function testTenantPushSettingsDefaultsMaxTtlDays(): void
+    public function test_tenant_push_settings_defaults_max_ttl_days(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1333,12 +1336,12 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push', $payload);
         $response->assertOk();
         $response->assertJsonPath('data.max_ttl_days', 7);
     }
 
-    public function testTenantPushSettingsPatchIsVisibleInKernelValuesEndpoint(): void
+    public function test_tenant_push_settings_patch_is_visible_in_kernel_values_endpoint(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1354,18 +1357,18 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $patch = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $patch = $this->patchJson($baseApiTenant.'settings/push', $payload);
         $patch->assertOk();
         $patch->assertJsonPath('data.max_ttl_days', 21);
         $patch->assertJsonPath('data.throttles.per_minute', 120);
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $kernelValues->assertJsonPath('data.push.max_ttl_days', 21);
         $kernelValues->assertJsonPath('data.push.throttles.per_minute', 120);
     }
 
-    public function testTenantFirebaseSettingsUpdateRequiresTenantAccess(): void
+    public function test_tenant_firebase_settings_update_requires_tenant_access(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1388,11 +1391,11 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/firebase', $payload);
         $response->assertStatus(403);
     }
 
-    public function testTenantFirebaseSettingsRequiresFirebaseConfig(): void
+    public function test_tenant_firebase_settings_requires_firebase_config(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1403,14 +1406,14 @@ class PushMessageFlowTest extends TestCase
         $payload = [];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/firebase', $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
             'payload',
         ]);
     }
 
-    public function testTenantFirebaseSettingsPatchIsVisibleInKernelValuesEndpoint(): void
+    public function test_tenant_firebase_settings_patch_is_visible_in_kernel_values_endpoint(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1427,17 +1430,17 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $patch = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
+        $patch = $this->patchJson($baseApiTenant.'settings/firebase', $payload);
         $patch->assertOk();
         $patch->assertJsonPath('data.projectId', 'tenant-project');
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $kernelValues->assertJsonPath('data.firebase.projectId', 'tenant-project');
         $kernelValues->assertJsonPath('data.firebase.apiKey', 'tenant-key');
     }
 
-    public function testLandlordTenantFirebaseSettingsAdminEndpointsUseKernelNamespace(): void
+    public function test_landlord_tenant_firebase_settings_admin_endpoints_use_kernel_namespace(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1474,7 +1477,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame('admin-key', $firebase['apiKey'] ?? null);
     }
 
-    public function testTenantRouteTypesUpdateNormalizesRoutes(): void
+    public function test_tenant_route_types_update_normalizes_routes(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1491,7 +1494,7 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/push/route_types', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push/route_types', $payload);
         $response->assertOk();
         $response->assertJsonFragment([
             'key' => 'agenda.detail',
@@ -1501,7 +1504,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $routes = $kernelValues->json('data.push.message_routes');
         $this->assertIsArray($routes);
@@ -1510,7 +1513,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame('/agenda/evento/:slug', $detail['path'] ?? null);
     }
 
-    public function testTenantPushSettingsRejectsRouteAndTypeFields(): void
+    public function test_tenant_push_settings_rejects_route_and_type_fields(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1543,7 +1546,7 @@ class PushMessageFlowTest extends TestCase
             'push' => true,
         ];
 
-        $response = $this->patchJson($baseApiTenant . 'settings/push', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push', $payload);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
             'firebase',
@@ -1554,7 +1557,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testTenantRouteTypesPatchMergesByKey(): void
+    public function test_tenant_route_types_patch_merges_by_key(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1594,20 +1597,20 @@ class PushMessageFlowTest extends TestCase
             ],
         ];
 
-        $response = $this->patchJson($baseApiTenant . 'settings/push/route_types', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push/route_types', $payload);
         $response->assertOk();
         $response->assertJsonFragment(['key' => 'agenda.search', 'path' => '/agenda/search']);
         $response->assertJsonFragment(['key' => 'agenda.detail', 'path' => '/agenda/evento/:slug']);
         $response->assertJsonFragment(['key' => 'agenda.new', 'path' => '/agenda/new']);
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $routes = $kernelValues->json('data.push.message_routes');
         $this->assertIsArray($routes);
         $this->assertNotNull(collect($routes)->firstWhere('key', 'agenda.new'));
     }
 
-    public function testTenantMessageTypesPatchMergesByKey(): void
+    public function test_tenant_message_types_patch_merges_by_key(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1643,13 +1646,13 @@ class PushMessageFlowTest extends TestCase
             ],
         ];
 
-        $response = $this->patchJson($baseApiTenant . 'settings/push/message_types', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/push/message_types', $payload);
         $response->assertOk();
         $response->assertJsonFragment(['key' => 'invite_received', 'label' => 'Invite Updated']);
         $response->assertJsonFragment(['key' => 'event_reminder', 'label' => 'Event Reminder']);
         $response->assertJsonFragment(['key' => 'new_type', 'label' => 'New Type']);
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $types = $kernelValues->json('data.push.message_types');
         $this->assertIsArray($types);
@@ -1658,7 +1661,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame('Invite Updated', $updated['label'] ?? null);
     }
 
-    public function testTenantRouteTypesSoftDeleteByKey(): void
+    public function test_tenant_route_types_soft_delete_by_key(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1689,12 +1692,12 @@ class PushMessageFlowTest extends TestCase
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $payload = ['keys' => ['agenda.detail']];
 
-        $response = $this->deleteJson($baseApiTenant . 'settings/push/route_types', $payload);
+        $response = $this->deleteJson($baseApiTenant.'settings/push/route_types', $payload);
         $response->assertOk();
         $response->assertJsonFragment(['key' => 'agenda.search', 'path' => '/agenda']);
         $response->assertJsonFragment(['key' => 'agenda.detail', 'active' => false]);
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $routes = $kernelValues->json('data.push.message_routes');
         $this->assertIsArray($routes);
@@ -1703,7 +1706,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertFalse((bool) ($deleted['active'] ?? true));
     }
 
-    public function testTenantMessageTypesSoftDeleteByKey(): void
+    public function test_tenant_message_types_soft_delete_by_key(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1730,12 +1733,12 @@ class PushMessageFlowTest extends TestCase
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
         $payload = ['keys' => ['event_reminder']];
 
-        $response = $this->deleteJson($baseApiTenant . 'settings/push/message_types', $payload);
+        $response = $this->deleteJson($baseApiTenant.'settings/push/message_types', $payload);
         $response->assertOk();
         $response->assertJsonFragment(['key' => 'invite_received', 'label' => 'Invite Received']);
         $response->assertJsonFragment(['key' => 'event_reminder', 'active' => false]);
 
-        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant) . 'settings/values');
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $types = $kernelValues->json('data.push.message_types');
         $this->assertIsArray($types);
@@ -1744,7 +1747,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertFalse((bool) ($deleted['active'] ?? true));
     }
 
-    public function testInactiveRouteTypeRejectedWhenCreatingMessage(): void
+    public function test_inactive_route_type_rejected_when_creating_message(): void
     {
         $this->actingAsOperator();
 
@@ -1806,7 +1809,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testInactiveMessageTypeBlocksRouteFiltering(): void
+    public function test_inactive_message_type_blocks_route_filtering(): void
     {
         $this->actingAsOperator();
 
@@ -1864,7 +1867,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testPushMessageCreateRejectsRouteKeyNotAllowedForType(): void
+    public function test_push_message_create_rejects_route_key_not_allowed_for_type(): void
     {
         $this->actingAsOperator();
 
@@ -1927,7 +1930,7 @@ class PushMessageFlowTest extends TestCase
         ]);
     }
 
-    public function testTenantPushStatusNotConfigured(): void
+    public function test_tenant_push_status_not_configured(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1937,12 +1940,12 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response = $this->getJson($baseApiTenant.'settings/push/status');
         $response->assertOk();
         $response->assertJsonPath('status', 'not_configured');
     }
 
-    public function testTenantPushStatusPendingTests(): void
+    public function test_tenant_push_status_pending_tests(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1953,14 +1956,14 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $enable = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $enable = $this->postJson($baseApiTenant.'settings/push/enable');
         $enable->assertOk();
-        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response = $this->getJson($baseApiTenant.'settings/push/status');
         $response->assertOk();
         $response->assertJsonPath('status', 'pending_tests');
     }
 
-    public function testTenantPushStatusActive(): void
+    public function test_tenant_push_status_active(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1968,7 +1971,7 @@ class PushMessageFlowTest extends TestCase
         $this->seedPushSettings();
 
         PushDeliveryLog::create([
-            'push_message_id' => (string) new \MongoDB\BSON\ObjectId(),
+            'push_message_id' => (string) new \MongoDB\BSON\ObjectId,
             'batch_id' => 'batch-1',
             'token_hash' => 'token',
             'status' => 'accepted',
@@ -1978,14 +1981,14 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $enable = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $enable = $this->postJson($baseApiTenant.'settings/push/enable');
         $enable->assertOk();
-        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response = $this->getJson($baseApiTenant.'settings/push/status');
         $response->assertOk();
         $response->assertJsonPath('status', 'active');
     }
 
-    public function testTenantTelemetryAddRemoveEnforcesUniqueTypes(): void
+    public function test_tenant_telemetry_add_remove_enforces_unique_types(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1996,7 +1999,7 @@ class PushMessageFlowTest extends TestCase
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
 
-        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+        $response = $this->postJson($baseApiTenant.'settings/telemetry', [
             'type' => 'mixpanel',
             'token' => 'token',
             'events' => ['invite_received'],
@@ -2006,7 +2009,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $response->json();
         $this->assertContains('invite_received', $payload['available_events'] ?? []);
 
-        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+        $response = $this->postJson($baseApiTenant.'settings/telemetry', [
             'type' => 'mixpanel',
             'token' => 'token-updated',
             'events' => ['invite_received'],
@@ -2015,7 +2018,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonCount(1, 'data');
         $response->assertJsonPath('data.0.token', 'token-updated');
 
-        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+        $response = $this->postJson($baseApiTenant.'settings/telemetry', [
             'type' => 'webhook',
             'url' => 'https://example.org/hook',
             'events' => ['invite_received'],
@@ -2025,13 +2028,13 @@ class PushMessageFlowTest extends TestCase
         $payload = $response->json();
         $this->assertContains('invite_received', $payload['available_events'] ?? []);
 
-        $response = $this->deleteJson($baseApiTenant . 'settings/telemetry/mixpanel');
+        $response = $this->deleteJson($baseApiTenant.'settings/telemetry/mixpanel');
         $response->assertOk();
         $response->assertJsonCount(1, 'data');
         $response->assertJsonPath('data.0.type', 'webhook');
     }
 
-    public function testTenantTelemetryAcceptsTrackAllWithoutEvents(): void
+    public function test_tenant_telemetry_accepts_track_all_without_events(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -2042,7 +2045,7 @@ class PushMessageFlowTest extends TestCase
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
 
-        $response = $this->postJson($baseApiTenant . 'settings/telemetry', [
+        $response = $this->postJson($baseApiTenant.'settings/telemetry', [
             'type' => 'mixpanel',
             'token' => 'token',
             'track_all' => true,
@@ -2054,7 +2057,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertContains('invite_received', $payload['available_events'] ?? []);
     }
 
-    public function testTenantPushEnableRequiresConfig(): void
+    public function test_tenant_push_enable_requires_config(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -2065,12 +2068,12 @@ class PushMessageFlowTest extends TestCase
         TenantPushSettings::query()->delete();
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $response = $this->postJson($baseApiTenant.'settings/push/enable');
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['firebase', 'push']);
     }
 
-    public function testTenantPushEnableSetsEnabledTrue(): void
+    public function test_tenant_push_enable_sets_enabled_true(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -2082,12 +2085,12 @@ class PushMessageFlowTest extends TestCase
         TenantPushSettings::create($this->buildTenantSettingsPayload());
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $response = $this->postJson($baseApiTenant.'settings/push/enable');
         $response->assertOk();
         $response->assertJsonPath('data.enabled', true);
     }
 
-    public function testTenantPushDisableSetsEnabledFalse(): void
+    public function test_tenant_push_disable_sets_enabled_false(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -2101,19 +2104,20 @@ class PushMessageFlowTest extends TestCase
         ]));
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->postJson($baseApiTenant . 'settings/push/disable');
+        $response = $this->postJson($baseApiTenant.'settings/push/disable');
         $response->assertOk();
         $response->assertJsonPath('data.enabled', false);
     }
 
-    public function testPlanPolicyBlocksDispatchWhenCannotSend(): void
+    public function test_plan_policy_blocks_dispatch_when_cannot_send(): void
     {
         $this->actingAsOperator();
 
         Bus::fake();
 
         $this->app->bind(PushPlanPolicyContract::class, static function () {
-            return new class implements PushPlanPolicyContract {
+            return new class implements PushPlanPolicyContract
+            {
                 public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
                 {
                     return false;
@@ -2134,14 +2138,15 @@ class PushMessageFlowTest extends TestCase
         Bus::assertNotDispatched(SendPushMessageJob::class);
     }
 
-    public function testCreateReturnsQuotaDecisionWhenPolicyProvides(): void
+    public function test_create_returns_quota_decision_when_policy_provides(): void
     {
         $this->actingAsOperator();
 
         Bus::fake();
 
         $this->app->bind(PushPlanPolicyContract::class, static function () {
-            return new class implements PushPlanPolicyContract, PushPlanPolicyDecisionContract {
+            return new class implements PushPlanPolicyContract, PushPlanPolicyDecisionContract
+            {
                 public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
                 {
                     return true;
@@ -2174,7 +2179,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertJsonPath('quota_decision.period', 'monthly');
     }
 
-    public function testQuotaCheckReturnsDecision(): void
+    public function test_quota_check_returns_decision(): void
     {
         Sanctum::actingAs($this->operator, ['push-messages:send']);
 
@@ -2187,7 +2192,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('allowed', true);
     }
 
-    public function testQuotaCheckInvalidInputReturns422(): void
+    public function test_quota_check_invalid_input_returns422(): void
     {
         Sanctum::actingAs($this->operator, ['push-messages:send']);
 
@@ -2199,7 +2204,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testFcmOptionsInvalidKeyReturns422(): void
+    public function test_fcm_options_invalid_key_returns422(): void
     {
         $this->actingAsOperator();
 
@@ -2213,7 +2218,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testFcmOptionsDataSizeLimitReturns422(): void
+    public function test_fcm_options_data_size_limit_returns422(): void
     {
         $this->actingAsOperator();
 
@@ -2229,7 +2234,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testFcmOptionsNotificationTitleTooLongReturns422(): void
+    public function test_fcm_options_notification_title_too_long_returns422(): void
     {
         $this->actingAsOperator();
 
@@ -2245,7 +2250,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testFcmOptionsNotificationBodyTooLongReturns422(): void
+    public function test_fcm_options_notification_body_too_long_returns422(): void
     {
         $this->actingAsOperator();
 
@@ -2261,7 +2266,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testExternalActionMissingUrlReturns422(): void
+    public function test_external_action_missing_url_returns422(): void
     {
         $this->actingAsOperator();
 
@@ -2284,7 +2289,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testExternalActionInvalidOpenModeReturns422(): void
+    public function test_external_action_invalid_open_mode_returns422(): void
     {
         $this->actingAsOperator();
 
@@ -2307,7 +2312,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testTenantPushMessageCrudWorks(): void
+    public function test_tenant_push_message_crud_works(): void
     {
         Sanctum::actingAs($this->operator, [
             'tenant-push-messages:read',
@@ -2327,14 +2332,14 @@ class PushMessageFlowTest extends TestCase
         $list->assertOk();
         $this->assertNotEmpty($list->json('data'));
 
-        $update = $this->patchJson('api/v1/push/messages/' . $messageId, [
+        $update = $this->patchJson('api/v1/push/messages/'.$messageId, [
             'body_template' => 'Tenant update',
         ]);
         $update->assertOk();
         $update->assertJsonPath('data.body_template', 'Tenant update');
     }
 
-    public function testTenantMessageDataForbiddenWhenNotEligible(): void
+    public function test_tenant_message_data_forbidden_when_not_eligible(): void
     {
         Sanctum::actingAs($this->operator, [
             'tenant-push-messages:create',
@@ -2353,12 +2358,12 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $data = $this->getJson('api/v1/push/messages/' . $messageId . '/data');
+        $data = $this->getJson('api/v1/push/messages/'.$messageId.'/data');
         $data->assertStatus(404);
         $data->assertJsonPath('reason', 'not_found');
     }
 
-    public function testTenantMessageActionsForbiddenWhenNotEligible(): void
+    public function test_tenant_message_actions_forbidden_when_not_eligible(): void
     {
         Sanctum::actingAs($this->operator, [
             'tenant-push-messages:create',
@@ -2377,22 +2382,23 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $action = $this->postJson('api/v1/push/messages/' . $messageId . '/actions', [
+        $action = $this->postJson('api/v1/push/messages/'.$messageId.'/actions', [
             'action' => 'opened',
             'step_index' => 0,
-            'idempotency_key' => 'opened:' . $messageId,
+            'idempotency_key' => 'opened:'.$messageId,
         ]);
 
         $action->assertStatus(403);
         $action->assertJsonPath('reason', 'forbidden');
     }
 
-    public function testAudienceEligibilityContractDenyBlocksData(): void
+    public function test_audience_eligibility_contract_deny_blocks_data(): void
     {
         $this->actingAsOperator();
 
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
-            return new class implements PushAudienceEligibilityContract {
+            return new class implements PushAudienceEligibilityContract
+            {
                 public function isEligible(
                     Authenticatable $user,
                     PushMessage $message,
@@ -2415,17 +2421,18 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$messageId.'/data');
         $data->assertStatus(404);
         $data->assertJsonPath('reason', 'not_found');
     }
 
-    public function testAudienceEligibilityContractOverrideAllowsData(): void
+    public function test_audience_eligibility_contract_override_allows_data(): void
     {
         $this->actingAsOperator();
 
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
-            return new class implements PushAudienceEligibilityContract {
+            return new class implements PushAudienceEligibilityContract
+            {
                 public function isEligible(
                     Authenticatable $user,
                     PushMessage $message,
@@ -2449,12 +2456,12 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $data = $this->getJson($this->baseUrl . '/' . $messageId . '/data');
+        $data = $this->getJson($this->baseUrl.'/'.$messageId.'/data');
         $data->assertOk();
         $data->assertJsonPath('ok', true);
     }
 
-    public function testTransactionalSendRequiresTransactionalType(): void
+    public function test_transactional_send_requires_transactional_type(): void
     {
         $this->actingAsOperator();
 
@@ -2471,14 +2478,14 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'user_id' => (string) $this->operator->_id,
         ]);
 
         $send->assertStatus(422);
     }
 
-    public function testTenantCredentialsEndpointsRequirePermission(): void
+    public function test_tenant_credentials_endpoints_require_permission(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
 
@@ -2491,7 +2498,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function testTenantCredentialUpsertCreatesAndUpdatesSingleRecord(): void
+    public function test_tenant_credential_upsert_creates_and_updates_single_record(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
@@ -2524,7 +2531,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame(1, PushCredential::query()->count());
     }
 
-    public function testTenantCredentialsIndexReturnsWithoutPrivateKey(): void
+    public function test_tenant_credentials_index_returns_without_private_key(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
@@ -2544,7 +2551,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonMissing(['private_key']);
     }
 
-    public function testTenantCredentialsIndexReturnsConflictWhenMultiple(): void
+    public function test_tenant_credentials_index_returns_conflict_when_multiple(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
 
@@ -2564,7 +2571,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(409);
     }
 
-    public function testTenantCredentialsUpsertReturnsConflictWhenMultiple(): void
+    public function test_tenant_credentials_upsert_returns_conflict_when_multiple(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
@@ -2588,7 +2595,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(409);
     }
 
-    public function testTenantPushStatusReturnsConflictWhenMultipleCredentials(): void
+    public function test_tenant_push_status_returns_conflict_when_multiple_credentials(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -2612,13 +2619,13 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($landlordUser, ['push-settings:update']);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $enable = $this->postJson($baseApiTenant . 'settings/push/enable');
+        $enable = $this->postJson($baseApiTenant.'settings/push/enable');
         $enable->assertOk();
-        $response = $this->getJson($baseApiTenant . 'settings/push/status');
+        $response = $this->getJson($baseApiTenant.'settings/push/status');
         $response->assertStatus(409);
     }
 
-    public function testTenantCredentialValidationReturns422(): void
+    public function test_tenant_credential_validation_returns422(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
 
@@ -2630,7 +2637,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertStatus(422);
     }
 
-    public function testTenantSettingsDoesNotExposeFirebaseCredentialsId(): void
+    public function test_tenant_settings_does_not_expose_firebase_credentials_id(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -2647,12 +2654,12 @@ class PushMessageFlowTest extends TestCase
         ];
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
-        $response = $this->patchJson($baseApiTenant . 'settings/firebase', $payload);
+        $response = $this->patchJson($baseApiTenant.'settings/firebase', $payload);
         $response->assertOk();
         $response->assertJsonMissing(['firebase_credentials_id']);
     }
 
-    public function testDeliveryLogsHaveNoTtlIndex(): void
+    public function test_delivery_logs_have_no_ttl_index(): void
     {
         $database = DB::connection('tenant')->getDatabase();
         $indexes = iterator_to_array(
@@ -2666,18 +2673,18 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
-    public function testDeliveryServiceLogsPartialFailures(): void
+    public function test_delivery_service_logs_partial_failures(): void
     {
         $this->app->bind(FcmClientContract::class, static function () {
-            return new class implements FcmClientContract {
+            return new class implements FcmClientContract
+            {
                 public function send(
                     PushMessage $message,
                     array $tokens,
                     string $messageInstanceId,
                     Carbon $expiresAt,
                     int $ttlMinutes
-                ): array
-                {
+                ): array {
                     return [
                         'accepted_count' => 1,
                         'responses' => [
@@ -2712,12 +2719,13 @@ class PushMessageFlowTest extends TestCase
         $this->assertContains('failed', $statuses);
     }
 
-    public function testDeliveryServiceCapsExpiresAtToDeadline(): void
+    public function test_delivery_service_caps_expires_at_to_deadline(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
 
         $this->app->bind(FcmClientContract::class, static function () {
-            return new class implements FcmClientContract {
+            return new class implements FcmClientContract
+            {
                 public function send(
                     PushMessage $message,
                     array $tokens,
@@ -2754,7 +2762,7 @@ class PushMessageFlowTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function testDeliveryServiceRejectsPastDeadline(): void
+    public function test_delivery_service_rejects_past_deadline(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
 
@@ -2773,7 +2781,7 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
-    public function testDeliveryServiceRejectsTtlBeyondMax(): void
+    public function test_delivery_service_rejects_ttl_beyond_max(): void
     {
         $originalTtl = config('belluga_push_handler.delivery_ttl_minutes.transactional');
         config([
@@ -2797,19 +2805,65 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
-    public function testDeliveryServiceBatchesTokensByConfig(): void
+    public function test_delivery_service_uses_schema_default_max_ttl_when_setting_is_not_persisted(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create([
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+            'push' => [
+                'message_types' => [
+                    [
+                        'key' => 'transactional',
+                        'label' => 'Transactional',
+                    ],
+                ],
+                'message_routes' => [],
+            ],
+        ]);
+
+        $originalTtl = config('belluga_push_handler.delivery_ttl_minutes.transactional');
+        config([
+            'belluga_push_handler.delivery_ttl_minutes.transactional' => 60 * 24 * 8,
+        ]);
+
+        try {
+            $this->expectException(ValidationException::class);
+            $this->expectExceptionMessage('Computed TTL exceeds max allowed TTL of 7 days.');
+
+            $message = PushMessage::create($this->buildPayload([
+                'type' => 'transactional',
+            ]));
+
+            $service = $this->app->make(PushDeliveryService::class);
+            $service->deliver($message, ['token-1']);
+        } finally {
+            config([
+                'belluga_push_handler.delivery_ttl_minutes.transactional' => $originalTtl,
+            ]);
+        }
+    }
+
+    public function test_delivery_service_batches_tokens_by_config(): void
     {
         config(['belluga_push_handler.fcm.max_batch_size' => 500]);
 
         $batches = [];
         $this->app->bind(FcmClientContract::class, function () use (&$batches) {
-            return new class($batches) implements FcmClientContract {
+            return new class($batches) implements FcmClientContract
+            {
                 /**
-                 * @param array<int, int> $batches
+                 * @param  array<int, int>  $batches
                  */
-                public function __construct(private array &$batches)
-                {
-                }
+                public function __construct(private array &$batches) {}
 
                 public function send(
                     PushMessage $message,
@@ -2817,9 +2871,9 @@ class PushMessageFlowTest extends TestCase
                     string $messageInstanceId,
                     Carbon $expiresAt,
                     int $ttlMinutes
-                ): array
-                {
+                ): array {
                     $this->batches[] = count($tokens);
+
                     return [
                         'accepted_count' => count($tokens),
                         'responses' => [],
@@ -2833,7 +2887,7 @@ class PushMessageFlowTest extends TestCase
 
         $tokens = [];
         for ($i = 1; $i <= 1200; $i++) {
-            $tokens[] = 'token-' . $i;
+            $tokens[] = 'token-'.$i;
         }
 
         $response = $service->deliver($message, $tokens);
@@ -2842,18 +2896,18 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame(1200, $response['accepted_count']);
     }
 
-    public function testSendJobUpdatesAcceptedMetricsFromFcmResponse(): void
+    public function test_send_job_updates_accepted_metrics_from_fcm_response(): void
     {
         $this->app->bind(FcmClientContract::class, static function () {
-            return new class implements FcmClientContract {
+            return new class implements FcmClientContract
+            {
                 public function send(
                     PushMessage $message,
                     array $tokens,
                     string $messageInstanceId,
                     Carbon $expiresAt,
                     int $ttlMinutes
-                ): array
-                {
+                ): array {
                     return [
                         'accepted_count' => 2,
                         'responses' => [
@@ -2874,10 +2928,9 @@ class PushMessageFlowTest extends TestCase
         });
 
         $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
-            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver {
-                public function __construct()
-                {
-                }
+            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver
+            {
+                public function __construct() {}
 
                 public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
                 {
@@ -2905,7 +2958,8 @@ class PushMessageFlowTest extends TestCase
         $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
         $job->handle(
             $this->app->make(PushDeliveryService::class),
-            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class)
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
         );
 
         $message->refresh();
@@ -2915,7 +2969,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertNotNull($message->sent_at);
     }
 
-    public function testFcmHttpClientBuildsPayloadWithOverrides(): void
+    public function test_fcm_http_client_builds_payload_with_overrides(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
 
@@ -2963,6 +3017,7 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
             $payload = $request->data()['message'] ?? [];
+
             return ($payload['notification']['title'] ?? null) === 'Override title'
                 && ($payload['data']['custom'] ?? null) === 'value'
                 && isset($payload['data']['push_message_id'])
@@ -2975,7 +3030,7 @@ class PushMessageFlowTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function testFcmHttpClientHonorsPlatformOverrides(): void
+    public function test_fcm_http_client_honors_platform_overrides(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
 
@@ -3049,10 +3104,11 @@ class PushMessageFlowTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function testQuotaCheckBlockedReturnsReason(): void
+    public function test_quota_check_blocked_returns_reason(): void
     {
         $this->app->bind(PushPlanPolicyContract::class, static function () {
-            return new class implements PushPlanPolicyContract, PushPlanPolicyDecisionContract {
+            return new class implements PushPlanPolicyContract, PushPlanPolicyDecisionContract
+            {
                 public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
                 {
                     return false;
@@ -3085,7 +3141,7 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('reason', 'quota_exceeded');
     }
 
-    public function testTransactionalSendAcceptsEmailTarget(): void
+    public function test_transactional_send_accepts_email_target(): void
     {
         $this->actingAsOperator();
 
@@ -3111,7 +3167,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
 
-        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'email' => 'push-operator@example.org',
             'dry_run' => true,
         ]);
@@ -3120,7 +3176,7 @@ class PushMessageFlowTest extends TestCase
         $send->assertJsonPath('ok', true);
     }
 
-    public function testTransactionalSendAcceptsUserIdTarget(): void
+    public function test_transactional_send_accepts_user_id_target(): void
     {
         $this->actingAsOperator();
 
@@ -3146,7 +3202,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
 
-        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'user_id' => (string) $this->operator->_id,
             'dry_run' => true,
         ]);
@@ -3155,7 +3211,7 @@ class PushMessageFlowTest extends TestCase
         $send->assertJsonPath('ok', true);
     }
 
-    public function testRegisterUpdatesDeviceTokenAndReactivates(): void
+    public function test_register_updates_device_token_and_reactivates(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
         $user->devices = [
@@ -3164,7 +3220,7 @@ class PushMessageFlowTest extends TestCase
                 'platform' => 'android',
                 'push_token' => 'token-old',
                 'is_active' => false,
-                'invalidated_at' => new UTCDateTime(),
+                'invalidated_at' => new UTCDateTime,
             ],
         ];
         $user->save();
@@ -3184,7 +3240,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertNull($device['invalidated_at'] ?? null);
     }
 
-    public function testInvalidateTokensMarksInactiveAndKeepsOthers(): void
+    public function test_invalidate_tokens_marks_inactive_and_keeps_others(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
         $user->devices = [
@@ -3214,7 +3270,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertTrue(($device2['is_active'] ?? true) === true);
     }
 
-    public function testRecipientResolverSkipsInactiveTokens(): void
+    public function test_recipient_resolver_skips_inactive_tokens(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
         $user->devices = [
@@ -3239,7 +3295,7 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame(['token-active'], $tokens);
     }
 
-    public function testInviteReceivedTelemetryUsesUserIdDistinctId(): void
+    public function test_invite_received_telemetry_uses_user_id_distinct_id(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -3260,7 +3316,8 @@ class PushMessageFlowTest extends TestCase
         $message = PushMessage::create($this->buildPayload());
 
         $this->app->bind(FcmClientContract::class, static function () {
-            return new class implements FcmClientContract {
+            return new class implements FcmClientContract
+            {
                 public function send(
                     PushMessage $message,
                     array $tokens,
@@ -3269,6 +3326,7 @@ class PushMessageFlowTest extends TestCase
                     int $ttlMinutes
                 ): array {
                     $token = $tokens[0] ?? 'token-1';
+
                     return [
                         'accepted_count' => 1,
                         'responses' => [
@@ -3298,6 +3356,7 @@ class PushMessageFlowTest extends TestCase
             }
             $payload = $request->data();
             $properties = $payload['properties'] ?? [];
+
             return ($properties['distinct_id'] ?? null) === $userId
                 && ($properties['user_id'] ?? null) === $userId
                 && isset($properties['$insert_id']);
@@ -3308,12 +3367,13 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
             $payload = $request->data();
+
             return ($payload['context']['user']['id'] ?? null) === $userId
                 && ($payload['payload']['event'] ?? null) === 'invite_received';
         });
     }
 
-    public function testInviteReceivedTelemetryTracksAllWithoutEventsList(): void
+    public function test_invite_received_telemetry_tracks_all_without_events_list(): void
     {
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -3334,7 +3394,8 @@ class PushMessageFlowTest extends TestCase
         $message = PushMessage::create($this->buildPayload());
 
         $this->app->bind(FcmClientContract::class, static function () {
-            return new class implements FcmClientContract {
+            return new class implements FcmClientContract
+            {
                 public function send(
                     PushMessage $message,
                     array $tokens,
@@ -3343,6 +3404,7 @@ class PushMessageFlowTest extends TestCase
                     int $ttlMinutes
                 ): array {
                     $token = $tokens[0] ?? 'token-1';
+
                     return [
                         'accepted_count' => 1,
                         'responses' => [
@@ -3371,6 +3433,7 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
             $payload = $request->data();
+
             return ($payload['event'] ?? null) === 'invite_received'
                 && ($payload['properties']['distinct_id'] ?? null) === $userId;
         });
@@ -3380,25 +3443,26 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
             $payload = $request->data();
+
             return ($payload['context']['user']['id'] ?? null) === $userId
                 && ($payload['payload']['event'] ?? null) === 'invite_received';
         });
     }
 
-    public function testSendInvalidatesNotFoundTokensAndSkipsOnNextSend(): void
+    public function test_send_invalidates_not_found_tokens_and_skips_on_next_send(): void
     {
         $this->actingAsOperator();
 
         $this->app->bind(FcmClientContract::class, static function () {
-            return new class implements FcmClientContract {
+            return new class implements FcmClientContract
+            {
                 public function send(
                     PushMessage $message,
                     array $tokens,
                     string $messageInstanceId,
                     Carbon $expiresAt,
                     int $ttlMinutes
-                ): array
-                {
+                ): array {
                     return [
                         'accepted_count' => 0,
                         'responses' => [
@@ -3437,7 +3501,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
 
-        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'user_id' => (string) $this->operator->_id,
         ]);
         $send->assertOk();
@@ -3446,7 +3510,7 @@ class PushMessageFlowTest extends TestCase
         $device = collect($user->devices ?? [])->firstWhere('device_id', 'device-1');
         $this->assertSame(false, $device['is_active'] ?? null);
 
-        $retry = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+        $retry = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'user_id' => (string) $this->operator->_id,
             'dry_run' => true,
         ]);
@@ -3454,12 +3518,13 @@ class PushMessageFlowTest extends TestCase
         $retry->assertJsonPath('reason', 'no_tokens');
     }
 
-    public function testTransactionalSendDeniedWhenEligibilityFails(): void
+    public function test_transactional_send_denied_when_eligibility_fails(): void
     {
         $this->actingAsOperator();
 
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
-            return new class implements PushAudienceEligibilityContract {
+            return new class implements PushAudienceEligibilityContract
+            {
                 public function isEligible(
                     Authenticatable $user,
                     PushMessage $message,
@@ -3484,7 +3549,7 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $send = $this->postJson($this->baseUrl . '/' . $messageId . '/send', [
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'email' => 'push-operator@example.org',
             'dry_run' => true,
         ]);
@@ -3493,7 +3558,7 @@ class PushMessageFlowTest extends TestCase
         $send->assertJsonPath('reason', 'forbidden');
     }
 
-    public function testSendReturnsInactiveWhenScopeMismatch(): void
+    public function test_send_returns_inactive_when_scope_mismatch(): void
     {
         $this->actingAsOperator();
 
@@ -3515,7 +3580,7 @@ class PushMessageFlowTest extends TestCase
         ]);
         Sanctum::actingAs($this->operator, ['tenant-push-messages:send']);
 
-        $send = $this->postJson('api/v1/push/messages/' . $messageId . '/send', [
+        $send = $this->postJson('api/v1/push/messages/'.$messageId.'/send', [
             'user_id' => (string) $this->operator->_id,
             'dry_run' => true,
         ]);
@@ -3540,13 +3605,13 @@ class PushMessageFlowTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
      */
     private function buildPayload(array $overrides = []): array
     {
         $payload = [
-            'internal_name' => 'message-' . Str::uuid()->toString(),
+            'internal_name' => 'message-'.Str::uuid()->toString(),
             'title_template' => 'Hello {{user_name}}',
             'body_template' => 'Body text',
             'type' => 'invite_received',
@@ -3631,7 +3696,7 @@ class PushMessageFlowTest extends TestCase
     }
 
     /**
-     * @param array<int, array<string, mixed>> $trackers
+     * @param  array<int, array<string, mixed>>  $trackers
      */
     private function seedTelemetrySettings(array $trackers, ?int $locationFreshnessMinutes = null): void
     {
@@ -3643,6 +3708,7 @@ class PushMessageFlowTest extends TestCase
         $settings = TenantSettings::current();
         if (! $settings) {
             TenantSettings::create(['telemetry' => $payload]);
+
             return;
         }
 
@@ -3691,8 +3757,8 @@ class PushMessageFlowTest extends TestCase
         $suffix = Str::lower(Str::random(6));
         $tenant = Tenant::create([
             'name' => 'Tenant Secondary',
-            'subdomain' => 'tenant-secondary-' . $suffix,
-            'app_domains' => ['tenant-secondary-' . $suffix . '.app'],
+            'subdomain' => 'tenant-secondary-'.$suffix,
+            'app_domains' => ['tenant-secondary-'.$suffix.'.app'],
             'domains' => [],
         ]);
 
@@ -3700,7 +3766,7 @@ class PushMessageFlowTest extends TestCase
         $this->seedPushSettings();
 
         $account = Account::create([
-            'name' => 'Account Secondary ' . Str::uuid()->toString(),
+            'name' => 'Account Secondary '.Str::uuid()->toString(),
             'document' => strtoupper(Str::random(14)),
         ]);
 
@@ -3715,7 +3781,7 @@ class PushMessageFlowTest extends TestCase
 
         $operator = $this->userService->create($account, [
             'name' => 'Secondary Operator',
-            'email' => 'secondary-operator-' . $suffix . '@example.org',
+            'email' => 'secondary-operator-'.$suffix.'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
 

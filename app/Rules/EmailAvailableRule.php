@@ -19,8 +19,7 @@ class EmailAvailableRule implements ValidationRule
         protected string $table,
         protected ?string $column = 'emails',
         protected ?string $ignoreId = null,
-    ) {
-    }
+    ) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {

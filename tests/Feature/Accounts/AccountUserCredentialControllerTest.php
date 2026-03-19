@@ -96,9 +96,9 @@ class AccountUserCredentialControllerTest extends TestCase
         );
     }
 
-    public function testStoreLinksCredential(): void
+    public function test_store_links_credential(): void
     {
-        $email = 'user+' . uniqid('', true) . '@example.org';
+        $email = 'user+'.uniqid('', true).'@example.org';
         $user = $this->createUser($email);
 
         $response = $this->postJson(
@@ -114,11 +114,11 @@ class AccountUserCredentialControllerTest extends TestCase
         $response->assertJsonPath('data.credential.provider', 'password');
     }
 
-    public function testStoreRejectsDuplicateCredential(): void
+    public function test_store_rejects_duplicate_credential(): void
     {
-        $user = $this->createUser('primary+' . uniqid('', true) . '@example.org');
-        $duplicateSubject = 'duplicate+' . uniqid('', true) . '@example.org';
-        $anotherUser = $this->createUser('another+' . uniqid('', true) . '@example.org');
+        $user = $this->createUser('primary+'.uniqid('', true).'@example.org');
+        $duplicateSubject = 'duplicate+'.uniqid('', true).'@example.org';
+        $anotherUser = $this->createUser('another+'.uniqid('', true).'@example.org');
 
         $this->postJson(
             sprintf('%s/%s/credentials', $this->baseUrl, $user->_id),
@@ -142,9 +142,9 @@ class AccountUserCredentialControllerTest extends TestCase
         $response->assertJsonValidationErrors(['subject']);
     }
 
-    public function testDestroyUnlinksCredential(): void
+    public function test_destroy_unlinks_credential(): void
     {
-        $email = 'unlink+' . uniqid('', true) . '@example.org';
+        $email = 'unlink+'.uniqid('', true).'@example.org';
         $user = $this->createUser($email);
         $result = $this->credentialService->link($user, [
             'provider' => 'password',
@@ -186,7 +186,7 @@ class AccountUserCredentialControllerTest extends TestCase
 
     private function createUser(?string $email = null): AccountUser
     {
-        $email ??= 'user+' . uniqid('', true) . '@example.org';
+        $email ??= 'user+'.uniqid('', true).'@example.org';
 
         return $this->userService->create($this->account, [
             'name' => 'Sample User',

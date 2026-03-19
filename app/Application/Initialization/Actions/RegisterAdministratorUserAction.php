@@ -14,11 +14,10 @@ class RegisterAdministratorUserAction
 {
     public function __construct(
         private readonly LandlordUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $userData
+     * @param  array<string, mixed>  $userData
      */
     public function execute(array $userData, LandlordRole $role, TenantRoleTemplate $tenantTemplate): LandlordUser
     {

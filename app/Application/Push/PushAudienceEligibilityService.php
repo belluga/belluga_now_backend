@@ -12,8 +12,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 class PushAudienceEligibilityService implements PushAudienceEligibilityContract
 {
     /**
-     * @param array<string, mixed> $audience
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $audience
+     * @param  array<string, mixed>  $context
      */
     public function isEligible(
         Authenticatable $user,
@@ -29,6 +29,7 @@ class PushAudienceEligibilityService implements PushAudienceEligibilityContract
 
         if ($type === 'users') {
             $ids = $audience['user_ids'] ?? [];
+
             return in_array((string) $user->_id, $ids, true);
         }
 

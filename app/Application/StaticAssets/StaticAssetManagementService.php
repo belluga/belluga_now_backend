@@ -17,11 +17,10 @@ class StaticAssetManagementService
     public function __construct(
         private readonly StaticProfileTypeRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload): StaticAsset
     {
@@ -85,7 +84,7 @@ class StaticAssetManagementService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(StaticAsset $asset, array $attributes): StaticAsset
     {
@@ -177,7 +176,6 @@ class StaticAssetManagementService
     }
 
     /**
-     * @param mixed $location
      * @return array<string, mixed>|null
      */
     private function formatLocation(mixed $location): ?array
@@ -200,7 +198,7 @@ class StaticAssetManagementService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $terms
+     * @param  array<int, array<string, mixed>>  $terms
      * @return array<int, string>
      */
     private function extractTypes(array $terms): array

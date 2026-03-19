@@ -17,11 +17,10 @@ class FcmHttpV1Client implements FcmClientContract
 {
     public function __construct(
         private readonly PushCredentialService $credentialService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<int, string> $tokens
+     * @param  array<int, string>  $tokens
      * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
      */
     public function send(PushMessage $message, array $tokens, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
@@ -82,6 +81,7 @@ class FcmHttpV1Client implements FcmClientContract
                         'error_code' => 'connection_error',
                         'error_message' => $response->getMessage(),
                     ];
+
                     continue;
                 }
 
@@ -92,6 +92,7 @@ class FcmHttpV1Client implements FcmClientContract
                         'status' => 'accepted',
                         'provider_message_id' => (string) ($response->json('name') ?? ''),
                     ];
+
                     continue;
                 }
 
@@ -141,7 +142,7 @@ class FcmHttpV1Client implements FcmClientContract
         }
 
         $ttlSeconds = max(0, (int) Carbon::now()->diffInSeconds($expiresAt, false));
-        $payload['android']['ttl'] = $ttlSeconds . 's';
+        $payload['android']['ttl'] = $ttlSeconds.'s';
         $payload['webpush']['headers']['TTL'] = (string) $ttlSeconds;
         $payload['apns']['headers']['apns-expiration'] = (string) $expiresAt->getTimestamp();
 
@@ -150,7 +151,7 @@ class FcmHttpV1Client implements FcmClientContract
 
     private function accessToken(string $projectId, string $clientEmail, string $privateKey): ?string
     {
-        $cacheKey = 'fcm_access_token:' . $projectId . ':' . sha1($clientEmail);
+        $cacheKey = 'fcm_access_token:'.$projectId.':'.sha1($clientEmail);
 
         return Cache::remember($cacheKey, now()->addMinutes(50), function () use ($clientEmail, $privateKey): ?string {
             $jwt = $this->buildJwt($clientEmail, $privateKey);

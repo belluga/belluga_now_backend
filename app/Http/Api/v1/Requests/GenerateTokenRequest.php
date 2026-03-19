@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Support\Validation\InputConstraints;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
 class GenerateTokenRequest extends FormRequest
@@ -27,14 +27,14 @@ class GenerateTokenRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
+            'email' => 'required|email|max:'.InputConstraints::EMAIL_MAX,
         ];
     }
 
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'errors' => $validator->errors()
+            'errors' => $validator->errors(),
         ], 422));
     }
 }

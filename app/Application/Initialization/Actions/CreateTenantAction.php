@@ -14,12 +14,11 @@ class CreateTenantAction
     public function __construct(
         private readonly AccountProfileRegistrySeeder $registrySeeder,
         private readonly StaticProfileTypeRegistrySeeder $staticProfileSeeder,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $tenantData
-     * @param array<int, string> $domains
+     * @param  array<string, mixed>  $tenantData
+     * @param  array<int, string>  $domains
      */
     public function execute(array $tenantData, array $domains = []): Tenant
     {

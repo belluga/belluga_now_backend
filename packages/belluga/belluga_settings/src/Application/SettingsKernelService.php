@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Belluga\Settings\Application;
 
+use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\SettingsSchemaValidatorContract;
 use Belluga\Settings\Contracts\SettingsStoreContract;
+use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Auth\Access\AuthorizationException;
 
@@ -16,8 +18,8 @@ class SettingsKernelService
         private readonly SettingsRegistryContract $registry,
         private readonly SettingsStoreContract $store,
         private readonly SettingsSchemaValidatorContract $validator,
-    ) {
-    }
+        private readonly SettingsNamespacePatchGuardContract $patchGuard,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -45,14 +47,14 @@ class SettingsKernelService
         $values = [];
 
         foreach ($this->accessibleDefinitions($scope, $user) as $definition) {
-            $values[$definition->namespace] = $this->store->getNamespaceValue($scope, $definition->namespace);
+            $values[$definition->namespace] = $this->resolvedNamespaceValue($scope, $definition);
         }
 
         return $values;
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function patchNamespace(string $scope, mixed $user, string $namespace, array $payload): array
@@ -60,20 +62,24 @@ class SettingsKernelService
         $definition = $this->registry->find($namespace, $scope);
 
         if (! $definition) {
-            abort(404, 'Settings namespace not found.');
+            throw new SettingsNamespaceNotFoundException($namespace, $scope);
         }
 
         if (! $this->canAccess($user, $definition)) {
             throw new AuthorizationException('Not authorized for this settings namespace.');
         }
 
+        $this->patchGuard->guard($scope, $user, $namespace, $payload, $definition);
+
         $changes = $this->validator->validatePatch($definition, $payload);
 
         if ($changes === []) {
-            return $this->store->getNamespaceValue($scope, $namespace);
+            return $this->resolvedNamespaceValue($scope, $definition);
         }
 
-        return $this->store->mergeNamespace($scope, $namespace, $changes, $definition);
+        return $definition->applyDefaults(
+            $this->store->mergeNamespace($scope, $namespace, $changes, $definition)
+        );
     }
 
     /**
@@ -112,5 +118,15 @@ class SettingsKernelService
         }
 
         return (bool) $user->tokenCan($ability);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolvedNamespaceValue(string $scope, SettingsNamespaceDefinition $definition): array
+    {
+        return $definition->applyDefaults(
+            $this->store->getNamespaceValue($scope, $definition->namespace)
+        );
     }
 }

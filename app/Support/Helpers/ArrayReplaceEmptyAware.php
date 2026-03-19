@@ -9,7 +9,7 @@ class ArrayReplaceEmptyAware
         foreach ($overrideArray as $key => $value) {
             if (isset($mainArray[$key]) && is_array($mainArray[$key]) && is_array($value)) {
                 $mainArray[$key] = self::mergeIfEmptyRecursive($mainArray[$key], $value);
-            } else if (!isset($mainArray[$key]) || is_null($mainArray[$key]) || $mainArray[$key] === '') {
+            } elseif (! isset($mainArray[$key]) || is_null($mainArray[$key]) || $mainArray[$key] === '') {
                 $mainArray[$key] = $value;
             }
         }
@@ -19,7 +19,7 @@ class ArrayReplaceEmptyAware
 
     public static function mergeIfOverridenIsNotEmptyRecursive(array $mainArray, ?array $overrideArray): array
     {
-        if($overrideArray === null){
+        if ($overrideArray === null) {
             return $mainArray;
         }
 
@@ -29,11 +29,12 @@ class ArrayReplaceEmptyAware
                 $mainArray[$key] = self::mergeIfOverridenIsNotEmptyRecursive($mainArray[$key], $value);
             }
             // The new condition: check if the NEW value is not empty
-            else if ($value !== null && $value !== '') {
+            elseif ($value !== null && $value !== '') {
                 $mainArray[$key] = $value;
             }
             // If the new value is empty, do nothing.
         }
+
         return $mainArray;
     }
 }

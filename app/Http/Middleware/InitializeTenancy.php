@@ -7,16 +7,14 @@ use Closure;
 
 class InitializeTenancy
 {
-    public function __construct(private readonly DomainTenantFinder $tenantFinder)
-    {
-    }
+    public function __construct(private readonly DomainTenantFinder $tenantFinder) {}
 
     public function handle($request, Closure $next)
     {
 
         $tenant = $this->tenantFinder->findForRequest($request);
 
-        if($tenant){
+        if ($tenant) {
             $tenant->makeCurrent();
         }
 

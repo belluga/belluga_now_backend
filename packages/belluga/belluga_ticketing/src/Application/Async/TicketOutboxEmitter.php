@@ -10,7 +10,7 @@ use Illuminate\Support\Carbon;
 class TicketOutboxEmitter
 {
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function emit(string $topic, array $payload, string $dedupeKey): void
     {

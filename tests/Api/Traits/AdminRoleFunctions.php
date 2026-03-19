@@ -10,7 +10,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/roles",
+            uri: 'admin/api/v1/roles',
             headers: $this->getHeaders(),
         );
     }
@@ -19,7 +19,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/roles?archived=true",
+            uri: 'admin/api/v1/roles?archived=true',
             headers: $this->getHeaders(),
         );
     }
@@ -37,7 +37,7 @@ trait AdminRoleFunctions
     {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/roles",
+            uri: 'admin/api/v1/roles',
             data: $data,
             headers: $this->getHeaders(),
         );
@@ -59,7 +59,7 @@ trait AdminRoleFunctions
             method: 'delete',
             uri: "admin/api/v1/roles/$roleId",
             data: [
-                "role_id" => $this->landlord->role_visitor->id,
+                'role_id' => $this->landlord->role_visitor->id,
             ],
             headers: $this->getHeaders(),
         );

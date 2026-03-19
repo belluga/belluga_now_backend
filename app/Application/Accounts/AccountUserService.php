@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
-use App\Application\Accounts\AccountUserAccessService;
 use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsException;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Models\Tenants\Account;
@@ -20,11 +19,10 @@ class AccountUserService
     public function __construct(
         private readonly PasswordIdentityRegistrar $passwordIdentityRegistrar,
         private readonly AccountUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(Account $account, array $payload, string $roleId): AccountUser
     {
@@ -53,7 +51,7 @@ class AccountUserService
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(AccountUser $user, array $attributes): AccountUser
     {
@@ -92,7 +90,7 @@ class AccountUserService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function normalizeCreatePayload(array $payload): array
     {
@@ -105,7 +103,7 @@ class AccountUserService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function findOrCreateUser(array $payload): AccountUser
     {
