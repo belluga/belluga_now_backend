@@ -27,4 +27,8 @@ return [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
     ],
+    'packages/belluga/belluga_favorites' => [
+        'integration_mode' => 'host-integrated',
+        'route_ownership' => 'host-owned-routes',
+    ],
 ];

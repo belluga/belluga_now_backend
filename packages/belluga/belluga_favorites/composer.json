@@ -1,0 +1,22 @@
+{
+  "name": "belluga/favorites",
+  "description": "Belluga favorites package with registry-backed snapshot query contract.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\Favorites\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\Favorites\\FavoritesServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}

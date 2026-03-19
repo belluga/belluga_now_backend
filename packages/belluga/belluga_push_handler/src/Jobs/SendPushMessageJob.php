@@ -15,8 +15,9 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Validation\ValidationException;
+use Spatie\Multitenancy\Jobs\TenantAware;
 
-class SendPushMessageJob implements ShouldQueue
+class SendPushMessageJob implements ShouldQueue, TenantAware
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 

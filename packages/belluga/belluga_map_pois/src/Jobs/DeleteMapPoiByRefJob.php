@@ -10,8 +10,9 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Spatie\Multitenancy\Jobs\TenantAware;
 
-class DeleteMapPoiByRefJob implements ShouldQueue
+class DeleteMapPoiByRefJob implements ShouldQueue, TenantAware
 {
     use Dispatchable;
     use InteractsWithQueue;
