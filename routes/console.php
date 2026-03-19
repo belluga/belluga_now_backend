@@ -62,8 +62,14 @@ Artisan::command('api-security:abuse-signals:report {--hours=24}', function () {
     return 0;
 })->purpose('Print API abuse signal aggregate report for observe-mode/enforcement review.');
 
-// Use class-string scheduling to avoid eager class instantiation during console bootstrap.
-Schedule::job(PublishScheduledEventsJob::class)->hourly();
+Schedule::call(static function (): void {
+    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
+        PublishScheduledEventsJob::dispatch();
+    });
+})
+    ->name('events:publication:publish_scheduled')
+    ->hourly()
+    ->withoutOverlapping();
 
 Schedule::call(static function (): void {
     app(EventAsyncOperationsMonitorService::class)->evaluate();
@@ -79,10 +85,18 @@ Schedule::call(static function (): void {
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
-Schedule::job(new ProcessTicketOutboxJob)->everyMinute();
 Schedule::call(static function (): void {
     app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
-        app()->call([new ExpireIssuedTicketUnitsJob, 'handle']);
+        ProcessTicketOutboxJob::dispatch();
+    });
+})
+    ->name('ticketing:outbox:process')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::call(static function (): void {
+    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
+        ExpireIssuedTicketUnitsJob::dispatch();
     });
 })
     ->name('ticketing:issued-expiry:sweep')

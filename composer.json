@@ -52,6 +52,10 @@
         {
             "type": "path",
             "url": "packages/belluga/belluga_invites"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_favorites"
         }
     ],
     "autoload": {
@@ -63,6 +67,7 @@
             "Belluga\\Ticketing\\": "packages/belluga/belluga_ticketing/src/",
             "Belluga\\Invites\\": "packages/belluga/belluga_invites/src/",
             "Belluga\\MapPois\\": "packages/belluga/belluga_map_pois/src/",
+            "Belluga\\Favorites\\": "packages/belluga/belluga_favorites/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }

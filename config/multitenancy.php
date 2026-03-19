@@ -73,6 +73,7 @@ return [
         'packages/belluga/belluga_ticketing/database/migrations',
         'packages/belluga/belluga_map_pois/database/migrations',
         'packages/belluga/belluga_invites/database/migrations',
+        'packages/belluga/belluga_favorites/database/migrations',
     ],
 
     /*
