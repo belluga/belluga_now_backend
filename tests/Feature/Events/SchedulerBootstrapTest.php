@@ -19,18 +19,19 @@ class SchedulerBootstrapTest extends TestCase
         $this->artisan('schedule:list')->assertExitCode(0);
     }
 
-    public function test_console_schedule_registers_publish_job_via_class_string(): void
+    public function test_console_schedule_registers_tenant_fan_out_dispatch_for_tenant_jobs(): void
     {
         $routesConsole = file_get_contents(base_path('routes/console.php'));
 
         $this->assertNotFalse($routesConsole);
         $this->assertStringContainsString(
-            'Schedule::job(PublishScheduledEventsJob::class)->hourly();',
+            "->name('events:publication:publish_scheduled')",
             $routesConsole
         );
-        $this->assertStringNotContainsString(
-            'Schedule::job(new PublishScheduledEventsJob())',
-            $routesConsole
-        );
+        $this->assertStringContainsString('PublishScheduledEventsJob::dispatch();', $routesConsole);
+        $this->assertStringContainsString('ProcessTicketOutboxJob::dispatch();', $routesConsole);
+        $this->assertStringContainsString('ExpireIssuedTicketUnitsJob::dispatch();', $routesConsole);
+        $this->assertStringNotContainsString('Schedule::job(PublishScheduledEventsJob::class)->hourly();', $routesConsole);
+        $this->assertStringNotContainsString('Schedule::job(new ProcessTicketOutboxJob)->everyMinute();', $routesConsole);
     }
 }

@@ -12,8 +12,9 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Spatie\Multitenancy\Jobs\TenantAware;
 
-class ProcessTicketOutboxJob implements ShouldQueue
+class ProcessTicketOutboxJob implements ShouldQueue, TenantAware
 {
     use Dispatchable;
     use InteractsWithQueue;
