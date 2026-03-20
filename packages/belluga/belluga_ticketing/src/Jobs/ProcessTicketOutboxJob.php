@@ -79,19 +79,7 @@ class ProcessTicketOutboxJob implements ShouldQueue, TenantAware
     private function currentTenantId(): ?string
     {
         $tenantId = Context::get('tenantId');
-        if (is_string($tenantId) && $tenantId !== '') {
-            return $tenantId;
-        }
 
-        $currentTenant = app()->bound('currentTenant') ? app('currentTenant') : null;
-        if (! is_object($currentTenant) || ! method_exists($currentTenant, 'getAttribute')) {
-            return null;
-        }
-
-        $candidate = $currentTenant->getAttribute('_id') ?? $currentTenant->getAttribute('id');
-
-        return is_scalar($candidate) && $candidate !== ''
-            ? (string) $candidate
-            : null;
+        return is_string($tenantId) && $tenantId !== '' ? $tenantId : null;
     }
 }
