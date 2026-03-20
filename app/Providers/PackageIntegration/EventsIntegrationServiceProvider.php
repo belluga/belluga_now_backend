@@ -6,6 +6,7 @@ namespace App\Providers\PackageIntegration;
 
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
+use App\Integration\Events\AttendanceCommitmentReadAdapter;
 use App\Integration\Events\EventParties\ArtistEventPartyMapper;
 use App\Integration\Events\EventParties\VenueEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
@@ -21,6 +22,7 @@ use App\Listeners\Events\SyncMapPoiOnEventDeleted;
 use App\Listeners\Events\SyncMapPoiOnEventUpdated;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
+use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
@@ -61,6 +63,11 @@ class EventsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             EventAccountResolverContract::class,
             AccountSlugResolverAdapter::class
+        );
+
+        $this->app->bind(
+            EventAttendanceReadContract::class,
+            AttendanceCommitmentReadAdapter::class
         );
 
         $this->app->bind(

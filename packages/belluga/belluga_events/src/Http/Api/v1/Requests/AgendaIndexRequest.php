@@ -23,6 +23,7 @@ class AgendaIndexRequest extends FormRequest
             'page' => 'sometimes|integer|min:1',
             'page_size' => 'sometimes|integer|min:1',
             'past_only' => 'sometimes|boolean',
+            'confirmed_only' => 'sometimes|boolean',
             // MVP: event text search is disabled; taxonomy/categorical filters are canonical.
             'search' => 'prohibited',
             'categories' => 'sometimes|array',
