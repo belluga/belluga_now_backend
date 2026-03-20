@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Events;
 
 use Belluga\Events\Application\Events\EventQueryService;
+use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -59,6 +60,7 @@ class EventQueryServiceTest extends TestCase
             Mockery::mock(EventProfileResolverContract::class),
             Mockery::mock(EventRadiusSettingsContract::class),
             Mockery::mock(EventCapabilitySettingsContract::class),
+            Mockery::mock(EventAttendanceReadContract::class),
         );
     }
 }
