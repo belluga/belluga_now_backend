@@ -25,6 +25,16 @@ class AccountProfileManagementService
      */
     public function create(array $payload): AccountProfile
     {
+        return DB::connection('tenant')->transaction(
+            fn (): AccountProfile => $this->createWithinCurrentTransaction($payload)
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function createWithinCurrentTransaction(array $payload): AccountProfile
+    {
         $profileType = (string) $payload['profile_type'];
 
         if (! $this->registryService->typeDefinition($profileType)) {
@@ -58,19 +68,13 @@ class AccountProfileManagementService
         }
 
         try {
-            $profile = DB::connection('tenant')->transaction(function () use ($payload): AccountProfile {
-                if (! array_key_exists('is_active', $payload)) {
-                    $payload['is_active'] = true;
-                }
-                $payload['account_id'] = (string) $payload['account_id'];
-                $payload['location'] = $this->formatLocation($payload['location'] ?? null);
+            if (! array_key_exists('is_active', $payload)) {
+                $payload['is_active'] = true;
+            }
+            $payload['account_id'] = (string) $payload['account_id'];
+            $payload['location'] = $this->formatLocation($payload['location'] ?? null);
 
-                return AccountProfile::create($payload)->fresh();
-            });
-
-            UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
-
-            return $profile;
+            $profile = AccountProfile::create($payload)->fresh();
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -82,6 +86,10 @@ class AccountProfileManagementService
                 'account_profile' => ['Something went wrong when trying to create the account profile.'],
             ]);
         }
+
+        $this->queueMapPoiSyncAfterCommit($profile);
+
+        return $profile;
     }
 
     /**
@@ -157,7 +165,7 @@ class AccountProfileManagementService
         $profile->restore();
 
         $profile = $profile->fresh();
-        UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
+        $this->queueMapPoiSyncAfterCommit($profile);
 
         return $profile;
     }
@@ -188,5 +196,12 @@ class AccountProfileManagementService
             'type' => 'Point',
             'coordinates' => [(float) $lng, (float) $lat],
         ];
+    }
+
+    private function queueMapPoiSyncAfterCommit(AccountProfile $profile): void
+    {
+        DB::connection('tenant')->afterCommit(
+            static fn () => UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id)
+        );
     }
 }
