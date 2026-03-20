@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -32,6 +33,7 @@ class EventQueryService
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventRadiusSettingsContract $eventRadiusSettings,
         private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
+        private readonly EventAttendanceReadContract $eventAttendanceRead,
     ) {}
 
     /**
@@ -47,7 +49,8 @@ class EventQueryService
         $limit = $pageSize + 1;
 
         $filters = $this->normalizeFilters($queryParams);
-        $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $filters['use_geo']);
+        $useGeo = $filters['use_geo'] && ! $filters['confirmed_only'];
+        $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $useGeo);
 
         $hasMore = count($raw) > $pageSize;
         $pageSlice = array_slice($raw, 0, $pageSize);
@@ -218,7 +221,8 @@ class EventQueryService
         }
 
         $filters = $this->normalizeFilters($queryParams);
-        $raw = $this->runStreamQuery($filters, $userId, $since, true);
+        $useGeo = $filters['use_geo'] && ! $filters['confirmed_only'];
+        $raw = $this->runStreamQuery($filters, $userId, $since, $useGeo);
         $deltas = array_values(array_filter(array_map(function ($event) use ($since): ?array {
             $payload = $this->formatStreamDelta($event, $since);
 
@@ -233,6 +237,7 @@ class EventQueryService
             'category_filter_count' => count($filters['categories'] ?? []),
             'tag_filter_count' => count($filters['tags'] ?? []),
             'taxonomy_filter_count' => count($filters['taxonomy'] ?? []),
+            'confirmed_only' => (bool) ($filters['confirmed_only'] ?? false),
         ]);
 
         return $deltas;
@@ -257,6 +262,7 @@ class EventQueryService
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
             'past_only' => filter_var($queryParams['past_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'confirmed_only' => filter_var($queryParams['confirmed_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'origin_lat' => $originLat,
             'origin_lng' => $originLng,
             'max_distance_meters' => $useGeo ? $this->resolveMaxDistanceMeters($queryParams) : null,
@@ -270,7 +276,12 @@ class EventQueryService
      */
     private function runAgendaQuery(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
     {
-        $pipeline = $this->buildAgendaPipeline($filters, $userId, $skip, $limit, $useGeo);
+        $confirmedEventIds = $this->resolveConfirmedEventIds($filters, $userId);
+        if (is_array($confirmedEventIds) && $confirmedEventIds === []) {
+            return [];
+        }
+
+        $pipeline = $this->buildAgendaPipeline($filters, $skip, $limit, $useGeo, $confirmedEventIds);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -284,7 +295,12 @@ class EventQueryService
      */
     private function runStreamQuery(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
     {
-        $pipeline = $this->buildStreamPipeline($filters, $userId, $since, $useGeo);
+        $confirmedEventIds = $this->resolveConfirmedEventIds($filters, $userId);
+        if (is_array($confirmedEventIds) && $confirmedEventIds === []) {
+            return [];
+        }
+
+        $pipeline = $this->buildStreamPipeline($filters, $since, $useGeo, $confirmedEventIds);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -296,8 +312,13 @@ class EventQueryService
      * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildAgendaPipeline(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
-    {
+    private function buildAgendaPipeline(
+        array $filters,
+        int $skip,
+        int $limit,
+        bool $useGeo,
+        ?array $confirmedEventIds = null
+    ): array {
         $now = new UTCDateTime(Carbon::now());
         $pipeline = [];
 
@@ -332,6 +353,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
+        $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
 
         $pipeline[] = [
             '$addFields' => [
@@ -365,8 +387,12 @@ class EventQueryService
      * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildStreamPipeline(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
-    {
+    private function buildStreamPipeline(
+        array $filters,
+        Carbon $since,
+        bool $useGeo,
+        ?array $confirmedEventIds = null
+    ): array {
         $sinceUtc = new UTCDateTime($since);
         $pipeline = [];
 
@@ -401,6 +427,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
+        $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
 
@@ -501,6 +528,23 @@ class EventQueryService
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param  array<int, string>|null  $confirmedEventIds
+     */
+    private function applyConfirmedEventsFilter(array &$pipeline, ?array $confirmedEventIds): void
+    {
+        if ($confirmedEventIds === null) {
+            return;
+        }
+
+        $pipeline[] = [
+            '$match' => [
+                'event_id' => ['$in' => $confirmedEventIds],
+            ],
+        ];
+    }
+
+    /**
      * @return array<int, string>
      */
     private function resolveAccountProfileIds(string $accountId): array
@@ -579,6 +623,26 @@ class EventQueryService
     private function resolveRadiusSettings(): array
     {
         return $this->eventRadiusSettings->resolveRadiusSettings();
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array<int, string>|null
+     */
+    private function resolveConfirmedEventIds(array $filters, ?string $userId): ?array
+    {
+        if ((bool) ($filters['confirmed_only'] ?? false) !== true) {
+            return null;
+        }
+
+        if (! is_string($userId) || trim($userId) === '') {
+            return [];
+        }
+
+        return array_values(array_unique(array_values(array_filter(
+            array_map(static fn (mixed $value): string => trim((string) $value), $this->eventAttendanceRead->listConfirmedEventIdsForUser($userId)),
+            static fn (string $value): bool => $value !== ''
+        ))));
     }
 
     private function parseSince(?string $value): ?Carbon

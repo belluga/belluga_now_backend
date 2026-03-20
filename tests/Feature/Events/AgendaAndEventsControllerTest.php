@@ -10,6 +10,7 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\AttendanceCommitment;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
@@ -380,6 +381,75 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $collection->createIndex(['geo_location' => '2dsphere']);
     }
 
+    public function test_agenda_confirmed_only_returns_only_confirmed_events(): void
+    {
+        $confirmed = $this->createEvent([
+            'title' => 'Confirmed Visible',
+            'date_time_start' => Carbon::now()->addDay(),
+            'date_time_end' => Carbon::now()->addDay()->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Not Confirmed Hidden',
+            'date_time_start' => Carbon::now()->addDays(2),
+            'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
+        ]);
+
+        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?confirmed_only=1&page=1&page_size=10");
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_more', false);
+
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame('Confirmed Visible', (string) ($items[0]['title'] ?? ''));
+        $this->assertSame((string) $confirmed->_id, (string) ($items[0]['event_id'] ?? ''));
+    }
+
+    public function test_agenda_confirmed_only_returns_empty_when_user_has_no_confirmed_events(): void
+    {
+        $this->createEvent([
+            'title' => 'Upcoming Event',
+            'date_time_start' => Carbon::now()->addDay(),
+            'date_time_end' => Carbon::now()->addDay()->addHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?confirmed_only=1&page=1&page_size=10");
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_more', false);
+        $this->assertSame([], $response->json('items'));
+    }
+
+    public function test_agenda_confirmed_only_ignores_geo_distance_filtering(): void
+    {
+        $confirmed = $this->createEvent([
+            'title' => 'Confirmed Far Away',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [120.0, 45.0],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [120.0, 45.0],
+            ],
+        ]);
+
+        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?confirmed_only=1&origin_lat=0&origin_lng=0&max_distance_meters=1&page=1&page_size=10"
+        );
+        $response->assertStatus(200);
+
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame((string) $confirmed->_id, (string) ($items[0]['event_id'] ?? ''));
+    }
+
     public function test_event_detail_resolves_slug_and_id(): void
     {
         $event = $this->createEvent([
@@ -503,6 +573,28 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringContainsString((string) $event->_id, $content);
     }
 
+    public function test_event_stream_confirmed_only_returns_only_confirmed_event_deltas(): void
+    {
+        $confirmed = $this->createEvent(['title' => 'Confirmed Stream Event']);
+        $other = $this->createEvent(['title' => 'Other Stream Event']);
+
+        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+
+        $response = $this->get(
+            "{$this->base_api_tenant}events/stream?confirmed_only=1",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $response->assertStatus(200);
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString((string) $confirmed->_id, $content);
+        $this->assertStringNotContainsString((string) $other->_id, $content);
+    }
+
     public function test_agenda_requires_auth(): void
     {
         auth('sanctum')->forgetUser();
@@ -613,6 +705,20 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
 
         return $event->fresh();
+    }
+
+    private function createActiveAttendanceCommitment(string $eventId, ?string $occurrenceId = null): void
+    {
+        AttendanceCommitment::create([
+            'user_id' => (string) $this->user->getAuthIdentifier(),
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'kind' => 'free_confirmation',
+            'status' => 'active',
+            'source' => 'direct',
+            'confirmed_at' => Carbon::now(),
+            'canceled_at' => null,
+        ]);
     }
 
     private function initializeSystem(): void

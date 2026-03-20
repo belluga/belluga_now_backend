@@ -12,6 +12,7 @@ use Belluga\Ticketing\Models\Tenants\TicketOutboxEvent;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCaseAuthenticated;
 
 class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
@@ -54,6 +55,43 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
 
         $this->assertOutboxProcessed($primaryTenant, $primaryOutboxId);
         $this->assertOutboxProcessed($secondaryTenant, $secondaryOutboxId);
+    }
+
+    public function test_ticket_outbox_job_emits_payload_safe_run_summary_telemetry_with_tenant_context(): void
+    {
+        $tenant = $this->primaryTenant();
+        $tenantId = (string) $tenant->getAttribute('_id');
+
+        $this->createPendingOutboxEvent($tenant, 'telemetry', [
+            'source' => 'scheduler-runtime-test',
+            'secret' => 'must-not-leak',
+            'email' => 'hidden@example.com',
+            'token' => 'must-not-leak',
+        ]);
+
+        $tenant->makeCurrent();
+
+        try {
+            Log::spy();
+
+            (new ProcessTicketOutboxJob)->handle();
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        Log::shouldHaveReceived('info')->with(
+            'ticketing_outbox_run_summary',
+            \Mockery::on(static function (array $context) use ($tenantId): bool {
+                $keys = array_keys($context);
+                sort($keys);
+
+                return $keys === ['batch_size', 'failed_count', 'processed_count', 'tenant_id']
+                    && ($context['tenant_id'] ?? null) === $tenantId
+                    && ($context['processed_count'] ?? null) === 1
+                    && ($context['failed_count'] ?? null) === 0
+                    && ($context['batch_size'] ?? null) === 100;
+            })
+        )->once();
     }
 
     private function runScheduledCallbackByName(string $name): void
@@ -115,7 +153,7 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
         }
     }
 
-    private function createPendingOutboxEvent(Tenant $tenant, string $suffix): string
+    private function createPendingOutboxEvent(Tenant $tenant, string $suffix, array $payload = ['source' => 'scheduler-runtime-test']): string
     {
         $tenant->makeCurrent();
 
@@ -123,7 +161,7 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
             $outbox = TicketOutboxEvent::query()->create([
                 'topic' => sprintf('scheduler-outbox-%s', $suffix),
                 'status' => 'pending',
-                'payload' => ['source' => 'scheduler-runtime-test'],
+                'payload' => $payload,
                 'dedupe_key' => sprintf('scheduler-outbox-%s-%s', $suffix, Carbon::now()->format('Uu')),
                 'available_at' => Carbon::now()->subSecond(),
                 'attempts' => 0,
