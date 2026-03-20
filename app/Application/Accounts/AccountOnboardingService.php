@@ -12,6 +12,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -31,53 +32,49 @@ class AccountOnboardingService
      */
     public function create(array $payload, Request $request): array
     {
-        $account = null;
-        $profile = null;
-        $role = null;
-
         $this->registrySeeder->ensureDefaults();
 
         try {
-            $accountResult = $this->accountService->create([
-                'name' => $payload['name'],
-                'ownership_state' => $payload['ownership_state'],
-                'created_by' => $payload['created_by'] ?? null,
-                'created_by_type' => $payload['created_by_type'] ?? null,
-                'updated_by' => $payload['updated_by'] ?? null,
-                'updated_by_type' => $payload['updated_by_type'] ?? null,
-            ]);
+            return DB::connection('tenant')->transaction(function () use ($payload, $request): array {
+                $accountResult = $this->accountService->createWithinCurrentTransaction([
+                    'name' => $payload['name'],
+                    'ownership_state' => $payload['ownership_state'],
+                    'created_by' => $payload['created_by'] ?? null,
+                    'created_by_type' => $payload['created_by_type'] ?? null,
+                    'updated_by' => $payload['updated_by'] ?? null,
+                    'updated_by_type' => $payload['updated_by_type'] ?? null,
+                ]);
 
-            $account = $accountResult['account'];
-            $role = $accountResult['role'];
+                $account = $accountResult['account'];
+                $role = $accountResult['role'];
 
-            $this->assertLocationKeysForPoiProfile($payload);
+                $this->assertLocationKeysForPoiProfile($payload);
 
-            $profile = $this->profileService->create([
-                'account_id' => (string) $account->_id,
-                'profile_type' => $payload['profile_type'],
-                'display_name' => $payload['name'],
-                'location' => $payload['location'] ?? null,
-                'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
-                'bio' => $payload['bio'] ?? null,
-                'content' => $payload['content'] ?? null,
-                'created_by' => $payload['created_by'] ?? null,
-                'created_by_type' => $payload['created_by_type'] ?? null,
-                'updated_by' => $payload['updated_by'] ?? null,
-                'updated_by_type' => $payload['updated_by_type'] ?? null,
-            ]);
+                $profile = $this->profileService->createWithinCurrentTransaction([
+                    'account_id' => (string) $account->_id,
+                    'profile_type' => $payload['profile_type'],
+                    'display_name' => $payload['name'],
+                    'location' => $payload['location'] ?? null,
+                    'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
+                    'bio' => $payload['bio'] ?? null,
+                    'content' => $payload['content'] ?? null,
+                    'created_by' => $payload['created_by'] ?? null,
+                    'created_by_type' => $payload['created_by_type'] ?? null,
+                    'updated_by' => $payload['updated_by'] ?? null,
+                    'updated_by_type' => $payload['updated_by_type'] ?? null,
+                ]);
 
-            $this->mediaService->applyUploads($request, $profile);
+                $this->mediaService->applyUploads($request, $profile);
 
-            return [
-                'account' => $account->fresh(),
-                'account_profile' => $profile->fresh(),
-                'role' => $role->fresh(),
-            ];
+                return [
+                    'account' => $account->fresh(),
+                    'account_profile' => $profile->fresh(),
+                    'role' => $role->fresh(),
+                ];
+            });
         } catch (ValidationException $exception) {
-            $this->rollbackPartialCreate($account, $profile);
             throw $this->normalizeValidationException($exception);
         } catch (Throwable $exception) {
-            $this->rollbackPartialCreate($account, $profile);
             throw ValidationException::withMessages([
                 'account' => ['Account onboarding could not be completed.'],
             ]);
@@ -116,25 +113,6 @@ class AccountOnboardingService
             'location.lat' => $messages,
             'location.lng' => $messages,
         ]);
-    }
-
-    private function rollbackPartialCreate(?Account $account, ?AccountProfile $profile): void
-    {
-        if ($profile !== null) {
-            try {
-                $this->profileService->forceDelete($profile);
-            } catch (Throwable) {
-                // Best-effort rollback.
-            }
-        }
-
-        if ($account !== null) {
-            try {
-                $this->accountService->forceDelete($account);
-            } catch (Throwable) {
-                // Best-effort rollback.
-            }
-        }
     }
 
     private function normalizeValidationException(

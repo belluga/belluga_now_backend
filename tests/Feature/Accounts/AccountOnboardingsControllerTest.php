@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -11,6 +12,7 @@ use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -94,7 +96,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $this->assertNotNull(Account::query()->where('_id', $accountId)->first());
         $this->assertSame(1, AccountProfile::query()->where('_id', $profileId)->count());
-        $this->assertSame(1, \App\Models\Tenants\AccountRoleTemplate::query()->where('_id', $roleId)->count());
+        $this->assertSame(1, AccountRoleTemplate::query()->where('_id', $roleId)->count());
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
     }
 
@@ -154,6 +156,7 @@ class AccountOnboardingsControllerTest extends TestCase
     {
         $this->actingAsAdmin(['account-users:create']);
         $name = 'Onboarding Media Fail '.Str::random(8);
+        $rolesBefore = AccountRoleTemplate::query()->count();
 
         $mediaMock = Mockery::mock(AccountProfileMediaService::class);
         $mediaMock->shouldReceive('applyUploads')
@@ -171,6 +174,32 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertNotEmpty($response->json('errors.account'));
         $this->assertSame(0, Account::query()->where('name', $name)->count());
         $this->assertSame(0, AccountProfile::query()->where('display_name', $name)->count());
+        $this->assertSame($rolesBefore, AccountRoleTemplate::query()->count());
+    }
+
+    public function test_onboarding_profile_write_failure_rolls_back_account_and_role(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        $name = 'Onboarding Profile Fail '.Str::random(8);
+        $rolesBefore = AccountRoleTemplate::query()->count();
+
+        $profileMock = Mockery::mock(AccountProfileManagementService::class);
+        $profileMock->shouldReceive('createWithinCurrentTransaction')
+            ->once()
+            ->andThrow(new \RuntimeException('Simulated profile write failure'));
+        $this->app->instance(AccountProfileManagementService::class, $profileMock);
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => $name,
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertNotEmpty($response->json('errors.account'));
+        $this->assertSame(0, Account::query()->where('name', $name)->count());
+        $this->assertSame(0, AccountProfile::query()->where('display_name', $name)->count());
+        $this->assertSame($rolesBefore, AccountRoleTemplate::query()->count());
     }
 
     public function test_legacy_routes_return_deterministic409_rejection(): void
