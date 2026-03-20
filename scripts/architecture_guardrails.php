@@ -47,6 +47,7 @@ final class ArchitectureGuardrailRunner
         $this->checkHostOwnedRouteExplicitness();
         $this->checkAppServiceProviderPackageComposition();
         $this->checkTenantMigrationPathRegistration();
+        $this->checkFavoritesRegistryGuardrails();
         $this->checkCiLocalTestRuntimeGuardrails();
         $this->checkApiSecurityHardeningBaseline();
 
@@ -1007,6 +1008,202 @@ final class ArchitectureGuardrailRunner
         }
     }
 
+    private function checkFavoritesRegistryGuardrails(): void
+    {
+        $configRelativePath = 'config/favorites.php';
+        $configAbsolutePath = $this->repoRoot.'/'.$configRelativePath;
+        if (! is_file($configAbsolutePath)) {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                $configRelativePath,
+                1,
+                'Missing favorites registry configuration file.'
+            );
+
+            return;
+        }
+
+        $configContent = @file_get_contents($configAbsolutePath);
+        if (! is_string($configContent)) {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                $configRelativePath,
+                1,
+                'Cannot read favorites registry configuration file.'
+            );
+
+            return;
+        }
+
+        $config = require $configAbsolutePath;
+        if (! is_array($config)) {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                $configRelativePath,
+                1,
+                'favorites configuration must return an array.'
+            );
+
+            return;
+        }
+
+        $registries = $config['registries'] ?? null;
+        if (! is_array($registries)) {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                $configRelativePath,
+                1,
+                'favorites.registries must be an array.'
+            );
+
+            return;
+        }
+
+        /** @var array<string, array<int, array<string, mixed>>> $collectionUsage */
+        $collectionUsage = [];
+        $migrationFiles = glob($this->repoRoot.'/packages/belluga/belluga_favorites/database/migrations/*.php') ?: [];
+        sort($migrationFiles);
+        $migrationContent = '';
+        foreach ($migrationFiles as $migrationFile) {
+            $content = @file_get_contents($migrationFile);
+            if (is_string($content)) {
+                $migrationContent .= "\n".$content;
+            }
+        }
+
+        if ($migrationContent === '') {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                'packages/belluga/belluga_favorites/database/migrations',
+                1,
+                'Favorites package migration files are missing or unreadable.'
+            );
+
+            return;
+        }
+
+        if (
+            preg_match("/['\"]owner_user_id['\"]\\s*=>\\s*1\\s*,\\s*['\"]favorited_at['\"]\\s*=>\\s*-?1/s", $migrationContent) !== 1
+            && preg_match("/['\"]owner_user_id['\"]\\s*=>\\s*1\\s*,\\s*['\"]favorited_at['\"]\\s*=>\\s*1/s", $migrationContent) !== 1
+        ) {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                'packages/belluga/belluga_favorites/database/migrations',
+                1,
+                'favorite_edges migration must define owner_user_id + favorited_at read index.'
+            );
+        }
+
+        if (preg_match("/['\"]registry_key['\"]\\s*=>\\s*1/s", $migrationContent) !== 1) {
+            $this->addViolation(
+                'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                'packages/belluga/belluga_favorites/database/migrations',
+                1,
+                'Favorites migrations must include a registry_key index.'
+            );
+        }
+
+        foreach ($registries as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $registryKey = trim((string) ($entry['registry_key'] ?? ''));
+            $line = $this->registryConfigLine($configContent, $registryKey !== '' ? "'registry_key' => '{$registryKey}'" : "'registry_key'");
+
+            if ($registryKey === '') {
+                $this->addViolation(
+                    'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                    $configRelativePath,
+                    $line,
+                    'favorites registry entry must define registry_key.'
+                );
+
+                continue;
+            }
+
+            if (preg_match('/^[a-z][a-z0-9_]*$/', $registryKey) !== 1) {
+                $this->addViolation(
+                    'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                    $configRelativePath,
+                    $line,
+                    "favorites registry_key `{$registryKey}` must be snake_case."
+                );
+            }
+
+            $snapshotCollection = isset($entry['snapshot_collection'])
+                ? trim((string) $entry['snapshot_collection'])
+                : '';
+            $snapshotCollection = $snapshotCollection !== '' ? $snapshotCollection : null;
+            $requiresSpecificIndexes = (bool) ($entry['requires_specific_indexes'] ?? false);
+
+            if ($snapshotCollection !== null) {
+                $expected = sprintf('favoritable_%s_snapshots', $registryKey);
+                if ($snapshotCollection !== $expected) {
+                    $this->addViolation(
+                        'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                        $configRelativePath,
+                        $line,
+                        "snapshot_collection `{$snapshotCollection}` must match `{$expected}`."
+                    );
+                }
+            }
+
+            if ($requiresSpecificIndexes && $snapshotCollection === null) {
+                $this->addViolation(
+                    'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                    $configRelativePath,
+                    $line,
+                    "Registry `{$registryKey}` declares specific indexes and cannot use default `favoritable_snapshots`."
+                );
+            }
+
+            $effectiveCollection = $snapshotCollection ?? 'favoritable_snapshots';
+            $collectionUsage[$effectiveCollection][] = $entry;
+
+            if ($snapshotCollection !== null) {
+                if (str_contains($migrationContent, "Schema::create('{$snapshotCollection}'") !== true) {
+                    $this->addViolation(
+                        'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                        'packages/belluga/belluga_favorites/database/migrations',
+                        1,
+                        "Favorites migration must create snapshot collection `{$snapshotCollection}` declared by registry `{$registryKey}`."
+                    );
+                }
+            }
+        }
+
+        foreach ($collectionUsage as $collection => $entries) {
+            if (count($entries) < 2) {
+                continue;
+            }
+
+            foreach ($entries as $entry) {
+                $registryKey = trim((string) ($entry['registry_key'] ?? ''));
+                $line = $this->registryConfigLine($configContent, $registryKey !== '' ? "'registry_key' => '{$registryKey}'" : "'registry_key'");
+                $sharedEnvelope = $entry['shared_envelope_fields'] ?? [];
+                if (! is_array($sharedEnvelope)) {
+                    $sharedEnvelope = [];
+                }
+                $normalizedEnvelope = array_values(array_unique(array_map(static fn (mixed $value): string => trim((string) $value), $sharedEnvelope)));
+                sort($normalizedEnvelope);
+
+                $requiredEnvelope = ['registry_key', 'target_id', 'target_type', 'updated_at'];
+                $requiredSorted = $requiredEnvelope;
+                sort($requiredSorted);
+
+                if ($normalizedEnvelope !== $requiredSorted) {
+                    $this->addViolation(
+                        'LAR-FAVORITES-REGISTRY-GUARDRAIL',
+                        $configRelativePath,
+                        $line,
+                        "Registries sharing collection `{$collection}` must declare shared_envelope_fields exactly as registry_key,target_type,target_id,updated_at."
+                    );
+                }
+            }
+        }
+    }
+
     private function checkCiLocalTestRuntimeGuardrails(): void
     {
         $relativePath = '.github/workflows/ci.yml';
@@ -1328,6 +1525,16 @@ final class ArchitectureGuardrailRunner
         $host = strtolower(trim($host, "[] \t\n\r\0\x0B"));
 
         return $host === '' ? null : $host;
+    }
+
+    private function registryConfigLine(string $content, string $needle): int
+    {
+        $offset = strpos($content, $needle);
+        if ($offset === false) {
+            return 1;
+        }
+
+        return $this->lineFromOffset($content, $offset);
     }
 
     private function lineFromOffset(string $content, int $offset): int

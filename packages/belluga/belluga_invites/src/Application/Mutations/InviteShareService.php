@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Belluga\Invites\Application\Mutations;
 
+use Belluga\Invites\Application\Feed\InviteProjectionService;
 use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
-use Belluga\Invites\Application\Feed\InviteProjectionService;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;

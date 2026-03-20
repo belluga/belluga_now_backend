@@ -13,6 +13,7 @@ use Belluga\Events\Capabilities\MultipleOccurrencesCapabilityHandler;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
+use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilityRegistryContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
@@ -47,6 +48,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->ensureHostBinding(EventTypeResolverContract::class);
         $this->ensureHostBinding(EventProfileResolverContract::class);
         $this->ensureHostBinding(EventAccountResolverContract::class);
+        $this->ensureHostBinding(EventAttendanceReadContract::class);
         $this->ensureHostBinding(EventCapabilitySettingsContract::class);
         $this->ensureHostBinding(EventPartyMapperRegistryContract::class);
         $this->ensureHostBinding(EventTenantContextContract::class);
