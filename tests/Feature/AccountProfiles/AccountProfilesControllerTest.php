@@ -104,7 +104,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
-            'profile_type' => 'personal',
+            'profile_type' => 'venue',
             'display_name' => 'Profile Viewer',
             'is_active' => true,
         ]);
@@ -148,6 +148,87 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue($items->every(fn (array $item): bool => $item['profile_type'] === 'venue'));
     }
 
+    public function test_public_account_profile_index_returns_only_favoritable_types(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Private Profile',
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Favoritable Account',
+            'document' => 'DOC-FAVORITABLE',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Public Venue',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('venue', $items->first()['profile_type'] ?? null);
+    }
+
+    public function test_public_account_profile_index_returns_empty_when_filter_requests_non_favoritable_type(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Personal Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?filter[profile_type]=personal"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('data'));
+    }
+
+    public function test_public_account_profile_index_excludes_inactive_profiles(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Active Venue',
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Inactive Account',
+            'document' => 'DOC-INACTIVE',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Inactive Venue',
+            'is_active' => false,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Active Venue', $items->first()['display_name'] ?? null);
+    }
+
     public function test_public_account_profile_index_returns_empty_when_none(): void
     {
         $this->createAccountUser([]);
@@ -171,13 +252,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
-            'profile_type' => 'personal',
+            'profile_type' => 'venue',
             'display_name' => 'Page Size 1',
             'is_active' => true,
         ]);
         AccountProfile::create([
             'account_id' => (string) $secondAccount->_id,
-            'profile_type' => 'personal',
+            'profile_type' => 'venue',
             'display_name' => 'Page Size 2',
             'is_active' => true,
         ]);

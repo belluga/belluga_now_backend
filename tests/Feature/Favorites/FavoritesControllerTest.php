@@ -253,6 +253,33 @@ class FavoritesControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_favorites_destroy_forbidden_for_anonymous_identity(): void
+    {
+        $profile = $this->createProfile('Profile Anonymous Destroy', 'profile-anonymous-destroy');
+        $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
+
+        $this->user->setAttribute('identity_state', 'anonymous');
+        $this->user->save();
+        Sanctum::actingAs($this->user, ['account-users:view']);
+
+        $response = $this->deleteJson("{$this->base_api_tenant}favorites", [
+            'target_id' => (string) $profile->_id,
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+        ]);
+
+        $response->assertStatus(403);
+
+        $this->assertTrue(
+            FavoriteEdge::query()
+                ->where('owner_user_id', (string) $this->user->getAuthIdentifier())
+                ->where('registry_key', 'account_profile')
+                ->where('target_type', 'account_profile')
+                ->where('target_id', (string) $profile->_id)
+                ->exists()
+        );
+    }
+
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
