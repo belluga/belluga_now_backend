@@ -529,8 +529,8 @@ class EventManagementService
         $venue = [];
         $geoLocation = $this->normalizeGeoLocation($locationPayload['geo'] ?? null, 'location.geo');
 
-        if (is_array($placeRef) && ($placeRef['type'] ?? null) === 'venue') {
-            $resolvedVenue = $this->eventProfileResolver->resolveVenueByProfileId((string) $placeRef['id']);
+        if (is_array($placeRef) && ($placeRef['type'] ?? null) === 'account_profile') {
+            $resolvedVenue = $this->eventProfileResolver->resolvePhysicalHostByProfileId((string) $placeRef['id']);
             $this->assertVenueBelongsToAccountContext($payload, $resolvedVenue);
             $venue = $this->normalizeArray($resolvedVenue['venue'] ?? []);
             $geoLocation = $this->normalizeGeoLocation($resolvedVenue['location'] ?? null, 'place_ref.id');
@@ -583,6 +583,11 @@ class EventManagementService
                 'place_ref' => ['place_ref.type and place_ref.id are required.'],
             ]);
         }
+        if ($type !== 'account_profile') {
+            throw ValidationException::withMessages([
+                'place_ref.type' => ['place_ref.type must be account_profile.'],
+            ]);
+        }
 
         $normalized = [
             'type' => $type,
@@ -624,7 +629,7 @@ class EventManagementService
         $name = trim((string) ($resolved['name'] ?? ''));
         $slug = trim((string) ($resolved['slug'] ?? ''));
         $description = trim((string) ($resolved['description'] ?? ''));
-        if ($name === '' || $slug === '' || $description === '') {
+        if ($name === '' || $slug === '') {
             throw ValidationException::withMessages([
                 'type.id' => ['Resolved event type payload is invalid.'],
             ]);
@@ -634,7 +639,7 @@ class EventManagementService
             'id' => (string) ($resolved['id'] ?? $id),
             'name' => $name,
             'slug' => $slug,
-            'description' => $description,
+            'description' => $description === '' ? null : $description,
             'icon' => $resolved['icon'] ?? null,
             'color' => $resolved['color'] ?? null,
         ];
@@ -739,7 +744,7 @@ class EventManagementService
         $venueId = isset($resolvedVenue['venue']['id']) ? (string) $resolvedVenue['venue']['id'] : '';
         if ($venueId === '' || ! $this->eventProfileResolver->accountOwnsProfile($accountContextId, $venueId)) {
             throw ValidationException::withMessages([
-                'place_ref.id' => ['Venue must belong to the target account context.'],
+                'place_ref.id' => ['Physical host must belong to the target account context.'],
             ]);
         }
     }

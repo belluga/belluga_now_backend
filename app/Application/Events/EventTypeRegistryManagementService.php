@@ -131,7 +131,7 @@ class EventTypeRegistryManagementService
         return [
             'name' => trim((string) ($payload['name'] ?? '')),
             'slug' => trim((string) ($payload['slug'] ?? '')),
-            'description' => trim((string) ($payload['description'] ?? '')),
+            'description' => $this->normalizeNullableString($payload['description'] ?? null),
             'icon' => $this->normalizeNullableString($payload['icon'] ?? null),
             'color' => $this->normalizeNullableString($payload['color'] ?? null),
         ];
@@ -151,8 +151,8 @@ class EventTypeRegistryManagementService
                 ? trim((string) $payload['slug'])
                 : trim((string) ($existing->slug ?? '')),
             'description' => array_key_exists('description', $payload)
-                ? trim((string) $payload['description'])
-                : trim((string) ($existing->description ?? '')),
+                ? $this->normalizeNullableString($payload['description'])
+                : $this->normalizeNullableString($existing->description ?? null),
             'icon' => array_key_exists('icon', $payload)
                 ? $this->normalizeNullableString($payload['icon'])
                 : $this->normalizeNullableString($existing->icon ?? null),

@@ -17,7 +17,7 @@ class EventTypeUpdateRequest extends FormRequest
         return [
             'name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
             'slug' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
-            'description' => ['sometimes', 'string', 'min:10', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'description' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
             'icon' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
             'color' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
         ];

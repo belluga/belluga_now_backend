@@ -56,13 +56,11 @@ class EventTypeRegistryService
      */
     public function toPayload(EventType $model): array
     {
-        $description = trim((string) ($model->description ?? ''));
-
         return [
             'id' => (string) $model->_id,
             'name' => trim((string) ($model->name ?? '')),
             'slug' => trim((string) ($model->slug ?? '')),
-            'description' => $description,
+            'description' => $this->normalizeNullableString($model->description ?? null),
             'icon' => $this->normalizeNullableString($model->icon ?? null),
             'color' => $this->normalizeNullableString($model->color ?? null),
         ];
