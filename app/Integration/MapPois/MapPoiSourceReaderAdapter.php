@@ -44,7 +44,18 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
 
     public function findStaticAssetById(string $assetId): ?object
     {
-        return StaticAsset::query()->find($assetId);
+        $asset = StaticAsset::query()->find($assetId);
+        if (! $asset) {
+            return null;
+        }
+
+        // Static asset tags are legacy. Keep projection input aligned to taxonomy.
+        $asset->setAttribute(
+            'tags',
+            $this->deriveTagsFromTaxonomyTerms($asset->taxonomy_terms ?? [])
+        );
+
+        return $asset;
     }
 
     public function allEventIds(): iterable
@@ -78,5 +89,37 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
 
             yield (string) $asset->_id;
         }
+    }
+
+    /**
+     * @param  mixed  $taxonomyTerms
+     * @return array<int, string>
+     */
+    private function deriveTagsFromTaxonomyTerms(mixed $taxonomyTerms): array
+    {
+        if ($taxonomyTerms instanceof \MongoDB\Model\BSONDocument || $taxonomyTerms instanceof \MongoDB\Model\BSONArray) {
+            $taxonomyTerms = $taxonomyTerms->getArrayCopy();
+        }
+
+        if (! is_array($taxonomyTerms)) {
+            return [];
+        }
+
+        $values = [];
+        foreach ($taxonomyTerms as $term) {
+            if ($term instanceof \MongoDB\Model\BSONDocument || $term instanceof \MongoDB\Model\BSONArray) {
+                $term = $term->getArrayCopy();
+            }
+            if (! is_array($term)) {
+                continue;
+            }
+            $value = trim((string) ($term['value'] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+            $values[] = $value;
+        }
+
+        return array_values(array_unique($values));
     }
 }

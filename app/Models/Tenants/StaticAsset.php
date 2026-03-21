@@ -24,8 +24,6 @@ class StaticAsset extends Model
         'content',
         'avatar_url',
         'cover_url',
-        'tags',
-        'categories',
         'taxonomy_terms',
         'location',
         'is_active',

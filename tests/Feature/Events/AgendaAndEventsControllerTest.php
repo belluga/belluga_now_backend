@@ -312,9 +312,48 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Artist Taxonomy Match', $response->json('items.0.title'));
     }
 
-    public function test_agenda_rejects_deprecated_search_query_param(): void
+    public function test_agenda_supports_text_search_query_param(): void
     {
-        $response = $this->getJson("{$this->base_api_tenant}agenda?search=solar&page=1&page_size=10");
+        $this->createEvent([
+            'title' => 'Solar Sunset Party',
+            'date_time_start' => Carbon::now()->addDay(),
+            'date_time_end' => Carbon::now()->addDay()->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'No Match Agenda',
+            'date_time_start' => Carbon::now()->addDay(),
+            'date_time_end' => Carbon::now()->addDay()->addHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?search=Solar&page=1&page_size=10");
+        $response->assertStatus(200);
+
+        $items = $response->json('items');
+        $titles = array_map(static fn ($item): string => (string) ($item['title'] ?? ''), $items);
+        $this->assertContains('Solar Sunset Party', $titles);
+        $this->assertNotContains('No Match Agenda', $titles);
+    }
+
+    public function test_agenda_rejects_search_combined_with_geo_filters(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?search=solar&origin_lat=-20.0&origin_lng=-40.0&max_distance_meters=5000&page=1&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['search']);
+    }
+
+    public function test_event_stream_rejects_search_combined_with_geo_filters(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events/stream?search=solar&origin_lat=-20.0&origin_lng=-40.0&max_distance_meters=5000",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+            ]
+        );
+
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['search']);
     }

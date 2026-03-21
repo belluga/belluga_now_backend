@@ -65,6 +65,8 @@ class EventStoreRequest extends FormRequest
             'taxonomy_terms' => 'sometimes|array',
             'taxonomy_terms.*.type' => 'required_with:taxonomy_terms|string|max:'.InputConstraints::NAME_MAX,
             'taxonomy_terms.*.value' => 'required_with:taxonomy_terms|string|max:'.InputConstraints::NAME_MAX,
+            'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
+            'remove_cover' => 'sometimes|boolean',
             'thumb' => 'sometimes|array',
             'thumb.type' => 'required_with:thumb|string|max:'.InputConstraints::NAME_MAX,
             'thumb.data' => 'required_with:thumb|array',

@@ -11,6 +11,7 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -321,6 +322,126 @@ class AccountControllerTest extends TestCase
         $response = $this->getJson($this->tenantAccountsAdminUrl);
 
         $response->assertStatus(403);
+    }
+
+    public function test_index_accepts_page_size_alias(): void
+    {
+        $response = $this->getJson("{$this->tenantAccountsAdminUrl}?page_size=1");
+
+        $response->assertOk();
+        $response->assertJsonPath('per_page', 1);
+        $this->assertCount(1, $response->json('data'));
+    }
+
+    public function test_index_search_filters_accounts_by_name_slug_and_document(): void
+    {
+        $suffix = fake()->unique()->numerify('####');
+        $otherSuffix = fake()->unique()->numerify('####');
+        $searchToken = "DOCSEARCHMATCH{$suffix}";
+        $matching = Account::create([
+            'name' => "Search Match Account {$suffix}",
+            'slug' => "search-match-account-{$suffix}",
+            'document' => [
+                'type' => 'cpf',
+                'number' => $searchToken,
+            ],
+            'ownership_state' => 'tenant_owned',
+        ]);
+        $matching->roleTemplates()->create([
+            'name' => 'Search Match Admin',
+            'permissions' => ['*'],
+        ]);
+
+        $other = Account::create([
+            'name' => "Other Account {$suffix}",
+            'slug' => "other-account-{$suffix}",
+            'document' => [
+                'type' => 'cpf',
+                'number' => "DOCOTHER{$otherSuffix}",
+            ],
+            'ownership_state' => 'tenant_owned',
+        ]);
+        $other->roleTemplates()->create([
+            'name' => 'Other Admin',
+            'permissions' => ['*'],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAccountsAdminUrl}?search={$searchToken}&per_page=50"
+        );
+
+        $response->assertOk();
+        $items = collect($response->json('data'));
+        $this->assertTrue(
+            $items->contains(
+                static fn (array $item): bool => ($item['id'] ?? null) === (string) $matching->_id
+            )
+        );
+        $this->assertFalse(
+            $items->contains(
+                static fn (array $item): bool => ($item['id'] ?? null) === (string) $other->_id
+            )
+        );
+    }
+
+    public function test_update_accepts_ownership_state_transition_to_unmanaged(): void
+    {
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+        $createResponse->assertCreated();
+        $accountSlug = $createResponse->json('data.account.slug');
+
+        $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'ownership_state' => 'unmanaged',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.ownership_state', 'unmanaged');
+
+        $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
+        $this->assertSame('unmanaged', $updated->ownership_state);
+        $this->assertNull($updated->organization_id);
+    }
+
+    public function test_delete_rejects_non_unmanaged_account(): void
+    {
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+        $createResponse->assertCreated();
+        $accountSlug = $createResponse->json('data.account.slug');
+
+        $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['account']);
+    }
+
+    public function test_delete_unmanaged_account_soft_deletes_account_and_profile(): void
+    {
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'personal',
+        ]);
+        $createResponse->assertCreated();
+        $accountSlug = $createResponse->json('data.account.slug');
+        $accountId = (string) $createResponse->json('data.account.id');
+
+        $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
+
+        $response->assertOk();
+        $this->assertNotNull(
+            Account::onlyTrashed()->where('slug', $accountSlug)->first()
+        );
+        $this->assertNotNull(
+            AccountProfile::onlyTrashed()->where('account_id', $accountId)->first()
+        );
     }
 
     public function test_update_forbidden_without_update_ability(): void

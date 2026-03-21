@@ -298,7 +298,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
             "{$this->base_tenant_api_admin}static_assets/{$assetId}",
             [
                 'display_name' => 'Praia Leste Atualizada',
-                'tags' => ['praia', 'sol'],
+                'taxonomy_terms' => [],
                 'is_active' => false,
             ],
             $this->getHeaders()
@@ -307,6 +307,60 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $updated->assertStatus(200);
         $updated->assertJsonPath('data.display_name', 'Praia Leste Atualizada');
         $updated->assertJsonPath('data.is_active', false);
+    }
+
+    public function test_static_assets_index_supports_text_search_query_param(): void
+    {
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+                'has_content' => true,
+            ],
+        ]);
+
+        $matching = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Sunset Boulevard Match',
+                'content' => 'Festival jazz e sunset na orla',
+                'location' => ['lat' => -20.0, 'lng' => -40.0],
+            ],
+            $this->getHeaders()
+        );
+        $matching->assertStatus(201);
+        $matchingId = (string) $matching->json('data.id');
+
+        $other = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia Sem Relacao',
+                'content' => 'Texto diferente',
+                'location' => ['lat' => -20.1, 'lng' => -40.1],
+            ],
+            $this->getHeaders()
+        );
+        $other->assertStatus(201);
+        $otherId = (string) $other->json('data.id');
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}static_assets?search=sunset&page=1&per_page=20",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['id'] ?? ''))
+            ->all();
+        $this->assertContains($matchingId, $ids);
+        $this->assertNotContains($otherId, $ids);
     }
 
     private function getMultipartHeaders(): array

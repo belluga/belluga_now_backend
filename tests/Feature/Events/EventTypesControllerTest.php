@@ -127,6 +127,29 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.description', null);
     }
 
+    public function test_event_type_update_accepts_null_description(): void
+    {
+        $eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'description' => 'Tipo de evento: Show',
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
+            [
+                'description' => null,
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.description', null);
+
+        $stored = EventType::query()->findOrFail($eventType->_id);
+        $this->assertNull($stored->description);
+    }
+
     public function test_event_type_update_propagates_snapshot_to_events_and_occurrences(): void
     {
         $eventType = EventType::query()->create([

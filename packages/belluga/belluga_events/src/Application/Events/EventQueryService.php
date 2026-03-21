@@ -85,6 +85,15 @@ class EventQueryService
             $query->where('publication.status', $queryParams['status']);
         }
 
+        $searchQuery = $this->extractSearchQuery($queryParams);
+        if ($searchQuery !== null) {
+            $query->whereRaw([
+                '$text' => [
+                    '$search' => $searchQuery,
+                ],
+            ]);
+        }
+
         if (! $isAdminContext) {
             $this->applyPublicPublicationFilter($query);
         }
@@ -261,6 +270,7 @@ class EventQueryService
             'categories' => $this->normalizeStringArray($queryParams['categories'] ?? []),
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
+            'search' => $this->extractSearchQuery($queryParams),
             'past_only' => filter_var($queryParams['past_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'confirmed_only' => filter_var($queryParams['confirmed_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'origin_lat' => $originLat,
@@ -326,6 +336,12 @@ class EventQueryService
             'deleted_at' => null,
             'is_event_published' => true,
         ];
+        $search = $filters['search'] ?? null;
+        if (is_string($search) && $search !== '' && ! $useGeo) {
+            $baseMatch['$text'] = [
+                '$search' => $search,
+            ];
+        }
 
         if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
@@ -402,6 +418,13 @@ class EventQueryService
                 ['deleted_at' => ['$gt' => $sinceUtc]],
             ],
         ];
+        $search = $filters['search'] ?? null;
+        if (is_string($search) && $search !== '' && ! $useGeo) {
+            $baseMatch['$text'] = [
+                '$search' => $search,
+            ];
+        }
+
         if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
                 'near' => [
@@ -601,6 +624,20 @@ class EventQueryService
         }
 
         return $normalized;
+    }
+
+    private function extractSearchQuery(array $queryParams): ?string
+    {
+        $rawSearch = $queryParams['search'] ?? $queryParams['q'] ?? null;
+        if (! is_string($rawSearch)) {
+            return null;
+        }
+        $trimmed = trim($rawSearch);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return $trimmed;
     }
 
     private function resolveMaxDistanceMeters(array $queryParams): float

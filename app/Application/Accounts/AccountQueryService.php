@@ -10,6 +10,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use MongoDB\BSON\ObjectId;
 
 class AccountQueryService extends AbstractQueryService
@@ -43,9 +44,14 @@ class AccountQueryService extends AbstractQueryService
             );
         }
 
+        $searchQuery = $this->extractSearchQuery($queryParams);
+        if ($searchQuery !== null) {
+            $this->applySearchFilter($query, $searchQuery);
+        }
+
         $paginator = $this->buildPaginator(
             $query,
-            $this->withoutOwnershipState($queryParams),
+            $this->withoutSearchAndOwnershipState($queryParams),
             $includeArchived,
             $perPage
         );
@@ -194,6 +200,29 @@ class AccountQueryService extends AbstractQueryService
         return ['organization_id'];
     }
 
+    private function applySearchFilter(\Illuminate\Database\Eloquent\Builder $query, string $searchQuery): void
+    {
+        $query->whereRaw([
+            '$text' => [
+                '$search' => $searchQuery,
+            ],
+        ]);
+    }
+
+    private function extractSearchQuery(array $queryParams): ?string
+    {
+        $rawSearch = $queryParams['search'] ?? $queryParams['q'] ?? null;
+        if (! is_string($rawSearch)) {
+            return null;
+        }
+        $trimmed = trim($rawSearch);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return $trimmed;
+    }
+
     private function extractOwnershipState(array $queryParams): ?string
     {
         $topLevel = $queryParams['ownership_state'] ?? null;
@@ -217,13 +246,16 @@ class AccountQueryService extends AbstractQueryService
     /**
      * @return array<string, mixed>
      */
-    private function withoutOwnershipState(array $queryParams): array
+    private function withoutSearchAndOwnershipState(array $queryParams): array
     {
-        unset($queryParams['ownership_state']);
+        unset($queryParams['ownership_state'], $queryParams['search'], $queryParams['q']);
 
         if (isset($queryParams['filter']) && is_array($queryParams['filter'])) {
             unset($queryParams['filter']['ownership_state']);
         }
+
+        Arr::forget($queryParams, 'filter.search');
+        Arr::forget($queryParams, 'filter.q');
 
         return $queryParams;
     }
