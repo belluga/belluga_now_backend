@@ -43,11 +43,20 @@ class AccountProfileQueryService extends AbstractQueryService
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
     {
-        $allowedTypes = TenantProfileType::query()->pluck('type')->all();
+        $allowedTypes = TenantProfileType::query()
+            ->where('capabilities.is_favoritable', true)
+            ->pluck('type')
+            ->map(static fn ($type): string => (string) $type)
+            ->values()
+            ->all();
         $query = $queryParams;
         $search = trim((string) ($query['search'] ?? ''));
         unset($query['search']);
-        if (! empty($allowedTypes)) {
+        $baseQuery = AccountProfile::query()
+            ->where('is_active', true);
+        if (empty($allowedTypes)) {
+            $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
+        } else {
             $existingFilters = (array) ($query['filter'] ?? []);
             $requested = $existingFilters['profile_type'] ?? null;
             if ($requested !== null) {
@@ -57,13 +66,16 @@ class AccountProfileQueryService extends AbstractQueryService
                 $effectiveTypes = $allowedTypes;
             }
 
-            $query['filter'] = array_merge(
-                $existingFilters,
-                ['profile_type' => $effectiveTypes]
-            );
+            if ($effectiveTypes === []) {
+                $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
+            } else {
+                $query['filter'] = array_merge(
+                    $existingFilters,
+                    ['profile_type' => $effectiveTypes]
+                );
+            }
         }
 
-        $baseQuery = AccountProfile::query();
         $this->applyPublicSearchFilter($baseQuery, $search);
         $paginator = $this->buildPaginator(
             $baseQuery,
