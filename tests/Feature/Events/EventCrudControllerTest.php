@@ -214,8 +214,13 @@ class EventCrudControllerTest extends TestCaseTenant
             ]
         );
 
+        $hostAccount = Account::create([
+            'name' => 'Main Bistro Account',
+            'document' => (string) Str::uuid(),
+        ]);
+
         $host = AccountProfile::query()->create([
-            'account_id' => (string) $this->account->_id,
+            'account_id' => (string) $hostAccount->_id,
             'profile_type' => 'restaurant',
             'display_name' => 'Main Bistro',
             'taxonomy_terms' => [],
@@ -234,6 +239,52 @@ class EventCrudControllerTest extends TestCaseTenant
         $matched = $hosts->firstWhere('id', (string) $host->_id);
         $this->assertNotNull($matched);
         $this->assertSame('restaurant', (string) ($matched['profile_type'] ?? ''));
+    }
+
+    public function test_event_party_candidates_endpoint_excludes_poi_enabled_profiles_without_valid_location(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'restaurant'],
+            [
+                'label' => 'Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'has_bio' => false,
+                    'has_content' => false,
+                    'has_taxonomies' => false,
+                    'has_avatar' => false,
+                    'has_cover' => false,
+                    'has_events' => false,
+                ],
+            ]
+        );
+
+        $hostAccount = Account::create([
+            'name' => 'No Geo Bistro Account',
+            'document' => (string) Str::uuid(),
+        ]);
+
+        $hostWithoutLocation = AccountProfile::query()->create([
+            'account_id' => (string) $hostAccount->_id,
+            'profile_type' => 'restaurant',
+            'display_name' => 'No Geo Bistro',
+            'taxonomy_terms' => [],
+            'location' => null,
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=no%20geo");
+
+        $response->assertStatus(200);
+        $hosts = collect($response->json('data.physical_hosts') ?? []);
+        $matched = $hosts->firstWhere('id', (string) $hostWithoutLocation->_id);
+        $this->assertNull($matched);
     }
 
     public function test_event_party_candidates_endpoint_rejects_without_party_candidate_abilities(): void
@@ -546,6 +597,17 @@ class EventCrudControllerTest extends TestCaseTenant
         $payload = $this->makeEventPayload([
             'content' => '',
         ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.content', '');
+    }
+
+    public function test_event_create_accepts_missing_content_field(): void
+    {
+        $payload = $this->makeEventPayload();
+        unset($payload['content']);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
