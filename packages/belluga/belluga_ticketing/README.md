@@ -8,8 +8,8 @@ This package owns ticketing-domain runtime concerns for Events integration.
 - Payment provider mechanics remain Checkout-owned through contract integration (`CheckoutOrchestratorContract`).
 
 ## Terminology Boundary (Canonical)
-- `event_parties` are part of event composition (artists, artisans, hosts, venue, organizers) and belong to **Events** domain.
-- Attendees/students are audience/attendance identities and belong to **Ticketing/Participation** domain.
+- `event_parties` are part of event composition (artists, artisans, hosts, venue, organizers) and belong to the **Events** domain.
+- Attendees/students are audience/attendance identities and belong to **Ticketing/Participation**.
 - Ticketing does not persist or resolve `event_parties` for eligibility.
 - Events does not use `event_parties` as attendee/student entitlement model.
 
@@ -20,6 +20,7 @@ Host app must bind:
 - `EventTemplateReadContract`
 - `CheckoutOrchestratorContract`
 - `TicketingPolicyContract`
+- `TicketingSettingsStoreContract`
 
 Current host adapters live in [`app/Integration/Ticketing`](../../../../app/Integration/Ticketing).
 
@@ -48,21 +49,37 @@ Registered tenant namespaces:
 - `participation_proofs`
 
 ## API Surface (v1)
-- `GET /api/v1/events/{event_id}/occurrences/{occurrence_id}/offer`
-- `GET /api/v1/occurrences/{occurrence_id}/offer`
-- `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/admission`
-- `POST /api/v1/occurrences/{occurrence_id}/admission`
+Host route files:
+- `routes/api/packages/project_tenant_public_api_v1/ticketing.php`
+- `routes/api/packages/project_tenant_package_admin_api_v1/ticketing.php`
+
+Public read routes use `event_ref` / `occurrence_ref`:
+- `GET /api/v1/events/{event_ref}/occurrences/{occurrence_ref}/offer`
+- `GET /api/v1/occurrences/{occurrence_ref}/offer`
+- `GET /api/v1/ticketing/streams/offer/{scope_type}/{scope_id}`
+
+Authenticated tenant routes:
+- `POST /api/v1/events/{event_ref}/occurrences/{occurrence_ref}/admission`
+- `POST /api/v1/occurrences/{occurrence_ref}/admission`
 - `POST /api/v1/admission/tokens/refresh`
 - `GET /api/v1/checkout/cart?hold_token=...`
 - `POST /api/v1/checkout/confirm`
 - `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/validation`
 - `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_units/{ticket_unit_id}/transfer`
 - `POST /api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_units/{ticket_unit_id}/reissue`
-- Admin:
-  - `GET /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_products`
-  - `POST /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_products`
-  - `GET /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions`
-  - `POST /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions`
+- `GET /api/v1/ticketing/streams/queue/{scope_type}/{scope_id}`
+- `GET /api/v1/ticketing/streams/hold/{hold_id}`
+
+Admin routes:
+- `GET /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_products`
+- `POST /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_products`
+- `GET /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions`
+- `POST /admin/api/v1/events/{event_id}/occurrences/{occurrence_id}/ticket_promotions`
+
+Auth rules:
+- Public offer routes are open.
+- Authenticated tenant routes use `auth:sanctum` + `CheckTenantAccess`.
+- Admin routes use the host ability gates shown in the route files.
 
 ## Hold/Queue/Capacity Rules
 - Hold protection is always applied for limited inventory.

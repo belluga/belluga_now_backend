@@ -27,7 +27,9 @@ use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 use Illuminate\Support\Carbon;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -142,6 +144,83 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->where('occurrence_index', 0)
                 ->exists()
         );
+    }
+
+    public function test_event_create_stores_cover_upload_and_exposes_media_url(): void
+    {
+        Storage::fake('public');
+
+        $payload = array_merge($this->makeEventPayload(), [
+            'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+        ]);
+
+        $response = $this->post($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $eventId = (string) $response->json('data.event_id');
+        $thumbUrl = (string) $response->json('data.thumb.data.url');
+
+        $this->assertNotSame('', $eventId);
+        $this->assertNotSame('', $thumbUrl);
+        $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+
+        $coverPaths = collect(Storage::disk('public')->allFiles())
+            ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
+        $this->assertTrue($coverPaths->isNotEmpty());
+
+        $publicCoverPath = parse_url($thumbUrl, PHP_URL_PATH);
+        $this->assertSame("/api/v1/media/events/{$eventId}/cover", $publicCoverPath);
+        $this->get("{$this->base_tenant_url}api/v1/media/events/{$eventId}/cover")->assertOk();
+        $this->get("{$this->base_tenant_url}events/{$eventId}/cover")->assertOk();
+    }
+
+    public function test_event_update_stores_cover_upload_and_exposes_media_url(): void
+    {
+        Storage::fake('public');
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patch(
+            "{$this->accountEventsBase}/{$eventId}",
+            ['cover' => UploadedFile::fake()->image('cover.jpg', 1400, 700)],
+        );
+
+        $response->assertStatus(200);
+        $thumbUrl = (string) $response->json('data.thumb.data.url');
+        $this->assertNotSame('', $thumbUrl);
+        $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+
+        $coverPaths = collect(Storage::disk('public')->allFiles())
+            ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
+        $this->assertTrue($coverPaths->isNotEmpty());
+        $this->get("{$this->base_tenant_url}api/v1/media/events/{$eventId}/cover")->assertOk();
+    }
+
+    public function test_event_update_remove_cover_clears_thumb_payload(): void
+    {
+        Storage::fake('public');
+
+        $created = $this->post(
+            $this->accountEventsBase,
+            array_merge($this->makeEventPayload(), [
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ]),
+        );
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patchJson(
+            "{$this->accountEventsBase}/{$eventId}",
+            ['remove_cover' => true],
+        );
+
+        $response->assertStatus(200);
+        $this->assertNull($response->json('data.thumb'));
+        $coverPaths = collect(Storage::disk('public')->allFiles())
+            ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
+        $this->assertTrue($coverPaths->isEmpty());
     }
 
     public function test_event_create_rejects_unknown_event_type_id(): void

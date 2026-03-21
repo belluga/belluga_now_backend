@@ -160,6 +160,68 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
+    public function test_public_account_profile_index_accepts_page_size_alias(): void
+    {
+        $this->createAccountUser([]);
+
+        $secondAccount = Account::create([
+            'name' => 'Second Account',
+            'document' => 'DOC-PAGE-SIZE-2',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Page Size 1',
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Page Size 2',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles?page_size=1");
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+        $this->assertSame(1, (int) $response->json('per_page'));
+    }
+
+    public function test_public_account_profile_index_supports_search_param(): void
+    {
+        $this->createAccountUser([]);
+
+        $secondAccount = Account::create([
+            'name' => 'Second Search Account',
+            'document' => 'DOC-SEARCH-2',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Jazz House',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'vegan'],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Classical Club',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles?search=vegan");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Jazz House', $items->first()['display_name'] ?? null);
+    }
+
     public function test_admin_account_profile_index_filters_by_ownership_state(): void
     {
         AccountProfile::create([

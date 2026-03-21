@@ -133,14 +133,20 @@ Tenant public scope:
 - `GET /api/v1/events`
 - `GET /api/v1/events/{event_id}`
 - `GET /api/v1/events/stream`
+- `GET /media/events/{event_id}/cover`
 
 Tenant admin scope:
+- `GET /events/party_candidates`
 - `GET /admin/api/v1/events`
 - `POST /admin/api/v1/events`
 - `PATCH /admin/api/v1/events/{event_id}`
 - `DELETE /admin/api/v1/events/{event_id}`
 - `GET /admin/api/v1/events/stream`
 - `GET /admin/api/v1/events/{event_id}`
+- `GET /event_types`
+- `POST /event_types`
+- `PATCH /event_types/{event_type}`
+- `DELETE /event_types/{event_type}`
 
 Account scope:
 - `GET /api/v1/accounts/{account_slug}/events`
@@ -176,7 +182,7 @@ Response item (minimum):
 - `type`
 - `title`, `content`
 - `location`, `place_ref`
-- `venue` (resolved projection when `place_ref.type=venue`)
+- `venue` (resolved projection from the host physical-host resolver)
 - `artists`
 - `latitude`, `longitude`
 - `date_time_start`, `date_time_end`
@@ -223,16 +229,16 @@ Reconnect policy:
 
 Required:
 - `title`
-- `content`
 - `location.mode`
 - `type` (`name`, `slug`; optional: `id`, `description`, `icon`, `color`)
 - `occurrences[]` (at least 1)
 - `publication.status`
 
 Optional:
+- `content`
 - `location.geo` (`Point`, coordinates)
 - `location.online` (required for `online|hybrid`)
-- `place_ref` (`{type,id,metadata?}`; required for `physical|hybrid`)
+- `place_ref` (`{type,id,metadata?}`; required for `physical|hybrid`, `type=account_profile`)
 - `artist_ids[]`
 - `tags[]`
 - `categories[]`
@@ -377,6 +383,9 @@ Host app must bind:
 - `EventPartyMapperRegistryContract`
 - `EventTenantContextContract`
 - `EventRadiusSettingsContract`
+- `EventTemplateSnapshotReadContract`
+- `EventAsyncQueueMetricsProviderContract`
+- `EventAsyncJobSignaturesContract`
 - `TenantExecutionContextContract`
 
 If a binding is missing, provider fails fast at runtime.
