@@ -1,463 +1,168 @@
 # Belluga Settings Kernel (`belluga/settings`)
 
-Complete reference for developers working on the settings kernel.
+Complete reference for the shared settings kernel used by Belluga packages.
 
-This package is the canonical settings runtime for the Belluga ecosystem. It centralizes how modules define settings, how clients discover schema, and how values are read/updated with strict semantics.
+## Purpose
 
-Use this README as the primary technical reference for implementation and maintenance.
+This package centralizes settings schema registration, validation, merge semantics, and Mongo persistence.
 
----
+It prevents each module from inventing its own settings payload shape or patch behavior.
 
-## What This Package Solves
+## Scope
 
-Before this package, each module tended to own ad-hoc settings persistence and custom endpoints. This caused drift in:
-
-- payload shape
-- patch behavior
-- validation rules
-- scope handling (`tenant` vs `landlord`)
-- UI metadata consistency
-
-`belluga/settings` standardizes all of that.
-
----
-
-## Core Model (Important)
-
-### 1) Scoped Settings
-
-Every namespace is explicitly scoped:
-
-- `tenant`
-- `landlord`
-
-### 2) Namespace-Based Organization
-
-A namespace is an immutable technical key (snake_case), for example:
-
-- `map_ui`
-- `events`
-- `push`
-
-Each namespace has:
-
-- schema (field types + metadata)
-- optional ability guard
-- values under one shared root document per scope DB
-
-### 3) Singleton Document Per Scope Database
-
-Settings are stored in Mongo `settings` collection with fixed root id:
-
-- `_id = settings_root`
-
-Rules:
-
-- exactly one settings document per scope DB
-- migration enforces this with Mongo `collMod` validator
-- migration fails fast when multiple docs exist
-
----
-
-## Package Responsibilities
-
-This package provides:
-
-- contracts
+Owned by the package:
 - schema registry
 - schema validator
-- conditional rules model + evaluator
+- conditional rules evaluator
 - merge policy
 - Mongo settings store
-- generic HTTP controllers/routes
-- tenant + landlord migrations
+- tenant and landlord settings controllers
+- tenant and landlord migrations
 
-What it does **not** do:
-
+Not owned by the package:
 - module-specific business logic
-- module-specific endpoint wrappers
-- tenant context resolution for landlord on-behalf (host must provide adapter)
+- host route registration
+- host auth/tenant middleware decisions
+- landlord on-behalf tenant resolution adapters
 
----
+## Public API
 
-## Public API (Canonical)
+The package is wired by host route files, not by a package route file.
 
-Routes are loaded from `packages/belluga/belluga_settings/routes/settings.php`.
+Host route files in this repository:
+- `routes/api/packages/project_tenant_package_admin_api_v1/settings.php`
+- `routes/api/packages/project_landlord_admin_api_v1/settings.php`
 
 ### Tenant scope
 
-Base prefix (default): `api/v1/settings`
+Mounted under the host tenant settings prefix.
 
-- `GET /schema`
-- `GET /values`
-- `PATCH /values/{namespace}`
+Endpoints:
+- `GET /settings/schema`
+- `GET /settings/values`
+- `PATCH /settings/values/{namespace}`
 
 Middleware:
-
-- `tenant`
 - `auth:sanctum`
 - `CheckTenantAccess`
 
 ### Landlord scope
 
-Base prefix (default): `admin/api/v1/settings`
+Mounted under the host landlord settings prefix.
 
-- `GET /schema`
-- `GET /values`
-- `PATCH /values/{namespace}`
+Endpoints:
+- `GET /settings/schema`
+- `GET /settings/values`
+- `PATCH /settings/values/{namespace}`
 
 Middleware:
-
-- `landlord`
 - `auth:sanctum`
 
 ### Landlord on-behalf tenant scope
 
-Base prefix (default): `admin/api/v1/{tenant_slug}/settings`
+Mounted under the host landlord tenant prefix.
 
-- `GET /schema`
-- `GET /values`
-- `PATCH /values/{namespace}`
+Endpoints:
+- `GET /{tenant_slug}/settings/schema`
+- `GET /{tenant_slug}/settings/values`
+- `PATCH /{tenant_slug}/settings/values/{namespace}`
 
 Middleware:
-
-- `landlord`
 - `auth:sanctum`
 
-Tenant switching is delegated to `TenantScopeContextContract` (host binding required).
+Tenant switching is delegated to `TenantScopeContextContract`, which must be provided by the host when on-behalf flows are used.
 
----
-
-## PATCH Contract (Locked)
+## PATCH Contract
 
 Endpoint: `PATCH /settings/values/{namespace}`
 
-Payload must be a direct object/map (no envelope):
-
-```json
-{
-  "max_ttl_days": 21,
-  "throttles.per_minute": 120
-}
-```
+Payload must be a direct object/map. Namespace envelopes are rejected.
 
 Rules:
+- only provided keys are changed
+- omitted keys remain untouched
+- `null` clears only nullable fields
+- `null` on a non-nullable field returns `422`
+- arrays at the top level return `422`
+- unknown field paths return `422`
+- namespace not found in scope returns `404`
+- missing ability returns `403`
 
-- only payload-present keys are changed
-- omitted keys remain unchanged
-- `null` means explicit clear only for nullable fields
-- `null` on non-nullable field returns `422`
-- list payload (JSON array) returns `422`
-- unknown field path returns `422`
-- namespace envelope style is rejected
+## Schema Model
 
-Typical errors:
+Namespaces are registered with `Belluga\Settings\Support\SettingsNamespaceDefinition`.
 
-- `404` namespace not found in scope
-- `403` token cannot access namespace ability
-- `422` payload/field/type/nullability invalid
+Field types supported by the kernel:
+- `boolean`
+- `integer`
+- `number`
+- `string`
+- `array`
+- `object`
+- `date`
+- `datetime`
+- `mixed`
 
----
-
-## Schema Definition Model
-
-Namespace definitions are created with:
-
-- `Belluga\Settings\Support\SettingsNamespaceDefinition`
-
-Minimum required constructor data:
-
-- `namespace`
-- `scope`
-- `label`
-- `fields`
-
-Per-field supports:
-
-- `type`: `boolean|integer|number|string|array|object|date|datetime|mixed`
-- `nullable`
-- `default`
-- `readonly`
-- `deprecated`
-- `order`
-- `options`
+Fields may also declare:
+- nullability
+- defaults
+- read-only flags
+- deprecation flags
 - display metadata
-- hierarchy metadata (`group`, `subgroup`, labels/i18n/icons)
-- conditional metadata (`visible_if`, `enabled_if`)
+- grouping metadata
+- conditional visibility/enabled rules
 
-Schema output includes both:
+## Internal Components
 
-- `fields` (flat)
-- `nodes` (tree) for dynamic UI rendering
-
----
-
-## Conditional Rules DSL
-
-The DSL is OR-of-AND:
-
-- expression has `groups[]` (OR)
-- each group has `rules[]` (AND)
-
-Rule shape:
-
-- `field_id`
-- `operator`
-- `value`
-
-Supported operators:
-
-- `equals`
-- `not_equals`
-- `in`
-- `not_in`
-- `exists`
-- `gt`
-- `gte`
-- `lt`
-- `lte`
-
-Hard limits:
-
-- max groups: 10
-- max rules per group: 10
-- max total rules: 50
-- max condition payload size: 16KB
-
-Comparable operators (`gt/gte/lt/lte`) are only valid for comparable field types (`integer`, `number`, `date`, `datetime`).
-
----
-
-## Key Internal Components
-
-### Contracts
-
+Contracts:
 - `SettingsRegistryContract`
 - `SettingsStoreContract`
 - `SettingsSchemaValidatorContract`
 - `SettingsMergePolicyContract`
 - `TenantScopeContextContract`
 
-### Runtime service
-
+Runtime service:
 - `SettingsKernelService`
 
-### Implementations
-
+Implementations:
 - registry: `InMemorySettingsRegistry`
 - validator: `SettingsSchemaValidator`
 - merge: `NamespacePatchMergePolicy`
 - store: `MongoSettingsStore`
 
-### Models
+Models:
+- `SettingsDocument`
+- `Models\Tenants\TenantSettings`
+- `Models\Landlord\LandlordSettings`
 
-- base: `SettingsDocument`
-- tenant: `Models\Tenants\TenantSettings` (`UsesTenantConnection`)
-- landlord: `Models\Landlord\LandlordSettings` (`UsesLandlordConnection`)
+## Host Integration
 
----
+Host apps must:
+1. Load the service provider.
+2. Bind `TenantScopeContextContract` when using landlord on-behalf tenant flows.
+3. Register namespaces through `SettingsRegistryContract`.
+4. Keep all writes on the kernel patch contract.
+5. Apply the correct abilities for each namespace.
 
-## Host App Integration Checklist
-
-When integrating this package in a host app:
-
-1. Ensure provider is loaded.
-2. Bind `TenantScopeContextContract` in host container.
-3. Register namespaces from host/modules using `SettingsRegistryContract`.
-4. Use per-namespace abilities (token-based).
-5. Keep all settings writes through kernel patch semantics.
-
-### Required host binding
-
-`TenantScopeContextContract` must be bound by host app.
-
-Repository example:
-
-- `App\Integration\Settings\TenantScopeContextAdapter`
-
-### Namespace registration locations in this repository
-
-- Core namespaces (`map_ui`, `events`): `AppServiceProvider`
-- Push namespace (`push`): `PushHandlerServiceProvider`
-
----
+In this repository, namespace registration lives in the host layer, including the core namespaces `map_ui`, `events`, and `push`.
 
 ## Migrations and Operations
 
 Included migrations:
-
 - tenant: `database/migrations/2026_02_26_000700_create_settings_collection.php`
 - landlord: `database/migrations_landlord/2026_02_26_000710_create_landlord_settings_collection.php`
 
-Both migrations:
+Both migrations create or normalize the single root document and fail fast on multi-document drift.
 
-- create collection if missing
-- enforce root singleton
-- migrate legacy single-doc id to `settings_root`
-- fail if multi-doc state is found
-- apply strict Mongo validator (`_id == settings_root`)
+## Validation
 
-### Tenant migration execution (Spatie flow)
+Recommended checks:
+- `php artisan test tests/Feature/Settings/SettingsKernelControllerTest.php`
+- `php artisan test tests/Unit/Settings`
+- `php artisan test`
 
-```bash
-php artisan tenants:artisan "migrate --database=tenant --path=packages/belluga/belluga_settings/database/migrations"
-```
+## Non-Goals
 
-### Landlord migration execution
-
-```bash
-php artisan migrate --database=landlord --path=packages/belluga/belluga_settings/database/migrations_landlord
-```
-
-### Multitenancy Classification (Required)
-
-Before adding migration files, classify scope explicitly:
-- `tenant`
-- `landlord`
-- `mixed`
-
-Current classification for `belluga_settings`:
-- `mixed` (tenant + landlord).
-
-Rules for this package:
-- Tenant migrations stay in `packages/belluga/belluga_settings/database/migrations` and must be listed in `config/multitenancy.php` `tenant_migration_paths`.
-- Landlord migrations stay in `packages/belluga/belluga_settings/database/migrations_landlord` and run only with landlord connection/path.
-- Never cross-run migration directories between tenant and landlord flows.
-- Namespace scope (`tenant` vs `landlord`) must remain consistent with where data is stored and migrated.
-
----
-
-## Example: Register a Namespace
-
-```php
-$registry->register(new SettingsNamespaceDefinition(
-    namespace: 'push',
-    scope: 'tenant',
-    label: 'Push',
-    groupLabel: 'Notifications',
-    ability: 'push-settings:update',
-    fields: [
-        'enabled' => [
-            'type' => 'boolean',
-            'nullable' => false,
-            'label' => 'Enabled',
-            'order' => 10,
-        ],
-        'max_ttl_days' => [
-            'type' => 'integer',
-            'nullable' => false,
-            'label' => 'Max TTL Days',
-            'order' => 20,
-        ],
-    ],
-));
-```
-
----
-
-## Example: Canonical Patch Request
-
-`PATCH /api/v1/settings/values/push`
-
-```json
-{
-  "enabled": true,
-  "max_ttl_days": 21
-}
-```
-
-Response:
-
-```json
-{
-  "data": {
-    "enabled": true,
-    "max_ttl_days": 21
-  }
-}
-```
-
----
-
-## Testing Guidance
-
-Primary tests in this repository:
-
-- `tests/Feature/Settings/SettingsKernelControllerTest.php`
-- `tests/Unit/Settings/SettingsPackageBindingsTest.php`
-- `tests/Unit/Settings/SettingsRegistryTest.php`
-- `tests/Unit/Settings/SettingsSchemaValidatorTest.php`
-- `tests/Unit/Settings/SettingsNamespaceDefinitionTest.php`
-- `tests/Unit/Settings/ConditionExpressionEvaluatorTest.php`
-
-Recommended sequence:
-
-```bash
-php artisan test tests/Feature/Settings/SettingsKernelControllerTest.php
-php artisan test tests/Unit/Settings
-php artisan test
-```
-
----
-
-## Current Repository Status (Important Context)
-
-As of current implementation in this repo:
-
-- settings kernel foundation is complete
-- registered tenant namespaces include `map_ui`, `events`, `push`
-- push migration Phase #1 already uses kernel for:
-  - `push.enabled`
-  - `push.throttles`
-  - `push.max_ttl_days`
-- push migration Phase #2 is still pending for:
-  - `firebase`
-  - `telemetry`
-  - `push.message_routes`
-  - `push.message_types`
-
----
-
-## Troubleshooting
-
-### `404 Settings namespace not found`
-
-- check namespace registration exists for the requested scope
-- check namespace key is snake_case and exact
-
-### `403 Not authorized for this settings namespace`
-
-- token is missing required ability defined in namespace
-
-### `422` on patch
-
-- payload is array/list instead of object
-- unknown field path
-- wrong field type
-- null provided to non-nullable field
-- envelope payload used instead of direct map
-
-### Migration singleton error
-
-- more than one document exists in `settings` for that scope DB
-- cleanup required before migration can proceed
-
-### Landlord on-behalf failing
-
-- host did not bind `TenantScopeContextContract`
-- tenant slug resolution/context switch issue
-
----
-
-## Quick Start
-
-When working on settings, follow this sequence:
-
-1. Read this README completely.
-2. Confirm scope (`tenant` or `landlord`).
-3. Confirm namespace owner and ability.
-4. Confirm field schema (types/nullability/defaults/conditions).
-5. Implement writes only through kernel patch flow.
-6. Validate with targeted settings tests and then full Laravel suite.
-
-This sequence prevents nearly all settings regressions seen in previous iterations.
+- No module-specific settings business rules.
+- No route registration inside the package.
+- No implicit scope guessing.

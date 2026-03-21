@@ -10,5 +10,7 @@ final class InputConstraints
 
     public const DESCRIPTION_MAX = 1000;
 
+    public const IMAGE_MAX_KB = 5120;
+
     public const OBJECT_ID_LENGTH = 24;
 }

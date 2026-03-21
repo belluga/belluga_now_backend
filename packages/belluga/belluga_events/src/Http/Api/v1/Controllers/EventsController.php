@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Http\Api\v1\Controllers;
 
 use Belluga\Events\Application\Events\EventManagementService;
+use Belluga\Events\Application\Events\EventMediaService;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
@@ -30,6 +31,7 @@ class EventsController extends Controller
         private readonly EventProfileResolverContract $profileResolver,
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventTemplateSnapshotReadContract $eventTemplateRead,
+        private readonly EventMediaService $eventMediaService,
     ) {}
 
     public function index(EventIndexRequest $request): JsonResponse
@@ -65,7 +67,9 @@ class EventsController extends Controller
 
     public function store(EventStoreRequest $request): JsonResponse
     {
-        $payload = $this->applyTemplateToPayload($request->validated());
+        $validated = $request->validated();
+        unset($validated['cover'], $validated['remove_cover']);
+        $payload = $this->applyTemplateToPayload($validated);
         $payload['_created_by'] = $this->resolveActorPrincipal($request);
         $accountIdFromRoute = $this->resolveAccountFromRoute($request);
 
@@ -74,9 +78,10 @@ class EventsController extends Controller
         }
 
         $event = $this->eventManagementService->create($payload);
+        $this->eventMediaService->applyUploads($request, $event);
 
         return response()->json([
-            'data' => $this->eventQueryService->formatManagementEvent($event),
+            'data' => $this->eventQueryService->formatManagementEvent($event->fresh()),
         ], 201);
     }
 
@@ -95,10 +100,13 @@ class EventsController extends Controller
             abort(404, 'Event not found.');
         }
 
-        $updated = $this->eventManagementService->update($event, $this->applyTemplateToPayload($request->validated()));
+        $validated = $request->validated();
+        unset($validated['cover'], $validated['remove_cover']);
+        $updated = $this->eventManagementService->update($event, $this->applyTemplateToPayload($validated));
+        $this->eventMediaService->applyUploads($request, $updated);
 
         return response()->json([
-            'data' => $this->eventQueryService->formatManagementEvent($updated),
+            'data' => $this->eventQueryService->formatManagementEvent($updated->fresh()),
         ]);
     }
 

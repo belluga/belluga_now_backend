@@ -50,6 +50,11 @@ class Account extends Model
         return $this->hasMany(AccountRoleTemplate::class);
     }
 
+    public function accountProfiles(): HasMany
+    {
+        return $this->hasMany(AccountProfile::class);
+    }
+
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
