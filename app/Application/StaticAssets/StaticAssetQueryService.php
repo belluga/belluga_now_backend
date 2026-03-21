@@ -92,8 +92,6 @@ class StaticAssetQueryService extends AbstractQueryService
                 'cover',
                 is_string($asset->cover_url) ? $asset->cover_url : null
             ),
-            'tags' => $asset->tags ?? [],
-            'categories' => $asset->categories ?? [],
             'taxonomy_terms' => $asset->taxonomy_terms ?? [],
             'location' => $this->formatLocation($asset->location),
             'is_active' => (bool) ($asset->is_active ?? false),

@@ -298,7 +298,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
             "{$this->base_tenant_api_admin}static_assets/{$assetId}",
             [
                 'display_name' => 'Praia Leste Atualizada',
-                'tags' => ['praia', 'sol'],
+                'taxonomy_terms' => [],
                 'is_active' => false,
             ],
             $this->getHeaders()
