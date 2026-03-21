@@ -13,6 +13,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\EventType;
+use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
@@ -188,6 +189,51 @@ class EventCrudControllerTest extends TestCaseTenant
         Sanctum::actingAs($landlord, ['events:update']);
         $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
         $updateResponse->assertStatus(200);
+    }
+
+    public function test_event_party_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'restaurant'],
+            [
+                'label' => 'Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'has_bio' => false,
+                    'has_content' => false,
+                    'has_taxonomies' => false,
+                    'has_avatar' => false,
+                    'has_cover' => false,
+                    'has_events' => false,
+                ],
+            ]
+        );
+
+        $host = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'restaurant',
+            'display_name' => 'Main Bistro',
+            'taxonomy_terms' => [],
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.1, -20.1],
+            ],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=bistro");
+
+        $response->assertStatus(200);
+        $hosts = collect($response->json('data.physical_hosts') ?? []);
+        $matched = $hosts->firstWhere('id', (string) $host->_id);
+        $this->assertNotNull($matched);
+        $this->assertSame('restaurant', (string) ($matched['profile_type'] ?? ''));
     }
 
     public function test_event_party_candidates_endpoint_rejects_without_party_candidate_abilities(): void
@@ -405,7 +451,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['event_parties.0.party_type']);
     }
 
-    public function test_event_create_rejects_venue_without_location(): void
+    public function test_event_create_rejects_physical_host_without_location(): void
     {
         [$extraAccount] = $this->seedAccountWithRole(['*']);
         $venue = AccountProfile::create([
@@ -419,7 +465,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $payload = $this->makeEventPayload([
             'place_ref' => [
-                'type' => 'venue',
+                'type' => 'account_profile',
                 'id' => (string) $venue->_id,
             ],
         ]);
@@ -485,7 +531,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 'mode' => 'hybrid',
             ],
             'place_ref' => [
-                'type' => 'venue',
+                'type' => 'account_profile',
                 'id' => (string) $this->venue->_id,
             ],
         ]);
@@ -493,6 +539,18 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $missingOnline);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['location.online']);
+    }
+
+    public function test_event_create_accepts_missing_content_description(): void
+    {
+        $payload = $this->makeEventPayload([
+            'content' => '',
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.content', '');
     }
 
     public function test_event_create_forbidden_without_ability(): void
@@ -1332,7 +1390,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 'mode' => 'physical',
             ],
             'place_ref' => [
-                'type' => 'venue',
+                'type' => 'account_profile',
                 'id' => (string) $this->venue->_id,
             ],
             'artist_ids' => [(string) $this->artist->_id],
@@ -1371,7 +1429,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
             ],
             'place_ref' => [
-                'type' => 'venue',
+                'type' => 'account_profile',
                 'id' => (string) $this->venue->_id,
                 'metadata' => [
                     'display_name' => $this->venue->display_name,
