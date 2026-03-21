@@ -59,7 +59,6 @@ class EventTypesControllerTest extends TestCaseTenant
         EventType::query()->create([
             'name' => 'Show',
             'slug' => 'show',
-            'description' => 'Tipo de evento: Show',
         ]);
 
         $response = $this->getJson(
@@ -69,7 +68,7 @@ class EventTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.0.slug', 'show');
-        $response->assertJsonPath('data.0.description', 'Tipo de evento: Show');
+        $response->assertJsonPath('data.0.description', null);
     }
 
     public function test_event_type_index_allows_create_ability_token(): void
@@ -77,7 +76,6 @@ class EventTypesControllerTest extends TestCaseTenant
         EventType::query()->create([
             'name' => 'Show',
             'slug' => 'show',
-            'description' => 'Tipo de evento: Show',
         ]);
 
         $user = LandlordUser::query()->firstOrFail();
@@ -102,7 +100,6 @@ class EventTypesControllerTest extends TestCaseTenant
             [
                 'name' => 'Workshop',
                 'slug' => 'workshop',
-                'description' => 'Tipo de evento: Workshop',
                 'icon' => 'build',
                 'color' => '#334455',
             ],
@@ -111,24 +108,23 @@ class EventTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.slug', 'workshop');
-        $response->assertJsonPath('data.description', 'Tipo de evento: Workshop');
+        $response->assertJsonPath('data.description', null);
         $this->assertNotEmpty((string) $response->json('data.id'));
     }
 
-    public function test_event_type_create_validates_description_minimum_length(): void
+    public function test_event_type_create_accepts_missing_description(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}event_types",
             [
                 'name' => 'Show',
                 'slug' => 'show',
-                'description' => 'short',
             ],
             $this->getHeaders()
         );
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['description']);
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.description', null);
     }
 
     public function test_event_type_update_propagates_snapshot_to_events_and_occurrences(): void

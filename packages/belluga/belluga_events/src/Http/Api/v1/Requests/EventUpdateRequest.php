@@ -22,7 +22,7 @@ class EventUpdateRequest extends FormRequest
     {
         return [
             'title' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'content' => 'sometimes|string|max:'.InputConstraints::DESCRIPTION_MAX,
+            'content' => 'sometimes|nullable|string|max:'.InputConstraints::DESCRIPTION_MAX,
             'venue_id' => 'prohibited',
             'location' => 'sometimes|array',
             'location.mode' => [
@@ -40,7 +40,7 @@ class EventUpdateRequest extends FormRequest
             'location.online.platform' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'location.online.label' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'place_ref' => 'sometimes|nullable|array',
-            'place_ref.type' => 'required_with:place_ref|string|max:'.InputConstraints::NAME_MAX,
+            'place_ref.type' => 'required_with:place_ref|string|in:account_profile|max:'.InputConstraints::NAME_MAX,
             'place_ref.id' => 'required_with:place_ref|string|max:'.InputConstraints::NAME_MAX,
             'place_ref.metadata' => 'sometimes|array',
             'artist_ids' => 'sometimes|array',

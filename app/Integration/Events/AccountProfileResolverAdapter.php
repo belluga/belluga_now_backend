@@ -4,31 +4,43 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
+use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Illuminate\Validation\ValidationException;
 
 class AccountProfileResolverAdapter implements EventProfileResolverContract
 {
-    public function resolveVenueByProfileId(string $profileId): array
+    public function __construct(
+        private readonly AccountProfileRegistryService $profileRegistryService,
+    ) {}
+
+    public function resolvePhysicalHostByProfileId(string $profileId): array
     {
         $profile = AccountProfile::query()->where('_id', $profileId)->first();
 
         if (! $profile) {
             throw ValidationException::withMessages([
-                'place_ref.id' => ['Venue account profile not found.'],
+                'place_ref.id' => ['Physical host account profile not found.'],
+            ]);
+        }
+
+        $profileType = trim((string) ($profile->profile_type ?? ''));
+        if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
             ]);
         }
 
         $location = $profile->location ?? null;
         if (! is_array($location) || ! isset($location['type'], $location['coordinates'])) {
             throw ValidationException::withMessages([
-                'place_ref.id' => ['Venue account profile must include a location.'],
+                'place_ref.id' => ['Physical host account profile must include a location.'],
             ]);
         }
         if (! is_array($location['coordinates']) || count($location['coordinates']) < 2) {
             throw ValidationException::withMessages([
-                'place_ref.id' => ['Venue account profile must include valid coordinates.'],
+                'place_ref.id' => ['Physical host account profile must include valid coordinates.'],
             ]);
         }
 
@@ -130,13 +142,75 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ? null
             : '%'.addcslashes($normalizedSearch, '%_\\').'%';
 
-        $venues = $this->queryCandidatesByType('venue', $normalizedLimit, $likePattern);
+        $physicalHostTypes = $this->resolvePoiEnabledProfileTypes();
+        $physicalHosts = $this->queryPhysicalHostCandidates($physicalHostTypes, $normalizedLimit, $likePattern);
         $artists = $this->queryCandidatesByType('artist', $normalizedLimit, $likePattern);
 
         return [
-            'venues' => $venues,
+            // Legacy alias kept while Flutter migrates from venue-only wording.
+            'venues' => $physicalHosts,
+            'physical_hosts' => $physicalHosts,
             'artists' => $artists,
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolvePoiEnabledProfileTypes(): array
+    {
+        return collect($this->profileRegistryService->registry())
+            ->filter(static function (array $definition): bool {
+                $capabilities = $definition['capabilities'] ?? [];
+
+                return ($capabilities['is_poi_enabled'] ?? false) === true;
+            })
+            ->map(static fn (array $definition): string => trim((string) ($definition['type'] ?? '')))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string>  $profileTypes
+     * @return array<int, array<string, mixed>>
+     */
+    private function queryPhysicalHostCandidates(array $profileTypes, int $limit, ?string $likePattern): array
+    {
+        if ($profileTypes === []) {
+            return [];
+        }
+
+        $query = AccountProfile::query()
+            ->whereIn('profile_type', $profileTypes)
+            ->whereNotNull('location.coordinates.0')
+            ->whereNotNull('location.coordinates.1');
+
+        if ($likePattern !== null) {
+            $query->where(static function ($builder) use ($likePattern): void {
+                $builder->where('display_name', 'like', $likePattern)
+                    ->orWhere('slug', 'like', $likePattern);
+            });
+        }
+
+        return $query
+            ->orderBy('display_name')
+            ->limit($limit)
+            ->get()
+            ->map(static function (AccountProfile $profile): array {
+                return [
+                    'id' => (string) $profile->_id,
+                    'account_id' => (string) $profile->account_id,
+                    'profile_type' => (string) $profile->profile_type,
+                    'display_name' => (string) ($profile->display_name ?? ''),
+                    'slug' => $profile->slug ? (string) $profile->slug : null,
+                    'avatar_url' => $profile->avatar_url ?? null,
+                    'cover_url' => $profile->cover_url ?? null,
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     /**
