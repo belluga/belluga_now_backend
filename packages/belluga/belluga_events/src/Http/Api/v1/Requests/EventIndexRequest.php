@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Http\Api\v1\Requests;
 
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -22,8 +23,7 @@ class EventIndexRequest extends FormRequest
         return [
             'page' => 'sometimes|integer|min:1',
             'page_size' => 'sometimes|integer|min:1',
-            // MVP: management listing does not support text search.
-            'search' => 'prohibited',
+            'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'archived' => 'sometimes|boolean',
             'status' => [
                 'sometimes',

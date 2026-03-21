@@ -13,6 +13,15 @@ If a client (backend consumer, Flutter, web) needs to integrate with Events, use
 
 ---
 
+## Purpose and Scope
+
+This package owns the canonical event and occurrence runtime for the Belluga ecosystem.
+It handles event write/read behavior, occurrence synchronization, stream deltas, capability gating, and package migrations for the tenant database.
+
+It does not own invite lifecycle, ticketing admission, or tenant resolution strategy.
+
+---
+
 ## Current Delivery Status
 
 Implemented and locked:
@@ -30,7 +39,7 @@ Deferred (still pending):
 
 ---
 
-## Terminology Boundary (Canonical)
+## Domain Concepts and Invariants
 
 ### Event Parties (`event_parties`)
 - Represents entities that are part of composing the event itself.
@@ -39,71 +48,23 @@ Deferred (still pending):
 - Purpose: content composition + ACL/edit permissions.
 
 ### Attendees / Students (Attendance Binding)
-- Represents people who will attend/consume access to the event or occurrence.
+- Represents people who will attend or consume access to the event or occurrence.
 - Examples: students, ticket holders, invited attendees.
 - Domain ownership: **Ticketing/Participation** (not Events).
 - Purpose: eligibility, entitlement, access validation, and presence/check-in.
 
 Rule: `event_parties` must never be reused as attendee/student binding.
 
----
-
-## Core Decisions Clients Must Know
-
-1. Contract is occurrence-first.
-- Stream events are `occurrence.created|occurrence.updated|occurrence.deleted`.
-- Deltas always include both `event_id` and `occurrence_id`.
-
-2. No backward-compatibility bridge.
-- Clients must use the current contract shape.
-- Legacy `account_id`/`account_profile_id` event fields are removed from Events payload/model/contracts.
-
-3. Invite lifecycle data is out of Events scope.
-- Events payloads do not expose:
-  - `received_invites`
-  - `sent_invites`
-  - `friends_going`
-  - `is_confirmed`
-  - `total_confirmed`
-
-4. Publication source of truth is Event-level.
-- Occurrence publication flags are derived mirrors for query performance only.
-
-5. Events are tenant-db scoped.
-- `event_occurrences` documents do not persist `tenant_id`.
-
-Decision traceability (program IDs):
-- `D3-01` two-collection model
-- `D3-02` event-level publication source of truth
-- `D3-03` occurrence-first stream contract
-- `D3-04` occurrence-first query/index strategy
-- `D3-05` hard cutover without compatibility bridge
-- `D3-06..D3-11` capability governance + effective gate + migration policy
-- `D3-16` pilot capability payload rules
-- `D3-17` invite boundary
-- `D3-18..D3-23` ACL/event-parties model and permission policy
+Other invariants:
+- Contract is occurrence-first.
+- Legacy `account_id` / `account_profile_id` event fields are removed from payloads, models, and contracts.
+- Invite lifecycle data is out of scope for Events payloads.
+- Publication source of truth is event-level; occurrence publication flags are derived mirrors only.
+- Events are tenant-db scoped; `event_occurrences` documents do not persist `tenant_id`.
 
 ---
 
-## Package Boundaries
-
-This package owns:
-- Event aggregate write/read services
-- occurrence synchronization and reconciliation
-- stream delta generation
-- capability runtime registry/handlers
-- package migrations/indexes
-
-This package does not own:
-- invite transaction lifecycle
-- map/account-profile domain rules
-- tenant resolution strategy details
-
-Those integrations are host-bound through contracts.
-
----
-
-## Persistence Model
+## Data Model and Migrations
 
 Collections:
 - `events`: canonical identity + publication source + content metadata
@@ -122,11 +83,16 @@ Key occurrence fields:
 Identity rule:
 - unique per event occurrence: `(event_id, occurrence_index)`
 
+Migration scope:
+- tenant-only package migrations loaded from `database/migrations`
+
 ---
 
-## API Surfaces (Host Routes)
+## Public Contracts
 
-The package provides controllers/requests used by host route files.
+The package provides controllers and requests used by host route files.
+
+### Host routes
 
 Tenant public scope:
 - `GET /api/v1/agenda`
@@ -155,13 +121,11 @@ Account scope:
 - `DELETE /api/v1/accounts/{account_slug}/events/{event_id}`
 - `GET /api/v1/accounts/{account_slug}/events/{event_id}`
 
-Auth/guard expectations are defined by host routes/middleware (`auth:sanctum`, `tenant`, `CheckTenantAccess`, `account`).
+Auth and guard expectations are defined by host routes and middleware (`auth:sanctum`, `tenant`, `CheckTenantAccess`, `account`).
 
----
+### Read contracts
 
-## Read Contracts
-
-### `GET /agenda`
+#### `GET /agenda`
 
 Query:
 - `page`, `page_size`
@@ -175,7 +139,7 @@ Notes:
 - `search` is intentionally unsupported in MVP for agenda/events listing.
 - `taxonomy[].type` and `taxonomy[].value` are slug pairs (`taxonomy.slug`, `taxonomy_term.slug`).
 
-Response item (minimum):
+Response item minimum:
 - `event_id`
 - `occurrence_id`
 - `slug`
@@ -192,18 +156,18 @@ Response item (minimum):
 - `capabilities`
 - `tags`, `taxonomy_terms`
 
-### `GET /events/{event_id}`
+#### `GET /events/{event_id}`
 
 Behavior:
 - accepts ObjectId or slug
-- in public context, unpublished/future scheduled events return `404`
+- in public context, unpublished or future scheduled events return `404`
 
 Response shape:
 - same contract family as agenda item
 - `occurrences[]` included
 - invite lifecycle fields excluded
 
-### `GET /events/stream` (SSE)
+#### `GET /events/stream` (SSE)
 
 Delta shape:
 ```json
@@ -221,11 +185,9 @@ Reconnect policy:
 - reconnect without usable cursor => rehydrate `/agenda` page 1, then continue stream from now
 - no replay retention buffer
 
----
+### Write contracts
 
-## Write Contracts
-
-### Create (`POST /events`)
+#### Create (`POST /events`)
 
 Required:
 - `title`
@@ -258,7 +220,7 @@ Location mode rules:
 - `online`: requires `location.online`; `place_ref` is optional.
 - `hybrid`: requires both `place_ref` and `location.online`.
 
-### Update (`PATCH /events/{event_id}`)
+#### Update (`PATCH /events/{event_id}`)
 
 Partial update by field presence.
 
@@ -273,9 +235,7 @@ Geo filtering rule (`agenda` + `stream`):
 Delete:
 - soft delete only
 
----
-
-## ACL and Event Parties
+### ACL and Event Parties
 
 Canonical persisted fields:
 - `created_by`: typed principal `{type, id}` (audit identity)
@@ -309,9 +269,7 @@ Defaults:
 - each mapper provides default `can_edit`
 - row payload may override default
 
----
-
-## Capability Model and Settings Integration
+### Capability model and settings integration
 
 Effective runtime rule:
 - `effective_capability = tenant_available && event_enabled`
@@ -339,7 +297,7 @@ Disable/reenable behavior:
 - non-destructive
 - config is preserved while disabled
 
-### `map_poi` Capability Runtime Behavior
+### `map_poi` capability runtime behavior
 
 Tenant key:
 - `events.capabilities.map_poi.available` (bool, default `true`)
@@ -373,22 +331,33 @@ Geometry compatibility:
 
 ---
 
-## Host Integration Contracts (Required Bindings)
+## Authentication and Authorization Boundary
 
-Host app must bind:
-- `EventTaxonomyValidationContract`
-- `EventProfileResolverContract`
-- `EventAccountResolverContract`
-- `EventCapabilitySettingsContract`
-- `EventPartyMapperRegistryContract`
-- `EventTenantContextContract`
-- `EventRadiusSettingsContract`
-- `EventTemplateSnapshotReadContract`
-- `EventAsyncQueueMetricsProviderContract`
-- `EventAsyncJobSignaturesContract`
-- `TenantExecutionContextContract`
+- Public read endpoints are exposed through host routes and depend on host middleware and guard selection.
+- Admin and account routes require host-owned auth and ability gates.
+- The package does not implement authentication; it only consumes the contracts and context provided by the host.
+- If a binding is missing, the provider fails fast at runtime.
 
-If a binding is missing, provider fails fast at runtime.
+---
+
+## Host Integration Steps
+
+1. Register `EventsServiceProvider`.
+2. Bind the required host contracts:
+   - `EventTaxonomyValidationContract`
+   - `EventTypeResolverContract`
+   - `EventProfileResolverContract`
+   - `EventAccountResolverContract`
+   - `EventAttendanceReadContract`
+   - `EventCapabilitySettingsContract`
+   - `EventPartyMapperRegistryContract`
+   - `EventTenantContextContract`
+   - `EventRadiusSettingsContract`
+   - `EventTemplateSnapshotReadContract`
+   - `TenantExecutionContextContract`
+3. Mount the host route files that expose the public, admin, and account event endpoints.
+4. Keep tenant migrations pointed at `packages/belluga/belluga_events/database/migrations`.
+5. Let the package queue failure hook emit DLQ alerts through `EventDlqAlertService`.
 
 ---
 
@@ -423,10 +392,6 @@ Important index families:
 Tenant migration model:
 - events and occurrences are migrated in tenant databases (Spatie multitenancy flow)
 
----
-
-## Multitenancy Classification (Required)
-
 Before adding any migration, classify it explicitly:
 - `tenant`: runs in tenant-isolated DBs.
 - `landlord`: runs in landlord DB only.
@@ -448,14 +413,15 @@ If future landlord data is introduced:
 
 ---
 
-## Testing Gates
+## Validation Commands
 
-Primary suites:
-- `tests/Feature/Events/EventCrudControllerTest.php`
-- `tests/Feature/Events/AgendaAndEventsControllerTest.php`
-- `tests/Unit/Events/EventsPackageBindingsTest.php`
-- `tests/Unit/Events/EventsAsyncOperationalPolicyTest.php`
-- `tests/Unit/Events/EventAsyncOperationsMonitorServiceTest.php`
+Recommended checks:
+- `php artisan test tests/Feature/Events/EventCrudControllerTest.php`
+- `php artisan test tests/Feature/Events/AgendaAndEventsControllerTest.php`
+- `php artisan test tests/Unit/Events/EventsPackageBindingsTest.php`
+- `php artisan test tests/Unit/Events/EventsAsyncOperationalPolicyTest.php`
+- `php artisan test tests/Unit/Events/EventAsyncOperationsMonitorServiceTest.php`
+- `php artisan test`
 
 Hard-cutover validation:
 - no dependency on legacy event `account_*` fields
@@ -471,12 +437,14 @@ Before integrating any client with this package:
 3. Use `occurrences[]` as schedule source; treat `date_time_start/end` as first occurrence projection.
 4. Do not send legacy `date_time_start/date_time_end` in write payloads.
 5. If tenant UI supports multiple occurrences, wire against settings-kernel `events` namespace.
-6. Handle reconnect by rehydrating `/agenda` when cursor is missing/invalid.
+6. Handle reconnect by rehydrating `/agenda` when cursor is missing or invalid.
 
 ---
 
-## Deferred Scope
+## Known Limitations and Non-Goals
 
 The following remain intentionally outside the delivered block:
 - consolidated ticketing capabilities (inventory, qr_checkin, combo, limits, participant/student binding, pricing fees)
 - their tenant-scoped migration/index expansion and dedicated integration tests
+- compatibility bridge to removed legacy `account_*` event fields
+- invite lifecycle ownership

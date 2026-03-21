@@ -24,8 +24,7 @@ class AgendaIndexRequest extends FormRequest
             'page_size' => 'sometimes|integer|min:1',
             'past_only' => 'sometimes|boolean',
             'confirmed_only' => 'sometimes|boolean',
-            // MVP: event text search is disabled; taxonomy/categorical filters are canonical.
-            'search' => 'prohibited',
+            'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX.'|prohibits:origin_lat,origin_lng,max_distance_meters',
             'categories' => 'sometimes|array',
             'categories.*' => 'string|max:'.InputConstraints::NAME_MAX,
             'tags' => 'sometimes|array',
@@ -33,9 +32,9 @@ class AgendaIndexRequest extends FormRequest
             'taxonomy' => 'sometimes|array',
             'taxonomy.*.type' => 'required_with:taxonomy|string|max:'.InputConstraints::NAME_MAX,
             'taxonomy.*.value' => 'required_with:taxonomy|string|max:'.InputConstraints::NAME_MAX,
-            'origin_lat' => 'nullable|numeric|required_with:origin_lng',
-            'origin_lng' => 'nullable|numeric|required_with:origin_lat',
-            'max_distance_meters' => 'sometimes|numeric|min:0',
+            'origin_lat' => 'nullable|numeric|required_with:origin_lng|prohibits:search',
+            'origin_lng' => 'nullable|numeric|required_with:origin_lat|prohibits:search',
+            'max_distance_meters' => 'sometimes|numeric|min:0|prohibits:search',
         ];
     }
 }

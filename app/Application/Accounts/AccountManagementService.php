@@ -127,6 +127,26 @@ class AccountManagementService
      */
     public function update(Account $account, array $attributes): Account
     {
+        if (array_key_exists('ownership_state', $attributes)) {
+            $normalizedOwnershipState = $this->ownershipStateService->normalize(
+                is_string($attributes['ownership_state'])
+                    ? $attributes['ownership_state']
+                    : null
+            );
+            if (
+                $normalizedOwnershipState === null ||
+                ! in_array($normalizedOwnershipState, AccountOwnershipStateService::allowedCreateIntents(), true)
+            ) {
+                throw ValidationException::withMessages([
+                    'ownership_state' => ['ownership_state must be tenant_owned or unmanaged.'],
+                ]);
+            }
+            $attributes['ownership_state'] = $normalizedOwnershipState;
+            if ($normalizedOwnershipState === AccountOwnershipStateService::UNMANAGED) {
+                $attributes['organization_id'] = null;
+            }
+        }
+
         try {
             $account->fill($attributes);
             $account->save();
@@ -147,7 +167,10 @@ class AccountManagementService
 
     public function delete(Account $account): void
     {
+        $this->assertUnmanagedAccountForDelete($account);
+
         DB::connection('tenant')->transaction(static function () use ($account): void {
+            $account->accountProfiles()->delete();
             $account->roleTemplates()->delete();
             $account->delete();
         });
@@ -162,10 +185,25 @@ class AccountManagementService
 
     public function forceDelete(Account $account): void
     {
+        $this->assertUnmanagedAccountForDelete($account);
+
         DB::connection('tenant')->transaction(static function () use ($account): void {
-            $account->roleTemplates()->forceDelete();
+            $account->accountProfiles()->withTrashed()->forceDelete();
+            $account->roleTemplates()->withTrashed()->forceDelete();
             $account->forceDelete();
         });
+    }
+
+    private function assertUnmanagedAccountForDelete(Account $account): void
+    {
+        $ownershipState = $this->ownershipStateService->deriveOwnershipState($account);
+        if ($ownershipState === AccountOwnershipStateService::UNMANAGED) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'account' => ['Only unmanaged accounts can be deleted.'],
+        ]);
     }
 
     public function attachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void

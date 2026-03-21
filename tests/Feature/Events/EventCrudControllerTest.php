@@ -13,9 +13,9 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\EventType;
-use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
@@ -26,8 +26,8 @@ use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
-use Illuminate\Support\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -237,12 +237,35 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type.id']);
     }
 
-    public function test_events_index_rejects_deprecated_search_query_param(): void
+    public function test_events_index_supports_text_search_query_param(): void
     {
-        $response = $this->getJson("{$this->accountEventsBase}?search=show&page=1&page_size=10");
+        $matching = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'title' => 'Noite Solar Search Match',
+            ])
+        );
+        $matching->assertStatus(201);
+        $matchingId = (string) $matching->json('data.event_id');
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['search']);
+        $other = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'title' => 'Evento Aleatorio Sem Match',
+            ])
+        );
+        $other->assertStatus(201);
+        $otherId = (string) $other->json('data.event_id');
+
+        $response = $this->getJson("{$this->accountEventsBase}?search=Solar&page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
+            ->all();
+
+        $this->assertContains($matchingId, $ids);
+        $this->assertNotContains($otherId, $ids);
     }
 
     public function test_event_party_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
