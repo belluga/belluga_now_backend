@@ -41,22 +41,9 @@ class AccountManagementService
     public function create(array $payload): array
     {
         try {
-            return DB::connection('tenant')->transaction(function () use ($payload): array {
-                $ownershipIntent = $this->resolveOwnershipIntent($payload);
-                $payload = $this->applyOwnershipIntent($payload, $ownershipIntent);
-                $account = Account::create($payload);
-
-                $role = $account->roleTemplates()->create([
-                    'name' => 'Admin',
-                    'description' => 'Administrador',
-                    'permissions' => ['*'],
-                ]);
-
-                return [
-                    'account' => $account->fresh(),
-                    'role' => $role->fresh(),
-                ];
-            });
+            return DB::connection('tenant')->transaction(
+                fn (): array => $this->createWithinCurrentTransaction($payload)
+            );
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -68,6 +55,30 @@ class AccountManagementService
                 'account' => ['Something went wrong when trying to create the account.'],
             ]);
         }
+    }
+
+    /**
+     * Create account + default admin role in the current tenant transaction boundary.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{account: Account, role: AccountRoleTemplate}
+     */
+    public function createWithinCurrentTransaction(array $payload): array
+    {
+        $ownershipIntent = $this->resolveOwnershipIntent($payload);
+        $payload = $this->applyOwnershipIntent($payload, $ownershipIntent);
+        $account = Account::create($payload);
+
+        $role = $account->roleTemplates()->create([
+            'name' => 'Admin',
+            'description' => 'Administrador',
+            'permissions' => ['*'],
+        ]);
+
+        return [
+            'account' => $account->fresh(),
+            'role' => $role->fresh(),
+        ];
     }
 
     /**

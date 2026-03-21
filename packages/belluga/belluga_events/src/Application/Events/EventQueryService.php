@@ -727,7 +727,7 @@ class EventQueryService
                 'id' => isset($type['id']) ? (string) $type['id'] : '',
                 'name' => (string) ($type['name'] ?? ''),
                 'slug' => (string) ($type['slug'] ?? ''),
-                'description' => (string) ($type['description'] ?? ''),
+                'description' => $type['description'] ?? null,
                 'icon' => $type['icon'] ?? null,
                 'color' => $type['color'] ?? null,
             ],

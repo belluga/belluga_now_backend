@@ -12,7 +12,7 @@ interface EventProfileResolverContract
      *   location: array<string, mixed>
      * }
      */
-    public function resolveVenueByProfileId(string $profileId): array;
+    public function resolvePhysicalHostByProfileId(string $profileId): array;
 
     /**
      * @param  array<int, string>  $artistProfileIds
@@ -28,10 +28,7 @@ interface EventProfileResolverContract
     public function accountOwnsProfile(string $accountId, string $profileId): bool;
 
     /**
-     * @return array{
-     *   venues: array<int, array<string, mixed>>,
-     *   artists: array<int, array<string, mixed>>
-     * }
+     * @return array<string, array<int, array<string, mixed>>>
      */
     public function listPartyCandidates(?string $search = null, int $perTypeLimit = 50): array;
 }
