@@ -8,6 +8,7 @@ use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\StaticAsset;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use MongoDB\BSON\ObjectId;
 
 class StaticAssetQueryService extends AbstractQueryService
@@ -19,8 +20,12 @@ class StaticAssetQueryService extends AbstractQueryService
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         $query = StaticAsset::query();
+        $searchQuery = $this->extractSearchQuery($queryParams);
+        if ($searchQuery !== null) {
+            $this->applySearchFilter($query, $searchQuery);
+        }
 
-        return $this->buildPaginator($query, $queryParams, $includeArchived, $perPage)
+        return $this->buildPaginator($query, $this->withoutSearch($queryParams), $includeArchived, $perPage)
             ->through(function (StaticAsset $asset): array {
                 return $this->format($asset);
             });
@@ -92,8 +97,6 @@ class StaticAssetQueryService extends AbstractQueryService
                 'cover',
                 is_string($asset->cover_url) ? $asset->cover_url : null
             ),
-            'tags' => $asset->tags ?? [],
-            'categories' => $asset->categories ?? [],
             'taxonomy_terms' => $asset->taxonomy_terms ?? [],
             'location' => $this->formatLocation($asset->location),
             'is_active' => (bool) ($asset->is_active ?? false),
@@ -141,5 +144,40 @@ class StaticAssetQueryService extends AbstractQueryService
     protected function dateFields(): array
     {
         return ['created_at', 'updated_at', 'deleted_at'];
+    }
+
+    private function applySearchFilter(\Illuminate\Database\Eloquent\Builder $query, string $searchQuery): void
+    {
+        $query->whereRaw([
+            '$text' => [
+                '$search' => $searchQuery,
+            ],
+        ]);
+    }
+
+    private function extractSearchQuery(array $queryParams): ?string
+    {
+        $rawSearch = $queryParams['search'] ?? $queryParams['q'] ?? null;
+        if (! is_string($rawSearch)) {
+            return null;
+        }
+        $trimmed = trim($rawSearch);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function withoutSearch(array $queryParams): array
+    {
+        unset($queryParams['search'], $queryParams['q']);
+        Arr::forget($queryParams, 'filter.search');
+        Arr::forget($queryParams, 'filter.q');
+
+        return $queryParams;
     }
 }

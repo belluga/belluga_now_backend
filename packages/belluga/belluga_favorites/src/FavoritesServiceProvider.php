@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Favorites;
 
+use Belluga\Favorites\Application\Favorites\FavoritesCommandService;
 use Belluga\Favorites\Application\Favorites\FavoriteSnapshotProjectionService;
 use Belluga\Favorites\Application\Favorites\FavoritesQueryService;
 use Belluga\Favorites\Contracts\FavoritesRegistryContract;
@@ -16,6 +17,7 @@ class FavoritesServiceProvider extends ServiceProvider
     {
         $this->app->singleton(FavoritesRegistryContract::class, InMemoryFavoritesRegistry::class);
         $this->app->singleton(FavoriteSnapshotProjectionService::class);
+        $this->app->singleton(FavoritesCommandService::class);
         $this->app->singleton(FavoritesQueryService::class);
     }
 

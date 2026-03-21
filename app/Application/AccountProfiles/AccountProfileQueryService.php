@@ -38,34 +38,15 @@ class AccountProfileQueryService extends AbstractQueryService
             $perPage
         );
 
-        /** @var Collection<int, AccountProfile> $profiles */
-        $profiles = $paginator->getCollection()
-            ->filter(static fn ($item): bool => $item instanceof AccountProfile)
-            ->values();
-        $accountsById = $this->loadAccountsById($profiles);
-        $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(
-            array_keys($accountsById)
-        );
-
-        $paginator->setCollection(
-            $profiles
-                ->map(
-                    fn (AccountProfile $profile): array => $this->format(
-                        $profile,
-                        $accountsById[(string) $profile->account_id] ?? null,
-                        $userOperatedLookup
-                    )
-                )
-                ->values()
-        );
-
-        return $paginator;
+        return $this->hydrateOwnershipState($paginator);
     }
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
     {
         $allowedTypes = TenantProfileType::query()->pluck('type')->all();
         $query = $queryParams;
+        $search = trim((string) ($query['search'] ?? ''));
+        unset($query['search']);
         if (! empty($allowedTypes)) {
             $existingFilters = (array) ($query['filter'] ?? []);
             $requested = $existingFilters['profile_type'] ?? null;
@@ -82,7 +63,16 @@ class AccountProfileQueryService extends AbstractQueryService
             );
         }
 
-        return $this->paginate($query, false, $perPage);
+        $baseQuery = AccountProfile::query();
+        $this->applyPublicSearchFilter($baseQuery, $search);
+        $paginator = $this->buildPaginator(
+            $baseQuery,
+            $query,
+            false,
+            $perPage
+        );
+
+        return $this->hydrateOwnershipState($paginator);
     }
 
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
@@ -252,6 +242,48 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         return $queryParams;
+    }
+
+    private function applyPublicSearchFilter(Builder $query, string $search): void
+    {
+        if ($search === '') {
+            return;
+        }
+
+        $pattern = '%'.addcslashes($search, '%_\\').'%';
+
+        $query->where(function (Builder $searchQuery) use ($pattern): void {
+            $searchQuery
+                ->where('display_name', 'like', $pattern)
+                ->orWhere('slug', 'like', $pattern)
+                ->orWhere('taxonomy_terms.value', 'like', $pattern);
+        });
+    }
+
+    private function hydrateOwnershipState(LengthAwarePaginator $paginator): LengthAwarePaginator
+    {
+        /** @var Collection<int, AccountProfile> $profiles */
+        $profiles = $paginator->getCollection()
+            ->filter(static fn ($item): bool => $item instanceof AccountProfile)
+            ->values();
+        $accountsById = $this->loadAccountsById($profiles);
+        $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(
+            array_keys($accountsById)
+        );
+
+        $paginator->setCollection(
+            $profiles
+                ->map(
+                    fn (AccountProfile $profile): array => $this->format(
+                        $profile,
+                        $accountsById[(string) $profile->account_id] ?? null,
+                        $userOperatedLookup
+                    )
+                )
+                ->values()
+        );
+
+        return $paginator;
     }
 
     protected function baseSearchableFields(): array

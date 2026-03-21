@@ -11,6 +11,7 @@ use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Controllers\StaticAssetMediaController;
 use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
+use Belluga\Events\Http\Api\v1\Controllers\EventMediaController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('tenant')->group(function () {
@@ -31,6 +32,10 @@ Route::middleware('tenant')->group(function () {
     Route::get(
         '/media/static-assets/{static_asset_id}/cover',
         [StaticAssetMediaController::class, 'cover']
+    );
+    Route::get(
+        '/media/events/{event_id}/cover',
+        [EventMediaController::class, 'cover']
     );
 
     Route::prefix('anonymous')

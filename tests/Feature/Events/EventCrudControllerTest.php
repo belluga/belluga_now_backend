@@ -13,9 +13,9 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\EventType;
-use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
@@ -26,8 +26,10 @@ use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -144,6 +146,83 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_event_create_stores_cover_upload_and_exposes_media_url(): void
+    {
+        Storage::fake('public');
+
+        $payload = array_merge($this->makeEventPayload(), [
+            'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+        ]);
+
+        $response = $this->post($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $eventId = (string) $response->json('data.event_id');
+        $thumbUrl = (string) $response->json('data.thumb.data.url');
+
+        $this->assertNotSame('', $eventId);
+        $this->assertNotSame('', $thumbUrl);
+        $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+
+        $coverPaths = collect(Storage::disk('public')->allFiles())
+            ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
+        $this->assertTrue($coverPaths->isNotEmpty());
+
+        $publicCoverPath = parse_url($thumbUrl, PHP_URL_PATH);
+        $this->assertSame("/api/v1/media/events/{$eventId}/cover", $publicCoverPath);
+        $this->get("{$this->base_tenant_url}api/v1/media/events/{$eventId}/cover")->assertOk();
+        $this->get("{$this->base_tenant_url}events/{$eventId}/cover")->assertOk();
+    }
+
+    public function test_event_update_stores_cover_upload_and_exposes_media_url(): void
+    {
+        Storage::fake('public');
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patch(
+            "{$this->accountEventsBase}/{$eventId}",
+            ['cover' => UploadedFile::fake()->image('cover.jpg', 1400, 700)],
+        );
+
+        $response->assertStatus(200);
+        $thumbUrl = (string) $response->json('data.thumb.data.url');
+        $this->assertNotSame('', $thumbUrl);
+        $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+
+        $coverPaths = collect(Storage::disk('public')->allFiles())
+            ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
+        $this->assertTrue($coverPaths->isNotEmpty());
+        $this->get("{$this->base_tenant_url}api/v1/media/events/{$eventId}/cover")->assertOk();
+    }
+
+    public function test_event_update_remove_cover_clears_thumb_payload(): void
+    {
+        Storage::fake('public');
+
+        $created = $this->post(
+            $this->accountEventsBase,
+            array_merge($this->makeEventPayload(), [
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ]),
+        );
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patchJson(
+            "{$this->accountEventsBase}/{$eventId}",
+            ['remove_cover' => true],
+        );
+
+        $response->assertStatus(200);
+        $this->assertNull($response->json('data.thumb'));
+        $coverPaths = collect(Storage::disk('public')->allFiles())
+            ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
+        $this->assertTrue($coverPaths->isEmpty());
+    }
+
     public function test_event_create_rejects_unknown_event_type_id(): void
     {
         $payload = $this->makeEventPayload([
@@ -158,12 +237,35 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type.id']);
     }
 
-    public function test_events_index_rejects_deprecated_search_query_param(): void
+    public function test_events_index_supports_text_search_query_param(): void
     {
-        $response = $this->getJson("{$this->accountEventsBase}?search=show&page=1&page_size=10");
+        $matching = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'title' => 'Noite Solar Search Match',
+            ])
+        );
+        $matching->assertStatus(201);
+        $matchingId = (string) $matching->json('data.event_id');
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['search']);
+        $other = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'title' => 'Evento Aleatorio Sem Match',
+            ])
+        );
+        $other->assertStatus(201);
+        $otherId = (string) $other->json('data.event_id');
+
+        $response = $this->getJson("{$this->accountEventsBase}?search=Solar&page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
+            ->all();
+
+        $this->assertContains($matchingId, $ids);
+        $this->assertNotContains($otherId, $ids);
     }
 
     public function test_event_party_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
@@ -214,8 +316,13 @@ class EventCrudControllerTest extends TestCaseTenant
             ]
         );
 
+        $hostAccount = Account::create([
+            'name' => 'Main Bistro Account',
+            'document' => (string) Str::uuid(),
+        ]);
+
         $host = AccountProfile::query()->create([
-            'account_id' => (string) $this->account->_id,
+            'account_id' => (string) $hostAccount->_id,
             'profile_type' => 'restaurant',
             'display_name' => 'Main Bistro',
             'taxonomy_terms' => [],
@@ -234,6 +341,52 @@ class EventCrudControllerTest extends TestCaseTenant
         $matched = $hosts->firstWhere('id', (string) $host->_id);
         $this->assertNotNull($matched);
         $this->assertSame('restaurant', (string) ($matched['profile_type'] ?? ''));
+    }
+
+    public function test_event_party_candidates_endpoint_excludes_poi_enabled_profiles_without_valid_location(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'restaurant'],
+            [
+                'label' => 'Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'has_bio' => false,
+                    'has_content' => false,
+                    'has_taxonomies' => false,
+                    'has_avatar' => false,
+                    'has_cover' => false,
+                    'has_events' => false,
+                ],
+            ]
+        );
+
+        $hostAccount = Account::create([
+            'name' => 'No Geo Bistro Account',
+            'document' => (string) Str::uuid(),
+        ]);
+
+        $hostWithoutLocation = AccountProfile::query()->create([
+            'account_id' => (string) $hostAccount->_id,
+            'profile_type' => 'restaurant',
+            'display_name' => 'No Geo Bistro',
+            'taxonomy_terms' => [],
+            'location' => null,
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=no%20geo");
+
+        $response->assertStatus(200);
+        $hosts = collect($response->json('data.physical_hosts') ?? []);
+        $matched = $hosts->firstWhere('id', (string) $hostWithoutLocation->_id);
+        $this->assertNull($matched);
     }
 
     public function test_event_party_candidates_endpoint_rejects_without_party_candidate_abilities(): void
@@ -546,6 +699,17 @@ class EventCrudControllerTest extends TestCaseTenant
         $payload = $this->makeEventPayload([
             'content' => '',
         ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.content', '');
+    }
+
+    public function test_event_create_accepts_missing_content_field(): void
+    {
+        $payload = $this->makeEventPayload();
+        unset($payload['content']);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 

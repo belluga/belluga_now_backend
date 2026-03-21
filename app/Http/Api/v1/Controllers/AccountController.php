@@ -29,7 +29,7 @@ class AccountController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $perPage = (int) $request->get('per_page', 15) ?: 15;
+        $perPage = (int) $request->get('per_page', $request->get('page_size', 15)) ?: 15;
 
         $paginator = $this->accountService->paginateForUser(
             auth()->guard('sanctum')->user(),
