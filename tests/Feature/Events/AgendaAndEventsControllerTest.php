@@ -333,6 +333,20 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $titles = array_map(static fn ($item): string => (string) ($item['title'] ?? ''), $items);
         $this->assertContains('Solar Sunset Party', $titles);
         $this->assertNotContains('No Match Agenda', $titles);
+
+        $partialResponse = $this->getJson("{$this->base_api_tenant}agenda?search=Sola&page=1&page_size=10");
+        $partialResponse->assertStatus(200);
+        $partialItems = $partialResponse->json('items');
+        $partialTitles = array_map(static fn ($item): string => (string) ($item['title'] ?? ''), $partialItems);
+        $this->assertContains('Solar Sunset Party', $partialTitles);
+        $this->assertNotContains('No Match Agenda', $partialTitles);
+
+        $containsResponse = $this->getJson("{$this->base_api_tenant}agenda?search=olar&page=1&page_size=10");
+        $containsResponse->assertStatus(200);
+        $containsItems = $containsResponse->json('items');
+        $containsTitles = array_map(static fn ($item): string => (string) ($item['title'] ?? ''), $containsItems);
+        $this->assertContains('Solar Sunset Party', $containsTitles);
+        $this->assertNotContains('No Match Agenda', $containsTitles);
     }
 
     public function test_agenda_rejects_search_combined_with_geo_filters(): void

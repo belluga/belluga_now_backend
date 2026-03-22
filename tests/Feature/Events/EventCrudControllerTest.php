@@ -266,6 +266,24 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertContains($matchingId, $ids);
         $this->assertNotContains($otherId, $ids);
+
+        $partialResponse = $this->getJson("{$this->accountEventsBase}?search=Sola&page=1&page_size=10");
+        $partialResponse->assertStatus(200);
+        $partialIds = collect($partialResponse->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
+            ->all();
+
+        $this->assertContains($matchingId, $partialIds);
+        $this->assertNotContains($otherId, $partialIds);
+
+        $containsResponse = $this->getJson("{$this->accountEventsBase}?search=olar&page=1&page_size=10");
+        $containsResponse->assertStatus(200);
+        $containsIds = collect($containsResponse->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
+            ->all();
+
+        $this->assertContains($matchingId, $containsIds);
+        $this->assertNotContains($otherId, $containsIds);
     }
 
     public function test_event_party_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
@@ -283,6 +301,11 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertNotNull($matchedVenue);
         $this->assertSame('venue', (string) ($matchedVenue['profile_type'] ?? ''));
+
+        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=mai");
+        $partialResponse->assertStatus(200);
+        $partialVenues = collect($partialResponse->json('data.venues') ?? []);
+        $this->assertNotNull($partialVenues->firstWhere('id', (string) $this->venue->_id));
 
         Sanctum::actingAs($landlord, ['events:create']);
         $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");

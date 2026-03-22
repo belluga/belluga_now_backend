@@ -382,6 +382,42 @@ class AccountControllerTest extends TestCase
                 static fn (array $item): bool => ($item['id'] ?? null) === (string) $other->_id
             )
         );
+
+        $partialToken = substr($searchToken, 0, -1);
+        $partialResponse = $this->getJson(
+            "{$this->tenantAccountsAdminUrl}?search={$partialToken}&per_page=50"
+        );
+
+        $partialResponse->assertOk();
+        $partialItems = collect($partialResponse->json('data'));
+        $this->assertTrue(
+            $partialItems->contains(
+                static fn (array $item): bool => ($item['id'] ?? null) === (string) $matching->_id
+            )
+        );
+        $this->assertFalse(
+            $partialItems->contains(
+                static fn (array $item): bool => ($item['id'] ?? null) === (string) $other->_id
+            )
+        );
+
+        $containsToken = substr($searchToken, 3, 6);
+        $containsResponse = $this->getJson(
+            "{$this->tenantAccountsAdminUrl}?search={$containsToken}&per_page=50"
+        );
+
+        $containsResponse->assertOk();
+        $containsItems = collect($containsResponse->json('data'));
+        $this->assertTrue(
+            $containsItems->contains(
+                static fn (array $item): bool => ($item['id'] ?? null) === (string) $matching->_id
+            )
+        );
+        $this->assertFalse(
+            $containsItems->contains(
+                static fn (array $item): bool => ($item['id'] ?? null) === (string) $other->_id
+            )
+        );
     }
 
     public function test_update_accepts_ownership_state_transition_to_unmanaged(): void

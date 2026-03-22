@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Application\Identity;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Identity\TenantPasswordRegistrationResult;
 use App\Application\Identity\TenantPasswordRegistrationService;
 use App\Domain\Identity\AnonymousIdentityMerger;
@@ -45,7 +46,8 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         $this->service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
             $this->app->make(AnonymousIdentityMerger::class),
-            $this->app->make(AccountProfileBootstrapService::class)
+            $this->app->make(AccountProfileBootstrapService::class),
+            $this->app->make(TenantScopedAccessTokenService::class),
         );
     }
 
@@ -107,7 +109,8 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         $service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
             $mockMerger,
-            $this->app->make(AccountProfileBootstrapService::class)
+            $this->app->make(AccountProfileBootstrapService::class),
+            $this->app->make(TenantScopedAccessTokenService::class),
         );
 
         $anonymous = $this->createAnonymousUser();

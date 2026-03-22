@@ -176,6 +176,50 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertArrayHasKey('time_end', $items[0]);
     }
 
+    public function test_map_near_supports_partial_text_search(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-thales',
+            'ref_slug' => 'thales-hub',
+            'ref_path' => '/static/thales-hub',
+            'name' => 'Thales Hub',
+            'category' => 'poi',
+            'source_type' => 'poi',
+            'location' => $location,
+            'priority' => 50,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-other',
+            'ref_slug' => 'bruno-hub',
+            'ref_path' => '/static/bruno-hub',
+            'name' => 'Bruno Hub',
+            'category' => 'poi',
+            'source_type' => 'poi',
+            'location' => $location,
+            'priority' => 40,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/near?origin_lat=-20.0&origin_lng=-40.0&search=ales&page=1&page_size=10"
+        );
+        $response->assertStatus(200);
+
+        $items = collect($response->json('items') ?? []);
+        $slugs = $items->map(static fn (array $item): string => (string) ($item['ref_slug'] ?? ''))->all();
+
+        $this->assertContains('thales-hub', $slugs);
+        $this->assertNotContains('bruno-hub', $slugs);
+    }
+
     public function test_map_near_returns_now_flag_and_occurrence_facets(): void
     {
         $location = $this->point(-40.0, -20.0);

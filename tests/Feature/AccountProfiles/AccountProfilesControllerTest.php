@@ -116,6 +116,31 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue(collect($response->json('data'))->every(static fn (array $item): bool => array_key_exists('ownership_state', $item)));
     }
 
+    public function test_public_account_profile_index_forbids_landlord_user_without_tenant_access(): void
+    {
+        $noAccessUser = LandlordUser::query()->create([
+            'name' => 'No Access User',
+            'emails' => [strtolower('no-access-'.uniqid('', true).'@example.org')],
+            'password' => 'Secret!234',
+        ]);
+
+        Sanctum::actingAs($noAccessUser, []);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(403);
+    }
+
+    public function test_public_account_profile_index_allows_landlord_user_with_tenant_access(): void
+    {
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+    }
+
     public function test_public_account_profile_index_filters_by_profile_type(): void
     {
         $this->createAccountUser([]);
@@ -301,6 +326,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Jazz House', $items->first()['display_name'] ?? null);
+
+        $partialResponse = $this->getJson("{$this->base_api_tenant}account_profiles?search=ega");
+        $partialResponse->assertStatus(200);
+        $partialItems = collect($partialResponse->json('data'));
+        $this->assertCount(1, $partialItems);
+        $this->assertSame('Jazz House', $partialItems->first()['display_name'] ?? null);
     }
 
     public function test_admin_account_profile_index_filters_by_ownership_state(): void
