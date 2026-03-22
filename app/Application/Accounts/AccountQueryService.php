@@ -202,11 +202,22 @@ class AccountQueryService extends AbstractQueryService
 
     private function applySearchFilter(\Illuminate\Database\Eloquent\Builder $query, string $searchQuery): void
     {
+        $regex = $this->buildContainsRegexPattern($searchQuery);
+
         $query->whereRaw([
-            '$text' => [
-                '$search' => $searchQuery,
+            '$or' => [
+                ['name' => ['$regex' => $regex, '$options' => 'i']],
+                ['slug' => ['$regex' => $regex, '$options' => 'i']],
+                ['document.number' => ['$regex' => $regex, '$options' => 'i']],
             ],
         ]);
+    }
+
+    private function buildContainsRegexPattern(string $searchQuery): string
+    {
+        $escaped = preg_quote(trim($searchQuery), '/');
+
+        return $escaped;
     }
 
     private function extractSearchQuery(array $queryParams): ?string

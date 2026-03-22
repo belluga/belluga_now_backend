@@ -148,11 +148,23 @@ class StaticAssetQueryService extends AbstractQueryService
 
     private function applySearchFilter(\Illuminate\Database\Eloquent\Builder $query, string $searchQuery): void
     {
+        $regex = $this->buildContainsRegexPattern($searchQuery);
+
         $query->whereRaw([
-            '$text' => [
-                '$search' => $searchQuery,
+            '$or' => [
+                ['display_name' => ['$regex' => $regex, '$options' => 'i']],
+                ['slug' => ['$regex' => $regex, '$options' => 'i']],
+                ['content' => ['$regex' => $regex, '$options' => 'i']],
+                ['taxonomy_terms.value' => ['$regex' => $regex, '$options' => 'i']],
             ],
         ]);
+    }
+
+    private function buildContainsRegexPattern(string $searchQuery): string
+    {
+        $escaped = preg_quote(trim($searchQuery), '/');
+
+        return $escaped;
     }
 
     private function extractSearchQuery(array $queryParams): ?string

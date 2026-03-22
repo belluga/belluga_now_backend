@@ -87,11 +87,7 @@ class EventQueryService
 
         $searchQuery = $this->extractSearchQuery($queryParams);
         if ($searchQuery !== null) {
-            $query->whereRaw([
-                '$text' => [
-                    '$search' => $searchQuery,
-                ],
-            ]);
+            $query->whereRaw($this->buildSearchMatchExpression($searchQuery));
         }
 
         if (! $isAdminContext) {
@@ -338,8 +334,11 @@ class EventQueryService
         ];
         $search = $filters['search'] ?? null;
         if (is_string($search) && $search !== '' && ! $useGeo) {
-            $baseMatch['$text'] = [
-                '$search' => $search,
+            $baseMatch = [
+                '$and' => [
+                    $baseMatch,
+                    $this->buildSearchMatchExpression($search),
+                ],
             ];
         }
 
@@ -420,8 +419,11 @@ class EventQueryService
         ];
         $search = $filters['search'] ?? null;
         if (is_string($search) && $search !== '' && ! $useGeo) {
-            $baseMatch['$text'] = [
-                '$search' => $search,
+            $baseMatch = [
+                '$and' => [
+                    $baseMatch,
+                    $this->buildSearchMatchExpression($search),
+                ],
             ];
         }
 
@@ -638,6 +640,33 @@ class EventQueryService
         }
 
         return $trimmed;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildSearchMatchExpression(string $searchQuery): array
+    {
+        $regex = $this->buildContainsRegexPattern($searchQuery);
+
+        return [
+            '$or' => [
+                ['title' => ['$regex' => $regex, '$options' => 'i']],
+                ['slug' => ['$regex' => $regex, '$options' => 'i']],
+                ['content' => ['$regex' => $regex, '$options' => 'i']],
+                ['tags' => ['$regex' => $regex, '$options' => 'i']],
+                ['categories' => ['$regex' => $regex, '$options' => 'i']],
+                ['taxonomy_terms.value' => ['$regex' => $regex, '$options' => 'i']],
+                ['artists.display_name' => ['$regex' => $regex, '$options' => 'i']],
+            ],
+        ];
+    }
+
+    private function buildContainsRegexPattern(string $searchQuery): string
+    {
+        $escaped = preg_quote(trim($searchQuery), '/');
+
+        return $escaped;
     }
 
     private function resolveMaxDistanceMeters(array $queryParams): float
