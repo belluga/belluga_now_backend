@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Log;
 
 class AccountAuthenticationService
 {
+    public function __construct(
+        private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
+    ) {}
+
     public function login(string $email, string $password, string $deviceName): AuthenticationResult
     {
         $user = $this->findUserByEmail($email);
@@ -33,10 +37,13 @@ class AccountAuthenticationService
 
         $abilities = $account ? $user->getPermissions($account) : [];
 
-        $token = $user->createToken(
-            $deviceName,
-            $this->sanitizeAbilities($user, $abilities)
-        )->plainTextToken;
+        $token = $this->tenantScopedAccessTokenService
+            ->issueForAccountUser(
+                $user,
+                $deviceName,
+                $this->sanitizeAbilities($user, $abilities)
+            )
+            ->plainTextToken;
 
         return new AuthenticationResult($user, $token);
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Identity;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
@@ -23,6 +24,7 @@ class TenantPasswordRegistrationService
         private readonly PasswordIdentityRegistrar $registrar,
         private readonly AnonymousIdentityMerger $identityMerger,
         private readonly AccountProfileBootstrapService $profileBootstrapper,
+        private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
     ) {}
 
     /**
@@ -81,9 +83,11 @@ class TenantPasswordRegistrationService
             $abilities = [];
         }
 
-        $token = $user->createToken(
+        $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
+            $user,
             'auth:password-register',
-            $this->sanitizeAbilities($abilities)
+            $this->sanitizeAbilities($abilities),
+            (string) $tenant->_id
         );
         $plainToken = $token->plainTextToken;
         $expiresAt = null;

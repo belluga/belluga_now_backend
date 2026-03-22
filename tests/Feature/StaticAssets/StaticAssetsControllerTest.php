@@ -361,6 +361,30 @@ class StaticAssetsControllerTest extends TestCaseTenant
             ->all();
         $this->assertContains($matchingId, $ids);
         $this->assertNotContains($otherId, $ids);
+
+        $partialResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}static_assets?search=sunse&page=1&per_page=20",
+            $this->getHeaders()
+        );
+
+        $partialResponse->assertStatus(200);
+        $partialIds = collect($partialResponse->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['id'] ?? ''))
+            ->all();
+        $this->assertContains($matchingId, $partialIds);
+        $this->assertNotContains($otherId, $partialIds);
+
+        $containsResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}static_assets?search=nset&page=1&per_page=20",
+            $this->getHeaders()
+        );
+
+        $containsResponse->assertStatus(200);
+        $containsIds = collect($containsResponse->json('data') ?? [])
+            ->map(static fn (array $item): string => (string) ($item['id'] ?? ''))
+            ->all();
+        $this->assertContains($matchingId, $containsIds);
+        $this->assertNotContains($otherId, $containsIds);
     }
 
     private function getMultipartHeaders(): array
