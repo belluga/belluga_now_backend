@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Identity;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Carbon;
@@ -11,6 +12,10 @@ use Illuminate\Support\Facades\Log;
 
 class AnonymousIdentityService
 {
+    public function __construct(
+        private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
+    ) {}
+
     /**
      * @param array{
      *     device_name: string,
@@ -52,7 +57,12 @@ class AnonymousIdentityService
             $abilities = array_values(array_filter($abilities, static fn (string $ability): bool => $ability !== '*'));
         }
 
-        $token = $user->createToken('anonymous:'.$payload['device_name'], $abilities);
+        $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
+            $user,
+            'anonymous:'.$payload['device_name'],
+            $abilities,
+            (string) $tenant->_id
+        );
         $plainToken = $token->plainTextToken;
 
         $expiresAt = null;
