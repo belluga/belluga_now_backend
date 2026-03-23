@@ -398,6 +398,121 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertCount(0, $items);
     }
 
+    public function test_agenda_returns_only_eligible_occurrences_from_mixed_dataset(): void
+    {
+        $now = Carbon::now();
+
+        $eligibleOne = $this->createEvent([
+            'title' => 'Eligible One',
+            'date_time_start' => $now->copy()->addDays(10),
+            'date_time_end' => $now->copy()->addDays(10)->addHours(2),
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.4950, -20.6710],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.4950, -20.6710],
+            ],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => 'account-profile-1',
+                'metadata' => [
+                    'display_name' => 'Eligible Host One',
+                ],
+            ],
+        ]);
+
+        $eligibleTwo = $this->createEvent([
+            'title' => 'Eligible Two',
+            'date_time_start' => $now->copy()->addDays(11),
+            'date_time_end' => $now->copy()->addDays(11)->addHours(2),
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.4700, -20.6400],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.4700, -20.6400],
+            ],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => 'account-profile-2',
+                'metadata' => [
+                    'display_name' => 'Eligible Host Two',
+                ],
+            ],
+        ]);
+
+        $draftHidden = $this->createEvent([
+            'title' => 'Draft Hidden',
+            'publication' => [
+                'status' => 'draft',
+                'publish_at' => $now->copy()->subMinute(),
+            ],
+            'date_time_start' => $now->copy()->addDays(12),
+            'date_time_end' => $now->copy()->addDays(12)->addHours(2),
+        ]);
+
+        $pastHidden = $this->createEvent([
+            'title' => 'Past Hidden',
+            'date_time_start' => $now->copy()->subDays(2),
+            'date_time_end' => $now->copy()->subDays(2)->addHours(2),
+        ]);
+
+        $deletedOccurrenceHidden = $this->createEvent([
+            'title' => 'Deleted Occurrence Hidden',
+            'date_time_start' => $now->copy()->addDays(13),
+            'date_time_end' => $now->copy()->addDays(13)->addHours(2),
+        ]);
+        EventOccurrence::query()
+            ->where('event_id', (string) $deletedOccurrenceHidden->_id)
+            ->update([
+                'deleted_at' => $now->copy(),
+            ]);
+
+        $outOfRadiusHidden = $this->createEvent([
+            'title' => 'Out Of Radius Hidden',
+            'date_time_start' => $now->copy()->addDays(14),
+            'date_time_end' => $now->copy()->addDays(14)->addHours(2),
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [100.0, 40.0],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [100.0, 40.0],
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=50000&page=1&page_size=20"
+        );
+
+        $response->assertStatus(200);
+
+        $items = $response->json('items');
+        $this->assertIsArray($items);
+        $this->assertCount(2, $items);
+
+        $eventIds = array_map(static fn ($item): string => (string) ($item['event_id'] ?? ''), $items);
+        $this->assertContains((string) $eligibleOne->_id, $eventIds);
+        $this->assertContains((string) $eligibleTwo->_id, $eventIds);
+        $this->assertNotContains((string) $draftHidden->_id, $eventIds);
+        $this->assertNotContains((string) $pastHidden->_id, $eventIds);
+        $this->assertNotContains((string) $deletedOccurrenceHidden->_id, $eventIds);
+        $this->assertNotContains((string) $outOfRadiusHidden->_id, $eventIds);
+    }
+
     public function test_agenda_geo_query_fails_when_geo_index_is_missing(): void
     {
         $this->createEvent([
