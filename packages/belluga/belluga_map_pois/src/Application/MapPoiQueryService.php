@@ -153,6 +153,54 @@ class MapPoiQueryService
 
     /**
      * @param  array<string, mixed>  $queryParams
+     * @return array<string, mixed>|null
+     */
+    public function lookup(array $queryParams, ?string $timezone): ?array
+    {
+        $resolvedRefType = $this->mapSourceToRefType((string) ($queryParams['ref_type'] ?? ''));
+        $resolvedRefId = trim((string) ($queryParams['ref_id'] ?? ''));
+
+        if ($resolvedRefType === null || $resolvedRefId === '') {
+            return null;
+        }
+
+        $match = $this->buildMatchConditions([], $timezone);
+        $match['ref_type'] = $resolvedRefType;
+        $match['ref_id'] = $resolvedRefId;
+
+        $pipeline = [
+            ['$match' => $match],
+            ['$limit' => 1],
+        ];
+
+        $items = MapPoi::raw(function ($collection) use ($pipeline) {
+            return $collection->aggregate($pipeline);
+        });
+
+        foreach ($items as $item) {
+            $payload = $this->formatTopPoi($item);
+            $poiData = $this->normalizeDocument($item);
+            $stackKey = trim((string) ($poiData['exact_key'] ?? ''));
+
+            if ($stackKey !== '') {
+                $payload['stack_key'] = $stackKey;
+                $payload['stack_count'] = $this->resolveStackCount(
+                    $stackKey,
+                    $timezone
+                );
+            }
+
+            return [
+                'tenant_id' => $this->resolveTenantId(),
+                'poi' => $payload,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
      */
     public function filters(array $queryParams, ?string $timezone): array
@@ -643,6 +691,30 @@ class MapPoiQueryService
         }
 
         return $formatted;
+    }
+
+    private function resolveStackCount(string $stackKey, ?string $timezone): int
+    {
+        $match = $this->buildMatchConditions([], $timezone);
+        $match['exact_key'] = $stackKey;
+
+        $pipeline = [
+            ['$match' => $match],
+            ['$count' => 'total'],
+        ];
+
+        $rows = MapPoi::raw(function ($collection) use ($pipeline) {
+            return $collection->aggregate($pipeline);
+        });
+
+        foreach ($rows as $row) {
+            $data = $this->normalizeDocument($row);
+            $resolvedCount = (int) ($data['total'] ?? 0);
+
+            return $resolvedCount > 0 ? $resolvedCount : 1;
+        }
+
+        return 1;
     }
 
     /**

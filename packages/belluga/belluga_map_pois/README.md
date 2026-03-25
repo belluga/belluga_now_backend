@@ -62,6 +62,7 @@ Stored fields include:
 Host routes are tenant-authenticated and tenant-access protected:
 
 - `GET /api/v1/map/pois`
+- `GET /api/v1/map/pois/lookup`
 - `GET /api/v1/map/near`
 - `GET /api/v1/map/filters`
 
@@ -91,6 +92,22 @@ Each stack exposes:
 - `center`
 - `stack_count`
 - `top_poi`
+
+### `GET /api/v1/map/pois/lookup`
+
+Returns a deterministic single POI payload by canonical typed reference.
+
+Query inputs:
+
+- `ref_type` (required): `event|account_profile|static` (aliases accepted by request validation)
+- `ref_id` (required)
+
+Response shape:
+
+- `tenant_id`
+- `poi`
+
+`poi` includes canonical fields used by Flutter deep-link hydration (`ref_type`, `ref_id`, `ref_slug`, `ref_path`, `location`, `updated_at`) and stack hints (`stack_key`, `stack_count`) when available.
 
 ### `GET /api/v1/map/near`
 
