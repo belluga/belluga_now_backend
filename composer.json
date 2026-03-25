@@ -31,6 +31,10 @@
     "repositories": [
         {
             "type": "path",
+            "url": "packages/belluga/belluga_media"
+        },
+        {
+            "type": "path",
             "url": "packages/belluga/belluga_events"
         },
         {
@@ -68,6 +72,7 @@
             "Belluga\\Invites\\": "packages/belluga/belluga_invites/src/",
             "Belluga\\MapPois\\": "packages/belluga/belluga_map_pois/src/",
             "Belluga\\Favorites\\": "packages/belluga/belluga_favorites/src/",
+            "Belluga\\Media\\": "packages/belluga/belluga_media/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }

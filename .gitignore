@@ -31,7 +31,11 @@ yarn-error.log
 AGENTS.md
 delphi-ai
 foundation_documentation
+.agent
 .agent/
+.agents
+.agents/
+.codex
 .codex/
 
 # CLINE

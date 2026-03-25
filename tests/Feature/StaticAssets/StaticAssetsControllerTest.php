@@ -309,6 +309,197 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $updated->assertJsonPath('data.is_active', false);
     }
 
+    public function test_static_asset_update_persists_avatar_and_cover_urls_without_file_upload(): void
+    {
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $created = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia URL Update',
+                'location' => ['lat' => -21.0, 'lng' => -41.0],
+            ],
+            $this->getHeaders()
+        );
+
+        $created->assertStatus(201);
+        $assetId = (string) $created->json('data.id');
+
+        $updated = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_assets/{$assetId}",
+            [
+                'avatar_url' => 'https://cdn.example.com/asset-avatar.png',
+                'cover_url' => 'https://cdn.example.com/asset-cover.png',
+            ],
+            $this->getHeaders()
+        );
+
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.avatar_url', 'https://cdn.example.com/asset-avatar.png');
+        $updated->assertJsonPath('data.cover_url', 'https://cdn.example.com/asset-cover.png');
+
+        $publicById = $this->getJson(
+            "{$this->base_api_tenant}static_assets/{$assetId}",
+            $this->getHeaders()
+        );
+        $publicById->assertStatus(200);
+        $publicById->assertJsonPath('data.avatar_url', 'https://cdn.example.com/asset-avatar.png');
+        $publicById->assertJsonPath('data.cover_url', 'https://cdn.example.com/asset-cover.png');
+    }
+
+    public function test_static_asset_update_replaces_avatar_and_cover_uploads(): void
+    {
+        Storage::fake('public');
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia Replace',
+                'location' => ['lat' => -20.0, 'lng' => -40.0],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 256, 256),
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $assetId = (string) $createResponse->json('data.id');
+        $originalAvatarPath = $this->assertMediaStored($assetId, 'avatar');
+        $originalCoverPath = $this->assertMediaStored($assetId, 'cover');
+
+        $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}static_assets/{$assetId}",
+            [
+                '_method' => 'PATCH',
+                'avatar' => UploadedFile::fake()->image('avatar.jpg', 320, 320),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1400, 700),
+            ],
+        );
+
+        $updateResponse->assertStatus(200);
+        $avatarUrl = (string) $updateResponse->json('data.avatar_url');
+        $coverUrl = (string) $updateResponse->json('data.cover_url');
+        $this->assertStringContainsString("/api/v1/media/static-assets/{$assetId}/avatar", $avatarUrl);
+        $this->assertStringContainsString("/api/v1/media/static-assets/{$assetId}/cover", $coverUrl);
+
+        $this->get("{$this->base_tenant_url}api/v1/media/static-assets/{$assetId}/avatar")->assertOk();
+        $this->get("{$this->base_tenant_url}api/v1/media/static-assets/{$assetId}/cover")->assertOk();
+
+        $this->assertMediaStored($assetId, 'avatar');
+        $this->assertMediaStored($assetId, 'cover');
+        Storage::disk('public')->assertMissing($originalAvatarPath);
+        Storage::disk('public')->assertMissing($originalCoverPath);
+    }
+
+    public function test_static_asset_remove_avatar_and_cover_clears_media(): void
+    {
+        Storage::fake('public');
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia Remove',
+                'location' => ['lat' => -20.0, 'lng' => -40.0],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 256, 256),
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $assetId = (string) $createResponse->json('data.id');
+        $avatarPath = $this->assertMediaStored($assetId, 'avatar');
+        $coverPath = $this->assertMediaStored($assetId, 'cover');
+
+        $removeResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_assets/{$assetId}",
+            [
+                'remove_avatar' => true,
+                'remove_cover' => true,
+            ],
+            $this->getHeaders()
+        );
+
+        $removeResponse->assertStatus(200);
+        $removeResponse->assertJsonPath('data.avatar_url', null);
+        $removeResponse->assertJsonPath('data.cover_url', null);
+        Storage::disk('public')->assertMissing($avatarPath);
+        Storage::disk('public')->assertMissing($coverPath);
+    }
+
+    public function test_static_asset_update_rejects_invalid_remove_flags(): void
+    {
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $created = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia Validation',
+                'location' => ['lat' => -21.0, 'lng' => -41.0],
+            ],
+            $this->getHeaders()
+        );
+
+        $created->assertStatus(201);
+        $assetId = (string) $created->json('data.id');
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_assets/{$assetId}",
+            [
+                'remove_avatar' => 'not-a-boolean',
+                'remove_cover' => 'not-a-boolean',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['remove_avatar', 'remove_cover']);
+    }
+
     public function test_static_assets_index_supports_text_search_query_param(): void
     {
         StaticAsset::query()->delete();
@@ -394,6 +585,23 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $headers['Accept'] = 'application/json';
 
         return $headers;
+    }
+
+    private function assertMediaStored(string $assetId, string $kind): string
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $baseDir = "tenants/{$tenant->slug}/static_assets/{$assetId}";
+
+        foreach (['jpg', 'jpeg', 'png', 'webp'] as $extension) {
+            $path = "{$baseDir}/{$kind}.{$extension}";
+            if (Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->assertExists($path);
+
+                return $path;
+            }
+        }
+
+        $this->fail("Expected {$kind} media file for static asset [{$assetId}] to exist.");
     }
 
     private function initializeSystem(): void

@@ -18,6 +18,7 @@ trait EnsuresSystemInitialization
         $hasTenant = Tenant::query()->exists();
 
         if ($hasLandlordUser && $hasTenant) {
+            $this->hydrateFromDatabase();
             static::$systemInitialized = true;
 
             return;
