@@ -88,7 +88,7 @@ class ApiV1AdminTenantTest extends TestCaseAuthenticated
     {
 
         $response = $this->tenantsCreate([
-            'name' => fake()->company(),
+            'name' => 'tenant-subdomain-conflict-'.Str::uuid()->toString(),
             'subdomain' => $this->landlord->tenant_disposable->subdomain,
         ]);
 
