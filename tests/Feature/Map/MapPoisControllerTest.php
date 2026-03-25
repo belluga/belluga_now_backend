@@ -87,6 +87,62 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertStatus(401);
     }
 
+    public function test_map_poi_lookup_returns_poi_by_typed_reference(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+        $exactKey = $this->exactKey($location);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-lookup',
+            'ref_slug' => 'event-lookup',
+            'ref_path' => '/event/event-lookup',
+            'name' => 'Event Lookup',
+            'subtitle' => 'Lookup subtitle',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 70,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-same-stack',
+            'ref_slug' => 'static-same-stack',
+            'ref_path' => '/static/static-same-stack',
+            'name' => 'Static Same Stack',
+            'category' => 'beach',
+            'source_type' => 'poi',
+            'location' => $location,
+            'priority' => 20,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois/lookup?ref_type=event&ref_id=event-lookup"
+        );
+        $response->assertStatus(200);
+
+        $this->assertNotSame('', (string) $response->json('tenant_id'));
+        $response->assertJsonPath('poi.ref_type', 'event');
+        $response->assertJsonPath('poi.ref_id', 'event-lookup');
+        $response->assertJsonPath('poi.ref_slug', 'event-lookup');
+        $response->assertJsonPath('poi.ref_path', '/event/event-lookup');
+        $response->assertJsonPath('poi.stack_key', $exactKey);
+        $response->assertJsonPath('poi.stack_count', 2);
+    }
+
+    public function test_map_poi_lookup_returns_not_found_for_unknown_reference(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois/lookup?ref_type=event&ref_id=event-missing"
+        );
+        $response->assertStatus(404);
+        $response->assertJsonPath('message', 'POI not found.');
+    }
+
     public function test_map_pois_returns_stacks(): void
     {
         $location = $this->point(-40.0, -20.0);
