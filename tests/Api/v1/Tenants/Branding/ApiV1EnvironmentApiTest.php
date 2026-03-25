@@ -101,11 +101,12 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $tenant = $this->currentTenant();
         $this->snapshotTenant($tenant);
         $rootHost = $this->rootHost();
+        $canonicalSubdomain = $tenant->subdomain;
+        $legacyFallbackDomain = "{$canonicalSubdomain}-legacy.$rootHost";
 
-        $tenant->update(['subdomain' => 'guarappari']);
         $tenant->domains()->delete();
         $tenant->domains()->create([
-            'path' => "guarapari.$rootHost",
+            'path' => $legacyFallbackDomain,
             'type' => 'web',
         ]);
         $tenant->makeCurrent();
@@ -113,12 +114,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response = $this->get("{$this->base_api_tenant}environment");
 
         $response->assertStatus(200);
+        $response->assertJsonPath('type', 'tenant');
         $this->assertSame(
-            "guarappari.$rootHost",
+            "{$canonicalSubdomain}.$rootHost",
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
         $this->assertSame(
-            ["guarappari.$rootHost"],
+            ["{$canonicalSubdomain}.$rootHost"],
             $response->json('domains')
         );
     }
@@ -195,7 +197,29 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
     private function currentTenant(): Tenant
     {
-        return Tenant::query()->firstOrFail();
+        $tenant = Tenant::query()
+            ->where('subdomain', $this->tenant->subdomain)
+            ->first();
+
+        if ($tenant instanceof Tenant) {
+            return $tenant;
+        }
+
+        if (! empty($this->tenant->slug)) {
+            $bySlug = Tenant::query()
+                ->where('slug', $this->tenant->slug)
+                ->first();
+
+            if ($bySlug instanceof Tenant) {
+                return $bySlug;
+            }
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Unable to resolve canonical tenant for Environment API test context (subdomain: %s, slug: %s).',
+            (string) $this->tenant->subdomain,
+            (string) $this->tenant->slug
+        ));
     }
 
     private function snapshotTenant(Tenant $tenant): void
