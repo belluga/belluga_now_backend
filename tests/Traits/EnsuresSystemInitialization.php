@@ -62,7 +62,9 @@ trait EnsuresSystemInitialization
         static::$systemInitialized = true;
     }
 
-    protected function hydrateFromDatabase(): void
+    protected function hydrateFromDatabase(
+        bool $ensureCrossTenantUsers = false
+    ): void
     {
         $user = LandlordUser::query()->first();
         $tenant = Tenant::query()->first();
@@ -78,7 +80,9 @@ trait EnsuresSystemInitialization
             $this->landlord->user_superadmin->user_id = (string) $user->_id;
             $this->landlord->user_superadmin->token = $token;
 
-            $this->ensureCrossTenantUsers();
+            if ($ensureCrossTenantUsers) {
+                $this->ensureCrossTenantUsers();
+            }
         }
 
         if ($role) {
