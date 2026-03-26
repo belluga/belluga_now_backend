@@ -10,14 +10,18 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Application\StaticAssets\StaticAssetManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\TenantSettings;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\Model\BSONDocument;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -104,6 +108,13 @@ class MapPoisControllerTest extends TestCaseTenant
             'location' => $location,
             'priority' => 70,
             'is_active' => true,
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'event',
+                'color' => '#3355AA',
+                'icon_color' => '#FFFFFF',
+                'source' => 'type_definition',
+            ],
             'exact_key' => $exactKey,
         ]);
         MapPoi::create([
@@ -132,6 +143,11 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('poi.ref_path', '/event/event-lookup');
         $response->assertJsonPath('poi.stack_key', $exactKey);
         $response->assertJsonPath('poi.stack_count', 2);
+        $response->assertJsonPath('poi.visual.mode', 'icon');
+        $response->assertJsonPath('poi.visual.icon', 'event');
+        $response->assertJsonPath('poi.visual.color', '#3355AA');
+        $response->assertJsonPath('poi.visual.icon_color', '#FFFFFF');
+        $response->assertJsonPath('poi.visual.source', 'type_definition');
     }
 
     public function test_map_poi_lookup_returns_not_found_for_unknown_reference(): void
@@ -160,6 +176,13 @@ class MapPoisControllerTest extends TestCaseTenant
             'location' => $location,
             'priority' => 80,
             'is_active' => true,
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'celebration',
+                'color' => '#FF2200',
+                'icon_color' => '#FFFFFF',
+                'source' => 'type_definition',
+            ],
             'exact_key' => $exactKey,
         ]);
 
@@ -190,8 +213,58 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertArrayHasKey('ref_slug', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('ref_path', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('source_type', $stacks[0]['top_poi']);
+        $this->assertArrayHasKey('visual', $stacks[0]['top_poi']);
+        $this->assertSame('icon', $stacks[0]['top_poi']['visual']['mode'] ?? null);
+        $this->assertSame('#FFFFFF', $stacks[0]['top_poi']['visual']['icon_color'] ?? null);
         $this->assertArrayNotHasKey('tags', $stacks[0]['top_poi']);
         $this->assertArrayNotHasKey('taxonomy_terms', $stacks[0]['top_poi']);
+    }
+
+    public function test_map_pois_exposes_visual_from_bson_type_projection_chain(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+        MapPoi::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'poi_visual' => new BSONDocument([
+                'mode' => 'icon',
+                'icon' => 'restaurant',
+                'color' => '#eb2528',
+                'icon_color' => '#ffffff',
+            ]),
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'BSON Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromAccountProfile(
+            $profile->fresh()
+        );
+
+        $response = $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('stacks.0.top_poi.ref_type', 'account_profile');
+        $response->assertJsonPath('stacks.0.top_poi.ref_id', (string) $profile->_id);
+        $response->assertJsonPath('stacks.0.top_poi.visual.mode', 'icon');
+        $response->assertJsonPath('stacks.0.top_poi.visual.icon', 'restaurant');
+        $response->assertJsonPath('stacks.0.top_poi.visual.color', '#EB2528');
+        $response->assertJsonPath('stacks.0.top_poi.visual.icon_color', '#FFFFFF');
     }
 
     public function test_map_near_returns_cards_with_tags_and_taxonomy(): void
@@ -328,6 +401,13 @@ class MapPoisControllerTest extends TestCaseTenant
                         'key' => 'events',
                         'label' => 'Eventos em destaque',
                         'image_uri' => 'https://tenant-zeta.test/map-filters/events/image?v=1710000000',
+                        'override_marker' => true,
+                        'marker_override' => [
+                            'mode' => 'icon',
+                            'icon' => 'celebration',
+                            'color' => '#FF2200',
+                            'icon_color' => '#101010',
+                        ],
                         'query' => [
                             'source' => 'event',
                         ],
@@ -335,6 +415,11 @@ class MapPoisControllerTest extends TestCaseTenant
                     [
                         'key' => 'praia',
                         'label' => 'Praias',
+                        'override_marker' => true,
+                        'marker_override' => [
+                            'mode' => 'image',
+                            'image_uri' => 'https://tenant-zeta.test/map-filters/praia/image?v=1710000002',
+                        ],
                         'query' => [
                             'source' => 'static_asset',
                             'types' => ['beach_spot'],
@@ -390,10 +475,74 @@ class MapPoisControllerTest extends TestCaseTenant
         parse_str((string) parse_url($imageUri, PHP_URL_QUERY), $imageQuery);
         $this->assertSame('1710000000', $imageQuery['v'] ?? null);
         $response->assertJsonPath('categories.0.query.source', 'event');
+        $response->assertJsonPath('categories.0.override_marker', true);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('categories.0.marker_override.icon', 'celebration');
+        $response->assertJsonPath('categories.0.marker_override.color', '#FF2200');
+        $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
         $response->assertJsonPath('categories.1.key', 'praia');
         $response->assertJsonPath('categories.1.label', 'Praias');
         $response->assertJsonPath('categories.1.query.source', 'static_asset');
         $response->assertJsonPath('categories.1.query.types.0', 'beach_spot');
+        $response->assertJsonPath('categories.1.override_marker', true);
+        $response->assertJsonPath('categories.1.marker_override.mode', 'image');
+        $overrideImageUri = (string) $response->json('categories.1.marker_override.image_uri');
+        $this->assertSame('/api/v1/media/map-filters/praia', parse_url($overrideImageUri, PHP_URL_PATH));
+    }
+
+    public function test_map_filters_normalize_bson_marker_override_icon_color(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'poi_time_window_days' => [
+                    'past' => 1,
+                    'future' => 30,
+                ],
+                'filters' => [
+                    new BSONDocument([
+                        'key' => 'events',
+                        'label' => 'Eventos',
+                        'override_marker' => true,
+                        'marker_override' => new BSONDocument([
+                            'mode' => 'icon',
+                            'icon' => 'music',
+                            'color' => '#C6141F',
+                            'icon_color' => '#101010',
+                        ]),
+                        'query' => new BSONDocument([
+                            'source' => 'event',
+                        ]),
+                    ]),
+                ],
+            ],
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-visual',
+            'ref_slug' => 'event-visual',
+            'ref_path' => '/event/event-visual',
+            'name' => 'Event Visual',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 60,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('categories.0.key', 'events');
+        $response->assertJsonPath('categories.0.query.source', 'event');
+        $response->assertJsonPath('categories.0.override_marker', true);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
+        $response->assertJsonPath('categories.0.marker_override.color', '#C6141F');
+        $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
     }
 
     public function test_map_filters_returns_configured_filters_even_when_count_is_zero(): void

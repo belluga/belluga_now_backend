@@ -18,6 +18,7 @@ class AccountProfileRegistrySeeder
                 'type' => 'personal',
                 'label' => 'Personal',
                 'allowed_taxonomies' => [],
+                'poi_visual' => null,
                 'capabilities' => [
                     'is_favoritable' => false,
                     'is_poi_enabled' => false,
@@ -28,6 +29,7 @@ class AccountProfileRegistrySeeder
                 'type' => 'artist',
                 'label' => 'Artist',
                 'allowed_taxonomies' => [],
+                'poi_visual' => null,
                 'capabilities' => [
                     'is_favoritable' => true,
                     'is_poi_enabled' => false,
@@ -38,6 +40,11 @@ class AccountProfileRegistrySeeder
                 'type' => 'venue',
                 'label' => 'Venue',
                 'allowed_taxonomies' => [],
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                    'color' => '#E53935',
+                ],
                 'capabilities' => [
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,

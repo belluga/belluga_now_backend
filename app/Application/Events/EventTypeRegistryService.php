@@ -63,6 +63,7 @@ class EventTypeRegistryService
             'description' => $this->normalizeNullableString($model->description ?? null),
             'icon' => $this->normalizeNullableString($model->icon ?? null),
             'color' => $this->normalizeNullableString($model->color ?? null),
+            'icon_color' => $this->normalizeNullableString($model->icon_color ?? null),
         ];
     }
 

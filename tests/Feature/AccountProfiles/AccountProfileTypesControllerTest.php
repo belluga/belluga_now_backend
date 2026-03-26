@@ -79,6 +79,12 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'type' => 'venue',
                 'label' => 'Venue',
                 'allowed_taxonomies' => ['cuisine'],
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                    'color' => '#FF8800',
+                    'icon_color' => '#101010',
+                ],
                 'capabilities' => [
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
@@ -90,6 +96,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.type', 'venue');
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
+        $response->assertJsonPath('data.poi_visual.mode', 'icon');
+        $response->assertJsonPath('data.poi_visual.icon', 'place');
+        $response->assertJsonPath('data.poi_visual.color', '#FF8800');
+        $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
     }
 
     public function test_profile_type_create_validation(): void
@@ -101,6 +111,28 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(422);
+    }
+
+    public function test_profile_type_create_rejects_invalid_poi_visual_icon_without_color_and_icon_color(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'venue',
+                'label' => 'Venue',
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'poi_visual.color',
+            'poi_visual.icon_color',
+        ]);
     }
 
     public function test_profile_type_create_rejects_duplicate_type(): void
@@ -200,6 +232,73 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.label', 'Restaurante Atualizado');
     }
 
+    public function test_profile_type_map_poi_projection_impact_returns_projection_count(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+        MapPoi::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $first = AccountProfile::create([
+            'account_id' => 'account-1',
+            'profile_type' => 'venue',
+            'display_name' => 'Venue One',
+            'is_active' => true,
+        ]);
+        $second = AccountProfile::create([
+            'account_id' => 'account-2',
+            'profile_type' => 'venue',
+            'display_name' => 'Venue Two',
+            'is_active' => true,
+        ]);
+        $other = AccountProfile::create([
+            'account_id' => 'account-3',
+            'profile_type' => 'artist',
+            'display_name' => 'Artist',
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $first->_id,
+            'name' => 'Venue One',
+            'category' => 'venue',
+            'is_active' => true,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $second->_id,
+            'name' => 'Venue Two',
+            'category' => 'venue',
+            'is_active' => true,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $other->_id,
+            'name' => 'Artist',
+            'category' => 'artist',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue/map_poi_projection_impact",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.profile_type', 'venue');
+        $response->assertJsonPath('data.projection_count', 2);
+    }
+
     public function test_profile_type_update_allows_type_rename_and_propagates_dependents(): void
     {
         TenantProfileType::query()->delete();
@@ -220,6 +319,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'account_id' => 'account-123',
             'profile_type' => 'personal',
             'display_name' => 'Profile One',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
             'is_active' => true,
         ]);
 
@@ -277,6 +380,148 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     ->category ?? ''
             )
         );
+    }
+
+    public function test_profile_type_update_disables_poi_and_hard_deletes_related_projections(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+        MapPoi::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-hard-delete',
+            'profile_type' => 'venue',
+            'display_name' => 'Venue One',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $profile->_id,
+            'source_checkpoint' => 1,
+            'name' => 'Venue One',
+            'category' => 'venue',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue",
+            [
+                'capabilities' => [
+                    'is_poi_enabled' => false,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $this->assertNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', (string) $profile->_id)
+                ->first()
+        );
+    }
+
+    public function test_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+        MapPoi::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'poi_visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#AA3300',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-visual-change',
+            'profile_type' => 'venue',
+            'display_name' => 'Venue One',
+            'avatar_url' => 'https://cdn.example.com/account-profile-avatar.png',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $profile->_id,
+            'source_checkpoint' => 1,
+            'name' => 'Venue One',
+            'category' => 'venue',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#AA3300',
+                'icon_color' => '#FFFFFF',
+                'source' => 'type_definition',
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue",
+            [
+                'poi_visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'avatar',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'avatar');
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->firstOrFail();
+
+        $this->assertSame('image', data_get($projection->visual, 'mode'));
+        $this->assertSame(
+            'https://cdn.example.com/account-profile-avatar.png',
+            data_get($projection->visual, 'image_uri')
+        );
+        $this->assertSame('item_media', data_get($projection->visual, 'source'));
     }
 
     public function test_profile_type_update_rejects_duplicate_type_rename(): void

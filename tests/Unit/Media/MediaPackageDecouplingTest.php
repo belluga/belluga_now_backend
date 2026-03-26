@@ -28,4 +28,3 @@ class MediaPackageDecouplingTest extends TestCase
         }
     }
 }
-

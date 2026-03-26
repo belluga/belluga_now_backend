@@ -796,6 +796,7 @@ class EventQueryService
                 'description' => $type['description'] ?? null,
                 'icon' => $type['icon'] ?? null,
                 'color' => $type['color'] ?? null,
+                'icon_color' => $type['icon_color'] ?? null,
             ],
             'title' => (string) ($event->title ?? ''),
             'content' => (string) ($event->content ?? ''),

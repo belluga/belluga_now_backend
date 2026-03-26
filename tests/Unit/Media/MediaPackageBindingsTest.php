@@ -20,4 +20,3 @@ class MediaPackageBindingsTest extends TestCase
         $this->assertInstanceOf(ModelMediaService::class, $this->app->make(ModelMediaService::class));
     }
 }
-

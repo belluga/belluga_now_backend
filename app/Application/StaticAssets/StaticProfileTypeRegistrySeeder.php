@@ -19,6 +19,11 @@ class StaticProfileTypeRegistrySeeder
                 'label' => 'POI',
                 'map_category' => 'poi',
                 'allowed_taxonomies' => [],
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                    'color' => '#1E88E5',
+                ],
                 'capabilities' => [
                     'is_poi_enabled' => true,
                     'has_bio' => true,

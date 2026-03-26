@@ -57,6 +57,20 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
                         ? $filter['image_uri']
                         : null,
                 );
+
+                if (
+                    (bool) ($filter['override_marker'] ?? false)
+                    && is_array($filter['marker_override'] ?? null)
+                    && strtolower(trim((string) ($filter['marker_override']['mode'] ?? ''))) === 'image'
+                ) {
+                    $filter['marker_override']['image_uri'] = $this->mapFilterImageStorageService->normalizePublicUrl(
+                        baseUrl: $baseUrl,
+                        key: $key,
+                        rawImageUri: isset($filter['marker_override']['image_uri']) && is_string($filter['marker_override']['image_uri'])
+                            ? $filter['marker_override']['image_uri']
+                            : null,
+                    );
+                }
             }
 
             $normalizedFilters[] = $filter;

@@ -19,7 +19,8 @@ class EventTypeStoreRequest extends FormRequest
             'slug' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'description' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
             'icon' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
-            'color' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'color' => ['sometimes', 'nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'icon_color' => ['sometimes', 'nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ];
     }
 }

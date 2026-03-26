@@ -8,4 +8,3 @@ interface TenantMediaScopeResolverContract
 {
     public function resolveTenantScope(?string $baseUrl): ?string;
 }
-

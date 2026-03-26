@@ -28,4 +28,3 @@ class MediaServiceProvider extends ServiceProvider
         });
     }
 }
-

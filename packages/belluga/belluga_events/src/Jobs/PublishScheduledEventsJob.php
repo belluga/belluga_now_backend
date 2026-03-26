@@ -16,8 +16,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Spatie\Multitenancy\Jobs\TenantAware;
 use RuntimeException;
+use Spatie\Multitenancy\Jobs\TenantAware;
 
 class PublishScheduledEventsJob implements ShouldQueue, TenantAware
 {

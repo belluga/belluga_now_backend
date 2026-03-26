@@ -20,7 +20,10 @@ class UpsertMapPoiFromAccountProfileJob implements ShouldQueue, TenantAware
     use Queueable;
     use SerializesModels;
 
-    public function __construct(private readonly string $profileId) {}
+    public function __construct(
+        private readonly string $profileId,
+        private readonly ?int $forcedCheckpoint = null,
+    ) {}
 
     public function handle(
         MapPoiProjectionService $projectionService,
@@ -34,6 +37,6 @@ class UpsertMapPoiFromAccountProfileJob implements ShouldQueue, TenantAware
             return;
         }
 
-        $projectionService->upsertFromAccountProfile($profile);
+        $projectionService->upsertFromAccountProfile($profile, $this->forcedCheckpoint);
     }
 }

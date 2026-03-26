@@ -642,6 +642,7 @@ class EventManagementService
             'description' => $description === '' ? null : $description,
             'icon' => $resolved['icon'] ?? null,
             'color' => $resolved['color'] ?? null,
+            'icon_color' => $resolved['icon_color'] ?? null,
         ];
     }
 

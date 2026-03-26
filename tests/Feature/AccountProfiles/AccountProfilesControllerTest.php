@@ -16,6 +16,7 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -417,6 +418,52 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $created->assertStatus(201);
         $created->assertJsonPath('data.account_profile.profile_type', 'venue');
+    }
+
+    public function test_account_onboarding_projects_map_poi_with_type_visual_snapshot(): void
+    {
+        MapPoi::query()->delete();
+
+        TenantProfileType::query()
+            ->where('type', 'venue')
+            ->update([
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'restaurant',
+                    'color' => '#EB2528',
+                    'icon_color' => '#101010',
+                ],
+            ]);
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Venue Visual Projection',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.67134,
+                    'lng' => -40.49540,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $profileId = (string) $response->json('data.account_profile.id');
+        $this->assertNotSame('', $profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame('icon', data_get($projection->visual, 'mode'));
+        $this->assertSame('restaurant', data_get($projection->visual, 'icon'));
+        $this->assertSame('#EB2528', data_get($projection->visual, 'color'));
+        $this->assertSame('#101010', data_get($projection->visual, 'icon_color'));
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
     }
 
     public function test_account_profile_create_stores_avatar_and_cover_uploads(): void

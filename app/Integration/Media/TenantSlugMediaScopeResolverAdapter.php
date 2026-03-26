@@ -73,4 +73,3 @@ final class TenantSlugMediaScopeResolverAdapter implements TenantMediaScopeResol
         return Tenant::query()->where('subdomain', $subdomain)->first();
     }
 }
-

@@ -29,4 +29,14 @@ class MapPoiRegistryAdapter implements MapPoiRegistryContract
     {
         return $this->staticProfiles->resolveMapCategory($profileType);
     }
+
+    public function resolveAccountProfilePoiVisual(string $profileType): ?array
+    {
+        return $this->accountProfiles->resolvePoiVisual($profileType);
+    }
+
+    public function resolveStaticAssetPoiVisual(string $profileType): ?array
+    {
+        return $this->staticProfiles->resolvePoiVisual($profileType);
+    }
 }
