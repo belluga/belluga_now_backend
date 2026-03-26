@@ -52,7 +52,13 @@ class TenantLabels extends Labels
             $this->slug = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.slug');
+            $persistedSlug = $this->getGlobal($this->base_label.'.slug');
+
+            if ($persistedSlug) {
+                return $persistedSlug;
+            }
+
+            return Str::slug($this->name);
         }
     }
 

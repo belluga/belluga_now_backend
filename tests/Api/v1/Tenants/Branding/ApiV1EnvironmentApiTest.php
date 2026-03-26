@@ -197,29 +197,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
     private function currentTenant(): Tenant
     {
-        $tenant = Tenant::query()
-            ->where('subdomain', $this->tenant->subdomain)
-            ->first();
-
-        if ($tenant instanceof Tenant) {
-            return $tenant;
-        }
-
-        if (! empty($this->tenant->slug)) {
-            $bySlug = Tenant::query()
-                ->where('slug', $this->tenant->slug)
-                ->first();
-
-            if ($bySlug instanceof Tenant) {
-                return $bySlug;
-            }
-        }
-
-        throw new \RuntimeException(sprintf(
-            'Unable to resolve canonical tenant for Environment API test context (subdomain: %s, slug: %s).',
-            (string) $this->tenant->subdomain,
-            (string) $this->tenant->slug
-        ));
+        return $this->resolveCanonicalTenant($this->tenant);
     }
 
     private function snapshotTenant(Tenant $tenant): void

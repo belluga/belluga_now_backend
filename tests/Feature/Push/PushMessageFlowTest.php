@@ -112,7 +112,7 @@ class PushMessageFlowTest extends TestCase
 
         $this->seedPushSettings();
 
-        $tenant = Tenant::query()->firstOrFail();
+        $tenant = $this->resolvePrimaryPushTenant();
         $tenant->makeCurrent();
         $this->tenantHost = (string) parse_url($tenant->getMainDomain(), PHP_URL_HOST);
         $this->withServerVariables([
@@ -3747,6 +3747,28 @@ class PushMessageFlowTest extends TestCase
         ];
 
         return array_replace_recursive($payload, $overrides);
+    }
+
+    protected function resolveTenantForAccountSeed(): Tenant
+    {
+        return $this->resolvePrimaryPushTenant();
+    }
+
+    private function resolvePrimaryPushTenant(): Tenant
+    {
+        $tenant = Tenant::query()
+            ->where('subdomain', 'tenant-zeta')
+            ->first();
+
+        if (! $tenant instanceof Tenant) {
+            throw new \RuntimeException('Unable to resolve push flow primary tenant (expected subdomain: tenant-zeta).');
+        }
+
+        $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
+        $this->landlord->tenant_primary->slug = $tenant->slug;
+        $this->landlord->tenant_primary->id = (string) $tenant->_id;
+
+        return $tenant;
     }
 
     /**
