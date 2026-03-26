@@ -18,6 +18,10 @@ trait EnsuresSystemInitialization
         $hasTenant = Tenant::query()->exists();
 
         if ($hasLandlordUser && $hasTenant) {
+            $this->hydrateFromDatabase(
+                syncCrossTenantUsers: true,
+                createCrossTenantUsers: true
+            );
             static::$systemInitialized = true;
 
             return;
@@ -26,7 +30,10 @@ trait EnsuresSystemInitialization
         static::$systemInitialized = false;
 
         if ($hasLandlordUser) {
-            $this->hydrateFromDatabase();
+            $this->hydrateFromDatabase(
+                syncCrossTenantUsers: true,
+                createCrossTenantUsers: true
+            );
             static::$systemInitialized = true;
 
             return;
@@ -61,10 +68,15 @@ trait EnsuresSystemInitialization
         static::$systemInitialized = true;
     }
 
-    protected function hydrateFromDatabase(): void
+    protected function hydrateFromDatabase(
+        bool $syncCrossTenantUsers = false,
+        bool $createCrossTenantUsers = false
+    ): void
     {
         $user = LandlordUser::query()->first();
-        $tenant = Tenant::query()->first();
+        $tenant = Tenant::query()->exists()
+            ? $this->resolveCanonicalTenant(allowSingleTenantContext: true)
+            : null;
         $role = LandlordRole::query()->first();
 
         if ($user) {
@@ -77,7 +89,9 @@ trait EnsuresSystemInitialization
             $this->landlord->user_superadmin->user_id = (string) $user->_id;
             $this->landlord->user_superadmin->token = $token;
 
-            $this->ensureCrossTenantUsers();
+            if ($syncCrossTenantUsers) {
+                $this->ensureCrossTenantUsers(createIfMissing: $createCrossTenantUsers);
+            }
         }
 
         if ($role) {
@@ -96,10 +110,7 @@ trait EnsuresSystemInitialization
 
     protected function makeTenantCurrent(): void
     {
-        $tenant = Tenant::query()->where('slug', $this->landlord->tenant_primary->slug)->first();
-        if ($tenant) {
-            $tenant->makeCurrent();
-        }
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
     }
 
     /**
@@ -152,7 +163,7 @@ trait EnsuresSystemInitialization
         ];
     }
 
-    protected function ensureCrossTenantUsers(): void
+    protected function ensureCrossTenantUsers(bool $createIfMissing = true): void
     {
         $adminEmail = 'cross-admin@belluga.test';
         $visitorEmail = 'cross-visitor@belluga.test';
@@ -161,13 +172,27 @@ trait EnsuresSystemInitialization
             ->where('emails', 'all', [$adminEmail])
             ->first();
 
-        if (! $crossAdmin) {
+        if (! $crossAdmin && $createIfMissing) {
             $crossAdmin = LandlordUser::create([
                 'name' => 'Cross Tenant Admin',
                 'emails' => [$adminEmail],
                 'password' => Hash::make('Secret!234'),
                 'identity_state' => 'registered',
             ]);
+        }
+
+        if ($crossAdmin) {
+            $crossAdmin->name = 'Cross Tenant Admin';
+            $crossAdmin->emails = [$adminEmail];
+            $crossAdmin->identity_state = 'registered';
+            $crossAdmin->password = Hash::make('Secret!234');
+            $crossAdmin->phones = [];
+            $crossAdmin->tenant_roles = [];
+            $crossAdmin->save();
+        }
+
+        if (! $crossAdmin) {
+            return;
         }
 
         $adminToken = $crossAdmin->createToken(
@@ -185,13 +210,27 @@ trait EnsuresSystemInitialization
             ->where('emails', 'all', [$visitorEmail])
             ->first();
 
-        if (! $crossVisitor) {
+        if (! $crossVisitor && $createIfMissing) {
             $crossVisitor = LandlordUser::create([
                 'name' => 'Cross Tenant Visitor',
                 'emails' => [$visitorEmail],
                 'password' => Hash::make('Secret!234'),
                 'identity_state' => 'registered',
             ]);
+        }
+
+        if ($crossVisitor) {
+            $crossVisitor->name = 'Cross Tenant Visitor';
+            $crossVisitor->emails = [$visitorEmail];
+            $crossVisitor->identity_state = 'registered';
+            $crossVisitor->password = Hash::make('Secret!234');
+            $crossVisitor->phones = [];
+            $crossVisitor->tenant_roles = [];
+            $crossVisitor->save();
+        }
+
+        if (! $crossVisitor) {
+            return;
         }
 
         $visitorToken = $crossVisitor->createToken(

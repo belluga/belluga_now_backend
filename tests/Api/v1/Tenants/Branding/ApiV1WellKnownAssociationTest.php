@@ -20,8 +20,7 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
 
     public function test_assetlinks_uses_tenant_settings_payload(): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.app');
 
         TenantSettings::query()->delete();
@@ -50,8 +49,7 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
 
     public function test_apple_app_site_association_uses_tenant_settings_payload(): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_IOS, 'com.guarappari.app');
 
         TenantSettings::query()->delete();
@@ -76,8 +74,7 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
 
     public function test_well_known_endpoints_return_json_fallback_when_tenant_credentials_are_missing(): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $tenant->domains()
             ->whereIn('type', [Tenant::DOMAIN_TYPE_APP_ANDROID, Tenant::DOMAIN_TYPE_APP_IOS])
             ->delete();
@@ -103,8 +100,7 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
 
     public function test_tenant_settings_take_precedence_over_landlord_fallback(): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.tenant.priority');
 
         LandlordSettings::query()->delete();

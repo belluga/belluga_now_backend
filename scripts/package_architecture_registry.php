@@ -31,4 +31,8 @@ return [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
     ],
+    'packages/belluga/belluga_media' => [
+        'integration_mode' => 'host-integrated',
+        'route_ownership' => 'host-owned-routes',
+    ],
 ];

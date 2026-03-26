@@ -10,6 +10,8 @@ return [
     Belluga\MapPois\MapPoisServiceProvider::class,
     Belluga\Invites\InvitesServiceProvider::class,
     Belluga\Favorites\FavoritesServiceProvider::class,
+    Belluga\Media\MediaServiceProvider::class,
+    App\Providers\PackageIntegration\MediaIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\SettingsIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\EventsIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\MapPoisIntegrationServiceProvider::class,

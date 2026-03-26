@@ -172,7 +172,7 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
         $response->assertStatus(200);
 
         $response_data = $response->json();
-        $this->assertEquals(4, count($response_data['data']));
+        $this->assertEquals(6, count($response_data['data']));
         $this->assertArrayHasKey('current_page', $response_data);
         $this->assertArrayHasKey('per_page', $response_data);
     }
@@ -187,7 +187,7 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
     public function test_list_archived(): void
     {
         $response = $this->userList();
-        $this->assertEquals(3, count($response['data']));
+        $this->assertEquals(5, count($response['data']));
 
         $response = $this->userListArchived();
         $this->assertEquals(1, count($response['data']));
@@ -199,7 +199,7 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(4, count($response['data']));
+        $this->assertEquals(6, count($response['data']));
     }
 
     public function test_user_show(): void
@@ -241,13 +241,13 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
     public function test_user_delete_flow(): void
     {
         $response = $this->userList();
-        $this->assertEquals(4, count($response['data']));
+        $this->assertEquals(6, count($response['data']));
 
         $response = $this->userSoftDelete($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(3, count($response['data']));
+        $this->assertEquals(5, count($response['data']));
 
         $response = $this->userListArchived();
         $this->assertEquals(1, count($response['data']));
@@ -256,7 +256,7 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(3, count($response['data']));
+        $this->assertEquals(5, count($response['data']));
 
         $response = $this->userListArchived();
         $this->assertEquals(0, count($response['data']));

@@ -12,7 +12,7 @@ trait SeedsTenantAccounts
 {
     protected function seedAccountWithRole(array $permissions = ['account-users:*']): array
     {
-        $tenant = Tenant::query()->firstOrFail();
+        $tenant = $this->resolveTenantForAccountSeed();
         $tenant->makeCurrent();
 
         $account = Account::create([
@@ -27,5 +27,10 @@ trait SeedsTenantAccounts
         ]);
 
         return [$account, $role];
+    }
+
+    protected function resolveTenantForAccountSeed(): Tenant
+    {
+        return $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
     }
 }
