@@ -10,6 +10,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -441,7 +442,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
 
         MapPoi::create([
             'ref_type' => 'static',
-            'ref_id' => (string) $asset->_id,
+            'ref_id' => new ObjectId((string) $asset->_id),
             'source_checkpoint' => 1,
             'name' => 'Beach One',
             'category' => 'beach',
@@ -464,12 +465,16 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
-        $this->assertNull(
-            MapPoi::query()
-                ->where('ref_type', 'static')
-                ->where('ref_id', (string) $asset->_id)
-                ->first()
-        );
+        $assetId = (string) $asset->_id;
+        $remaining = MapPoi::query()
+            ->where('ref_type', 'static')
+            ->where(function ($query) use ($assetId): void {
+                $query->where('ref_id', $assetId)
+                    ->orWhere('ref_id', new ObjectId($assetId));
+            })
+            ->count();
+
+        $this->assertSame(0, $remaining);
     }
 
     public function test_static_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void
@@ -507,7 +512,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
 
         MapPoi::create([
             'ref_type' => 'static',
-            'ref_id' => (string) $asset->_id,
+            'ref_id' => new ObjectId((string) $asset->_id),
             'source_checkpoint' => 1,
             'name' => 'Beach One',
             'category' => 'beach',
@@ -539,11 +544,16 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'cover');
-
-        $projection = MapPoi::query()
+        $assetId = (string) $asset->_id;
+        $projectionQuery = MapPoi::query()
             ->where('ref_type', 'static')
-            ->where('ref_id', (string) $asset->_id)
-            ->firstOrFail();
+            ->where(function ($query) use ($assetId): void {
+                $query->where('ref_id', $assetId)
+                    ->orWhere('ref_id', new ObjectId($assetId));
+            });
+
+        $this->assertSame(1, $projectionQuery->count());
+        $projection = $projectionQuery->firstOrFail();
 
         $this->assertSame('image', data_get($projection->visual, 'mode'));
         $this->assertSame(

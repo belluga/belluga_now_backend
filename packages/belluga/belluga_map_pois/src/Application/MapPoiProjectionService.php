@@ -9,6 +9,7 @@ use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
+use MongoDB\BSON\ObjectId;
 
 class MapPoiProjectionService
 {
@@ -20,10 +21,10 @@ class MapPoiProjectionService
 
     public function deleteByRef(string $refType, string $refId): void
     {
-        MapPoi::query()
-            ->where('ref_type', $refType)
-            ->where('ref_id', $refId)
-            ->delete();
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdConstraint($query, $refId);
+        $query->delete();
     }
 
     public function upsertFromAccountProfile(object $profile, ?int $forcedCheckpoint = null): void
@@ -233,10 +234,10 @@ class MapPoiProjectionService
     private function deactivateByRef(string $refType, string $refId, int $checkpoint): void
     {
         /** @var MapPoi|null $existing */
-        $existing = MapPoi::query()
-            ->where('ref_type', $refType)
-            ->where('ref_id', $refId)
-            ->first();
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdConstraint($query, $refId);
+        $existing = $query->first();
 
         if (! $existing) {
             return;
@@ -271,10 +272,10 @@ class MapPoiProjectionService
         $incomingCheckpoint = (int) ($payload['source_checkpoint'] ?? 0);
 
         /** @var MapPoi|null $existing */
-        $existing = MapPoi::query()
-            ->where('ref_type', $refType)
-            ->where('ref_id', $refId)
-            ->first();
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdConstraint($query, $refId);
+        $existing = $query->first();
 
         if ($existing) {
             $currentCheckpoint = (int) ($existing->source_checkpoint ?? 0);
@@ -312,6 +313,42 @@ class MapPoiProjectionService
             'effective_enabled' => $tenantAvailable && $eventEnabled,
             'discovery_scope' => $discoveryScope,
         ];
+    }
+
+    /**
+     * @param  mixed  $query
+     */
+    private function applyRefIdConstraint($query, string $refId): void
+    {
+        [$stringRefId, $objectRefId] = $this->buildRefIdAlternatives($refId);
+
+        $query->where(function ($nested) use ($stringRefId, $objectRefId): void {
+            $nested->where('ref_id', $stringRefId);
+            if ($objectRefId !== null) {
+                $nested->orWhere('ref_id', $objectRefId);
+            }
+        });
+    }
+
+    /**
+     * @return array{0: string, 1: ObjectId|null}
+     */
+    private function buildRefIdAlternatives(string $refId): array
+    {
+        $stringRefId = trim($refId);
+        if ($stringRefId === '') {
+            return ['', null];
+        }
+
+        if (preg_match('/^[a-f0-9]{24}$/i', $stringRefId) !== 1) {
+            return [$stringRefId, null];
+        }
+
+        try {
+            return [$stringRefId, new ObjectId($stringRefId)];
+        } catch (\Throwable) {
+            return [$stringRefId, null];
+        }
     }
 
     /**

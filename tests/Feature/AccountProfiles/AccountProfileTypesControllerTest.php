@@ -10,6 +10,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -411,7 +412,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         MapPoi::create([
             'ref_type' => 'account_profile',
-            'ref_id' => (string) $profile->_id,
+            'ref_id' => new ObjectId((string) $profile->_id),
             'source_checkpoint' => 1,
             'name' => 'Venue One',
             'category' => 'venue',
@@ -434,12 +435,16 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
-        $this->assertNull(
-            MapPoi::query()
-                ->where('ref_type', 'account_profile')
-                ->where('ref_id', (string) $profile->_id)
-                ->first()
-        );
+        $profileId = (string) $profile->_id;
+        $remaining = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where(function ($query) use ($profileId): void {
+                $query->where('ref_id', $profileId)
+                    ->orWhere('ref_id', new ObjectId($profileId));
+            })
+            ->count();
+
+        $this->assertSame(0, $remaining);
     }
 
     public function test_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void
@@ -478,7 +483,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         MapPoi::create([
             'ref_type' => 'account_profile',
-            'ref_id' => (string) $profile->_id,
+            'ref_id' => new ObjectId((string) $profile->_id),
             'source_checkpoint' => 1,
             'name' => 'Venue One',
             'category' => 'venue',
@@ -510,11 +515,16 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'avatar');
-
-        $projection = MapPoi::query()
+        $profileId = (string) $profile->_id;
+        $projectionQuery = MapPoi::query()
             ->where('ref_type', 'account_profile')
-            ->where('ref_id', (string) $profile->_id)
-            ->firstOrFail();
+            ->where(function ($query) use ($profileId): void {
+                $query->where('ref_id', $profileId)
+                    ->orWhere('ref_id', new ObjectId($profileId));
+            });
+
+        $this->assertSame(1, $projectionQuery->count());
+        $projection = $projectionQuery->firstOrFail();
 
         $this->assertSame('image', data_get($projection->visual, 'mode'));
         $this->assertSame(

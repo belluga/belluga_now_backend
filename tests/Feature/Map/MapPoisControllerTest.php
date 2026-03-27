@@ -545,6 +545,61 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
     }
 
+    public function test_map_filters_normalize_bson_marker_override_image_uri(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'poi_time_window_days' => [
+                    'past' => 1,
+                    'future' => 30,
+                ],
+                'filters' => [
+                    new BSONDocument([
+                        'key' => 'praia',
+                        'label' => 'Praias',
+                        'override_marker' => true,
+                        'marker_override' => new BSONDocument([
+                            'mode' => 'image',
+                            'image_uri' => 'https://tenant-zeta.test/map-filters/praia/image?v=1710000002',
+                        ]),
+                        'query' => new BSONDocument([
+                            'source' => 'static_asset',
+                            'types' => ['beach_spot'],
+                        ]),
+                    ]),
+                ],
+            ],
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-beach',
+            'ref_slug' => 'praia-azul',
+            'ref_path' => '/static/praia-azul',
+            'name' => 'Praia Azul',
+            'category' => 'beach',
+            'source_type' => 'beach_spot',
+            'location' => $location,
+            'priority' => 40,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($location),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('categories.0.key', 'praia');
+        $response->assertJsonPath('categories.0.override_marker', true);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'image');
+        $overrideImageUri = (string) $response->json('categories.0.marker_override.image_uri');
+        $this->assertNotSame('', $overrideImageUri);
+        $this->assertSame('/api/v1/media/map-filters/praia', parse_url($overrideImageUri, PHP_URL_PATH));
+        parse_str((string) parse_url($overrideImageUri, PHP_URL_QUERY), $imageQuery);
+        $this->assertSame('1710000002', $imageQuery['v'] ?? null);
+    }
+
     public function test_map_filters_returns_configured_filters_even_when_count_is_zero(): void
     {
         $location = $this->point(-40.0, -20.0);
