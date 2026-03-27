@@ -316,6 +316,8 @@ class MapPoiQueryService
      *   position: int,
      *   label: string,
      *   image_uri: ?string,
+     *   override_marker: bool,
+     *   marker_override: array<string, string>|null,
      *   query: array{
      *     source: ?string,
      *     types: array<int, string>,
@@ -379,11 +381,16 @@ class MapPoiQueryService
                 'key' => $key,
                 'label' => (string) ($metadata['label'] ?? $key),
                 'count' => $count,
+                'override_marker' => (bool) ($metadata['override_marker'] ?? false),
             ];
 
             $imageUri = $metadata['image_uri'] ?? null;
             if (is_string($imageUri) && trim($imageUri) !== '') {
                 $item['image_uri'] = trim($imageUri);
+            }
+            $markerOverride = $metadata['marker_override'] ?? null;
+            if (is_array($markerOverride) && $markerOverride !== []) {
+                $item['marker_override'] = $markerOverride;
             }
 
             if ($hasScopedQuery) {
@@ -546,6 +553,8 @@ class MapPoiQueryService
      *   position: int,
      *   label: string,
      *   image_uri: ?string,
+     *   override_marker: bool,
+     *   marker_override: array<string, string>|null,
      *   query: array{
      *     source: ?string,
      *     types: array<int, string>,
@@ -592,8 +601,12 @@ class MapPoiQueryService
                 $imageUri = trim($imageUri);
             }
 
-            $query = $this->normalizeConfiguredFilterQuery(
-                is_array($filter['query'] ?? null) ? $filter['query'] : []
+            $rawQuery = $this->normalizeDocument($filter['query'] ?? null);
+            $query = $this->normalizeConfiguredFilterQuery($rawQuery);
+            $rawMarkerOverride = $this->normalizeDocument($filter['marker_override'] ?? null);
+            [$overrideMarker, $markerOverride] = $this->normalizeConfiguredMarkerOverride(
+                $rawMarkerOverride === [] ? null : $rawMarkerOverride,
+                (bool) ($filter['override_marker'] ?? false),
             );
 
             $metadata[$key] = [
@@ -601,6 +614,8 @@ class MapPoiQueryService
                 'position' => $position,
                 'label' => $label,
                 'image_uri' => $imageUri,
+                'override_marker' => $overrideMarker,
+                'marker_override' => $markerOverride,
                 'query' => $query,
             ];
             $position++;
@@ -633,6 +648,64 @@ class MapPoiQueryService
                 $query['categories'] ?? ($query['category_keys'] ?? [])
             ),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $markerOverride
+     * @return array{0: bool, 1: array<string, string>|null}
+     */
+    private function normalizeConfiguredMarkerOverride(
+        ?array $markerOverride,
+        bool $overrideMarker,
+    ): array {
+        if (! $overrideMarker) {
+            return [false, null];
+        }
+
+        if (! is_array($markerOverride)) {
+            return [false, null];
+        }
+
+        $mode = strtolower(trim((string) ($markerOverride['mode'] ?? '')));
+        if ($mode === 'icon') {
+            $icon = trim((string) ($markerOverride['icon'] ?? ''));
+            $color = strtoupper(trim((string) ($markerOverride['color'] ?? '')));
+            $iconColor = strtoupper(trim((string) ($markerOverride['icon_color'] ?? '#FFFFFF')));
+            if (
+                $icon === ''
+                || preg_match('/^#[0-9A-F]{6}$/', $color) !== 1
+                || preg_match('/^#[0-9A-F]{6}$/', $iconColor) !== 1
+            ) {
+                return [false, null];
+            }
+
+            return [
+                true,
+                [
+                    'mode' => 'icon',
+                    'icon' => $icon,
+                    'color' => $color,
+                    'icon_color' => $iconColor,
+                ],
+            ];
+        }
+
+        if ($mode === 'image') {
+            $imageUri = trim((string) ($markerOverride['image_uri'] ?? ''));
+            if ($imageUri === '') {
+                return [false, null];
+            }
+
+            return [
+                true,
+                [
+                    'mode' => 'image',
+                    'image_uri' => $imageUri,
+                ],
+            ];
+        }
+
+        return [false, null];
     }
 
     /**

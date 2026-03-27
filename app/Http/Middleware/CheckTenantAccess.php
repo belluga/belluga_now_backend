@@ -2,8 +2,8 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Tenants\AccountUser;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Tenants\AccountUser;
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;

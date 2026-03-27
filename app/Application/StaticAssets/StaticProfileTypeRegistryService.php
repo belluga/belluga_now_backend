@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
+use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\StaticProfileType;
 
 class StaticProfileTypeRegistryService
 {
+    public function __construct(
+        private readonly PoiVisualNormalizer $poiVisualNormalizer,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -16,7 +21,7 @@ class StaticProfileTypeRegistryService
         return StaticProfileType::query()
             ->orderBy('type')
             ->get()
-            ->map(static function (StaticProfileType $type): array {
+            ->map(function (StaticProfileType $type): array {
                 $typeKey = trim((string) ($type->type ?? ''));
                 $mapCategory = trim((string) ($type->map_category ?? ''));
 
@@ -30,6 +35,7 @@ class StaticProfileTypeRegistryService
                             : [],
                         static fn ($value): bool => is_string($value) && $value !== ''
                     )),
+                    'poi_visual' => $this->poiVisualNormalizer->normalize($type->poi_visual ?? null),
                     'capabilities' => [
                         'is_poi_enabled' => (bool) ($type->capabilities['is_poi_enabled'] ?? false),
                         'has_bio' => (bool) ($type->capabilities['has_bio'] ?? false),
@@ -77,5 +83,16 @@ class StaticProfileTypeRegistryService
         $fallback = trim($profileType);
 
         return $fallback !== '' ? $fallback : 'static';
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    public function resolvePoiVisual(string $profileType): ?array
+    {
+        $definition = $this->typeDefinition($profileType);
+        $poiVisual = $definition['poi_visual'] ?? null;
+
+        return is_array($poiVisual) ? $poiVisual : null;
     }
 }

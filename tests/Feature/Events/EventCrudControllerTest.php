@@ -845,6 +845,36 @@ class EventCrudControllerTest extends TestCaseTenant
         ])->assertStatus(200);
     }
 
+    public function test_event_create_projects_map_poi_with_event_type_icon_color_snapshot(): void
+    {
+        $this->eventType->fill([
+            'icon' => 'music_note',
+            'color' => '#C6141F',
+            'icon_color' => '#101010',
+        ])->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $response->assertStatus(201);
+
+        $eventId = (string) $response->json('data.event_id');
+        $event = Event::query()->find($eventId);
+        $this->assertNotNull($event);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame('icon', data_get($projection->visual, 'mode'));
+        $this->assertSame('music_note', data_get($projection->visual, 'icon'));
+        $this->assertSame('#C6141F', data_get($projection->visual, 'color'));
+        $this->assertSame('#101010', data_get($projection->visual, 'icon_color'));
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
+    }
+
     public function test_event_create_online_supports_range_discovery_scope_for_map_poi_projection(): void
     {
         $this->patchEventsSettings([

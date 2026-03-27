@@ -4,15 +4,23 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Shared\MapPois\MapPoiProjectionRefService;
+use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
-use Belluga\MapPois\Models\Tenants\MapPoi;
+use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
-use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
 
 class AccountProfileRegistryManagementService
 {
+    public function __construct(
+        private readonly PoiVisualNormalizer $poiVisualNormalizer,
+        private readonly MapPoiProjectionRefService $mapPoiProjectionRefs,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -59,6 +67,17 @@ class AccountProfileRegistryManagementService
         }
 
         $entry = $this->mergeEntry($model, $payload, $nextType);
+        $currentCapabilities = is_array($model->capabilities ?? null)
+            ? $model->capabilities
+            : [];
+        $currentPoiEnabled = (bool) ($currentCapabilities['is_poi_enabled'] ?? false);
+        $nextCapabilities = is_array($entry['capabilities'] ?? null)
+            ? $entry['capabilities']
+            : [];
+        $nextPoiEnabled = (bool) ($nextCapabilities['is_poi_enabled'] ?? false);
+        $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->poi_visual ?? null);
+        $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['poi_visual'] ?? null);
+        $poiVisualChanged = $currentPoiVisual !== $nextPoiVisual;
 
         try {
             $model->fill($entry);
@@ -75,37 +94,62 @@ class AccountProfileRegistryManagementService
             ]);
         }
 
-        if ($nextType !== $currentType) {
+        $forcedCheckpoint = $this->toCheckpoint($model->updated_at ?? null);
+        $shouldRefreshMapProjection = $nextType !== $currentType
+            || $currentPoiEnabled !== $nextPoiEnabled
+            || $poiVisualChanged;
+
+        if ($shouldRefreshMapProjection) {
+            $queryType = $nextType === $currentType ? $nextType : $currentType;
             $profileIds = AccountProfile::query()
-                ->where('profile_type', $currentType)
+                ->where('profile_type', $queryType)
                 ->get(['_id'])
                 ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
                 ->all();
 
-            if ($profileIds !== []) {
+            if ($nextType !== $currentType && $profileIds !== []) {
                 AccountProfile::query()
                     ->where('profile_type', $currentType)
                     ->update(['profile_type' => $nextType]);
+            }
 
-                [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($profileIds);
-
-                if ($stringRefIds !== []) {
-                    MapPoi::query()
-                        ->where('ref_type', 'account_profile')
-                        ->whereIn('ref_id', $stringRefIds)
-                        ->update(['category' => $nextType]);
-                }
-
-                if ($objectRefIds !== []) {
-                    MapPoi::query()
-                        ->where('ref_type', 'account_profile')
-                        ->whereIn('ref_id', $objectRefIds)
-                        ->update(['category' => $nextType]);
+            if ($profileIds !== []) {
+                if (! $nextPoiEnabled) {
+                    $this->mapPoiProjectionRefs->dispatchForEachRefId(
+                        $profileIds,
+                        static function (string $profileId): void {
+                            DeleteMapPoiByRefJob::dispatch('account_profile', $profileId);
+                        },
+                    );
+                } else {
+                    $checkpoint = $forcedCheckpoint > 0 ? $forcedCheckpoint : null;
+                    $this->mapPoiProjectionRefs->dispatchForEachRefId(
+                        $profileIds,
+                        static function (string $profileId) use ($checkpoint): void {
+                            UpsertMapPoiFromAccountProfileJob::dispatch($profileId, $checkpoint);
+                        },
+                    );
                 }
             }
         }
 
-        return $this->toPayload($model);
+        return $this->toPayload($model->fresh() ?? $model);
+    }
+
+    public function previewDisableProjectionCount(string $type): int
+    {
+        $normalizedType = trim($type);
+        if ($normalizedType === '') {
+            return 0;
+        }
+
+        $profileIds = AccountProfile::query()
+            ->where('profile_type', $normalizedType)
+            ->get(['_id'])
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
+            ->all();
+
+        return $this->mapPoiProjectionRefs->countByRefType('account_profile', $profileIds);
     }
 
     public function delete(string $type): void
@@ -131,6 +175,7 @@ class AccountProfileRegistryManagementService
             'type' => $type,
             'label' => trim((string) ($payload['label'] ?? '')),
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
+            'poi_visual' => $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null),
             'capabilities' => [
                 'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
@@ -161,6 +206,9 @@ class AccountProfileRegistryManagementService
             'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
                 ? $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? [])
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
+            'poi_visual' => array_key_exists('poi_visual', $payload)
+                ? $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null)
+                : $this->poiVisualNormalizer->normalize($existing->poi_visual ?? null),
             'capabilities' => [
                 'is_favoritable' => array_key_exists('is_favoritable', $capabilities)
                     ? (bool) $capabilities['is_favoritable']
@@ -204,33 +252,25 @@ class AccountProfileRegistryManagementService
         return array_values(array_filter(array_unique($normalized), static fn (string $value): bool => $value !== ''));
     }
 
-    /**
-     * @param  array<int, string>  $rawIds
-     * @return array{0: array<int, string>, 1: array<int, ObjectId>}
-     */
-    private function splitMapPoiRefIds(array $rawIds): array
+    private function toCheckpoint(mixed $value): int
     {
-        $stringIds = [];
-        $objectIds = [];
+        if ($value instanceof Carbon) {
+            return (int) $value->valueOf();
+        }
 
-        foreach ($rawIds as $rawId) {
-            $id = trim((string) $rawId);
-            if ($id === '') {
-                continue;
-            }
+        if ($value instanceof \DateTimeInterface) {
+            return (int) Carbon::instance($value)->valueOf();
+        }
 
-            $stringIds[] = $id;
-
-            if (preg_match('/^[a-f0-9]{24}$/i', $id) === 1) {
-                try {
-                    $objectIds[] = new ObjectId($id);
-                } catch (\Throwable) {
-                    // Ignore invalid ObjectId conversions and keep string matching.
-                }
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return (int) Carbon::parse($value)->valueOf();
+            } catch (\Exception) {
+                return 0;
             }
         }
 
-        return [$stringIds, $objectIds];
+        return 0;
     }
 
     /**
@@ -247,6 +287,7 @@ class AccountProfileRegistryManagementService
                     : [],
                 static fn ($value): bool => is_string($value) && $value !== ''
             )),
+            'poi_visual' => $this->poiVisualNormalizer->normalize($model->poi_visual ?? null),
             'capabilities' => [
                 'is_favoritable' => (bool) ($model->capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),

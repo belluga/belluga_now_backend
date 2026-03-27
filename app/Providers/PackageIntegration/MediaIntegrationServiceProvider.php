@@ -18,4 +18,3 @@ class MediaIntegrationServiceProvider extends ServiceProvider
         );
     }
 }
-

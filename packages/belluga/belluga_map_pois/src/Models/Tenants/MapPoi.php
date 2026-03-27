@@ -40,6 +40,7 @@ class MapPoi extends Model
         'time_end',
         'avatar_url',
         'cover_url',
+        'visual',
         'badge',
         'exact_key',
     ];

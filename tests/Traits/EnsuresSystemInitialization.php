@@ -71,8 +71,7 @@ trait EnsuresSystemInitialization
     protected function hydrateFromDatabase(
         bool $syncCrossTenantUsers = false,
         bool $createCrossTenantUsers = false
-    ): void
-    {
+    ): void {
         $user = LandlordUser::query()->first();
         $tenant = Tenant::query()->exists()
             ? $this->resolveCanonicalTenant(allowSingleTenantContext: true)

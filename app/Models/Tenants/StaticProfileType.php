@@ -18,6 +18,7 @@ class StaticProfileType extends Model
         'label',
         'map_category',
         'allowed_taxonomies',
+        'poi_visual',
         'capabilities',
     ];
 

@@ -19,4 +19,3 @@ final readonly class MediaModelDefinition
         public string $tenantScopeFallback = 'landlord',
     ) {}
 }
-

@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\TenantProfileType;
 
 class AccountProfileRegistryService
 {
+    public function __construct(
+        private readonly PoiVisualNormalizer $poiVisualNormalizer,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -16,7 +21,7 @@ class AccountProfileRegistryService
         return TenantProfileType::query()
             ->orderBy('type')
             ->get()
-            ->map(static function (TenantProfileType $type): array {
+            ->map(function (TenantProfileType $type): array {
                 return [
                     'type' => $type->type,
                     'label' => $type->label,
@@ -26,6 +31,7 @@ class AccountProfileRegistryService
                             : [],
                         static fn ($value): bool => is_string($value) && $value !== ''
                     )),
+                    'poi_visual' => $this->poiVisualNormalizer->normalize($type->poi_visual ?? null),
                     'capabilities' => [
                         'is_favoritable' => (bool) ($type->capabilities['is_favoritable'] ?? false),
                         'is_poi_enabled' => (bool) ($type->capabilities['is_poi_enabled'] ?? false),
@@ -62,5 +68,16 @@ class AccountProfileRegistryService
         $capabilities = $definition['capabilities'] ?? [];
 
         return (bool) ($capabilities['is_poi_enabled'] ?? false);
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    public function resolvePoiVisual(string $profileType): ?array
+    {
+        $definition = $this->typeDefinition($profileType);
+        $poiVisual = $definition['poi_visual'] ?? null;
+
+        return is_array($poiVisual) ? $poiVisual : null;
     }
 }

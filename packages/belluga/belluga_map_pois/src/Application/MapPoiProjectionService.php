@@ -9,6 +9,7 @@ use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
+use MongoDB\BSON\ObjectId;
 
 class MapPoiProjectionService
 {
@@ -20,13 +21,13 @@ class MapPoiProjectionService
 
     public function deleteByRef(string $refType, string $refId): void
     {
-        MapPoi::query()
-            ->where('ref_type', $refType)
-            ->where('ref_id', $refId)
-            ->delete();
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdConstraint($query, $refId);
+        $query->delete();
     }
 
-    public function upsertFromAccountProfile(object $profile): void
+    public function upsertFromAccountProfile(object $profile, ?int $forcedCheckpoint = null): void
     {
         if (! $profile->profile_type) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
@@ -46,12 +47,17 @@ class MapPoiProjectionService
 
             return;
         }
+        $resolvedVisual = $this->resolveProjectionVisual(
+            $this->registry->resolveAccountProfilePoiVisual((string) $profile->profile_type),
+            $profile->avatar_url ?? null,
+            $profile->cover_url ?? null,
+        );
 
         $payload = [
             'ref_type' => 'account_profile',
             'ref_id' => (string) $profile->_id,
             'projection_key' => $this->projectionKey('account_profile', (string) $profile->_id),
-            'source_checkpoint' => $this->resolveCheckpointFromModel($profile),
+            'source_checkpoint' => $this->resolveCheckpointFromModel($profile, $forcedCheckpoint),
             'ref_slug' => $profile->slug ?? null,
             'ref_path' => $this->buildRefPath('account_profile', $profile->slug ?? null),
             'name' => (string) ($profile->display_name ?? ''),
@@ -73,6 +79,7 @@ class MapPoiProjectionService
             'time_end' => null,
             'avatar_url' => $profile->avatar_url ?? null,
             'cover_url' => $profile->cover_url ?? null,
+            'visual' => $resolvedVisual,
             'badge' => null,
             'exact_key' => $this->exactKey($location),
         ];
@@ -80,7 +87,7 @@ class MapPoiProjectionService
         $this->upsertIdempotent($payload);
     }
 
-    public function upsertFromStaticAsset(object $asset): void
+    public function upsertFromStaticAsset(object $asset, ?int $forcedCheckpoint = null): void
     {
         if (! $asset->profile_type) {
             $this->deleteByRef('static', (string) $asset->_id);
@@ -104,12 +111,17 @@ class MapPoiProjectionService
         $mapCategory = $this->registry->resolveStaticAssetMapCategory(
             (string) $asset->profile_type
         );
+        $resolvedVisual = $this->resolveProjectionVisual(
+            $this->registry->resolveStaticAssetPoiVisual((string) $asset->profile_type),
+            $asset->avatar_url ?? null,
+            $asset->cover_url ?? null,
+        );
 
         $payload = [
             'ref_type' => 'static',
             'ref_id' => (string) $asset->_id,
             'projection_key' => $this->projectionKey('static', (string) $asset->_id),
-            'source_checkpoint' => $this->resolveCheckpointFromModel($asset),
+            'source_checkpoint' => $this->resolveCheckpointFromModel($asset, $forcedCheckpoint),
             'ref_slug' => $asset->slug ?? null,
             'ref_path' => $this->buildRefPath('static', $asset->slug ?? null),
             'name' => (string) ($asset->display_name ?? ''),
@@ -131,6 +143,7 @@ class MapPoiProjectionService
             'time_end' => null,
             'avatar_url' => $asset->avatar_url ?? null,
             'cover_url' => $asset->cover_url ?? null,
+            'visual' => $resolvedVisual,
             'badge' => null,
             'exact_key' => $this->exactKey($location),
         ];
@@ -138,7 +151,7 @@ class MapPoiProjectionService
         $this->upsertIdempotent($payload);
     }
 
-    public function upsertFromEvent(object $event): void
+    public function upsertFromEvent(object $event, ?int $forcedCheckpoint = null): void
     {
         $eventId = (string) $event->_id;
 
@@ -146,7 +159,8 @@ class MapPoiProjectionService
         $occurrenceProjection = $this->resolveOccurrenceProjection($eventId);
         $checkpoint = max(
             $this->toCheckpoint($event->updated_at ?? null),
-            (int) ($occurrenceProjection['source_checkpoint'] ?? 0)
+            (int) ($occurrenceProjection['source_checkpoint'] ?? 0),
+            (int) ($forcedCheckpoint ?? 0),
         );
         if ($checkpoint <= 0) {
             $checkpoint = (int) Carbon::now()->valueOf();
@@ -177,6 +191,7 @@ class MapPoiProjectionService
         $placeMetadata = is_array($placeRef['metadata'] ?? null) ? $placeRef['metadata'] : [];
         $thumb = $this->normalizeArray($event->thumb ?? null);
         $thumbData = is_array($thumb['data'] ?? null) ? $thumb['data'] : [];
+        $eventVisual = $this->resolveEventProjectionVisual($event);
 
         $activeWindowStartAt = $occurrenceProjection['active_window_start_at'] ?? null;
         $activeWindowEndAt = $occurrenceProjection['active_window_end_at'] ?? null;
@@ -208,6 +223,7 @@ class MapPoiProjectionService
             'time_end' => $activeWindowEndAt,
             'avatar_url' => null,
             'cover_url' => $thumbData['url'] ?? null,
+            'visual' => $eventVisual,
             'badge' => null,
             'exact_key' => $this->exactKey($geometry['location']),
         ];
@@ -218,10 +234,10 @@ class MapPoiProjectionService
     private function deactivateByRef(string $refType, string $refId, int $checkpoint): void
     {
         /** @var MapPoi|null $existing */
-        $existing = MapPoi::query()
-            ->where('ref_type', $refType)
-            ->where('ref_id', $refId)
-            ->first();
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdConstraint($query, $refId);
+        $existing = $query->first();
 
         if (! $existing) {
             return;
@@ -256,10 +272,10 @@ class MapPoiProjectionService
         $incomingCheckpoint = (int) ($payload['source_checkpoint'] ?? 0);
 
         /** @var MapPoi|null $existing */
-        $existing = MapPoi::query()
-            ->where('ref_type', $refType)
-            ->where('ref_id', $refId)
-            ->first();
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdConstraint($query, $refId);
+        $existing = $query->first();
 
         if ($existing) {
             $currentCheckpoint = (int) ($existing->source_checkpoint ?? 0);
@@ -297,6 +313,42 @@ class MapPoiProjectionService
             'effective_enabled' => $tenantAvailable && $eventEnabled,
             'discovery_scope' => $discoveryScope,
         ];
+    }
+
+    /**
+     * @param  mixed  $query
+     */
+    private function applyRefIdConstraint($query, string $refId): void
+    {
+        [$stringRefId, $objectRefId] = $this->buildRefIdAlternatives($refId);
+
+        $query->where(function ($nested) use ($stringRefId, $objectRefId): void {
+            $nested->where('ref_id', $stringRefId);
+            if ($objectRefId !== null) {
+                $nested->orWhere('ref_id', $objectRefId);
+            }
+        });
+    }
+
+    /**
+     * @return array{0: string, 1: ObjectId|null}
+     */
+    private function buildRefIdAlternatives(string $refId): array
+    {
+        $stringRefId = trim($refId);
+        if ($stringRefId === '') {
+            return ['', null];
+        }
+
+        if (preg_match('/^[a-f0-9]{24}$/i', $stringRefId) !== 1) {
+            return [$stringRefId, null];
+        }
+
+        try {
+            return [$stringRefId, new ObjectId($stringRefId)];
+        } catch (\Throwable) {
+            return [$stringRefId, null];
+        }
     }
 
     /**
@@ -452,6 +504,110 @@ class MapPoiProjectionService
     {
         $value = strtolower(trim((string) $raw));
         if ($value === '') {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param  array<string, string>|null  $poiVisual
+     * @return array<string, string>|null
+     */
+    private function resolveProjectionVisual(
+        ?array $poiVisual,
+        mixed $avatarUrl,
+        mixed $coverUrl,
+    ): ?array {
+        if (! is_array($poiVisual)) {
+            return null;
+        }
+
+        $mode = strtolower(trim((string) ($poiVisual['mode'] ?? '')));
+        if ($mode === 'image') {
+            $imageSource = strtolower(trim((string) ($poiVisual['image_source'] ?? '')));
+            $imageUri = $this->resolveImageUriBySource($imageSource, $avatarUrl, $coverUrl);
+            if ($imageUri === null) {
+                return null;
+            }
+
+            return [
+                'mode' => 'image',
+                'image_uri' => $imageUri,
+                'source' => 'item_media',
+            ];
+        }
+
+        if ($mode === 'icon') {
+            $icon = trim((string) ($poiVisual['icon'] ?? ''));
+            $color = $this->normalizeHexColor($poiVisual['color'] ?? null);
+            $iconColor = $this->normalizeHexColor($poiVisual['icon_color'] ?? '#FFFFFF');
+            if ($icon === '' || $color === null || $iconColor === null) {
+                return null;
+            }
+
+            return [
+                'mode' => 'icon',
+                'icon' => $icon,
+                'color' => $color,
+                'icon_color' => $iconColor,
+                'source' => 'type_definition',
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function resolveEventProjectionVisual(object $event): ?array
+    {
+        $type = $this->normalizeArray($event->type ?? null);
+        $icon = trim((string) ($type['icon'] ?? ''));
+        $color = $this->normalizeHexColor($type['color'] ?? null);
+        $iconColor = $this->normalizeHexColor($type['icon_color'] ?? '#FFFFFF');
+        if ($icon === '' || $color === null || $iconColor === null) {
+            return null;
+        }
+
+        return [
+            'mode' => 'icon',
+            'icon' => $icon,
+            'color' => $color,
+            'icon_color' => $iconColor,
+            'source' => 'type_definition',
+        ];
+    }
+
+    private function resolveImageUriBySource(
+        string $imageSource,
+        mixed $avatarUrl,
+        mixed $coverUrl,
+    ): ?string {
+        $candidate = match ($imageSource) {
+            'avatar' => $avatarUrl,
+            'cover' => $coverUrl,
+            default => null,
+        };
+
+        if (! is_string($candidate)) {
+            return null;
+        }
+
+        $resolved = trim($candidate);
+
+        return $resolved === '' ? null : $resolved;
+    }
+
+    private function normalizeHexColor(mixed $raw): ?string
+    {
+        $value = strtoupper(trim((string) $raw));
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^#[0-9A-F]{6}$/', $value) !== 1) {
             return null;
         }
 
@@ -708,9 +864,10 @@ class MapPoiProjectionService
         return $carbon ? (int) $carbon->valueOf() : 0;
     }
 
-    private function resolveCheckpointFromModel(object $model): int
+    private function resolveCheckpointFromModel(object $model, ?int $forcedCheckpoint = null): int
     {
         $checkpoint = max(
+            (int) ($forcedCheckpoint ?? 0),
             $this->toCheckpoint($model->updated_at ?? null),
             $this->toCheckpoint($model->created_at ?? null)
         );

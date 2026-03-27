@@ -95,8 +95,7 @@ abstract class TestCase extends BaseTestCase
     protected function resolveCanonicalTenant(
         ?TenantLabels $labels = null,
         bool $allowSingleTenantContext = false
-    ): Tenant
-    {
+    ): Tenant {
         $labels ??= $this->landlord->tenant_primary;
         $expectedSubdomain = trim((string) $labels->subdomain);
 
@@ -147,8 +146,7 @@ abstract class TestCase extends BaseTestCase
     protected function makeCanonicalTenantCurrent(
         ?TenantLabels $labels = null,
         bool $allowSingleTenantContext = false
-    ): Tenant
-    {
+    ): Tenant {
         $tenant = $this->resolveCanonicalTenant($labels, $allowSingleTenantContext);
         $tenant->makeCurrent();
 
