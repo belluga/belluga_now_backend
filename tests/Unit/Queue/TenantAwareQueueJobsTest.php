@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Unit\Queue;
 
 use App\Jobs\Telemetry\DeliverTelemetryEventJob;
-use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Favorites\Jobs\RebuildFavoriteSnapshotJob;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
@@ -13,7 +12,6 @@ use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromStaticAssetJob;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
-use Belluga\Ticketing\Jobs\ProcessTicketOutboxJob;
 use Spatie\Multitenancy\Jobs\TenantAware;
 use Tests\TestCase;
 
@@ -36,7 +34,6 @@ class TenantAwareQueueJobsTest extends TestCase
     {
         return [
             DeliverTelemetryEventJob::class,
-            ExpireIssuedTicketUnitsJob::class,
             PublishScheduledEventsJob::class,
             RebuildFavoriteSnapshotJob::class,
             DeleteMapPoiByRefJob::class,
@@ -44,7 +41,6 @@ class TenantAwareQueueJobsTest extends TestCase
             UpsertMapPoiFromEventJob::class,
             UpsertMapPoiFromStaticAssetJob::class,
             SendPushMessageJob::class,
-            ProcessTicketOutboxJob::class,
         ];
     }
 }

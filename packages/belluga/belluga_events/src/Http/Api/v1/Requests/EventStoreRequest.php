@@ -107,9 +107,6 @@ class EventStoreRequest extends FormRequest
             'event_parties.*.permissions' => 'sometimes|array',
             'event_parties.*.permissions.can_edit' => 'sometimes|boolean',
             'event_parties.*.metadata' => 'sometimes|array',
-            'template_id' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'template_version' => 'sometimes|integer|min:1',
-            'ticketing' => 'sometimes|array',
         ];
     }
 }

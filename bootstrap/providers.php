@@ -6,7 +6,6 @@ return [
     Belluga\Events\EventsServiceProvider::class,
     Belluga\Settings\SettingsServiceProvider::class,
     Belluga\PushHandler\PushHandlerServiceProvider::class,
-    Belluga\Ticketing\TicketingServiceProvider::class,
     Belluga\MapPois\MapPoisServiceProvider::class,
     Belluga\Invites\InvitesServiceProvider::class,
     Belluga\Favorites\FavoritesServiceProvider::class,
@@ -16,7 +15,6 @@ return [
     App\Providers\PackageIntegration\EventsIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\MapPoisIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\PushIntegrationServiceProvider::class,
-    App\Providers\PackageIntegration\TicketingIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\InvitesIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\FavoritesIntegrationServiceProvider::class,
 ];
