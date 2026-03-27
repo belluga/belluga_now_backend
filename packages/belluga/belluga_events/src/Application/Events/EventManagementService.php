@@ -122,7 +122,6 @@ class EventManagementService
             'tags',
             'categories',
             'taxonomy_terms',
-            'ticketing',
         ] as $field) {
             if (array_key_exists($field, $payload)) {
                 $normalized[$field] = $payload[$field];

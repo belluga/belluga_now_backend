@@ -13,7 +13,6 @@ use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
-use App\Integration\Ticketing\EventTemplateReadAdapter;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
@@ -23,7 +22,6 @@ use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
-use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
@@ -69,10 +67,6 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             TenantExecutionContextAdapter::class,
             $this->app->make(TenantExecutionContextContract::class)
-        );
-        $this->assertInstanceOf(
-            EventTemplateReadAdapter::class,
-            $this->app->make(EventTemplateSnapshotReadContract::class)
         );
         $this->assertInstanceOf(
             QueueEventAsyncMetricsProvider::class,
