@@ -9,11 +9,13 @@ use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\Regex;
 
 class AccountProfileQueryService extends AbstractQueryService
 {
@@ -43,37 +45,21 @@ class AccountProfileQueryService extends AbstractQueryService
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
     {
-        $allowedTypes = TenantProfileType::query()
-            ->where('capabilities.is_favoritable', true)
-            ->pluck('type')
-            ->map(static fn ($type): string => (string) $type)
-            ->values()
-            ->all();
-        $query = $queryParams;
+        $allowedTypes = $this->favoritableProfileTypes();
+        $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
+
+        $query = $this->withoutPublicProfileTypeFilters($queryParams);
         $search = trim((string) ($query['search'] ?? ''));
         unset($query['search']);
+
         $baseQuery = AccountProfile::query()
             ->where('is_active', true);
-        if (empty($allowedTypes)) {
+        $this->applyPublicVisibilityConstraint($baseQuery);
+
+        if ($effectiveTypes === []) {
             $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
         } else {
-            $existingFilters = (array) ($query['filter'] ?? []);
-            $requested = $existingFilters['profile_type'] ?? null;
-            if ($requested !== null) {
-                $requestedList = is_array($requested) ? $requested : [$requested];
-                $effectiveTypes = array_values(array_intersect($allowedTypes, $requestedList));
-            } else {
-                $effectiveTypes = $allowedTypes;
-            }
-
-            if ($effectiveTypes === []) {
-                $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
-            } else {
-                $query['filter'] = array_merge(
-                    $existingFilters,
-                    ['profile_type' => $effectiveTypes]
-                );
-            }
+            $baseQuery->whereIn('profile_type', $effectiveTypes);
         }
 
         $this->applyPublicSearchFilter($baseQuery, $search);
@@ -85,6 +71,151 @@ class AccountProfileQueryService extends AbstractQueryService
         );
 
         return $this->hydrateOwnershipState($paginator);
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @return array<string, mixed>
+     */
+    public function publicNear(array $queryParams): array
+    {
+        $allowedTypes = $this->favoritableProfileTypes();
+        $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
+        $page = max(1, (int) ($queryParams['page'] ?? 1));
+        $pageSize = (int) ($queryParams['page_size'] ?? 10);
+        if ($pageSize <= 0) {
+            $pageSize = 10;
+        }
+        if ($pageSize > 50) {
+            $pageSize = 50;
+        }
+
+        if ($effectiveTypes === []) {
+            return [
+                'page' => $page,
+                'page_size' => $pageSize,
+                'has_more' => false,
+                'data' => [],
+            ];
+        }
+
+        $originLat = $this->toFloat($queryParams['origin_lat'] ?? null);
+        $originLng = $this->toFloat($queryParams['origin_lng'] ?? null);
+        if ($originLat === null || $originLng === null) {
+            return [
+                'page' => $page,
+                'page_size' => $pageSize,
+                'has_more' => false,
+                'data' => [],
+            ];
+        }
+
+        $search = trim((string) ($queryParams['search'] ?? ''));
+        $baseMatch = [
+            '$and' => [
+                ['is_active' => true],
+                ['deleted_at' => null],
+                ['profile_type' => ['$in' => $effectiveTypes]],
+                ['location' => ['$ne' => null]],
+                $this->publicVisibilityConstraintExpression(),
+            ],
+        ];
+        if ($search !== '') {
+            $baseMatch['$and'][] = $this->publicSearchExpression($search);
+        }
+
+        $geoNear = [
+            'near' => [
+                'type' => 'Point',
+                'coordinates' => [$originLng, $originLat],
+            ],
+            'distanceField' => 'distance_meters',
+            'spherical' => true,
+            'query' => $baseMatch,
+        ];
+        $maxDistance = $this->toFloat($queryParams['max_distance_meters'] ?? null);
+        if ($maxDistance !== null) {
+            $geoNear['maxDistance'] = $maxDistance;
+        }
+
+        $skip = ($page - 1) * $pageSize;
+        $limit = $pageSize + 1;
+
+        $pipeline = [
+            ['$geoNear' => $geoNear],
+            ['$sort' => ['distance_meters' => 1, '_id' => 1]],
+            ['$skip' => $skip],
+            ['$limit' => $limit],
+            ['$project' => ['_id' => 1, 'distance_meters' => 1]],
+        ];
+
+        $rows = AccountProfile::raw(fn ($collection) => $collection->aggregate($pipeline));
+        $orderedIds = [];
+        $distanceById = [];
+        foreach ($rows as $row) {
+            $payload = $this->normalizeDocument($row);
+            $id = $this->toObjectIdString($payload['_id'] ?? null);
+            if ($id === null) {
+                continue;
+            }
+
+            $orderedIds[] = $id;
+            $distanceById[$id] = isset($payload['distance_meters']) ? (float) $payload['distance_meters'] : null;
+        }
+
+        $hasMore = count($orderedIds) > $pageSize;
+        if ($hasMore) {
+            $orderedIds = array_slice($orderedIds, 0, $pageSize);
+        }
+
+        if ($orderedIds === []) {
+            return [
+                'page' => $page,
+                'page_size' => $pageSize,
+                'has_more' => false,
+                'data' => [],
+            ];
+        }
+
+        $profiles = AccountProfile::query()
+            ->whereIn('_id', $orderedIds)
+            ->get();
+        $profilesById = [];
+        foreach ($profiles as $profile) {
+            $profilesById[(string) $profile->getKey()] = $profile;
+        }
+
+        /** @var Collection<int, AccountProfile> $orderedProfiles */
+        $orderedProfiles = collect($orderedIds)
+            ->map(static fn (string $id): ?AccountProfile => $profilesById[$id] ?? null)
+            ->filter(static fn ($item): bool => $item instanceof AccountProfile)
+            ->values();
+        $accountsById = $this->loadAccountsById($orderedProfiles);
+        $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(
+            array_keys($accountsById)
+        );
+
+        $data = $orderedProfiles
+            ->map(function (AccountProfile $profile) use ($accountsById, $userOperatedLookup, $distanceById): array {
+                $id = (string) $profile->getKey();
+                $payload = $this->format(
+                    $profile,
+                    $accountsById[(string) $profile->account_id] ?? null,
+                    $userOperatedLookup
+                );
+                $payload['distance_meters'] = $distanceById[$id] ?? null;
+
+                return $payload;
+            })
+            ->values()
+            ->all();
+
+        return [
+            'page' => $page,
+            'page_size' => $pageSize,
+            'has_more' => $hasMore,
+            'data' => $data,
+        ];
     }
 
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
@@ -270,6 +401,181 @@ class AccountProfileQueryService extends AbstractQueryService
                 ->orWhere('slug', 'like', $pattern)
                 ->orWhere('taxonomy_terms.value', 'like', $pattern);
         });
+    }
+
+    private function applyPublicVisibilityConstraint(Builder $query): void
+    {
+        $query->whereRaw($this->publicVisibilityConstraintExpression());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function publicVisibilityConstraintExpression(): array
+    {
+        return [
+            '$or' => [
+                ['visibility' => ['$exists' => false]],
+                ['visibility' => null],
+                ['visibility' => 'public'],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function favoritableProfileTypes(): array
+    {
+        return TenantProfileType::query()
+            ->where('capabilities.is_favoritable', true)
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string>  $allowedTypes
+     * @return array<int, string>
+     */
+    private function resolveEffectivePublicProfileTypes(array $queryParams, array $allowedTypes): array
+    {
+        if ($allowedTypes === []) {
+            return [];
+        }
+
+        $topLevelRequested = $this->normalizeProfileTypeList($queryParams['profile_type'] ?? null);
+        $filterPayload = $queryParams['filter'] ?? null;
+        $filterRequested = is_array($filterPayload)
+            ? $this->normalizeProfileTypeList($filterPayload['profile_type'] ?? null)
+            : [];
+
+        if ($topLevelRequested !== [] && $filterRequested !== []) {
+            $requested = array_values(array_intersect($topLevelRequested, $filterRequested));
+        } elseif ($topLevelRequested !== []) {
+            $requested = $topLevelRequested;
+        } else {
+            $requested = $filterRequested;
+        }
+
+        if ($requested === []) {
+            return $allowedTypes;
+        }
+
+        return array_values(array_intersect($allowedTypes, $requested));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeProfileTypeList(mixed $value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+        $normalized = [];
+
+        foreach ($items as $item) {
+            $type = trim((string) $item);
+            if ($type === '') {
+                continue;
+            }
+            $normalized[] = $type;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function withoutPublicProfileTypeFilters(array $queryParams): array
+    {
+        unset($queryParams['profile_type']);
+
+        if (isset($queryParams['filter']) && is_array($queryParams['filter'])) {
+            unset($queryParams['filter']['profile_type']);
+            if ($queryParams['filter'] === []) {
+                unset($queryParams['filter']);
+            }
+        }
+
+        return $queryParams;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function publicSearchExpression(string $search): array
+    {
+        $query = trim($search);
+        if ($query === '') {
+            return [];
+        }
+
+        $regex = new Regex(preg_quote($query, '/'), 'i');
+
+        return [
+            '$or' => [
+                ['display_name' => $regex],
+                ['slug' => $regex],
+                ['taxonomy_terms.value' => $regex],
+            ],
+        ];
+    }
+
+    private function toFloat(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function toObjectIdString(mixed $value): ?string
+    {
+        if ($value instanceof ObjectId) {
+            return (string) $value;
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            return trim($value);
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeDocument(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        if ($value instanceof Arrayable) {
+            return $value->toArray();
+        }
+
+        if (is_object($value)) {
+            if (method_exists($value, 'getArrayCopy')) {
+                $copy = $value->getArrayCopy();
+                if (is_array($copy)) {
+                    return $copy;
+                }
+            }
+
+            return get_object_vars($value);
+        }
+
+        return [];
     }
 
     private function hydrateOwnershipState(LengthAwarePaginator $paginator): LengthAwarePaginator

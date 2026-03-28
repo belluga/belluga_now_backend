@@ -224,6 +224,148 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
+    public function test_public_account_profile_index_returns_empty_when_top_level_profile_type_is_non_favoritable(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Personal Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=personal"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('data'));
+    }
+
+    public function test_public_account_profile_near_returns_distance_sorted_favoritable_profiles_only(): void
+    {
+        $this->createAccountUser([]);
+
+        $secondary = Account::create([
+            'name' => 'Geo Secondary',
+            'document' => 'DOC-GEO-SECONDARY',
+        ]);
+
+        $tertiary = Account::create([
+            'name' => 'Geo Tertiary',
+            'document' => 'DOC-GEO-TERTIARY',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Near Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0002, -20.0002],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Far Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0120, -20.0120],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $tertiary->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Personal Profile',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('page', 1);
+        $response->assertJsonPath('page_size', 10);
+        $response->assertJsonPath('has_more', false);
+
+        $items = collect($response->json('data'));
+        $this->assertCount(2, $items);
+        $this->assertTrue(
+            $items->every(static fn (array $item): bool => ($item['profile_type'] ?? null) === 'venue')
+        );
+        $this->assertSame('Near Venue', $items->first()['display_name'] ?? null);
+        $this->assertNotNull($items->first()['distance_meters'] ?? null);
+        $this->assertIsNumeric($items->first()['distance_meters'] ?? null);
+    }
+
+    public function test_public_account_profile_near_requires_origin_coordinates(): void
+    {
+        $this->createAccountUser([]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $this->assertNotEmpty($response->json('errors.origin_lng'));
+    }
+
+    public function test_public_account_profile_near_excludes_private_visibility_profiles(): void
+    {
+        $this->createAccountUser([]);
+
+        $publicProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Public Nearby',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0005, -20.0005],
+            ],
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Nearby Private Account',
+            'document' => 'DOC-NEARBY-PRIVATE',
+        ]);
+        $privateProfile = AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Nearby',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0007, -20.0007],
+            ],
+            'is_active' => true,
+        ]);
+
+        AccountProfile::query()
+            ->where('_id', (string) $publicProfile->_id)
+            ->update(['visibility' => 'public']);
+        AccountProfile::query()
+            ->where('_id', (string) $privateProfile->_id)
+            ->update(['visibility' => 'friends_only']);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Public Nearby', $items->first()['display_name'] ?? null);
+    }
+
     public function test_public_account_profile_index_excludes_inactive_profiles(): void
     {
         $this->createAccountUser([]);
@@ -253,6 +395,44 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Active Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_excludes_private_visibility_profiles(): void
+    {
+        $this->createAccountUser([]);
+
+        $publicProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Public Venue',
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Private Visibility Account',
+            'document' => 'DOC-PRIVATE-VISIBILITY',
+        ]);
+
+        $privateProfile = AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Venue',
+            'is_active' => true,
+        ]);
+
+        AccountProfile::query()
+            ->where('_id', (string) $publicProfile->_id)
+            ->update(['visibility' => 'public']);
+        AccountProfile::query()
+            ->where('_id', (string) $privateProfile->_id)
+            ->update(['visibility' => 'friends_only']);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Public Venue', $items->first()['display_name'] ?? null);
     }
 
     public function test_public_account_profile_index_returns_empty_when_none(): void

@@ -24,5 +24,6 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::post('/events/{event_id}/attendance/unconfirm', [EventAttendanceController::class, 'unconfirm']);
         Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
+        Route::get('/account_profiles/near', [AccountProfilesController::class, 'publicNear']);
         Route::get('/static_assets/{asset_ref}', [StaticAssetsController::class, 'showPublic']);
     });
