@@ -154,7 +154,7 @@ class AccountProfileQueryService extends AbstractQueryService
         $distanceById = [];
         foreach ($rows as $row) {
             $payload = $this->normalizeDocument($row);
-            $id = $this->toObjectIdString($payload['_id'] ?? null);
+            $id = $this->resolveAggregateRowId($payload);
             if ($id === null) {
                 continue;
             }
@@ -413,13 +413,7 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     private function publicVisibilityConstraintExpression(): array
     {
-        return [
-            '$or' => [
-                ['visibility' => ['$exists' => false]],
-                ['visibility' => null],
-                ['visibility' => 'public'],
-            ],
-        ];
+        return ['visibility' => 'public'];
     }
 
     /**
@@ -534,10 +528,22 @@ class AccountProfileQueryService extends AbstractQueryService
         return is_numeric($value) ? (float) $value : null;
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function resolveAggregateRowId(array $payload): ?string
+    {
+        return $this->toObjectIdString($payload['_id'] ?? $payload['id'] ?? null);
+    }
+
     private function toObjectIdString(mixed $value): ?string
     {
         if ($value instanceof ObjectId) {
             return (string) $value;
+        }
+
+        if (is_array($value) && isset($value['$oid']) && is_string($value['$oid']) && trim($value['$oid']) !== '') {
+            return trim($value['$oid']);
         }
 
         if (is_string($value) && trim($value) !== '') {

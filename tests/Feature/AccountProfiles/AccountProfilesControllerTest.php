@@ -20,6 +20,7 @@ use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -364,6 +365,113 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Public Nearby', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_excludes_legacy_profiles_without_visibility_field(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Explicit Public Venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $legacyAccount = Account::create([
+            'name' => 'Legacy Visibility Account',
+            'document' => 'DOC-LEGACY-VISIBILITY-INDEX',
+        ]);
+
+        AccountProfile::raw(static function ($collection) use ($legacyAccount): void {
+            $collection->insertOne([
+                '_id' => new ObjectId,
+                'account_id' => (string) $legacyAccount->_id,
+                'profile_type' => 'venue',
+                'display_name' => 'Legacy Missing Visibility',
+                'slug' => 'legacy-missing-visibility-index',
+                'is_active' => true,
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0008, -20.0008],
+                ],
+                'taxonomy_terms' => [],
+            ]);
+        });
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Explicit Public Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_near_excludes_legacy_profiles_without_visibility_field(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Explicit Public Nearby',
+            'is_active' => true,
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0005, -20.0005],
+            ],
+        ]);
+
+        $legacyAccount = Account::create([
+            'name' => 'Legacy Near Visibility Account',
+            'document' => 'DOC-LEGACY-VISIBILITY-NEAR',
+        ]);
+
+        AccountProfile::raw(static function ($collection) use ($legacyAccount): void {
+            $collection->insertOne([
+                '_id' => new ObjectId,
+                'account_id' => (string) $legacyAccount->_id,
+                'profile_type' => 'venue',
+                'display_name' => 'Legacy Missing Visibility Nearby',
+                'slug' => 'legacy-missing-visibility-near',
+                'is_active' => true,
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0006, -20.0006],
+                ],
+                'taxonomy_terms' => [],
+            ]);
+        });
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Explicit Public Nearby', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_account_profile_model_defaults_visibility_to_public(): void
+    {
+        $this->createAccountUser([]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Default Visibility Venue',
+            'is_active' => true,
+        ]);
+
+        $stored = AccountProfile::query()
+            ->where('_id', (string) $profile->_id)
+            ->first();
+
+        $this->assertNotNull($stored);
+        $this->assertSame('public', $stored?->visibility);
     }
 
     public function test_public_account_profile_index_excludes_inactive_profiles(): void
