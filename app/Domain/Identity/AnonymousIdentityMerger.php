@@ -9,6 +9,9 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
 use App\Models\Tenants\MergedAccountSnapshot;
+use Belluga\Invites\Models\Tenants\InviteEdge;
+use Belluga\Invites\Models\Tenants\InviteFeedProjection;
+use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -124,6 +127,11 @@ class AnonymousIdentityMerger
                 }
 
                 $mergeAuditSources->push($mergeAuditEntry);
+
+                $this->migrateInviteOwnership(
+                    sourceUserId: $sourceId,
+                    targetUserId: (string) $target->_id,
+                );
 
                 $source->tokens()->delete();
                 $source->forceDelete();
@@ -247,6 +255,27 @@ class AnonymousIdentityMerger
     private function refreshSource(AccountUser $source): AccountUser
     {
         return AccountUser::query()->find($source->_id) ?? $source;
+    }
+
+    private function migrateInviteOwnership(string $sourceUserId, string $targetUserId): void
+    {
+        InviteEdge::query()
+            ->where('receiver_user_id', $sourceUserId)
+            ->update([
+                'receiver_user_id' => $targetUserId,
+            ]);
+
+        InviteFeedProjection::query()
+            ->where('receiver_user_id', $sourceUserId)
+            ->update([
+                'receiver_user_id' => $targetUserId,
+            ]);
+
+        InviteOutboxEvent::query()
+            ->where('receiver_user_id', $sourceUserId)
+            ->update([
+                'receiver_user_id' => $targetUserId,
+            ]);
     }
 
     /**

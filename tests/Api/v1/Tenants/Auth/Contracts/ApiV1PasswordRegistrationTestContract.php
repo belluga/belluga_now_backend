@@ -8,6 +8,9 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
 use App\Models\Tenants\MergedAccountSnapshot;
+use Belluga\Invites\Models\Tenants\InviteEdge;
+use Belluga\Invites\Models\Tenants\InviteFeedProjection;
+use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
 use Illuminate\Support\Carbon;
 use Illuminate\Testing\TestResponse;
 use Mockery;
@@ -270,6 +273,101 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         $this->assertNotNull($devices->firstWhere('device_id', 'merge-device-1'));
         $this->assertNotNull($devices->firstWhere('device_id', 'merge-device-2'));
         $this->assertCount(2, $devices);
+    }
+
+    public function testPasswordRegistrationMigratesInviteOwnershipFromAnonymousIdentities(): void
+    {
+        $hash = hash('sha256', 'invite-merge-device-one');
+        $anonymous = $this->issueAnonymousIdentityForMerge($hash, 'invite-merge-device-one');
+        $this->tenantModel->makeCurrent();
+
+        $eventId = (string) new ObjectId;
+        $occurrenceId = (string) new ObjectId;
+        $groupKey = "{$eventId}::{$occurrenceId}";
+        $anonymousId = $anonymous['id'];
+
+        InviteEdge::query()->create([
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'receiver_user_id' => $anonymousId,
+            'status' => 'accepted',
+            'credited_acceptance' => true,
+            'event_name' => 'Merge Ownership Event',
+            'event_slug' => 'merge-ownership-event',
+            'attendance_policy' => 'free_confirmation_only',
+            'inviter_principal' => [
+                'kind' => 'user',
+                'id' => (string) new ObjectId,
+            ],
+        ]);
+
+        InviteFeedProjection::query()->create([
+            'receiver_user_id' => $anonymousId,
+            'group_key' => $groupKey,
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'event_name' => 'Merge Ownership Event',
+            'event_slug' => 'merge-ownership-event',
+            'attendance_policy' => 'free_confirmation_only',
+            'inviter_candidates' => [],
+            'social_proof' => ['additional_inviter_count' => 0],
+        ]);
+
+        InviteOutboxEvent::query()->create([
+            'topic' => 'invite.upsert',
+            'status' => 'pending',
+            'receiver_user_id' => $anonymousId,
+            'payload' => [
+                'type' => 'invite.upsert',
+                'updated_at' => Carbon::now()->toISOString(),
+            ],
+            'available_at' => Carbon::now(),
+        ]);
+
+        $response = $this->registerPassword([
+            'name' => 'Invite Ownership Merge',
+            'email' => 'invite-ownership-merge@example.org',
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [$anonymousId],
+        ]);
+        $response->assertStatus(201);
+
+        $canonicalId = $response->json('data.user_id');
+
+        $this->assertFalse(
+            InviteEdge::query()
+                ->where('receiver_user_id', $anonymousId)
+                ->exists()
+        );
+        $this->assertFalse(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', $anonymousId)
+                ->exists()
+        );
+        $this->assertFalse(
+            InviteOutboxEvent::query()
+                ->where('receiver_user_id', $anonymousId)
+                ->exists()
+        );
+
+        $this->assertTrue(
+            InviteEdge::query()
+                ->where('receiver_user_id', $canonicalId)
+                ->where('event_id', $eventId)
+                ->exists()
+        );
+        $this->assertTrue(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', $canonicalId)
+                ->where('group_key', $groupKey)
+                ->exists()
+        );
+        $this->assertTrue(
+            InviteOutboxEvent::query()
+                ->where('receiver_user_id', $canonicalId)
+                ->where('topic', 'invite.upsert')
+                ->exists()
+        );
     }
 
     public function testPasswordRegistrationRejectsUnknownAnonymousIdentity(): void

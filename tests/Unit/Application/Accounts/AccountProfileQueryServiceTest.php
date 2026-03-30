@@ -41,4 +41,3 @@ class AccountProfileQueryServiceTest extends TestCase
         $this->assertNull($resolver->invoke($service, ['distance_meters' => 150.0]));
     }
 }
-

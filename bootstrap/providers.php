@@ -10,6 +10,7 @@ return [
     Belluga\Invites\InvitesServiceProvider::class,
     Belluga\Favorites\FavoritesServiceProvider::class,
     Belluga\Media\MediaServiceProvider::class,
+    Belluga\DeepLinks\DeepLinksServiceProvider::class,
     App\Providers\PackageIntegration\MediaIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\SettingsIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\EventsIntegrationServiceProvider::class,
@@ -17,4 +18,5 @@ return [
     App\Providers\PackageIntegration\PushIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\InvitesIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\FavoritesIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\DeepLinksIntegrationServiceProvider::class,
 ];

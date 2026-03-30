@@ -56,6 +56,10 @@
         {
             "type": "path",
             "url": "packages/belluga/belluga_favorites"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_deep_links"
         }
     ],
     "autoload": {
@@ -68,6 +72,7 @@
             "Belluga\\MapPois\\": "packages/belluga/belluga_map_pois/src/",
             "Belluga\\Favorites\\": "packages/belluga/belluga_favorites/src/",
             "Belluga\\Media\\": "packages/belluga/belluga_media/src/",
+            "Belluga\\DeepLinks\\": "packages/belluga/belluga_deep_links/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }

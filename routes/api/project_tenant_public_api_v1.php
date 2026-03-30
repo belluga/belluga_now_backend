@@ -13,6 +13,7 @@ require base_path('routes/api/packages/project_tenant_public_api_v1/invites.php'
 require base_path('routes/api/packages/project_tenant_public_api_v1/favorites.php');
 require base_path('routes/api/packages/project_tenant_public_api_v1/map_pois.php');
 require base_path('routes/api/packages/project_tenant_public_api_v1/push_handler.php');
+require base_path('routes/api/packages/project_tenant_public_api_v1/deep_links.php');
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
