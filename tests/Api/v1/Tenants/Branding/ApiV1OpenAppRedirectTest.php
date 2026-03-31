@@ -109,6 +109,41 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame("{$tenantOrigin}/invite?code=CODE123", $location);
     }
 
+    public function test_open_app_redirect_honors_explicit_platform_target_override(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.openapp.override');
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_IOS, 'com.guarappari.ios.override');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.openapp.override',
+                ],
+                'ios' => [
+                    'store_url' => 'https://apps.apple.com/br/app/id123456789',
+                ],
+            ],
+        ]);
+
+        $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64)')
+            ->get("{$this->base_tenant_url}open-app?path=/profile&store_channel=web_gate&platform_target=ios");
+
+        $response->assertRedirect();
+
+        $location = $response->headers->get('Location');
+        $this->assertNotNull($location);
+        $this->assertStringStartsWith('https://apps.apple.com/br/app/id123456789', (string) $location);
+
+        $parsed = parse_url((string) $location);
+        parse_str((string) ($parsed['query'] ?? ''), $query);
+
+        $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
+        $this->assertSame('web_gate', $query['store_channel'] ?? null);
+        $this->assertSame("{$tenantOrigin}/", $query['deep_link'] ?? null);
+    }
+
     private function upsertTypedAppDomain(Tenant $tenant, string $type, string $identifier): void
     {
         $existing = $tenant->domains()

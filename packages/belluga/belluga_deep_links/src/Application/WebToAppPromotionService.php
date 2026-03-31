@@ -66,6 +66,20 @@ class WebToAppPromotionService
         return 'web';
     }
 
+    public function normalizePlatformTarget(?string $platformTarget): ?string
+    {
+        $candidate = strtolower(trim((string) $platformTarget));
+        if ($candidate === '') {
+            return null;
+        }
+
+        if ($candidate === 'android' || $candidate === 'ios') {
+            return $candidate;
+        }
+
+        return null;
+    }
+
     public function normalizeTargetPath(?string $path): string
     {
         $candidate = trim((string) $path);

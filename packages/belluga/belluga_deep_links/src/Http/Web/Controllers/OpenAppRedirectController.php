@@ -22,7 +22,8 @@ class OpenAppRedirectController extends Controller
         $targetPath = $this->promotionService->normalizeTargetPath($request->query('path'));
         $code = $this->promotionService->normalizeCode($request->query('code'));
         $storeChannel = $this->promotionService->normalizeStoreChannel($request->query('store_channel'));
-        $platformTarget = $this->promotionService->detectPlatformTarget($request->userAgent());
+        $platformTarget = $this->promotionService->normalizePlatformTarget($request->query('platform_target'))
+            ?? $this->promotionService->detectPlatformTarget($request->userAgent());
 
         $redirectUrl = $this->promotionService->resolveRedirectUrl(
             origin: $request->getSchemeAndHttpHost(),
