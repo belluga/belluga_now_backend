@@ -79,7 +79,7 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     public function publicNear(array $queryParams): array
     {
-        $allowedTypes = $this->favoritableProfileTypes();
+        $allowedTypes = $this->nearEligibleProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $page = max(1, (int) ($queryParams['page'] ?? 1));
         $pageSize = (int) ($queryParams['page_size'] ?? 10);
@@ -423,6 +423,22 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         return TenantProfileType::query()
             ->where('capabilities.is_favoritable', true)
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function nearEligibleProfileTypes(): array
+    {
+        return TenantProfileType::query()
+            ->where('capabilities.is_favoritable', true)
+            ->where('capabilities.is_poi_enabled', true)
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')

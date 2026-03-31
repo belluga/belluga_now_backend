@@ -248,6 +248,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $this->createAccountUser([]);
 
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => false,
+            ],
+        ]);
+
         $secondary = Account::create([
             'name' => 'Geo Secondary',
             'document' => 'DOC-GEO-SECONDARY',
@@ -280,8 +290,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
         AccountProfile::create([
             'account_id' => (string) $tertiary->_id,
-            'profile_type' => 'personal',
-            'display_name' => 'Personal Profile',
+            'profile_type' => 'artist',
+            'display_name' => 'Non Poi Artist',
             'location' => [
                 'type' => 'Point',
                 'coordinates' => [-40.0001, -20.0001],
@@ -303,9 +313,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue(
             $items->every(static fn (array $item): bool => ($item['profile_type'] ?? null) === 'venue')
         );
-        $this->assertSame('Near Venue', $items->first()['display_name'] ?? null);
+        $this->assertSame(
+            ['Near Venue', 'Far Venue'],
+            $items->pluck('display_name')->values()->all()
+        );
         $this->assertNotNull($items->first()['distance_meters'] ?? null);
         $this->assertIsNumeric($items->first()['distance_meters'] ?? null);
+        $this->assertLessThan(
+            (float) ($items->last()['distance_meters'] ?? INF),
+            (float) ($items->first()['distance_meters'] ?? 0)
+        );
     }
 
     public function test_public_account_profile_near_requires_origin_coordinates(): void
