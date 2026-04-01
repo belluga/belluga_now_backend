@@ -22,7 +22,10 @@ class UpsertMapPoiFromEventJob implements ShouldQueue, TenantAware
 
     public int $tries = 5;
 
-    public function __construct(private readonly string $eventId) {}
+    public function __construct(
+        private readonly string $eventId,
+        private readonly ?int $forcedCheckpoint = null,
+    ) {}
 
     /**
      * @return array<int, int>
@@ -44,6 +47,6 @@ class UpsertMapPoiFromEventJob implements ShouldQueue, TenantAware
             return;
         }
 
-        $projectionService->upsertFromEvent($event);
+        $projectionService->upsertFromEvent($event, $this->forcedCheckpoint);
     }
 }

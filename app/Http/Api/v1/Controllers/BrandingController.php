@@ -3,8 +3,8 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Branding\BrandingManifestService;
-use App\Application\Branding\DeepLinkAssociationService;
 use App\Http\Controllers\Controller;
+use Belluga\DeepLinks\Application\DeepLinkAssociationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;

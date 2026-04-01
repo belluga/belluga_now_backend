@@ -16,7 +16,6 @@ use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
-use App\Integration\Ticketing\EventTemplateReadAdapter;
 use App\Listeners\Events\SyncMapPoiOnEventCreated;
 use App\Listeners\Events\SyncMapPoiOnEventDeleted;
 use App\Listeners\Events\SyncMapPoiOnEventUpdated;
@@ -28,7 +27,6 @@ use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
-use Belluga\Events\Contracts\EventTemplateSnapshotReadContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
@@ -99,11 +97,6 @@ class EventsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             EventRadiusSettingsContract::class,
             TenantRadiusSettingsAdapter::class
-        );
-
-        $this->app->bind(
-            EventTemplateSnapshotReadContract::class,
-            EventTemplateReadAdapter::class
         );
 
         $this->app->bind(

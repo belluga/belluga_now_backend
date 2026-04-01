@@ -22,7 +22,8 @@ class AgendaIndexRequest extends FormRequest
         return [
             'page' => 'sometimes|integer|min:1',
             'page_size' => 'sometimes|integer|min:1',
-            'past_only' => 'sometimes|boolean',
+            'past_only' => 'sometimes|boolean|prohibited_if:live_now_only,true',
+            'live_now_only' => 'sometimes|boolean|prohibited_if:past_only,true',
             'confirmed_only' => 'sometimes|boolean',
             'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX.'|prohibits:origin_lat,origin_lng,max_distance_meters',
             'categories' => 'sometimes|array',

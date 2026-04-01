@@ -19,5 +19,6 @@ class EventType extends Model
         'description',
         'icon',
         'color',
+        'icon_color',
     ];
 }

@@ -52,6 +52,7 @@ class EventStoreRequest extends FormRequest
             'type.description' => 'sometimes|string|max:'.InputConstraints::DESCRIPTION_MAX,
             'type.icon' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'type.color' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'type.icon_color' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'date_time_start' => 'prohibited',
             'date_time_end' => 'prohibited',
             'occurrences' => 'required|array|min:1',
@@ -106,9 +107,6 @@ class EventStoreRequest extends FormRequest
             'event_parties.*.permissions' => 'sometimes|array',
             'event_parties.*.permissions.can_edit' => 'sometimes|boolean',
             'event_parties.*.metadata' => 'sometimes|array',
-            'template_id' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'template_version' => 'sometimes|integer|min:1',
-            'ticketing' => 'sometimes|array',
         ];
     }
 }

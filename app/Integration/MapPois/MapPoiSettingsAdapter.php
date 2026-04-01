@@ -7,6 +7,7 @@ namespace App\Integration\MapPois;
 use App\Application\Media\MapFilterImageStorageService;
 use App\Models\Tenants\TenantSettings;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
+use MongoDB\Model\BSONDocument;
 
 class MapPoiSettingsAdapter implements MapPoiSettingsContract
 {
@@ -25,14 +26,13 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
     public function resolveMapUiSettings(): array
     {
         $settings = TenantSettings::current();
-        $mapUi = $settings?->getAttribute('map_ui') ?? [];
-
-        if (! is_array($mapUi)) {
+        $mapUi = $this->normalizeDocument($settings?->getAttribute('map_ui'));
+        if ($mapUi === []) {
             return [];
         }
 
-        $filters = $mapUi['filters'] ?? null;
-        if (! is_array($filters)) {
+        $filters = $this->normalizeList($mapUi['filters'] ?? null);
+        if ($filters === []) {
             return $mapUi;
         }
 
@@ -40,26 +40,43 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
         $normalizedFilters = [];
 
         foreach ($filters as $filter) {
-            if (! is_array($filter)) {
+            $normalizedFilter = $this->normalizeDocument($filter);
+            if ($normalizedFilter === []) {
                 $normalizedFilters[] = $filter;
 
                 continue;
             }
 
-            $key = isset($filter['key']) && is_string($filter['key'])
-                ? trim($filter['key'])
+            $key = isset($normalizedFilter['key']) && is_string($normalizedFilter['key'])
+                ? trim($normalizedFilter['key'])
                 : '';
             if ($key !== '') {
-                $filter['image_uri'] = $this->mapFilterImageStorageService->normalizePublicUrl(
+                $normalizedFilter['image_uri'] = $this->mapFilterImageStorageService->normalizePublicUrl(
                     baseUrl: $baseUrl,
                     key: $key,
-                    rawImageUri: isset($filter['image_uri']) && is_string($filter['image_uri'])
-                        ? $filter['image_uri']
+                    rawImageUri: isset($normalizedFilter['image_uri']) && is_string($normalizedFilter['image_uri'])
+                        ? $normalizedFilter['image_uri']
                         : null,
                 );
+
+                $markerOverride = $this->normalizeDocument($normalizedFilter['marker_override'] ?? null);
+                if (
+                    (bool) ($normalizedFilter['override_marker'] ?? false)
+                    && $markerOverride !== []
+                    && strtolower(trim((string) ($markerOverride['mode'] ?? ''))) === 'image'
+                ) {
+                    $markerOverride['image_uri'] = $this->mapFilterImageStorageService->normalizePublicUrl(
+                        baseUrl: $baseUrl,
+                        key: $key,
+                        rawImageUri: isset($markerOverride['image_uri']) && is_string($markerOverride['image_uri'])
+                            ? $markerOverride['image_uri']
+                            : null,
+                    );
+                    $normalizedFilter['marker_override'] = $markerOverride;
+                }
             }
 
-            $normalizedFilters[] = $filter;
+            $normalizedFilters[] = $normalizedFilter;
         }
 
         $mapUi['filters'] = $normalizedFilters;
@@ -73,5 +90,37 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
         $mapIngest = $settings?->getAttribute('map_ingest') ?? [];
 
         return is_array($mapIngest) ? $mapIngest : [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeDocument(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof BSONDocument) {
+            return $value->getArrayCopy();
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function normalizeList(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof BSONDocument) {
+            return $value->getArrayCopy();
+        }
+
+        return [];
     }
 }

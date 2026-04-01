@@ -13,7 +13,8 @@ require base_path('routes/api/packages/project_tenant_public_api_v1/invites.php'
 require base_path('routes/api/packages/project_tenant_public_api_v1/favorites.php');
 require base_path('routes/api/packages/project_tenant_public_api_v1/map_pois.php');
 require base_path('routes/api/packages/project_tenant_public_api_v1/push_handler.php');
-require base_path('routes/api/packages/project_tenant_public_api_v1/ticketing.php');
+require base_path('routes/api/packages/project_tenant_public_api_v1/deep_links.php');
+require base_path('routes/api/packages/project_tenant_public_api_v1/email.php');
 
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
@@ -25,5 +26,6 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::post('/events/{event_id}/attendance/unconfirm', [EventAttendanceController::class, 'unconfirm']);
         Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
+        Route::get('/account_profiles/near', [AccountProfilesController::class, 'publicNear']);
         Route::get('/static_assets/{asset_ref}', [StaticAssetsController::class, 'showPublic']);
     });

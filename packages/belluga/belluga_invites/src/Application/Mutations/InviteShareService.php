@@ -32,6 +32,7 @@ class InviteShareService
         private readonly InviteRuntimeSettingsService $runtimeSettings,
         private readonly InviteQuotaCounterService $quotaCounters,
         private readonly InviteCommandIdempotencyService $idempotencyService,
+        private readonly InviteMutationService $mutationService,
     ) {}
 
     /**
@@ -225,6 +226,30 @@ class InviteShareService
     /**
      * @return array<string, mixed>
      */
+    public function accept(mixed $user, string $code, ?string $idempotencyKey = null): array
+    {
+        $userId = $this->userId($user);
+        if ($userId === null) {
+            throw new InviteDomainException('auth_required', 401);
+        }
+
+        $normalizedCode = strtoupper(trim($code));
+        if ($normalizedCode === '') {
+            throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        return $this->idempotencyService->runWithReplay(
+            command: 'invite.share_accept',
+            actorUserId: $userId,
+            idempotencyKey: $idempotencyKey,
+            fingerprintPayload: ['code' => $normalizedCode],
+            callback: fn (): array => $this->acceptWithoutReplay($userId, $normalizedCode),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function materializeWithoutReplay(string $userId, string $normalizedCode): array
     {
         /** @var InviteShareCode|null $share */
@@ -262,6 +287,36 @@ class InviteShareService
         }
 
         return $this->materializeResponse($existing, $share);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function acceptWithoutReplay(string $userId, string $normalizedCode): array
+    {
+        /** @var InviteShareCode|null $share */
+        $share = InviteShareCode::query()
+            ->where('code', $normalizedCode)
+            ->first();
+        if (! $share || $this->isExpired($share)) {
+            throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        /** @var InviteEdge|null $edge */
+        $edge = $this->findExistingInviteEdge($userId, $share);
+        if ($edge === null) {
+            $edge = $this->createMaterializedInviteEdge($userId, $share);
+            $this->projectionService->rebuildReceiverTargetProjection($userId, [
+                'event_id' => (string) $edge->event_id,
+                'occurrence_id' => $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+            ]);
+        }
+
+        return $this->mutationService->acceptForUserId(
+            userId: $userId,
+            inviteId: $this->inviteEdgeId($edge),
+            idempotencyKey: null,
+        );
     }
 
     /**

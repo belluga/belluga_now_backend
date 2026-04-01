@@ -10,6 +10,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -82,6 +83,12 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
                 'label' => 'Beach',
                 'map_category' => 'beach',
                 'allowed_taxonomies' => ['vibe'],
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                    'color' => '#00AAFF',
+                    'icon_color' => '#101010',
+                ],
                 'capabilities' => [
                     'is_poi_enabled' => true,
                     'has_content' => true,
@@ -94,6 +101,10 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.type', 'beach');
         $response->assertJsonPath('data.map_category', 'beach');
         $response->assertJsonPath('data.capabilities.has_content', true);
+        $response->assertJsonPath('data.poi_visual.mode', 'icon');
+        $response->assertJsonPath('data.poi_visual.icon', 'place');
+        $response->assertJsonPath('data.poi_visual.color', '#00AAFF');
+        $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
     }
 
     public function test_static_profile_type_create_validation(): void
@@ -105,6 +116,28 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(422);
+    }
+
+    public function test_static_profile_type_create_rejects_invalid_poi_visual_icon_without_color_and_icon_color(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}static_profile_types",
+            [
+                'type' => 'beach',
+                'label' => 'Beach',
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'poi_visual.color',
+            'poi_visual.icon_color',
+        ]);
     }
 
     public function test_static_profile_type_create_rejects_duplicate_type(): void
@@ -172,6 +205,70 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.has_bio', true);
     }
 
+    public function test_static_profile_type_map_poi_projection_impact_returns_projection_count(): void
+    {
+        StaticProfileType::query()->delete();
+        StaticAsset::query()->delete();
+        MapPoi::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'beach',
+            'label' => 'Beach',
+            'map_category' => 'beach',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $first = StaticAsset::create([
+            'profile_type' => 'beach',
+            'display_name' => 'Beach One',
+            'is_active' => true,
+        ]);
+        $second = StaticAsset::create([
+            'profile_type' => 'beach',
+            'display_name' => 'Beach Two',
+            'is_active' => true,
+        ]);
+        $other = StaticAsset::create([
+            'profile_type' => 'historic',
+            'display_name' => 'Historic',
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => (string) $first->_id,
+            'name' => 'Beach One',
+            'category' => 'beach',
+            'is_active' => true,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => (string) $second->_id,
+            'name' => 'Beach Two',
+            'category' => 'beach',
+            'is_active' => true,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => (string) $other->_id,
+            'name' => 'Historic',
+            'category' => 'historic',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}static_profile_types/beach/map_poi_projection_impact",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.profile_type', 'beach');
+        $response->assertJsonPath('data.projection_count', 2);
+    }
+
     public function test_static_profile_type_update_allows_type_rename_and_propagates_dependents(): void
     {
         StaticProfileType::query()->delete();
@@ -191,6 +288,10 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $asset = StaticAsset::create([
             'profile_type' => 'poi',
             'display_name' => 'Asset One',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
             'is_active' => true,
         ]);
 
@@ -274,6 +375,10 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $asset = StaticAsset::create([
             'profile_type' => 'poi',
             'display_name' => 'Asset One',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
             'is_active' => true,
         ]);
 
@@ -307,6 +412,155 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
                     ->category ?? ''
             )
         );
+    }
+
+    public function test_static_profile_type_update_disables_poi_and_hard_deletes_related_projections(): void
+    {
+        StaticProfileType::query()->delete();
+        StaticAsset::query()->delete();
+        MapPoi::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'beach',
+            'label' => 'Beach',
+            'map_category' => 'beach',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $asset = StaticAsset::create([
+            'profile_type' => 'beach',
+            'display_name' => 'Beach One',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => new ObjectId((string) $asset->_id),
+            'source_checkpoint' => 1,
+            'name' => 'Beach One',
+            'category' => 'beach',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_profile_types/beach",
+            [
+                'capabilities' => [
+                    'is_poi_enabled' => false,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $assetId = (string) $asset->_id;
+        $remaining = MapPoi::query()
+            ->where('ref_type', 'static')
+            ->where(function ($query) use ($assetId): void {
+                $query->where('ref_id', $assetId)
+                    ->orWhere('ref_id', new ObjectId($assetId));
+            })
+            ->count();
+
+        $this->assertSame(0, $remaining);
+    }
+
+    public function test_static_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void
+    {
+        StaticProfileType::query()->delete();
+        StaticAsset::query()->delete();
+        MapPoi::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'beach',
+            'label' => 'Beach',
+            'map_category' => 'beach',
+            'allowed_taxonomies' => [],
+            'poi_visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#2266AA',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $asset = StaticAsset::create([
+            'profile_type' => 'beach',
+            'display_name' => 'Beach One',
+            'cover_url' => 'https://cdn.example.com/static-cover.png',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => new ObjectId((string) $asset->_id),
+            'source_checkpoint' => 1,
+            'name' => 'Beach One',
+            'category' => 'beach',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#2266AA',
+                'icon_color' => '#FFFFFF',
+                'source' => 'type_definition',
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_profile_types/beach",
+            [
+                'poi_visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'cover',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'cover');
+        $assetId = (string) $asset->_id;
+        $projectionQuery = MapPoi::query()
+            ->where('ref_type', 'static')
+            ->where(function ($query) use ($assetId): void {
+                $query->where('ref_id', $assetId)
+                    ->orWhere('ref_id', new ObjectId($assetId));
+            });
+
+        $this->assertSame(1, $projectionQuery->count());
+        $projection = $projectionQuery->firstOrFail();
+
+        $this->assertSame('image', data_get($projection->visual, 'mode'));
+        $this->assertSame(
+            'https://cdn.example.com/static-cover.png',
+            data_get($projection->visual, 'image_uri')
+        );
+        $this->assertSame('item_media', data_get($projection->visual, 'source'));
     }
 
     public function test_static_profile_type_update_rejects_duplicate_type_rename(): void

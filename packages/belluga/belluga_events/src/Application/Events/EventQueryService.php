@@ -268,6 +268,7 @@ class EventQueryService
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
             'search' => $this->extractSearchQuery($queryParams),
             'past_only' => filter_var($queryParams['past_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'live_now_only' => filter_var($queryParams['live_now_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'confirmed_only' => filter_var($queryParams['confirmed_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'origin_lat' => $originLat,
             'origin_lng' => $originLng,
@@ -383,7 +384,19 @@ class EventQueryService
             ],
         ];
 
-        if ($filters['past_only']) {
+        if ((bool) ($filters['live_now_only'] ?? false)) {
+            $pipeline[] = [
+                '$match' => [
+                    '$expr' => [
+                        '$and' => [
+                            ['$lte' => ['$starts_at', $now]],
+                            ['$gt' => ['$effective_end', $now]],
+                        ],
+                    ],
+                ],
+            ];
+            $sort = ['starts_at' => 1, '_id' => 1];
+        } elseif ($filters['past_only']) {
             $pipeline[] = ['$match' => ['$expr' => ['$lte' => ['$effective_end', $now]]]];
             $sort = ['starts_at' => -1, '_id' => -1];
         } else {
@@ -796,6 +809,7 @@ class EventQueryService
                 'description' => $type['description'] ?? null,
                 'icon' => $type['icon'] ?? null,
                 'color' => $type['color'] ?? null,
+                'icon_color' => $type['icon_color'] ?? null,
             ],
             'title' => (string) ($event->title ?? ''),
             'content' => (string) ($event->content ?? ''),

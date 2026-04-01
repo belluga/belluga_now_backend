@@ -92,7 +92,6 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
     }
 
     /**
-     * @param  mixed  $taxonomyTerms
      * @return array<int, string>
      */
     private function deriveTagsFromTaxonomyTerms(mixed $taxonomyTerms): array

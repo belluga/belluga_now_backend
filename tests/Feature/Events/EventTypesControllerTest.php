@@ -11,6 +11,8 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\EventType;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -215,6 +217,108 @@ class EventTypesControllerTest extends TestCaseTenant
             'Tipo de evento atualizado: Live Show',
             (string) (EventOccurrence::query()->where('event_id', (string) $event->_id)->firstOrFail()->type['description'] ?? '')
         );
+    }
+
+    public function test_event_type_update_rematerializes_visual_for_related_event_map_pois(): void
+    {
+        MapPoi::query()->delete();
+
+        $eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'description' => 'Tipo de evento: Show',
+            'icon' => 'music_note',
+            'color' => '#112233',
+            'icon_color' => '#FFFFFF',
+        ]);
+
+        $event = Event::query()->create([
+            'title' => 'Visual Event',
+            'slug' => 'visual-event',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Tipo de evento: Show',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+            ],
+            'content' => 'Visual content',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => now()->subMinute()->toISOString(),
+            ],
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        EventOccurrence::query()->create([
+            'event_id' => (string) $event->_id,
+            'occurrence_index' => 0,
+            'occurrence_slug' => 'visual-event-occ-1',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Tipo de evento: Show',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+            ],
+            'starts_at' => now()->addDay(),
+            'is_event_published' => true,
+        ]);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event->fresh());
+        $before = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->assertSame('#112233', data_get($before->visual, 'color'));
+        $this->assertSame('#FFFFFF', data_get($before->visual, 'icon_color'));
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
+            [
+                'icon' => 'restaurant',
+                'color' => '#334455',
+                'icon_color' => '#101010',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.icon', 'restaurant');
+        $response->assertJsonPath('data.color', '#334455');
+        $response->assertJsonPath('data.icon_color', '#101010');
+
+        $updatedEvent = Event::query()->findOrFail($event->_id);
+        $this->assertSame('restaurant', data_get($updatedEvent->type, 'icon'));
+        $this->assertSame('#334455', data_get($updatedEvent->type, 'color'));
+        $this->assertSame('#101010', data_get($updatedEvent->type, 'icon_color'));
+
+        $after = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->assertSame('restaurant', data_get($after->visual, 'icon'));
+        $this->assertSame('#334455', data_get($after->visual, 'color'));
+        $this->assertSame('#101010', data_get($after->visual, 'icon_color'));
     }
 
     public function test_event_type_delete_rejects_when_referenced_by_events(): void

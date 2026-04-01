@@ -31,13 +31,19 @@ yarn-error.log
 AGENTS.md
 delphi-ai
 foundation_documentation
+.agent
 .agent/
+.agents
+.agents/
+.codex
 .codex/
 
 # CLINE
 CLINE.md
 .cline
+.cline/
 .clinerules
+.clinerules/
 
 # Local-only helper scripts/symlinks
 /scripts/delphi

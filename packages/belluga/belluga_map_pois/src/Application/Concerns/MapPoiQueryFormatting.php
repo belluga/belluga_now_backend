@@ -58,6 +58,7 @@ trait MapPoiQueryFormatting
         $name = (string) ($payloadData['name'] ?? $payloadData['title'] ?? '');
         $subtitleRaw = $payloadData['subtitle'] ?? $payloadData['description'] ?? $payloadData['address'] ?? null;
         $subtitle = is_string($subtitleRaw) && trim($subtitleRaw) !== '' ? trim($subtitleRaw) : null;
+        $visual = $this->formatVisual($payloadData['visual'] ?? null);
 
         $payload = [
             'ref_type' => (string) ($payloadData['ref_type'] ?? ''),
@@ -79,6 +80,7 @@ trait MapPoiQueryFormatting
             'time_end' => $this->formatDate($payloadData['time_end'] ?? null),
             'avatar_url' => $payloadData['avatar_url'] ?? null,
             'cover_url' => $payloadData['cover_url'] ?? null,
+            'visual' => $visual,
             'badge' => $payloadData['badge'] ?? null,
         ];
 
@@ -100,6 +102,7 @@ trait MapPoiQueryFormatting
         $title = (string) ($payloadData['name'] ?? $payloadData['title'] ?? '');
         $subtitleRaw = $payloadData['subtitle'] ?? $payloadData['description'] ?? $payloadData['address'] ?? null;
         $subtitle = is_string($subtitleRaw) && trim($subtitleRaw) !== '' ? trim($subtitleRaw) : null;
+        $visual = $this->formatVisual($payloadData['visual'] ?? null);
 
         return [
             'ref_type' => (string) ($payloadData['ref_type'] ?? ''),
@@ -117,6 +120,7 @@ trait MapPoiQueryFormatting
             'time_end' => $this->formatDate($payloadData['time_end'] ?? null),
             'avatar_url' => $payloadData['avatar_url'] ?? null,
             'cover_url' => $payloadData['cover_url'] ?? null,
+            'visual' => $visual,
             'badge' => $payloadData['badge'] ?? null,
             'tags' => $this->normalizeStringArray($payloadData['tags'] ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($payloadData['taxonomy_terms'] ?? []),
@@ -148,6 +152,67 @@ trait MapPoiQueryFormatting
         }
 
         return $normalized;
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function formatVisual(mixed $visual): ?array
+    {
+        if (! is_array($visual)) {
+            $visual = $this->normalizeDocument($visual);
+        }
+
+        if (! is_array($visual) || $visual === []) {
+            return null;
+        }
+
+        $mode = strtolower(trim((string) ($visual['mode'] ?? '')));
+        if ($mode === 'icon') {
+            $icon = trim((string) ($visual['icon'] ?? ''));
+            $color = strtoupper(trim((string) ($visual['color'] ?? '')));
+            $iconColor = strtoupper(trim((string) ($visual['icon_color'] ?? '#FFFFFF')));
+            if (
+                $icon === ''
+                || preg_match('/^#[0-9A-F]{6}$/', $color) !== 1
+                || preg_match('/^#[0-9A-F]{6}$/', $iconColor) !== 1
+            ) {
+                return null;
+            }
+
+            $source = strtolower(trim((string) ($visual['source'] ?? '')));
+            $payload = [
+                'mode' => 'icon',
+                'icon' => $icon,
+                'color' => $color,
+                'icon_color' => $iconColor,
+            ];
+            if ($source !== '') {
+                $payload['source'] = $source;
+            }
+
+            return $payload;
+        }
+
+        if ($mode === 'image') {
+            $imageUri = trim((string) ($visual['image_uri'] ?? ''));
+            if ($imageUri === '') {
+                return null;
+            }
+
+            $source = strtolower(trim((string) ($visual['source'] ?? '')));
+            $payload = [
+                'mode' => 'image',
+                'image_uri' => $imageUri,
+            ];
+            if ($source !== '') {
+                $payload['source'] = $source;
+            }
+
+            return $payload;
+        }
+
+        return null;
     }
 
     /**

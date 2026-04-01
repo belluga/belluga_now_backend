@@ -141,6 +141,11 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
 
     public function test_add_emails_repeated(): void
     {
+        $seedDuplicate = $this->profileAddEmails(
+            $this->landlord->user_cross_tenant_admin,
+            $this->temporary_email_1,
+        );
+        $seedDuplicate->assertStatus(200);
 
         $userUpdate = $this->profileAddEmails(
             $this->landlord->user_cross_tenant_visitor,
@@ -158,6 +163,16 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
 
     public function test_remove_email(): void
     {
+        $this->profileAddEmails(
+            $this->landlord->user_cross_tenant_admin,
+            $this->temporary_email_1,
+        )->assertStatus(200);
+
+        $this->profileAddEmails(
+            $this->landlord->user_cross_tenant_admin,
+            $this->temporary_email_2,
+        )->assertStatus(200);
+
         $userUpdate = $this->profileRemoveEmail(
             $this->landlord->user_cross_tenant_admin,
             $this->temporary_email_1,
@@ -209,8 +224,13 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
 
     public function test_add_phones_repeated(): void
     {
-
-        $this->adminLogin($this->landlord->user_cross_tenant_visitor);
+        $firstUpdate = $this->profileAddPhones(
+            $this->landlord->user_cross_tenant_visitor,
+            [
+                $this->temporary_phone_1,
+            ]
+        );
+        $firstUpdate->assertStatus(200);
 
         $userUpdate = $this->profileAddPhones(
             $this->landlord->user_cross_tenant_visitor,
@@ -219,17 +239,20 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
             ]
         );
 
-        $userUpdate->assertStatus(422);
-
-        $userUpdate->assertJsonStructure([
-            'errors' => [
-                'phones',
-            ],
-        ]);
+        $userUpdate->assertStatus(200);
+        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_1), $userUpdate->json()['data']['phones']);
+        $this->assertCount(1, $userUpdate->json()['data']['phones']);
     }
 
     public function test_remove_phone_from_firs_user(): void
     {
+        $this->profileAddPhones(
+            $this->landlord->user_cross_tenant_admin,
+            [
+                $this->temporary_phone_1,
+            ]
+        )->assertStatus(200);
+
         $userUpdate = $this->profileRemovePhone(
             $this->landlord->user_cross_tenant_admin,
             $this->temporary_phone_1,
@@ -242,6 +265,13 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
 
     public function test_remove_phone_from_second_user(): void
     {
+        $this->profileAddPhones(
+            $this->landlord->user_cross_tenant_visitor,
+            [
+                $this->temporary_phone_2,
+            ]
+        )->assertStatus(200);
+
         $userUpdate = $this->profileRemovePhone(
             $this->landlord->user_cross_tenant_visitor,
             $this->temporary_phone_2,
