@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace App\Application\Media;
 
-use App\Application\Tenants\TenantDomainResolverService;
-use App\Models\Landlord\Tenant;
+use Belluga\Media\Contracts\TenantMediaScopeResolverContract;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
 final class MapFilterImageStorageService
 {
     public function __construct(
-        private readonly TenantDomainResolverService $tenantDomainResolver,
+        private readonly TenantMediaScopeResolverContract $tenantScopeResolver,
     ) {}
 
     /**
@@ -111,7 +110,10 @@ final class MapFilterImageStorageService
 
     private function baseDirectory(?string $baseUrl): string
     {
-        $tenantSlug = $this->resolveTenantSlug($baseUrl) ?? 'landlord';
+        $tenantSlug = trim((string) ($this->tenantScopeResolver->resolveTenantScope($baseUrl) ?? ''));
+        if ($tenantSlug === '') {
+            $tenantSlug = 'landlord';
+        }
 
         return "tenants/{$tenantSlug}/map_filters";
     }
@@ -151,65 +153,6 @@ final class MapFilterImageStorageService
         }
 
         return $this->resolveMediaVersion($path);
-    }
-
-    private function resolveTenantSlug(?string $baseUrl): ?string
-    {
-        $host = $this->resolveHost($baseUrl);
-        if ($host !== null) {
-            $tenant = $this->tenantDomainResolver->findTenantByDomain($host);
-            if ($tenant !== null) {
-                return $tenant->slug;
-            }
-
-            $subdomainTenant = $this->resolveTenantBySubdomain($host);
-            if ($subdomainTenant !== null) {
-                return $subdomainTenant->slug;
-            }
-        }
-
-        return Tenant::current()?->slug;
-    }
-
-    private function resolveHost(?string $baseUrl): ?string
-    {
-        $fromBaseUrl = $this->extractHost($baseUrl);
-        if ($fromBaseUrl !== null) {
-            return $fromBaseUrl;
-        }
-
-        return $this->extractHost(request()->getSchemeAndHttpHost());
-    }
-
-    private function extractHost(?string $baseUrl): ?string
-    {
-        $value = is_string($baseUrl) ? trim($baseUrl) : '';
-        if ($value === '') {
-            return null;
-        }
-
-        $host = parse_url($value, PHP_URL_HOST);
-        if (! is_string($host) || trim($host) === '') {
-            return null;
-        }
-
-        return strtolower(trim($host));
-    }
-
-    private function resolveTenantBySubdomain(string $host): ?Tenant
-    {
-        $normalizedHost = strtolower(trim($host));
-        if ($normalizedHost === '' || filter_var($normalizedHost, FILTER_VALIDATE_IP) !== false) {
-            return null;
-        }
-
-        $parts = explode('.', $normalizedHost);
-        $subdomain = trim($parts[0] ?? '');
-        if ($subdomain === '') {
-            return null;
-        }
-
-        return Tenant::query()->where('subdomain', $subdomain)->first();
     }
 
     private function extractVersionFromUri(string $value): ?string

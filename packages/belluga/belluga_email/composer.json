@@ -1,0 +1,22 @@
+{
+  "name": "belluga/email",
+  "description": "Tenant-scoped transactional email delivery with Resend-backed configuration stored in the Belluga settings kernel.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\Email\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\Email\\EmailServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}

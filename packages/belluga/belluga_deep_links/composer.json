@@ -1,0 +1,23 @@
+{
+  "name": "belluga/deep-links",
+  "description": "Deep link and deferred deep link contract package for Belluga.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\DeepLinks\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\DeepLinks\\DeepLinksServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0",
+    "belluga/settings": "*"
+  }
+}

@@ -2,14 +2,12 @@
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\Security\ApiAbuseSignalRecorder;
-use App\Jobs\Ticketing\ExpireIssuedTicketUnitsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
-use Belluga\Ticketing\Jobs\ProcessTicketOutboxJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -83,24 +81,6 @@ Schedule::call(static function (): void {
 })
     ->name('events:occurrences:reconcile')
     ->everyFifteenMinutes()
-    ->withoutOverlapping();
-
-Schedule::call(static function (): void {
-    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
-        ProcessTicketOutboxJob::dispatch();
-    });
-})
-    ->name('ticketing:outbox:process')
-    ->everyMinute()
-    ->withoutOverlapping();
-
-Schedule::call(static function (): void {
-    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
-        ExpireIssuedTicketUnitsJob::dispatch();
-    });
-})
-    ->name('ticketing:issued-expiry:sweep')
-    ->everyMinute()
     ->withoutOverlapping();
 
 Schedule::command('api-security:abuse-signals:prune')

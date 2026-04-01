@@ -18,7 +18,7 @@ If a client (backend consumer, Flutter, web) needs to integrate with Events, use
 This package owns the canonical event and occurrence runtime for the Belluga ecosystem.
 It handles event write/read behavior, occurrence synchronization, stream deltas, capability gating, and package migrations for the tenant database.
 
-It does not own invite lifecycle, ticketing admission, or tenant resolution strategy.
+It does not own invite lifecycle, addon admission/entitlement flows, or tenant resolution strategy.
 
 ---
 
@@ -35,7 +35,7 @@ Implemented and locked:
 - capability `map_poi` (tenant/event gate + geometry contract + projection semantics)
 
 Deferred (still pending):
-- final capability block (ticketing capabilities: inventory, qr_checkin, combo, limits, attendee/student binding, pricing fees)
+- final addon capability blocks owned by external packages (inventory, check-in, bundle/combo, access limits, attendee/student binding, pricing fees)
 
 ---
 
@@ -50,7 +50,7 @@ Deferred (still pending):
 ### Attendees / Students (Attendance Binding)
 - Represents people who will attend or consume access to the event or occurrence.
 - Examples: students, ticket holders, invited attendees.
-- Domain ownership: **Ticketing/Participation** (not Events).
+- Domain ownership: **Participation package** (not Events).
 - Purpose: eligibility, entitlement, access validation, and presence/check-in.
 
 Rule: `event_parties` must never be reused as attendee/student binding.
@@ -353,7 +353,6 @@ Geometry compatibility:
    - `EventPartyMapperRegistryContract`
    - `EventTenantContextContract`
    - `EventRadiusSettingsContract`
-   - `EventTemplateSnapshotReadContract`
    - `TenantExecutionContextContract`
 3. Mount the host route files that expose the public, admin, and account event endpoints.
 4. Keep tenant migrations pointed at `packages/belluga/belluga_events/database/migrations`.
@@ -444,7 +443,7 @@ Before integrating any client with this package:
 ## Known Limitations and Non-Goals
 
 The following remain intentionally outside the delivered block:
-- consolidated ticketing capabilities (inventory, qr_checkin, combo, limits, participant/student binding, pricing fees)
-- their tenant-scoped migration/index expansion and dedicated integration tests
+- consolidated addon capabilities (inventory, check-in, combo, limits, participant/student binding, pricing fees)
+- their tenant-scoped migration/index expansion and dedicated integration tests in external addon packages
 - compatibility bridge to removed legacy `account_*` event fields
 - invite lifecycle ownership

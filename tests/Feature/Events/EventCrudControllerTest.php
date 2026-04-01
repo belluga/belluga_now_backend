@@ -25,7 +25,6 @@ use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
-use Belluga\Ticketing\Models\Tenants\TicketEventTemplate;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
@@ -82,7 +81,6 @@ class EventCrudControllerTest extends TestCaseTenant
         Event::query()->delete();
         EventOccurrence::query()->delete();
         EventType::query()->delete();
-        TicketEventTemplate::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
 
@@ -472,78 +470,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences', 'date_time_start', 'date_time_end']);
     }
 
-    public function test_event_create_applies_template_defaults_and_stores_template_audit_metadata(): void
-    {
-        TicketEventTemplate::query()->create([
-            'template_key' => 'fair-template-defaults',
-            'version' => 3,
-            'status' => 'active',
-            'name' => 'Fair Template',
-            'defaults' => [
-                'ticketing' => [
-                    'hold_minutes' => 25,
-                ],
-            ],
-            'field_states' => [
-                'ticketing.hold_minutes' => 'hidden',
-            ],
-            'hidden_fields' => ['ticketing.hold_minutes'],
-            'metadata' => [
-                'owner' => 'qa',
-            ],
-        ]);
-
-        $payload = $this->makeEventPayload([
-            'template_id' => 'fair-template-defaults',
-        ]);
-
-        $response = $this->postJson($this->accountEventsBase, $payload);
-
-        $response->assertStatus(201);
-
-        /** @var Event $stored */
-        $stored = Event::query()->where('_id', $response->json('data.event_id'))->firstOrFail();
-        $ticketing = is_array($stored->ticketing ?? null) ? $stored->ticketing : [];
-        $template = is_array($ticketing['template'] ?? null) ? $ticketing['template'] : [];
-
-        $this->assertSame(25, (int) data_get($ticketing, 'hold_minutes', 0));
-        $this->assertSame('fair-template-defaults', (string) ($template['template_id'] ?? ''));
-        $this->assertSame(3, (int) ($template['version'] ?? 0));
-    }
-
-    public function test_event_create_rejects_override_for_template_protected_field(): void
-    {
-        TicketEventTemplate::query()->create([
-            'template_key' => 'template-hidden-publication',
-            'version' => 1,
-            'status' => 'active',
-            'name' => 'Hidden Publication',
-            'defaults' => [
-                'publication' => [
-                    'status' => 'draft',
-                ],
-            ],
-            'field_states' => [
-                'publication.status' => 'hidden',
-            ],
-            'hidden_fields' => ['publication.status'],
-            'metadata' => [],
-        ]);
-
-        $payload = $this->makeEventPayload([
-            'template_id' => 'template-hidden-publication',
-            'publication' => [
-                'status' => 'published',
-                'publish_at' => Carbon::now()->subMinute()->toISOString(),
-            ],
-        ]);
-
-        $response = $this->postJson($this->accountEventsBase, $payload);
-
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['publication.status']);
-    }
-
     public function test_event_create_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
@@ -843,6 +769,36 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->patchEventsSettings([
             'capabilities.map_poi.available' => true,
         ])->assertStatus(200);
+    }
+
+    public function test_event_create_projects_map_poi_with_event_type_icon_color_snapshot(): void
+    {
+        $this->eventType->fill([
+            'icon' => 'music_note',
+            'color' => '#C6141F',
+            'icon_color' => '#101010',
+        ])->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $response->assertStatus(201);
+
+        $eventId = (string) $response->json('data.event_id');
+        $event = Event::query()->find($eventId);
+        $this->assertNotNull($event);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame('icon', data_get($projection->visual, 'mode'));
+        $this->assertSame('music_note', data_get($projection->visual, 'icon'));
+        $this->assertSame('#C6141F', data_get($projection->visual, 'color'));
+        $this->assertSame('#101010', data_get($projection->visual, 'icon_color'));
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
     }
 
     public function test_event_create_online_supports_range_discovery_scope_for_map_poi_projection(): void

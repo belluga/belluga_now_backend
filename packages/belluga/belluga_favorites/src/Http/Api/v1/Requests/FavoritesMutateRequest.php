@@ -25,4 +25,3 @@ class FavoritesMutateRequest extends FormRequest
         ];
     }
 }
-

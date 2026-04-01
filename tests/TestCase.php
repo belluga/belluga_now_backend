@@ -2,10 +2,12 @@
 
 namespace Tests;
 
+use App\Models\Landlord\Tenant;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Tests\Api\Traits\ClearConfigCacheOnce;
 use Tests\Api\Traits\MigrateFreshSeedOnce;
 use Tests\Helpers\Landlord;
+use Tests\Helpers\TenantLabels;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -88,6 +90,67 @@ abstract class TestCase extends BaseTestCase
         get {
             return new Landlord('landlord');
         }
+    }
+
+    protected function resolveCanonicalTenant(
+        ?TenantLabels $labels = null,
+        bool $allowSingleTenantContext = false
+    ): Tenant {
+        $labels ??= $this->landlord->tenant_primary;
+        $expectedSubdomain = trim((string) $labels->subdomain);
+
+        if ($expectedSubdomain !== '') {
+            $tenantBySubdomain = Tenant::query()
+                ->where('subdomain', $expectedSubdomain)
+                ->first();
+
+            if ($tenantBySubdomain instanceof Tenant) {
+                return $tenantBySubdomain;
+            }
+        }
+
+        $expectedSlug = '';
+        try {
+            $expectedSlug = trim((string) $labels->slug);
+        } catch (\TypeError) {
+            $expectedSlug = '';
+        }
+        if ($expectedSlug !== '') {
+            $tenantBySlug = Tenant::query()
+                ->where('slug', $expectedSlug)
+                ->first();
+
+            if ($tenantBySlug instanceof Tenant) {
+                return $tenantBySlug;
+            }
+        }
+
+        if ($allowSingleTenantContext) {
+            $candidateTenants = Tenant::query()
+                ->limit(2)
+                ->get()
+                ->all();
+
+            if (count($candidateTenants) === 1 && $candidateTenants[0] instanceof Tenant) {
+                return $candidateTenants[0];
+            }
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Unable to resolve canonical tenant for test context (subdomain: %s, slug: %s).',
+            $expectedSubdomain,
+            $expectedSlug
+        ));
+    }
+
+    protected function makeCanonicalTenantCurrent(
+        ?TenantLabels $labels = null,
+        bool $allowSingleTenantContext = false
+    ): Tenant {
+        $tenant = $this->resolveCanonicalTenant($labels, $allowSingleTenantContext);
+        $tenant->makeCurrent();
+
+        return $tenant;
     }
 
     protected function getGlobal($key): mixed

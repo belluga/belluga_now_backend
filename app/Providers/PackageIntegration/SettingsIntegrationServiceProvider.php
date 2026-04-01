@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
-use App\Integration\Settings\TenantAppLinksPatchGuard;
 use App\Integration\Settings\TenantScopeContextAdapter;
+use App\Integration\Settings\CompositeSettingsPatchGuard;
 use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
@@ -20,9 +20,10 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
             TenantScopeContextContract::class,
             TenantScopeContextAdapter::class
         );
+
         $this->app->singleton(
             SettingsNamespacePatchGuardContract::class,
-            TenantAppLinksPatchGuard::class,
+            CompositeSettingsPatchGuard::class
         );
     }
 
@@ -62,43 +63,5 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
             icon: 'analytics',
         ));
 
-        $registry->register(new SettingsNamespaceDefinition(
-            namespace: 'app_links',
-            scope: 'tenant',
-            label: 'App Links',
-            groupLabel: 'Mobile',
-            ability: 'push-settings:update',
-            fields: [
-                'android.sha256_cert_fingerprints' => [
-                    'type' => 'array',
-                    'nullable' => false,
-                    'label' => 'Android SHA-256 Fingerprints',
-                    'label_i18n_key' => 'settings.app_links.android.sha256_cert_fingerprints.label',
-                    'default' => [],
-                    'order' => 10,
-                ],
-                'ios.team_id' => [
-                    'type' => 'string',
-                    'nullable' => true,
-                    'label' => 'Apple Team ID',
-                    'label_i18n_key' => 'settings.app_links.ios.team_id.label',
-                    'default' => null,
-                    'order' => 20,
-                ],
-                'ios.paths' => [
-                    'type' => 'array',
-                    'nullable' => false,
-                    'label' => 'iOS Universal Link Paths',
-                    'label_i18n_key' => 'settings.app_links.ios.paths.label',
-                    'default' => ['/invite*', '/convites*'],
-                    'order' => 30,
-                ],
-            ],
-            order: 40,
-            labelI18nKey: 'settings.app_links.namespace.label',
-            description: 'Per-tenant Android App Links and iOS Universal Links credentials. App identifiers are managed via typed app domains.',
-            descriptionI18nKey: 'settings.app_links.namespace.description',
-            icon: 'link',
-        ));
     }
 }

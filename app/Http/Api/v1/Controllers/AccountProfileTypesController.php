@@ -42,6 +42,19 @@ class AccountProfileTypesController extends Controller
         return response()->json(['data' => $entry]);
     }
 
+    public function mapPoiProjectionImpact(Request $request): JsonResponse
+    {
+        $profileType = (string) $request->route('profile_type', '');
+        $count = $this->managementService->previewDisableProjectionCount($profileType);
+
+        return response()->json([
+            'data' => [
+                'profile_type' => $profileType,
+                'projection_count' => $count,
+            ],
+        ]);
+    }
+
     public function destroy(Request $request): JsonResponse
     {
         $profileType = (string) $request->route('profile_type', '');

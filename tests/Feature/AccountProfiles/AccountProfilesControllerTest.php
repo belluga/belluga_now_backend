@@ -16,9 +16,11 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -223,6 +225,272 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
+    public function test_public_account_profile_index_returns_empty_when_top_level_profile_type_is_non_favoritable(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Personal Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=personal"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('data'));
+    }
+
+    public function test_public_account_profile_near_returns_distance_sorted_favoritable_profiles_only(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => false,
+            ],
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Geo Secondary',
+            'document' => 'DOC-GEO-SECONDARY',
+        ]);
+
+        $tertiary = Account::create([
+            'name' => 'Geo Tertiary',
+            'document' => 'DOC-GEO-TERTIARY',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Near Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0002, -20.0002],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Far Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0120, -20.0120],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $tertiary->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Non Poi Artist',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
+            'is_active' => true,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('page', 1);
+        $response->assertJsonPath('page_size', 10);
+        $response->assertJsonPath('has_more', false);
+
+        $items = collect($response->json('data'));
+        $this->assertCount(2, $items);
+        $this->assertTrue(
+            $items->every(static fn (array $item): bool => ($item['profile_type'] ?? null) === 'venue')
+        );
+        $this->assertSame(
+            ['Near Venue', 'Far Venue'],
+            $items->pluck('display_name')->values()->all()
+        );
+        $this->assertNotNull($items->first()['distance_meters'] ?? null);
+        $this->assertIsNumeric($items->first()['distance_meters'] ?? null);
+        $this->assertLessThan(
+            (float) ($items->last()['distance_meters'] ?? INF),
+            (float) ($items->first()['distance_meters'] ?? 0)
+        );
+    }
+
+    public function test_public_account_profile_near_requires_origin_coordinates(): void
+    {
+        $this->createAccountUser([]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $this->assertNotEmpty($response->json('errors.origin_lng'));
+    }
+
+    public function test_public_account_profile_near_excludes_private_visibility_profiles(): void
+    {
+        $this->createAccountUser([]);
+
+        $publicProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Public Nearby',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0005, -20.0005],
+            ],
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Nearby Private Account',
+            'document' => 'DOC-NEARBY-PRIVATE',
+        ]);
+        $privateProfile = AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Nearby',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0007, -20.0007],
+            ],
+            'is_active' => true,
+        ]);
+
+        AccountProfile::query()
+            ->where('_id', (string) $publicProfile->_id)
+            ->update(['visibility' => 'public']);
+        AccountProfile::query()
+            ->where('_id', (string) $privateProfile->_id)
+            ->update(['visibility' => 'friends_only']);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Public Nearby', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_excludes_legacy_profiles_without_visibility_field(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Explicit Public Venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $legacyAccount = Account::create([
+            'name' => 'Legacy Visibility Account',
+            'document' => 'DOC-LEGACY-VISIBILITY-INDEX',
+        ]);
+
+        AccountProfile::raw(static function ($collection) use ($legacyAccount): void {
+            $collection->insertOne([
+                '_id' => new ObjectId,
+                'account_id' => (string) $legacyAccount->_id,
+                'profile_type' => 'venue',
+                'display_name' => 'Legacy Missing Visibility',
+                'slug' => 'legacy-missing-visibility-index',
+                'is_active' => true,
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0008, -20.0008],
+                ],
+                'taxonomy_terms' => [],
+            ]);
+        });
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Explicit Public Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_near_excludes_legacy_profiles_without_visibility_field(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Explicit Public Nearby',
+            'is_active' => true,
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0005, -20.0005],
+            ],
+        ]);
+
+        $legacyAccount = Account::create([
+            'name' => 'Legacy Near Visibility Account',
+            'document' => 'DOC-LEGACY-VISIBILITY-NEAR',
+        ]);
+
+        AccountProfile::raw(static function ($collection) use ($legacyAccount): void {
+            $collection->insertOne([
+                '_id' => new ObjectId,
+                'account_id' => (string) $legacyAccount->_id,
+                'profile_type' => 'venue',
+                'display_name' => 'Legacy Missing Visibility Nearby',
+                'slug' => 'legacy-missing-visibility-near',
+                'is_active' => true,
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0006, -20.0006],
+                ],
+                'taxonomy_terms' => [],
+            ]);
+        });
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Explicit Public Nearby', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_account_profile_model_defaults_visibility_to_public(): void
+    {
+        $this->createAccountUser([]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Default Visibility Venue',
+            'is_active' => true,
+        ]);
+
+        $stored = AccountProfile::query()
+            ->where('_id', (string) $profile->_id)
+            ->first();
+
+        $this->assertNotNull($stored);
+        $this->assertSame('public', $stored?->visibility);
+    }
+
     public function test_public_account_profile_index_excludes_inactive_profiles(): void
     {
         $this->createAccountUser([]);
@@ -252,6 +520,44 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Active Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_excludes_private_visibility_profiles(): void
+    {
+        $this->createAccountUser([]);
+
+        $publicProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Public Venue',
+            'is_active' => true,
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Private Visibility Account',
+            'document' => 'DOC-PRIVATE-VISIBILITY',
+        ]);
+
+        $privateProfile = AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Venue',
+            'is_active' => true,
+        ]);
+
+        AccountProfile::query()
+            ->where('_id', (string) $publicProfile->_id)
+            ->update(['visibility' => 'public']);
+        AccountProfile::query()
+            ->where('_id', (string) $privateProfile->_id)
+            ->update(['visibility' => 'friends_only']);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Public Venue', $items->first()['display_name'] ?? null);
     }
 
     public function test_public_account_profile_index_returns_empty_when_none(): void
@@ -417,6 +723,52 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $created->assertStatus(201);
         $created->assertJsonPath('data.account_profile.profile_type', 'venue');
+    }
+
+    public function test_account_onboarding_projects_map_poi_with_type_visual_snapshot(): void
+    {
+        MapPoi::query()->delete();
+
+        TenantProfileType::query()
+            ->where('type', 'venue')
+            ->update([
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'restaurant',
+                    'color' => '#EB2528',
+                    'icon_color' => '#101010',
+                ],
+            ]);
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Venue Visual Projection',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.67134,
+                    'lng' => -40.49540,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $profileId = (string) $response->json('data.account_profile.id');
+        $this->assertNotSame('', $profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame('icon', data_get($projection->visual, 'mode'));
+        $this->assertSame('restaurant', data_get($projection->visual, 'icon'));
+        $this->assertSame('#EB2528', data_get($projection->visual, 'color'));
+        $this->assertSame('#101010', data_get($projection->visual, 'icon_color'));
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
     }
 
     public function test_account_profile_create_stores_avatar_and_cover_uploads(): void

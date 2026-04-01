@@ -1,0 +1,23 @@
+{
+  "name": "belluga/media",
+  "description": "Belluga shared media processing primitives for tenant-scoped model media.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\Media\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\Media\\MediaServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}
+

@@ -36,6 +36,8 @@ class StaticAssetUpdateRequest extends FormRequest
             'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             'avatar_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'cover_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'remove_avatar' => 'sometimes|boolean',
+            'remove_cover' => 'sometimes|boolean',
         ];
     }
 }

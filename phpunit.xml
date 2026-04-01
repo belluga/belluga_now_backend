@@ -18,6 +18,9 @@
         <testsuite name="Feature-AccountProfiles">
             <directory>tests/Feature/AccountProfiles</directory>
         </testsuite>
+        <testsuite name="Feature-Events">
+            <directory>tests/Feature/Events</directory>
+        </testsuite>
         <testsuite name="Feature-Map">
             <directory>tests/Feature/Map</directory>
         </testsuite>

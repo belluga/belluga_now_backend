@@ -192,6 +192,9 @@ Route::post('/account_profile_types', [AccountProfileTypesController::class, 'st
 Route::patch('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'update'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
+Route::get('/account_profile_types/{profile_type}/map_poi_projection_impact', [AccountProfileTypesController::class, 'mapPoiProjectionImpact'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
 Route::delete('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'destroy'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
 
@@ -203,6 +206,9 @@ Route::post('/static_profile_types', [StaticProfileTypesController::class, 'stor
 
 Route::patch('/static_profile_types/{profile_type}', [StaticProfileTypesController::class, 'update'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::get('/static_profile_types/{profile_type}/map_poi_projection_impact', [StaticProfileTypesController::class, 'mapPoiProjectionImpact'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
 Route::delete('/static_profile_types/{profile_type}', [StaticProfileTypesController::class, 'destroy'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);

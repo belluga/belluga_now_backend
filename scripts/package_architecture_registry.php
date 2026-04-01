@@ -23,11 +23,19 @@ return [
         'integration_mode' => 'shared-kernel',
         'route_ownership' => 'host-owned-routes',
     ],
-    'packages/belluga/belluga_ticketing' => [
+    'packages/belluga/belluga_favorites' => [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
     ],
-    'packages/belluga/belluga_favorites' => [
+    'packages/belluga/belluga_media' => [
+        'integration_mode' => 'host-integrated',
+        'route_ownership' => 'host-owned-routes',
+    ],
+    'packages/belluga/belluga_deep_links' => [
+        'integration_mode' => 'host-integrated',
+        'route_ownership' => 'host-owned-routes',
+    ],
+    'packages/belluga/belluga_email' => [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
     ],

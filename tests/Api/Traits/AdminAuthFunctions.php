@@ -49,7 +49,12 @@ trait AdminAuthFunctions
             ]
         );
 
-        $user->token = $response->json()['data']['token'];
+        if ($response->status() === 200) {
+            $token = $response->json('data.token');
+            if (is_string($token) && $token !== '') {
+                $user->token = $token;
+            }
+        }
 
         return $response;
     }

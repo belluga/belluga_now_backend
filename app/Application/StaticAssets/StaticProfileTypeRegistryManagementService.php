@@ -4,15 +4,23 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
+use App\Application\Shared\MapPois\MapPoiProjectionRefService;
+use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
-use Belluga\MapPois\Models\Tenants\MapPoi;
+use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\UpsertMapPoiFromStaticAssetJob;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
-use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
 
 class StaticProfileTypeRegistryManagementService
 {
+    public function __construct(
+        private readonly PoiVisualNormalizer $poiVisualNormalizer,
+        private readonly MapPoiProjectionRefService $mapPoiProjectionRefs,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -66,6 +74,17 @@ class StaticProfileTypeRegistryManagementService
             $nextType,
             $currentType,
         );
+        $currentCapabilities = is_array($model->capabilities ?? null)
+            ? $model->capabilities
+            : [];
+        $currentPoiEnabled = (bool) ($currentCapabilities['is_poi_enabled'] ?? false);
+        $nextCapabilities = is_array($entry['capabilities'] ?? null)
+            ? $entry['capabilities']
+            : [];
+        $nextPoiEnabled = (bool) ($nextCapabilities['is_poi_enabled'] ?? false);
+        $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->poi_visual ?? null);
+        $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['poi_visual'] ?? null);
+        $poiVisualChanged = $currentPoiVisual !== $nextPoiVisual;
 
         try {
             $model->fill($entry);
@@ -83,44 +102,63 @@ class StaticProfileTypeRegistryManagementService
         }
 
         $nextMapCategory = (string) ($entry['map_category'] ?? $nextType);
-        $shouldSyncMapPoiCategory = $nextMapCategory !== $currentMapCategory;
-        $shouldSyncStaticAssets = $nextType !== $currentType;
+        $forcedCheckpoint = $this->toCheckpoint($model->updated_at ?? null);
+        $shouldRefreshMapProjection = $nextType !== $currentType
+            || $nextMapCategory !== $currentMapCategory
+            || $currentPoiEnabled !== $nextPoiEnabled
+            || $poiVisualChanged;
 
-        if ($shouldSyncStaticAssets || $shouldSyncMapPoiCategory) {
+        if ($shouldRefreshMapProjection) {
+            $queryType = $nextType === $currentType ? $nextType : $currentType;
             $assetIds = StaticAsset::query()
-                ->where('profile_type', $currentType)
+                ->where('profile_type', $queryType)
                 ->get(['_id'])
                 ->map(static fn (StaticAsset $asset): string => (string) $asset->getKey())
                 ->all();
 
+            if ($nextType !== $currentType && $assetIds !== []) {
+                StaticAsset::query()
+                    ->where('profile_type', $currentType)
+                    ->update(['profile_type' => $nextType]);
+            }
+
             if ($assetIds !== []) {
-                if ($shouldSyncStaticAssets) {
-                    StaticAsset::query()
-                        ->where('profile_type', $currentType)
-                        ->update(['profile_type' => $nextType]);
-                }
-
-                if ($shouldSyncMapPoiCategory) {
-                    [$stringRefIds, $objectRefIds] = $this->splitMapPoiRefIds($assetIds);
-
-                    if ($stringRefIds !== []) {
-                        MapPoi::query()
-                            ->where('ref_type', 'static')
-                            ->whereIn('ref_id', $stringRefIds)
-                            ->update(['category' => $nextMapCategory]);
-                    }
-
-                    if ($objectRefIds !== []) {
-                        MapPoi::query()
-                            ->where('ref_type', 'static')
-                            ->whereIn('ref_id', $objectRefIds)
-                            ->update(['category' => $nextMapCategory]);
-                    }
+                if (! $nextPoiEnabled) {
+                    $this->mapPoiProjectionRefs->dispatchForEachRefId(
+                        $assetIds,
+                        static function (string $assetId): void {
+                            DeleteMapPoiByRefJob::dispatch('static', $assetId);
+                        },
+                    );
+                } else {
+                    $checkpoint = $forcedCheckpoint > 0 ? $forcedCheckpoint : null;
+                    $this->mapPoiProjectionRefs->dispatchForEachRefId(
+                        $assetIds,
+                        static function (string $assetId) use ($checkpoint): void {
+                            UpsertMapPoiFromStaticAssetJob::dispatch($assetId, $checkpoint);
+                        },
+                    );
                 }
             }
         }
 
-        return $this->toPayload($model);
+        return $this->toPayload($model->fresh() ?? $model);
+    }
+
+    public function previewDisableProjectionCount(string $type): int
+    {
+        $normalizedType = trim($type);
+        if ($normalizedType === '') {
+            return 0;
+        }
+
+        $assetIds = StaticAsset::query()
+            ->where('profile_type', $normalizedType)
+            ->get(['_id'])
+            ->map(static fn (StaticAsset $asset): string => (string) $asset->getKey())
+            ->all();
+
+        return $this->mapPoiProjectionRefs->countByRefType('static', $assetIds);
     }
 
     public function delete(string $type): void
@@ -147,6 +185,7 @@ class StaticProfileTypeRegistryManagementService
             'label' => trim((string) ($payload['label'] ?? '')),
             'map_category' => $this->normalizeMapCategory($payload['map_category'] ?? null, $type),
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
+            'poi_visual' => $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null),
             'capabilities' => [
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
                 'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
@@ -188,6 +227,9 @@ class StaticProfileTypeRegistryManagementService
             'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
                 ? $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? [])
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
+            'poi_visual' => array_key_exists('poi_visual', $payload)
+                ? $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null)
+                : $this->poiVisualNormalizer->normalize($existing->poi_visual ?? null),
             'capabilities' => [
                 'is_poi_enabled' => array_key_exists('is_poi_enabled', $capabilities)
                     ? (bool) $capabilities['is_poi_enabled']
@@ -235,33 +277,25 @@ class StaticProfileTypeRegistryManagementService
         return trim($type);
     }
 
-    /**
-     * @param  array<int, string>  $rawIds
-     * @return array{0: array<int, string>, 1: array<int, ObjectId>}
-     */
-    private function splitMapPoiRefIds(array $rawIds): array
+    private function toCheckpoint(mixed $value): int
     {
-        $stringIds = [];
-        $objectIds = [];
+        if ($value instanceof Carbon) {
+            return (int) $value->valueOf();
+        }
 
-        foreach ($rawIds as $rawId) {
-            $id = trim((string) $rawId);
-            if ($id === '') {
-                continue;
-            }
+        if ($value instanceof \DateTimeInterface) {
+            return (int) Carbon::instance($value)->valueOf();
+        }
 
-            $stringIds[] = $id;
-
-            if (preg_match('/^[a-f0-9]{24}$/i', $id) === 1) {
-                try {
-                    $objectIds[] = new ObjectId($id);
-                } catch (\Throwable) {
-                    // Ignore invalid ObjectId conversions and keep string matching.
-                }
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return (int) Carbon::parse($value)->valueOf();
+            } catch (\Exception) {
+                return 0;
             }
         }
 
-        return [$stringIds, $objectIds];
+        return 0;
     }
 
     /**
@@ -279,6 +313,7 @@ class StaticProfileTypeRegistryManagementService
                     : [],
                 static fn ($value): bool => is_string($value) && $value !== ''
             )),
+            'poi_visual' => $this->poiVisualNormalizer->normalize($model->poi_visual ?? null),
             'capabilities' => [
                 'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),
                 'has_bio' => (bool) ($model->capabilities['has_bio'] ?? false),

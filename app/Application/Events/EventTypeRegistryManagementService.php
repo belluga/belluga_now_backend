@@ -7,6 +7,7 @@ namespace App\Application\Events;
 use App\Models\Tenants\EventType;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -82,17 +83,33 @@ class EventTypeRegistryManagementService
 
         $snapshot = $this->registryService->toPayload($model);
         $eventTypeId = (string) $snapshot['id'];
+        $now = Carbon::now();
+        $eventIds = Event::query()
+            ->where('type.id', $eventTypeId)
+            ->get(['_id'])
+            ->map(static fn (Event $event): string => (string) $event->getKey())
+            ->all();
+
         Event::query()
             ->where('type.id', $eventTypeId)
-            ->update(['type' => $snapshot]);
+            ->update([
+                'type' => $snapshot,
+                'updated_at' => $now,
+            ]);
 
         EventOccurrence::query()
             ->where('type.id', $eventTypeId)
             ->update([
                 'type' => $snapshot,
-                'updated_from_event_at' => Carbon::now(),
-                'updated_at' => Carbon::now(),
+                'updated_from_event_at' => $now,
+                'updated_at' => $now,
             ]);
+
+        $forcedCheckpoint = $this->toCheckpoint($now);
+        $jobCheckpoint = $forcedCheckpoint > 0 ? $forcedCheckpoint : null;
+        foreach ($eventIds as $eventId) {
+            UpsertMapPoiFromEventJob::dispatch($eventId, $jobCheckpoint);
+        }
 
         return $snapshot;
     }
@@ -134,6 +151,7 @@ class EventTypeRegistryManagementService
             'description' => $this->normalizeNullableString($payload['description'] ?? null),
             'icon' => $this->normalizeNullableString($payload['icon'] ?? null),
             'color' => $this->normalizeNullableString($payload['color'] ?? null),
+            'icon_color' => $this->normalizeNullableString($payload['icon_color'] ?? null),
         ];
     }
 
@@ -159,6 +177,9 @@ class EventTypeRegistryManagementService
             'color' => array_key_exists('color', $payload)
                 ? $this->normalizeNullableString($payload['color'])
                 : $this->normalizeNullableString($existing->color ?? null),
+            'icon_color' => array_key_exists('icon_color', $payload)
+                ? $this->normalizeNullableString($payload['icon_color'])
+                : $this->normalizeNullableString($existing->icon_color ?? null),
         ];
     }
 
@@ -167,5 +188,26 @@ class EventTypeRegistryManagementService
         $normalized = trim((string) $value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function toCheckpoint(mixed $value): int
+    {
+        if ($value instanceof Carbon) {
+            return (int) $value->valueOf();
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return (int) Carbon::instance($value)->valueOf();
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return (int) Carbon::parse($value)->valueOf();
+            } catch (\Exception) {
+                return 0;
+            }
+        }
+
+        return 0;
     }
 }

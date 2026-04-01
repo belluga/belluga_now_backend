@@ -17,6 +17,7 @@ class TenantProfileType extends Model
         'type',
         'label',
         'allowed_taxonomies',
+        'poi_visual',
         'capabilities',
     ];
 

@@ -20,7 +20,10 @@ class UpsertMapPoiFromStaticAssetJob implements ShouldQueue, TenantAware
     use Queueable;
     use SerializesModels;
 
-    public function __construct(private readonly string $assetId) {}
+    public function __construct(
+        private readonly string $assetId,
+        private readonly ?int $forcedCheckpoint = null,
+    ) {}
 
     public function handle(
         MapPoiProjectionService $projectionService,
@@ -34,6 +37,6 @@ class UpsertMapPoiFromStaticAssetJob implements ShouldQueue, TenantAware
             return;
         }
 
-        $projectionService->upsertFromStaticAsset($asset);
+        $projectionService->upsertFromStaticAsset($asset, $this->forcedCheckpoint);
     }
 }

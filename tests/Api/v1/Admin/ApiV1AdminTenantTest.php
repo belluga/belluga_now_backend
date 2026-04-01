@@ -2,6 +2,7 @@
 
 namespace Tests\Api\v1\Admin;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCaseAuthenticated;
@@ -88,9 +89,27 @@ class ApiV1AdminTenantTest extends TestCaseAuthenticated
     {
 
         $response = $this->tenantsCreate([
-            'name' => fake()->company(),
+            'name' => 'tenant-subdomain-conflict-'.Str::uuid()->toString(),
             'subdomain' => $this->landlord->tenant_disposable->subdomain,
         ]);
+
+        $response->assertStatus(422);
+        $this->assertEquals('The subdomain has already been taken', $response->json()['message']);
+    }
+
+    public function test_tenants_create_existent_subdomain_uses_landlord_connection_even_with_tenant_default(): void
+    {
+        $originalDefaultConnection = DB::getDefaultConnection();
+        DB::setDefaultConnection('tenant');
+
+        try {
+            $response = $this->tenantsCreate([
+                'name' => 'tenant-subdomain-conflict-'.Str::uuid()->toString(),
+                'subdomain' => $this->landlord->tenant_disposable->subdomain,
+            ]);
+        } finally {
+            DB::setDefaultConnection($originalDefaultConnection);
+        }
 
         $response->assertStatus(422);
         $this->assertEquals('The subdomain has already been taken', $response->json()['message']);

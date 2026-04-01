@@ -20,6 +20,7 @@ class EnvironmentResolverService
         private readonly TelemetrySettingsKernelBridge $telemetrySettings,
         private readonly PushSettingsKernelBridge $pushSettings,
         private readonly TenantAppDomainResolverService $appDomainResolver,
+        private readonly AccountProfileRegistryService $profileRegistryService,
     ) {}
 
     /**
@@ -63,7 +64,7 @@ class EnvironmentResolverService
         $telemetry = $this->telemetrySettings->currentTelemetryConfig();
         $firebase = $this->pushSettings->currentFirebaseConfig();
         $push = $this->pushSettings->currentPushConfig();
-        $profileTypes = (new AccountProfileRegistryService)->registry();
+        $profileTypes = $this->profileRegistryService->registry();
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
