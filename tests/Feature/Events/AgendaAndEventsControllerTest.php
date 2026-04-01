@@ -160,6 +160,54 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame('', (string) ($upcomingItem['occurrence_id'] ?? ''));
     }
 
+    public function test_agenda_live_now_only_returns_only_current_occurrences_with_artists(): void
+    {
+        $now = Carbon::now();
+
+        $this->createEvent([
+            'title' => 'Live Discovery Slot',
+            'date_time_start' => $now->copy()->subMinutes(15),
+            'date_time_end' => $now->copy()->addMinutes(45),
+            'artists' => [
+                [
+                    'id' => 'artist-live-1',
+                    'display_name' => 'Live Artist One',
+                    'avatar_url' => 'https://example.org/artist-live-1.jpg',
+                    'highlight' => true,
+                    'genres' => ['samba'],
+                ],
+                [
+                    'id' => 'artist-live-2',
+                    'display_name' => 'Live Artist Two',
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['mpb'],
+                ],
+            ],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Upcoming Hidden In Live',
+            'date_time_start' => $now->copy()->addHours(2),
+            'date_time_end' => $now->copy()->addHours(4),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Past Hidden In Live',
+            'date_time_start' => $now->copy()->subHours(4),
+            'date_time_end' => $now->copy()->subHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?live_now_only=1&page=1&page_size=10");
+        $response->assertStatus(200);
+
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame('Live Discovery Slot', (string) ($items[0]['title'] ?? ''));
+        $this->assertSame('Live Artist One', (string) ($items[0]['artists'][0]['display_name'] ?? ''));
+        $this->assertSame('artist-live-1', (string) ($items[0]['artists'][0]['id'] ?? ''));
+    }
+
     public function test_agenda_public_endpoint_shows_only_effectively_published_items(): void
     {
         $now = Carbon::now();
@@ -776,6 +824,13 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     {
         $response = $this->getJson("{$this->base_api_tenant}agenda?origin_lat=10&page=1&page_size=10");
         $response->assertStatus(422);
+    }
+
+    public function test_agenda_rejects_live_now_only_combined_with_past_only(): void
+    {
+        $response = $this->getJson("{$this->base_api_tenant}agenda?live_now_only=1&past_only=1&page=1&page_size=10");
+        $response->assertStatus(422);
+        $this->assertNotEmpty($response->json('errors.live_now_only'));
     }
 
     private function createAccountUser(array $permissions): AccountUser

@@ -4,6 +4,7 @@ use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\BrandingController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
 use App\Http\Api\v1\Controllers\StaticAssetMediaController;
+use Belluga\DeepLinks\Http\Web\Controllers\OpenAppRedirectController;
 use Belluga\Events\Http\Api\v1\Controllers\EventMediaController;
 use Illuminate\Support\Facades\Route;
 
@@ -16,6 +17,7 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('tenant-maybe')->group(function () {
+    Route::get('/open-app', [OpenAppRedirectController::class, 'redirect']);
     Route::get('/.well-known/assetlinks.json', [BrandingController::class, 'getAssetLinks']);
     Route::get('/.well-known/apple-app-site-association', [BrandingController::class, 'getAppleAppSiteAssociation']);
     Route::get('/account-profiles/{account_profile}/avatar', [AccountProfileMediaController::class, 'avatar']);

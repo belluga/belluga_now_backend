@@ -31,4 +31,12 @@ return [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
     ],
+    'packages/belluga/belluga_deep_links' => [
+        'integration_mode' => 'host-integrated',
+        'route_ownership' => 'host-owned-routes',
+    ],
+    'packages/belluga/belluga_email' => [
+        'integration_mode' => 'host-integrated',
+        'route_ownership' => 'host-owned-routes',
+    ],
 ];

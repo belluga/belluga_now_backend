@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -42,6 +43,13 @@ class AccountProfilesController extends Controller
         $paginator = $this->profileQueryService->publicPaginate($request->query(), $perPage);
 
         return response()->json($paginator->toArray());
+    }
+
+    public function publicNear(AccountProfileNearRequest $request): JsonResponse
+    {
+        return response()->json(
+            $this->profileQueryService->publicNear($request->validated())
+        );
     }
 
     public function store(AccountProfileStoreRequest $request): JsonResponse

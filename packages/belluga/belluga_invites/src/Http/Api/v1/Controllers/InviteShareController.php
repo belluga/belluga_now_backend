@@ -39,4 +39,15 @@ class InviteShareController extends Controller
             isset($payload['idempotency_key']) ? (string) $payload['idempotency_key'] : null,
         ));
     }
+
+    public function accept(InviteActionRequest $request, string $tenant_domain, string $code): JsonResponse
+    {
+        $payload = $request->validated();
+
+        return $this->runWithDomainGuard(fn (): array => $this->shareService->accept(
+            $request->user(),
+            (string) $code,
+            isset($payload['idempotency_key']) ? (string) $payload['idempotency_key'] : null,
+        ));
+    }
 }

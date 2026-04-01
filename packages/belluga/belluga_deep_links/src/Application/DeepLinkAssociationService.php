@@ -2,21 +2,24 @@
 
 declare(strict_types=1);
 
-namespace App\Application\Branding;
+namespace Belluga\DeepLinks\Application;
 
-use App\Models\Landlord\Tenant;
-use App\Models\Tenants\TenantSettings;
-use Belluga\Settings\Models\Landlord\LandlordSettings;
-use Illuminate\Support\Arr;
+use Belluga\DeepLinks\Contracts\AppLinksIdentifierGatewayContract;
+use Belluga\DeepLinks\Contracts\AppLinksSettingsSourceContract;
 
 class DeepLinkAssociationService
 {
+    public function __construct(
+        private readonly AppLinksIdentifierGatewayContract $identifierGateway,
+        private readonly AppLinksSettingsSourceContract $settingsSource,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
     public function buildAssetLinks(): array
     {
-        $settings = $this->resolveAppLinksSettings();
+        $settings = $this->settingsSource->currentAppLinksSettings();
 
         $packageName = $this->resolveAndroidPackageName($settings);
         $fingerprints = $this->normalizeFingerprints(data_get($settings, 'android.sha256_cert_fingerprints', []));
@@ -40,7 +43,7 @@ class DeepLinkAssociationService
      */
     public function buildAppleAppSiteAssociation(): array
     {
-        $settings = $this->resolveAppLinksSettings();
+        $settings = $this->settingsSource->currentAppLinksSettings();
 
         $teamId = trim((string) data_get($settings, 'ios.team_id', ''));
         $bundleId = $this->resolveIosBundleId($settings);
@@ -67,21 +70,29 @@ class DeepLinkAssociationService
     }
 
     /**
-     * @return array<string, mixed>
+     * @param  array<string, mixed>  $settings
      */
-    private function resolveAppLinksSettings(): array
+    public function resolveAndroidStoreUrl(array $settings): ?string
     {
-        $tenantSettings = TenantSettings::current();
-        if ($tenantSettings !== null) {
-            return $this->normalizeArray($tenantSettings->getAttribute('app_links'));
+        $configured = $this->normalizeText(data_get($settings, 'android.store_url'));
+        if ($configured !== null) {
+            return $configured;
         }
 
-        $landlordSettings = LandlordSettings::current();
-        if ($landlordSettings !== null) {
-            return $this->normalizeArray($landlordSettings->getAttribute('app_links'));
+        $packageName = $this->resolveAndroidPackageName($settings);
+        if ($packageName === '') {
+            return null;
         }
 
-        return [];
+        return 'https://play.google.com/store/apps/details?id='.$packageName;
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     */
+    public function resolveIosStoreUrl(array $settings): ?string
+    {
+        return $this->normalizeText(data_get($settings, 'ios.store_url'));
     }
 
     /**
@@ -89,12 +100,9 @@ class DeepLinkAssociationService
      */
     private function resolveAndroidPackageName(array $settings): string
     {
-        $tenant = Tenant::current();
-        if ($tenant !== null) {
-            $typed = $tenant->appDomainIdentifierForPlatform(Tenant::APP_PLATFORM_ANDROID);
-            if (is_string($typed) && trim($typed) !== '') {
-                return trim($typed);
-            }
+        $identifier = $this->identifierGateway->identifierForPlatform('android');
+        if (is_string($identifier) && trim($identifier) !== '') {
+            return trim($identifier);
         }
 
         return trim((string) data_get($settings, 'android.package_name', ''));
@@ -105,12 +113,9 @@ class DeepLinkAssociationService
      */
     private function resolveIosBundleId(array $settings): string
     {
-        $tenant = Tenant::current();
-        if ($tenant !== null) {
-            $typed = $tenant->appDomainIdentifierForPlatform(Tenant::APP_PLATFORM_IOS);
-            if (is_string($typed) && trim($typed) !== '') {
-                return trim($typed);
-            }
+        $identifier = $this->identifierGateway->identifierForPlatform('ios');
+        if (is_string($identifier) && trim($identifier) !== '') {
+            return trim($identifier);
         }
 
         return trim((string) data_get($settings, 'ios.bundle_id', ''));
@@ -168,33 +173,14 @@ class DeepLinkAssociationService
         return array_values(array_unique($paths));
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function normalizeArray(mixed $value): array
+    private function normalizeText(mixed $value): ?string
     {
-        if (is_array($value)) {
-            return Arr::undot($value);
-        }
-        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
-            /** @var array<string, mixed> $copy */
-            $copy = $value->getArrayCopy();
-
-            return Arr::undot($copy);
-        }
-        if ($value instanceof \Traversable) {
-            /** @var array<string, mixed> $copy */
-            $copy = iterator_to_array($value);
-
-            return Arr::undot($copy);
-        }
-        if (is_object($value)) {
-            /** @var array<string, mixed> $copy */
-            $copy = (array) $value;
-
-            return Arr::undot($copy);
+        if (! is_string($value)) {
+            return null;
         }
 
-        return [];
+        $normalized = trim($value);
+
+        return $normalized === '' ? null : $normalized;
     }
 }

@@ -22,6 +22,7 @@ class AccountProfile extends Model
         'profile_type',
         'display_name',
         'slug',
+        'visibility',
         'taxonomy_terms',
         'location',
         'bio',
@@ -34,6 +35,10 @@ class AccountProfile extends Model
         'created_by_type',
         'updated_by',
         'updated_by_type',
+    ];
+
+    protected $attributes = [
+        'visibility' => 'public',
     ];
 
     protected $casts = [
