@@ -19,7 +19,7 @@ class SchedulerBootstrapTest extends TestCase
         $this->artisan('schedule:list')->assertExitCode(0);
     }
 
-    public function test_console_schedule_registers_tenant_fan_out_dispatch_for_tenant_jobs(): void
+    public function test_console_schedule_registers_current_event_dispatches_and_keeps_ticketing_jobs_removed(): void
     {
         $routesConsole = file_get_contents(base_path('routes/console.php'));
 
@@ -29,8 +29,10 @@ class SchedulerBootstrapTest extends TestCase
             $routesConsole
         );
         $this->assertStringContainsString('PublishScheduledEventsJob::dispatch();', $routesConsole);
-        $this->assertStringContainsString('ProcessTicketOutboxJob::dispatch();', $routesConsole);
-        $this->assertStringContainsString('ExpireIssuedTicketUnitsJob::dispatch();', $routesConsole);
+        $this->assertStringContainsString("->name('events:async:monitor')", $routesConsole);
+        $this->assertStringContainsString("->name('events:occurrences:reconcile')", $routesConsole);
+        $this->assertStringNotContainsString('ProcessTicketOutboxJob::dispatch();', $routesConsole);
+        $this->assertStringNotContainsString('ExpireIssuedTicketUnitsJob::dispatch();', $routesConsole);
         $this->assertStringNotContainsString('Schedule::job(PublishScheduledEventsJob::class)->hourly();', $routesConsole);
         $this->assertStringNotContainsString('Schedule::job(new ProcessTicketOutboxJob)->everyMinute();', $routesConsole);
     }
