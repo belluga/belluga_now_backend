@@ -370,6 +370,115 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         );
     }
 
+    public function testPasswordRegistrationDeduplicatesInviteFeedProjectionWhenMergingMultipleAnonymousIdentities(): void
+    {
+        $firstAnonymous = $this->issueAnonymousIdentityForMerge(
+            hash('sha256', 'invite-projection-merge-one'),
+            'invite-projection-merge-one',
+        );
+        $secondAnonymous = $this->issueAnonymousIdentityForMerge(
+            hash('sha256', 'invite-projection-merge-two'),
+            'invite-projection-merge-two',
+        );
+
+        $this->tenantModel->makeCurrent();
+
+        $eventId = (string) new ObjectId;
+        $occurrenceId = (string) new ObjectId;
+        $groupKey = "{$eventId}::{$occurrenceId}";
+
+        InviteFeedProjection::query()->create([
+            'receiver_user_id' => $firstAnonymous['id'],
+            'group_key' => $groupKey,
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'event_name' => 'Projection Merge Event',
+            'event_slug' => 'projection-merge-event',
+            'attendance_policy' => 'free_confirmation_only',
+            'tags' => ['vip'],
+            'inviter_candidates' => [[
+                'invite_id' => 'invite-first',
+                'inviter_principal' => [
+                    'kind' => 'user',
+                    'id' => (string) new ObjectId,
+                ],
+                'display_name' => 'Inviter One',
+                'avatar_url' => 'https://example.com/one.png',
+                'status' => 'pending',
+            ]],
+            'social_proof' => ['additional_inviter_count' => 0],
+        ]);
+
+        InviteFeedProjection::query()->create([
+            'receiver_user_id' => $secondAnonymous['id'],
+            'group_key' => $groupKey,
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'event_name' => 'Projection Merge Event',
+            'event_slug' => 'projection-merge-event',
+            'attendance_policy' => 'free_confirmation_only',
+            'tags' => ['early'],
+            'inviter_candidates' => [[
+                'invite_id' => 'invite-second',
+                'inviter_principal' => [
+                    'kind' => 'user',
+                    'id' => (string) new ObjectId,
+                ],
+                'display_name' => 'Inviter Two',
+                'avatar_url' => 'https://example.com/two.png',
+                'status' => 'pending',
+            ]],
+            'social_proof' => ['additional_inviter_count' => 0],
+        ]);
+
+        $response = $this->registerPassword([
+            'name' => 'Projection Merge Candidate',
+            'email' => 'projection-merge@example.org',
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [
+                $firstAnonymous['id'],
+                $secondAnonymous['id'],
+            ],
+        ]);
+        $response->assertStatus(201);
+
+        $canonicalId = $response->json('data.user_id');
+
+        $this->assertFalse(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', $firstAnonymous['id'])
+                ->exists()
+        );
+        $this->assertFalse(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', $secondAnonymous['id'])
+                ->exists()
+        );
+
+        $projection = InviteFeedProjection::query()
+            ->where('receiver_user_id', $canonicalId)
+            ->where('group_key', $groupKey)
+            ->firstOrFail();
+
+        $this->assertSame(
+            ['early', 'vip'],
+            collect($projection->tags ?? [])->sort()->values()->all(),
+        );
+        $this->assertCount(2, $projection->inviter_candidates ?? []);
+        $this->assertSame(
+            ['invite-first', 'invite-second'],
+            collect($projection->inviter_candidates ?? [])
+                ->pluck('invite_id')
+                ->sort()
+                ->values()
+                ->all(),
+        );
+        $this->assertSame(
+            1,
+            data_get($projection->social_proof, 'additional_inviter_count'),
+        );
+    }
+
     public function testPasswordRegistrationRejectsUnknownAnonymousIdentity(): void
     {
         $payload = [

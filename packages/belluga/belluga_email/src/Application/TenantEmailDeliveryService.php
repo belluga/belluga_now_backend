@@ -8,6 +8,7 @@ use Belluga\Email\Contracts\EmailSettingsSourceContract;
 use Belluga\Email\Contracts\EmailTenantContextContract;
 use Belluga\Email\Exceptions\EmailDeliveryException;
 use Belluga\Email\Exceptions\EmailIntegrationPendingException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -36,18 +37,24 @@ class TenantEmailDeliveryService
         $displayName = $tenantName !== '' ? $tenantName : ($appName !== '' ? $appName : 'Belluga');
         $platform = trim((string) ($payload['os'] ?? ''));
 
-        $response = Http::timeout((int) config('belluga_email.resend.timeout_seconds', 10))
-            ->acceptJson()
-            ->asJson()
-            ->withToken((string) $config['token'])
-            ->post($this->endpoint(), $this->buildResendPayload(
-                $config,
-                sprintf('🚀 Novo Testador VIP: %s (%s)', $displayName, $platform),
-                (string) $payload['email'],
-                (string) $payload['whatsapp'],
-                $platform,
-                $displayName,
-            ));
+        try {
+            $response = Http::timeout((int) config('belluga_email.resend.timeout_seconds', 10))
+                ->acceptJson()
+                ->asJson()
+                ->withToken((string) $config['token'])
+                ->post($this->endpoint(), $this->buildResendPayload(
+                    $config,
+                    sprintf('🚀 Novo Testador VIP: %s (%s)', $displayName, $platform),
+                    (string) $payload['email'],
+                    (string) $payload['whatsapp'],
+                    $platform,
+                    $displayName,
+                ));
+        } catch (ConnectionException) {
+            throw new EmailDeliveryException(
+                'Nao foi possivel enviar seu contato agora. Tente novamente em instantes.',
+            );
+        }
 
         if (! $response->successful()) {
             throw new EmailDeliveryException($this->resolveErrorMessage($response));

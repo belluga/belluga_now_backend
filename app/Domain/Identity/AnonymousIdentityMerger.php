@@ -265,17 +265,192 @@ class AnonymousIdentityMerger
                 'receiver_user_id' => $targetUserId,
             ]);
 
-        InviteFeedProjection::query()
-            ->where('receiver_user_id', $sourceUserId)
-            ->update([
-                'receiver_user_id' => $targetUserId,
-            ]);
+        $this->migrateInviteProjectionOwnership(
+            sourceUserId: $sourceUserId,
+            targetUserId: $targetUserId,
+        );
 
         InviteOutboxEvent::query()
             ->where('receiver_user_id', $sourceUserId)
             ->update([
                 'receiver_user_id' => $targetUserId,
             ]);
+    }
+
+    private function migrateInviteProjectionOwnership(string $sourceUserId, string $targetUserId): void
+    {
+        InviteFeedProjection::query()
+            ->where('receiver_user_id', $sourceUserId)
+            ->get()
+            ->each(function (InviteFeedProjection $sourceProjection) use ($targetUserId): void {
+                $groupKey = trim((string) ($sourceProjection->group_key ?? ''));
+                if ($groupKey === '') {
+                    $sourceProjection->receiver_user_id = $targetUserId;
+                    $sourceProjection->save();
+
+                    return;
+                }
+
+                /** @var InviteFeedProjection|null $targetProjection */
+                $targetProjection = InviteFeedProjection::query()
+                    ->where('receiver_user_id', $targetUserId)
+                    ->where('group_key', $groupKey)
+                    ->first();
+
+                if ($targetProjection === null) {
+                    $sourceProjection->receiver_user_id = $targetUserId;
+                    $sourceProjection->save();
+
+                    return;
+                }
+
+                $targetProjection->fill($this->mergeInviteProjectionAttributes(
+                    targetProjection: $targetProjection,
+                    sourceProjection: $sourceProjection,
+                    targetUserId: $targetUserId,
+                    groupKey: $groupKey,
+                ));
+                $targetProjection->save();
+
+                $sourceProjection->delete();
+            });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function mergeInviteProjectionAttributes(
+        InviteFeedProjection $targetProjection,
+        InviteFeedProjection $sourceProjection,
+        string $targetUserId,
+        string $groupKey,
+    ): array {
+        $mergedCandidates = $this->mergeInviteProjectionCandidates(
+            $targetProjection->inviter_candidates ?? null,
+            $sourceProjection->inviter_candidates ?? null,
+        );
+
+        return [
+            'receiver_user_id' => $targetUserId,
+            'group_key' => $groupKey,
+            'event_id' => $this->preferProjectionValue($targetProjection->event_id ?? null, $sourceProjection->event_id ?? null),
+            'occurrence_id' => $this->preferProjectionValue($targetProjection->occurrence_id ?? null, $sourceProjection->occurrence_id ?? null),
+            'event_name' => $this->preferProjectionValue($targetProjection->event_name ?? null, $sourceProjection->event_name ?? null),
+            'event_slug' => $this->preferProjectionValue($targetProjection->event_slug ?? null, $sourceProjection->event_slug ?? null),
+            'event_date' => $this->preferProjectionValue($targetProjection->event_date ?? null, $sourceProjection->event_date ?? null),
+            'event_image_url' => $this->preferProjectionValue($targetProjection->event_image_url ?? null, $sourceProjection->event_image_url ?? null),
+            'location' => $this->preferProjectionValue($targetProjection->location ?? null, $sourceProjection->location ?? null),
+            'host_name' => $this->preferProjectionValue($targetProjection->host_name ?? null, $sourceProjection->host_name ?? null),
+            'message' => $this->preferProjectionValue($targetProjection->message ?? null, $sourceProjection->message ?? null),
+            'tags' => $this->mergeInviteProjectionTags(
+                $targetProjection->tags ?? null,
+                $sourceProjection->tags ?? null,
+            ),
+            'attendance_policy' => $this->preferProjectionValue($targetProjection->attendance_policy ?? null, $sourceProjection->attendance_policy ?? null),
+            'inviter_candidates' => $mergedCandidates,
+            'social_proof' => $this->mergeInviteProjectionSocialProof(
+                $targetProjection->social_proof ?? null,
+                $sourceProjection->social_proof ?? null,
+                $mergedCandidates,
+            ),
+        ];
+    }
+
+    private function preferProjectionValue(mixed $current, mixed $incoming): mixed
+    {
+        if (is_string($current)) {
+            return trim($current) !== '' ? $current : $incoming;
+        }
+
+        if (is_array($current)) {
+            return $current !== [] ? $current : $incoming;
+        }
+
+        return $current ?? $incoming;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function mergeInviteProjectionTags(mixed $currentTags, mixed $incomingTags): array
+    {
+        return Collection::make(is_array($currentTags) ? $currentTags : [])
+            ->concat(is_array($incomingTags) ? $incomingTags : [])
+            ->map(static fn (mixed $tag): string => trim((string) $tag))
+            ->filter(static fn (string $tag): bool => $tag !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeInviteProjectionCandidates(mixed $currentCandidates, mixed $incomingCandidates): array
+    {
+        $merged = [];
+
+        foreach ([is_array($currentCandidates) ? $currentCandidates : [], is_array($incomingCandidates) ? $incomingCandidates : []] as $candidates) {
+            foreach ($candidates as $candidate) {
+                if (! is_array($candidate)) {
+                    continue;
+                }
+
+                $key = $this->inviteProjectionCandidateKey($candidate);
+                $merged[$key] = array_replace_recursive($merged[$key] ?? [], $candidate);
+            }
+        }
+
+        return array_values($merged);
+    }
+
+    /**
+     * @param  array<string, mixed>  $candidate
+     */
+    private function inviteProjectionCandidateKey(array $candidate): string
+    {
+        $inviteId = trim((string) ($candidate['invite_id'] ?? ''));
+        if ($inviteId !== '') {
+            return 'invite:'.$inviteId;
+        }
+
+        $principal = is_array($candidate['inviter_principal'] ?? null)
+            ? $candidate['inviter_principal']
+            : [];
+
+        $principalKey = implode('|', [
+            trim((string) ($principal['kind'] ?? '')),
+            trim((string) ($principal['id'] ?? '')),
+            trim((string) ($candidate['display_name'] ?? '')),
+        ]);
+
+        if ($principalKey !== '||') {
+            return 'principal:'.$principalKey;
+        }
+
+        return 'fallback:'.sha1(json_encode($candidate) ?: '');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $mergedCandidates
+     * @return array<string, mixed>
+     */
+    private function mergeInviteProjectionSocialProof(
+        mixed $currentSocialProof,
+        mixed $incomingSocialProof,
+        array $mergedCandidates,
+    ): array {
+        $current = is_array($currentSocialProof) ? $currentSocialProof : [];
+        $incoming = is_array($incomingSocialProof) ? $incomingSocialProof : [];
+
+        return array_merge($current, $incoming, [
+            'additional_inviter_count' => max(
+                0,
+                count($mergedCandidates) - 1,
+                (int) ($current['additional_inviter_count'] ?? 0),
+                (int) ($incoming['additional_inviter_count'] ?? 0),
+            ),
+        ]);
     }
 
     /**

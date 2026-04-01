@@ -8,6 +8,7 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -102,6 +103,39 @@ class TenantEmailSendControllerTest extends TestCaseTenant
                 && ($request['reply_to'][0] ?? null) === 'reply@bellugasolutions.com.br'
                 && str_contains((string) ($request['subject'] ?? ''), 'Novo Testador VIP');
         });
+    }
+
+    public function test_public_email_send_returns_bad_gateway_when_resend_transport_fails(): void
+    {
+        TenantSettings::create([
+            'resend_email' => [
+                'token' => 're_live_token',
+                'from' => 'Belluga <noreply@belluga.space>',
+                'to' => ['admin@bellugasolutions.com.br'],
+                'cc' => [],
+                'bcc' => [],
+                'reply_to' => [],
+            ],
+        ]);
+
+        Http::fake([
+            'https://api.resend.com/emails' => static function (): never {
+                throw new ConnectionException('Connection refused');
+            },
+        ]);
+
+        $response = $this->postJson("{$this->base_api_tenant}email/send", [
+            'email' => 'lead@example.org',
+            'whatsapp' => '(27) 99999-9999',
+            'os' => 'Android',
+            'app_name' => 'Guarappari',
+        ]);
+
+        $response->assertStatus(502);
+        $response->assertJson([
+            'ok' => false,
+            'message' => 'Nao foi possivel enviar seu contato agora. Tente novamente em instantes.',
+        ]);
     }
 
     private function initializeSystem(): void
