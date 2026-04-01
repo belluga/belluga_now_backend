@@ -13,7 +13,10 @@ class TenantSettings extends PackageTenantSettings
         'map_ingest',
         'map_security',
         'events',
+        'push',
+        'telemetry',
         'app_links',
+        'resend_email',
     ];
 
     /**
@@ -52,6 +55,30 @@ class TenantSettings extends PackageTenantSettings
      * @return array<string, mixed>
      */
     public function getAppLinksAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getPushAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getTelemetryAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getResendEmailAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

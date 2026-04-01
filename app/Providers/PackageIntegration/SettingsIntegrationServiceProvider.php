@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers\PackageIntegration;
 
 use App\Integration\Settings\TenantScopeContextAdapter;
+use App\Integration\Settings\CompositeSettingsPatchGuard;
+use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
@@ -17,6 +19,11 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             TenantScopeContextContract::class,
             TenantScopeContextAdapter::class
+        );
+
+        $this->app->singleton(
+            SettingsNamespacePatchGuardContract::class,
+            CompositeSettingsPatchGuard::class
         );
     }
 

@@ -114,6 +114,14 @@ class SettingsKernelControllerTest extends TestCaseTenant
                     'paths' => ['/invite*'],
                 ],
             ],
+            'resend_email' => [
+                'token' => 're_fixture_token',
+                'from' => 'Belluga <noreply@example.org>',
+                'to' => ['admin@example.org'],
+                'cc' => [],
+                'bcc' => [],
+                'reply_to' => ['reply@example.org'],
+            ],
         ]);
 
         [$this->account] = $this->seedAccountWithRole([
@@ -152,6 +160,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('push', $namespaces);
         $this->assertContains('telemetry', $namespaces);
         $this->assertContains('app_links', $namespaces);
+        $this->assertContains('resend_email', $namespaces);
     }
 
     public function test_settings_values_endpoint_returns_namespace_values(): void
@@ -174,6 +183,36 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.app_links.android.sha256_cert_fingerprints.0', 'AA:BB:CC:DD');
         $response->assertJsonPath('data.app_links.ios.team_id', 'ABCDE12345');
         $response->assertJsonPath('data.app_links.ios.paths.0', '/invite*');
+        $response->assertJsonPath('data.resend_email.token', 're_fixture_token');
+        $response->assertJsonPath('data.resend_email.from', 'Belluga <noreply@example.org>');
+        $response->assertJsonPath('data.resend_email.to.0', 'admin@example.org');
+        $response->assertJsonPath('data.resend_email.reply_to.0', 'reply@example.org');
+    }
+
+    public function test_patch_resend_email_rejects_invalid_sender_format(): void
+    {
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/resend_email", [
+            'from' => 'sender invalido',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['from']);
+    }
+
+    public function test_patch_resend_email_accepts_valid_delivery_envelope(): void
+    {
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/resend_email", [
+            'from' => 'Belluga <noreply@belluga.space>',
+            'to' => ['owner@example.org'],
+            'cc' => ['ops@example.org'],
+            'reply_to' => ['reply@example.org'],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.from', 'Belluga <noreply@belluga.space>');
+        $response->assertJsonPath('data.to.0', 'owner@example.org');
+        $response->assertJsonPath('data.cc.0', 'ops@example.org');
+        $response->assertJsonPath('data.reply_to.0', 'reply@example.org');
     }
 
     public function test_patch_namespace_applies_partial_merge_by_field_presence(): void

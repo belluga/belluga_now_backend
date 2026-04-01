@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace App\Providers\PackageIntegration;
 
 use App\Integration\DeepLinks\AppLinksIdentifierGatewayAdapter;
-use App\Integration\DeepLinks\AppLinksPatchGuard;
 use App\Integration\DeepLinks\AppLinksSettingsNamespaceRegistrar;
 use App\Integration\DeepLinks\AppLinksSettingsSourceAdapter;
 use Belluga\DeepLinks\Contracts\AppLinksIdentifierGatewayContract;
 use Belluga\DeepLinks\Contracts\AppLinksSettingsSourceContract;
-use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Illuminate\Support\ServiceProvider;
 
@@ -26,11 +24,6 @@ class DeepLinksIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             AppLinksSettingsSourceContract::class,
             AppLinksSettingsSourceAdapter::class
-        );
-
-        $this->app->singleton(
-            SettingsNamespacePatchGuardContract::class,
-            AppLinksPatchGuard::class
         );
     }
 
