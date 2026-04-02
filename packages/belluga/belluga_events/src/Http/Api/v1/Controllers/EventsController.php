@@ -11,8 +11,8 @@ use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
+use Belluga\Events\Http\Api\v1\Requests\EventAccountProfileCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
-use Belluga\Events\Http\Api\v1\Requests\EventPartyCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
 use Illuminate\Http\JsonResponse;
@@ -48,17 +48,22 @@ class EventsController extends Controller
         return response()->json($paginator->toArray());
     }
 
-    public function partyCandidates(EventPartyCandidatesRequest $request): JsonResponse
+    public function accountProfileCandidates(EventAccountProfileCandidatesRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        $candidateType = trim((string) ($validated['type'] ?? ''));
         $search = isset($validated['search']) ? trim((string) $validated['search']) : null;
-        $limit = isset($validated['limit']) ? (int) $validated['limit'] : 50;
+        $page = isset($validated['page']) ? (int) $validated['page'] : 1;
+        $perPage = isset($validated['per_page']) ? (int) $validated['per_page'] : (isset($validated['page_size']) ? (int) $validated['page_size'] : 15);
 
-        $candidates = $this->profileResolver->listPartyCandidates($search, $limit);
+        $candidates = $this->profileResolver->paginateAccountProfileCandidates(
+            $candidateType,
+            $search,
+            $page,
+            $perPage
+        );
 
-        return response()->json([
-            'data' => $candidates,
-        ]);
+        return response()->json($candidates->toArray());
     }
 
     public function store(EventStoreRequest $request): JsonResponse

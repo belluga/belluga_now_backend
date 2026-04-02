@@ -17,7 +17,7 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::post('/account_onboardings', [AccountOnboardingsController::class, 'store'])
             ->middleware('abilities:account-users:create');
 
-        Route::get('/events/party_candidates', [EventsController::class, 'partyCandidates'])
+        Route::get('/events/account_profile_candidates', [EventsController::class, 'accountProfileCandidates'])
             ->middleware('ability:events:read,events:create,events:update');
         Route::get('/events', [EventsController::class, 'index'])
             ->middleware('abilities:events:read');

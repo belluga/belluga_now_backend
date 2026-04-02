@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Belluga\Events\Http\Api\v1\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
-class EventPartyCandidatesRequest extends FormRequest
+class EventAccountProfileCandidatesRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -19,8 +20,11 @@ class EventPartyCandidatesRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'type' => ['required', 'string', Rule::in(['artist', 'physical_host'])],
             'search' => 'sometimes|string|max:120',
-            'limit' => 'sometimes|integer|min:1|max:100',
+            'page' => 'sometimes|integer|min:1',
+            'per_page' => 'sometimes|integer|min:1|max:50',
+            'page_size' => 'sometimes|integer|min:1|max:50',
         ];
     }
 }

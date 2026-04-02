@@ -284,37 +284,61 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotContains($otherId, $containsIds);
     }
 
-    public function test_event_party_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
+    public function test_event_account_profile_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main&page=1&page_size=20");
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.artists', []);
+        $response->assertJsonPath('current_page', 1);
+        $response->assertJsonPath('per_page', 20);
 
-        $venues = collect($response->json('data.venues') ?? []);
+        $venues = collect($response->json('data') ?? []);
         $matchedVenue = $venues->firstWhere('id', (string) $this->venue->_id);
 
         $this->assertNotNull($matchedVenue);
         $this->assertSame('venue', (string) ($matchedVenue['profile_type'] ?? ''));
 
-        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=mai");
+        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=mai&page=1&page_size=20");
         $partialResponse->assertStatus(200);
-        $partialVenues = collect($partialResponse->json('data.venues') ?? []);
+        $partialVenues = collect($partialResponse->json('data') ?? []);
         $this->assertNotNull($partialVenues->firstWhere('id', (string) $this->venue->_id));
 
         Sanctum::actingAs($landlord, ['events:create']);
-        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
+        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main");
         $createResponse->assertStatus(200);
 
         Sanctum::actingAs($landlord, ['events:update']);
-        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=main");
+        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main");
         $updateResponse->assertStatus(200);
     }
 
-    public function test_event_party_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
+    public function test_event_account_profile_candidates_endpoint_paginates_artists_beyond_one_hundred_results(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        foreach (range(1, 102) as $index) {
+            $this->createAccountProfile(
+                'artist',
+                sprintf('Zulu Artist %03d', $index)
+            );
+        }
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=artist&search=zulu&page=6&page_size=20");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('current_page', 6);
+        $response->assertJsonPath('per_page', 20);
+        $response->assertJsonPath('total', 102);
+        $response->assertJsonCount(2, 'data');
+        $response->assertJsonPath('data.0.display_name', 'Zulu Artist 101');
+        $response->assertJsonPath('data.1.display_name', 'Zulu Artist 102');
+    }
+
+    public function test_event_account_profile_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -355,16 +379,16 @@ class EventCrudControllerTest extends TestCaseTenant
             'is_verified' => false,
         ]);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=bistro");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=bistro");
 
         $response->assertStatus(200);
-        $hosts = collect($response->json('data.physical_hosts') ?? []);
+        $hosts = collect($response->json('data') ?? []);
         $matched = $hosts->firstWhere('id', (string) $host->_id);
         $this->assertNotNull($matched);
         $this->assertSame('restaurant', (string) ($matched['profile_type'] ?? ''));
     }
 
-    public function test_event_party_candidates_endpoint_excludes_poi_enabled_profiles_without_valid_location(): void
+    public function test_event_account_profile_candidates_endpoint_excludes_poi_enabled_profiles_without_valid_location(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -402,36 +426,57 @@ class EventCrudControllerTest extends TestCaseTenant
             'is_verified' => false,
         ]);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates?search=no%20geo");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=no%20geo");
 
         $response->assertStatus(200);
-        $hosts = collect($response->json('data.physical_hosts') ?? []);
+        $hosts = collect($response->json('data') ?? []);
         $matched = $hosts->firstWhere('id', (string) $hostWithoutLocation->_id);
         $this->assertNull($matched);
     }
 
-    public function test_event_party_candidates_endpoint_rejects_without_party_candidate_abilities(): void
+    public function test_event_account_profile_candidates_endpoint_rejects_without_candidate_abilities(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['account-users:view']);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/party_candidates");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=artist");
 
         $response->assertStatus(403);
     }
 
-    public function test_account_events_party_candidates_endpoint_uses_account_auth_boundary(): void
+    public function test_account_events_account_profile_candidates_endpoint_uses_account_auth_boundary(): void
     {
         Sanctum::actingAs($this->user, ['events:create']);
 
-        $response = $this->getJson("{$this->accountEventsBase}/party_candidates?search=main");
+        $response = $this->getJson("{$this->accountEventsBase}/account_profile_candidates?type=physical_host&search=main");
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.artists', []);
 
-        $venues = collect($response->json('data.venues') ?? []);
+        $venues = collect($response->json('data') ?? []);
         $matchedVenue = $venues->firstWhere('id', (string) $this->venue->_id);
         $this->assertNotNull($matchedVenue);
+    }
+
+    public function test_account_events_account_profile_candidates_endpoint_paginates_artists_beyond_one_hundred_results(): void
+    {
+        Sanctum::actingAs($this->user, ['events:create']);
+
+        foreach (range(1, 102) as $index) {
+            $this->createAccountProfile(
+                'artist',
+                sprintf('Scoped Zulu Artist %03d', $index)
+            );
+        }
+
+        $response = $this->getJson("{$this->accountEventsBase}/account_profile_candidates?type=artist&search=scoped%20zulu&page=6&page_size=20");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('current_page', 6);
+        $response->assertJsonPath('per_page', 20);
+        $response->assertJsonPath('total', 102);
+        $response->assertJsonCount(2, 'data');
+        $response->assertJsonPath('data.0.display_name', 'Scoped Zulu Artist 101');
+        $response->assertJsonPath('data.1.display_name', 'Scoped Zulu Artist 102');
     }
 
     public function test_event_create_persists_created_by_and_default_event_parties(): void
