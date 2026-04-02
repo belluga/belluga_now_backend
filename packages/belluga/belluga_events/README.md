@@ -102,7 +102,7 @@ Tenant public scope:
 - `GET /media/events/{event_id}/cover`
 
 Tenant admin scope:
-- `GET /events/party_candidates`
+- `GET /events/account_profile_candidates`
 - `GET /admin/api/v1/events`
 - `POST /admin/api/v1/events`
 - `PATCH /admin/api/v1/events/{event_id}`
