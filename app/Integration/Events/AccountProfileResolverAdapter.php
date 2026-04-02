@@ -7,6 +7,8 @@ namespace App\Integration\Events;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Validation\ValidationException;
 
 class AccountProfileResolverAdapter implements EventProfileResolverContract
@@ -134,24 +136,44 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ->exists();
     }
 
-    public function listPartyCandidates(?string $search = null, int $perTypeLimit = 50): array
+    public function paginateAccountProfileCandidates(
+        string $candidateType,
+        ?string $search = null,
+        int $page = 1,
+        int $perPage = 15
+    ): LengthAwarePaginator
     {
-        $normalizedLimit = max(1, min($perTypeLimit, 100));
+        $normalizedPage = max(1, $page);
+        $normalizedPerPage = max(1, min($perPage, 50));
         $normalizedSearch = trim((string) ($search ?? ''));
         $likePattern = $normalizedSearch === ''
             ? null
             : '%'.addcslashes($normalizedSearch, '%_\\').'%';
 
-        $physicalHostTypes = $this->resolvePoiEnabledProfileTypes();
-        $physicalHosts = $this->queryPhysicalHostCandidates($physicalHostTypes, $normalizedLimit, $likePattern);
-        $artists = $this->queryCandidatesByType('artist', $normalizedLimit, $likePattern);
+        $query = match ($candidateType) {
+            'artist' => $this->queryCandidatesByType('artist', $likePattern),
+            'physical_host' => $this->queryPhysicalHostCandidates(
+                $this->resolvePoiEnabledProfileTypes(),
+                $likePattern
+            ),
+            default => throw ValidationException::withMessages([
+                'type' => ['Unsupported account profile candidate type.'],
+            ]),
+        };
 
-        return [
-            // Legacy alias kept while Flutter migrates from venue-only wording.
-            'venues' => $physicalHosts,
-            'physical_hosts' => $physicalHosts,
-            'artists' => $artists,
-        ];
+        $paginator = $query
+            ->orderBy('display_name')
+            ->orderBy('_id')
+            ->paginate($normalizedPerPage, ['*'], 'page', $normalizedPage);
+
+        $paginator->setCollection(
+            $paginator->getCollection()
+                ->filter(static fn ($profile): bool => $profile instanceof AccountProfile)
+                ->map(fn (AccountProfile $profile): array => $this->mapCandidate($profile))
+                ->values()
+        );
+
+        return $paginator;
     }
 
     /**
@@ -174,12 +196,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
     /**
      * @param  array<int, string>  $profileTypes
-     * @return array<int, array<string, mixed>>
      */
-    private function queryPhysicalHostCandidates(array $profileTypes, int $limit, ?string $likePattern): array
+    private function queryPhysicalHostCandidates(array $profileTypes, ?string $likePattern): Builder
     {
         if ($profileTypes === []) {
-            return [];
+            return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
         }
 
         $query = AccountProfile::query()
@@ -194,29 +215,13 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             });
         }
 
-        return $query
-            ->orderBy('display_name')
-            ->limit($limit)
-            ->get()
-            ->map(static function (AccountProfile $profile): array {
-                return [
-                    'id' => (string) $profile->_id,
-                    'account_id' => (string) $profile->account_id,
-                    'profile_type' => (string) $profile->profile_type,
-                    'display_name' => (string) ($profile->display_name ?? ''),
-                    'slug' => $profile->slug ? (string) $profile->slug : null,
-                    'avatar_url' => $profile->avatar_url ?? null,
-                    'cover_url' => $profile->cover_url ?? null,
-                ];
-            })
-            ->values()
-            ->all();
+        return $query;
     }
 
     /**
-     * @return array<int, array<string, mixed>>
+     * @return Builder<AccountProfile>
      */
-    private function queryCandidatesByType(string $profileType, int $limit, ?string $likePattern): array
+    private function queryCandidatesByType(string $profileType, ?string $likePattern): Builder
     {
         $query = AccountProfile::query()
             ->where('profile_type', $profileType);
@@ -228,22 +233,22 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             });
         }
 
-        return $query
-            ->orderBy('display_name')
-            ->limit($limit)
-            ->get()
-            ->map(static function (AccountProfile $profile): array {
-                return [
-                    'id' => (string) $profile->_id,
-                    'account_id' => (string) $profile->account_id,
-                    'profile_type' => (string) $profile->profile_type,
-                    'display_name' => (string) ($profile->display_name ?? ''),
-                    'slug' => $profile->slug ? (string) $profile->slug : null,
-                    'avatar_url' => $profile->avatar_url ?? null,
-                    'cover_url' => $profile->cover_url ?? null,
-                ];
-            })
-            ->values()
-            ->all();
+        return $query;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function mapCandidate(AccountProfile $profile): array
+    {
+        return [
+            'id' => (string) $profile->_id,
+            'account_id' => (string) $profile->account_id,
+            'profile_type' => (string) $profile->profile_type,
+            'display_name' => (string) ($profile->display_name ?? ''),
+            'slug' => $profile->slug ? (string) $profile->slug : null,
+            'avatar_url' => $profile->avatar_url ?? null,
+            'cover_url' => $profile->cover_url ?? null,
+        ];
     }
 }

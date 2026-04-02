@@ -7,7 +7,7 @@ require base_path('routes/api/packages/project_account_api_v1/push_handler.php')
 
 Route::middleware(['auth:sanctum', 'account'])
     ->group(function () {
-        Route::get('/events/party_candidates', [EventsController::class, 'partyCandidates'])
+        Route::get('/events/account_profile_candidates', [EventsController::class, 'accountProfileCandidates'])
             ->middleware('ability:events:read,events:create,events:update');
         Route::get('/events', [EventsController::class, 'index'])
             ->middleware('abilities:events:read');

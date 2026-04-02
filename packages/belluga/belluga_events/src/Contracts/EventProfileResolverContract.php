@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Contracts;
 
+use Illuminate\Pagination\LengthAwarePaginator;
+
 interface EventProfileResolverContract
 {
     /**
@@ -27,8 +29,10 @@ interface EventProfileResolverContract
 
     public function accountOwnsProfile(string $accountId, string $profileId): bool;
 
-    /**
-     * @return array<string, array<int, array<string, mixed>>>
-     */
-    public function listPartyCandidates(?string $search = null, int $perTypeLimit = 50): array;
+    public function paginateAccountProfileCandidates(
+        string $candidateType,
+        ?string $search = null,
+        int $page = 1,
+        int $perPage = 15
+    ): LengthAwarePaginator;
 }
