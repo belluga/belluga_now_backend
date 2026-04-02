@@ -45,10 +45,14 @@ class TenantEmailSendControllerTest extends TestCaseTenant
     public function test_public_email_send_returns_integration_pending_when_settings_are_incomplete(): void
     {
         $response = $this->postJson("{$this->base_api_tenant}email/send", [
-            'email' => 'lead@example.org',
-            'whatsapp' => '(27) 99999-9999',
-            'os' => 'Android',
             'app_name' => 'Guarappari',
+            'submitted_fields' => [
+                ['label' => 'Seu Nome', 'value' => 'Maria'],
+                ['label' => 'E-mail', 'value' => 'lead@example.org'],
+                ['label' => 'WhatsApp', 'value' => '27999999999'],
+                ['label' => 'Qual o seu sistema operacional?', 'value' => 'Android'],
+                ['label' => 'O que não pode faltar para atender às suas expectativas?', 'value' => 'Mapa confiável e agenda atualizada.'],
+            ],
         ]);
 
         $response->assertStatus(503);
@@ -78,10 +82,14 @@ class TenantEmailSendControllerTest extends TestCaseTenant
         ]);
 
         $response = $this->postJson("{$this->base_api_tenant}email/send", [
-            'email' => 'lead@example.org',
-            'whatsapp' => '(27) 99999-9999',
-            'os' => 'Android',
             'app_name' => 'Guarappari',
+            'submitted_fields' => [
+                ['label' => 'Seu Nome', 'value' => 'Maria'],
+                ['label' => 'E-mail', 'value' => 'lead@example.org'],
+                ['label' => 'WhatsApp', 'value' => '27999999999'],
+                ['label' => 'Qual o seu sistema operacional?', 'value' => 'Android'],
+                ['label' => 'O que não pode faltar para atender às suas expectativas?', 'value' => 'Mapa confiável e agenda atualizada.'],
+            ],
         ]);
 
         $response->assertStatus(200);
@@ -101,7 +109,11 @@ class TenantEmailSendControllerTest extends TestCaseTenant
                 && ($request['to'][0] ?? null) === 'admin@bellugasolutions.com.br'
                 && ($request['cc'][0] ?? null) === 'ops@bellugasolutions.com.br'
                 && ($request['reply_to'][0] ?? null) === 'reply@bellugasolutions.com.br'
-                && str_contains((string) ($request['subject'] ?? ''), 'Novo Testador VIP');
+                && str_contains((string) ($request['subject'] ?? ''), 'Novo cadastro de beta tester')
+                && str_contains((string) ($request['html'] ?? ''), 'Seu Nome')
+                && str_contains((string) ($request['html'] ?? ''), 'Maria')
+                && str_contains((string) ($request['html'] ?? ''), 'O que não pode faltar para atender às suas expectativas?')
+                && str_contains((string) ($request['text'] ?? ''), 'WhatsApp: 27999999999');
         });
     }
 
@@ -125,16 +137,35 @@ class TenantEmailSendControllerTest extends TestCaseTenant
         ]);
 
         $response = $this->postJson("{$this->base_api_tenant}email/send", [
-            'email' => 'lead@example.org',
-            'whatsapp' => '(27) 99999-9999',
-            'os' => 'Android',
             'app_name' => 'Guarappari',
+            'submitted_fields' => [
+                ['label' => 'Seu Nome', 'value' => 'Maria'],
+                ['label' => 'E-mail', 'value' => 'lead@example.org'],
+                ['label' => 'WhatsApp', 'value' => '27999999999'],
+                ['label' => 'Qual o seu sistema operacional?', 'value' => 'Android'],
+                ['label' => 'O que não pode faltar para atender às suas expectativas?', 'value' => 'Mapa confiável e agenda atualizada.'],
+            ],
         ]);
 
         $response->assertStatus(502);
         $response->assertJson([
             'ok' => false,
             'message' => 'Nao foi possivel enviar seu contato agora. Tente novamente em instantes.',
+        ]);
+    }
+
+    public function test_public_email_send_validates_generic_submitted_fields_shape(): void
+    {
+        $response = $this->postJson("{$this->base_api_tenant}email/send", [
+            'app_name' => 'Guarappari',
+            'submitted_fields' => [
+                ['label' => 'Seu Nome', 'value' => ''],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'submitted_fields.0.value',
         ]);
     }
 

@@ -20,7 +20,10 @@ class TenantEmailDeliveryService
     ) {}
 
     /**
-     * @param  array{email:string, whatsapp:string, os:string, app_name?:string}  $payload
+     * @param  array{
+     *   app_name?:string,
+     *   submitted_fields:array<int, array{label:string, value:string}>
+     * }  $payload
      * @return array{provider:string, message_id:?string}
      */
     public function sendTesterWaitlistLead(array $payload): array
@@ -35,7 +38,7 @@ class TenantEmailDeliveryService
         $tenantName = trim((string) ($this->tenantContext->currentTenantDisplayName() ?? ''));
         $appName = trim((string) ($payload['app_name'] ?? ''));
         $displayName = $tenantName !== '' ? $tenantName : ($appName !== '' ? $appName : 'Belluga');
-        $platform = trim((string) ($payload['os'] ?? ''));
+        $submittedFields = array_values($payload['submitted_fields'] ?? []);
 
         try {
             $response = Http::timeout((int) config('belluga_email.resend.timeout_seconds', 10))
@@ -44,10 +47,8 @@ class TenantEmailDeliveryService
                 ->withToken((string) $config['token'])
                 ->post($this->endpoint(), $this->buildResendPayload(
                     $config,
-                    sprintf('🚀 Novo Testador VIP: %s (%s)', $displayName, $platform),
-                    (string) $payload['email'],
-                    (string) $payload['whatsapp'],
-                    $platform,
+                    sprintf('🚀 Novo cadastro de beta tester: %s', $displayName),
+                    $submittedFields,
                     $displayName,
                 ));
         } catch (ConnectionException) {
@@ -90,26 +91,29 @@ class TenantEmailDeliveryService
     private function buildResendPayload(
         array $config,
         string $subject,
-        string $email,
-        string $whatsapp,
-        string $os,
+        array $submittedFields,
         string $appName,
     ): array {
+        $htmlFieldRows = array_map(
+            static fn (array $field): string => '<p><strong>'.e($field['label']).':</strong> '.nl2br(e($field['value'])).'</p>',
+            $submittedFields,
+        );
+        $textFieldRows = array_map(
+            static fn (array $field): string => sprintf('%s: %s', $field['label'], $field['value']),
+            $submittedFields,
+        );
+
         $html = implode('', [
             '<h1>Novo cadastro de testador</h1>',
             '<p><strong>Aplicativo:</strong> '.e($appName).'</p>',
-            '<p><strong>E-mail:</strong> '.e($email).'</p>',
-            '<p><strong>WhatsApp:</strong> '.e($whatsapp).'</p>',
-            '<p><strong>Celular:</strong> '.e($os).'</p>',
+            ...$htmlFieldRows,
             '<p><strong>Data:</strong> '.e(now()->toIso8601String()).'</p>',
         ]);
 
         $text = implode("\n", [
             'Novo cadastro de testador',
             "Aplicativo: {$appName}",
-            "E-mail: {$email}",
-            "WhatsApp: {$whatsapp}",
-            "Celular: {$os}",
+            ...$textFieldRows,
             'Data: '.now()->toIso8601String(),
         ]);
 

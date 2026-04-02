@@ -6,7 +6,6 @@ namespace Belluga\Email\Http\Requests;
 
 use Belluga\Email\Support\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class TenantEmailSendRequest extends FormRequest
 {
@@ -17,23 +16,40 @@ class TenantEmailSendRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $submittedFields = $this->input('submitted_fields');
+        if (is_array($submittedFields)) {
+            $submittedFields = array_map(
+                static function ($field) {
+                    if (! is_array($field)) {
+                        return $field;
+                    }
+
+                    return [
+                        'label' => is_string($field['label'] ?? null)
+                            ? trim((string) $field['label'])
+                            : ($field['label'] ?? null),
+                        'value' => is_string($field['value'] ?? null)
+                            ? trim((string) $field['value'])
+                            : ($field['value'] ?? null),
+                    ];
+                },
+                $submittedFields,
+            );
+        }
+
         $this->merge([
-            'email' => is_string($this->input('email')) ? trim((string) $this->input('email')) : $this->input('email'),
-            'whatsapp' => is_string($this->input('whatsapp'))
-                ? preg_replace('/\D+/', '', (string) $this->input('whatsapp'))
-                : $this->input('whatsapp'),
-            'os' => is_string($this->input('os')) ? trim((string) $this->input('os')) : $this->input('os'),
             'app_name' => is_string($this->input('app_name')) ? trim((string) $this->input('app_name')) : $this->input('app_name'),
+            'submitted_fields' => $submittedFields,
         ]);
     }
 
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email', 'max:'.InputConstraints::EMAIL_MAX],
-            'whatsapp' => ['required', 'string', 'regex:/^\d{10,15}$/'],
-            'os' => ['required', 'string', Rule::in(['Android', 'iOS'])],
             'app_name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'submitted_fields' => ['required', 'array', 'min:1'],
+            'submitted_fields.*.label' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'submitted_fields.*.value' => ['required', 'string', 'max:'.InputConstraints::TEXT_MAX],
         ];
     }
 }
