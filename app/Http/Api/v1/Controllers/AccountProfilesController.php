@@ -52,6 +52,15 @@ class AccountProfilesController extends Controller
         );
     }
 
+    public function publicShowBySlug(string $tenant_domain, string $account_profile_slug): JsonResponse
+    {
+        $profile = $this->profileQueryService->publicFindBySlugOrFail($account_profile_slug);
+
+        return response()->json([
+            'data' => $this->formatter->format($profile),
+        ]);
+    }
+
     public function store(AccountProfileStoreRequest $request): JsonResponse
     {
         $validated = $request->validated();

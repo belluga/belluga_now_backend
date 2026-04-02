@@ -244,6 +244,48 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
+    public function test_public_account_profile_show_by_slug_returns_public_active_profile(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Slug Detail Venue',
+            'slug' => 'slug-detail-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/slug-detail-venue"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.slug', 'slug-detail-venue');
+        $response->assertJsonPath('data.display_name', 'Slug Detail Venue');
+    }
+
+    public function test_public_account_profile_show_by_slug_returns_not_found_for_private_profile(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Detail Venue',
+            'slug' => 'private-detail-venue',
+            'is_active' => true,
+            'visibility' => 'friends_only',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/private-detail-venue"
+        );
+
+        $response->assertStatus(404);
+    }
+
     public function test_public_account_profile_near_returns_distance_sorted_favoritable_profiles_only(): void
     {
         $this->createAccountUser([]);
