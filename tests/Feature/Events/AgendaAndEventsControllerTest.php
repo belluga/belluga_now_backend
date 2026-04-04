@@ -725,21 +725,6 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ],
             'event_parties' => [
                 [
-                    'party_type' => 'venue',
-                    'party_ref_id' => 'venue-1',
-                    'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => 'Carvoeiro',
-                        'slug' => 'carvoeiro',
-                        'profile_type' => 'restaurant',
-                        'avatar_url' => 'https://example.org/venue-avatar.jpg',
-                        'cover_url' => 'https://example.org/venue-cover.jpg',
-                        'taxonomy_terms' => [
-                            ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
-                        ],
-                    ],
-                ],
-                [
                     'party_type' => 'artist',
                     'party_ref_id' => 'artist-1',
                     'permissions' => ['can_edit' => true],
@@ -759,14 +744,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);
-        $response->assertJsonPath('data.linked_account_profiles.0.id', 'venue-1');
-        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'restaurant');
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', 'carvoeiro');
-        $response->assertJsonPath('data.linked_account_profiles.1.id', 'artist-1');
-        $response->assertJsonPath('data.linked_account_profiles.1.profile_type', 'artist');
-        $response->assertJsonPath('data.linked_account_profiles.1.slug', 'ananda-torres');
+        $response->assertJsonCount(1, 'data.linked_account_profiles');
+        $response->assertJsonPath('data.linked_account_profiles.0.id', 'artist-1');
+        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'artist');
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', 'ananda-torres');
         $response->assertJsonPath(
-            'data.linked_account_profiles.1.taxonomy_terms.0.name',
+            'data.linked_account_profiles.0.taxonomy_terms.0.name',
             'Showcase'
         );
     }

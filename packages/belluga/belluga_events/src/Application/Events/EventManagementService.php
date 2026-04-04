@@ -159,24 +159,21 @@ class EventManagementService
             $normalized['publication'] = $this->resolvePublicationPayload($publication, $existing);
         }
 
-        $artistIds = $payload['artist_ids'] ?? null;
-        $resolvedVenueForParties = null;
-        $resolvedArtistsForParties = null;
-
         $resolvedLocation = $this->resolveLocationAndPlacePayload($payload, $existing);
         if ($resolvedLocation['touched']) {
             $normalized['location'] = $resolvedLocation['location'];
             $normalized['place_ref'] = $resolvedLocation['place_ref'];
             $normalized['geo_location'] = $resolvedLocation['geo_location'];
             $normalized['venue'] = $resolvedLocation['venue'];
-            $resolvedVenueForParties = $resolvedLocation['venue'];
         }
 
-        $artistsSourceTouched = $artistIds !== null || $existing === null;
-        if ($artistsSourceTouched) {
-            $normalized['artists'] = $this->resolveArtistPayloads($artistIds, $existing);
-            $resolvedArtistsForParties = $normalized['artists'];
-        }
+        $eventPartiesSourceTouched = array_key_exists('event_parties', $payload) || $existing === null;
+        $normalized['artists'] = $this->resolveArtistPayloads(
+            array_key_exists('event_parties', $payload) && is_array($payload['event_parties'])
+                ? $payload['event_parties']
+                : null,
+            $existing
+        );
 
         if ($existing === null) {
             $normalized['created_by'] = $this->resolveCreatedByPrincipal($payload);
@@ -185,14 +182,8 @@ class EventManagementService
         $normalized['event_parties'] = $this->resolveEventParties(
             $payload,
             $existing,
-            is_array($resolvedVenueForParties)
-                ? $resolvedVenueForParties
-                : $this->normalizeArray($existing?->venue ?? []),
-            is_array($resolvedArtistsForParties)
-                ? $resolvedArtistsForParties
-                : $this->normalizeArray($existing?->artists ?? []),
-            $resolvedLocation['touched'],
-            $artistsSourceTouched
+            $normalized['artists'],
+            $eventPartiesSourceTouched
         );
 
         return [

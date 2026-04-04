@@ -8,7 +8,6 @@ use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\AttendanceCommitmentReadAdapter;
 use App\Integration\Events\EventParties\ArtistEventPartyMapper;
-use App\Integration\Events\EventParties\VenueEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
@@ -82,7 +81,6 @@ class EventsIntegrationServiceProvider extends ServiceProvider
             EventPartyMapperRegistryContract::class,
             static function () {
                 $registry = new InMemoryEventPartyMapperRegistry;
-                $registry->register(new VenueEventPartyMapper);
                 $registry->register(new ArtistEventPartyMapper);
 
                 return $registry;

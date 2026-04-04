@@ -84,7 +84,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $missing = array_diff($artistProfileIds, $resolvedIds);
         if ($missing !== []) {
             throw ValidationException::withMessages([
-                'artist_ids' => ['Some artists were not found.'],
+                'event_parties' => ['Some event parties were not found.'],
             ]);
         }
 
@@ -93,7 +93,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         );
         if ($invalid->isNotEmpty()) {
             throw ValidationException::withMessages([
-                'artist_ids' => ['All artists must be account profiles of type artist.'],
+                'event_parties' => ['All event parties must be account profiles of type artist.'],
             ]);
         }
 

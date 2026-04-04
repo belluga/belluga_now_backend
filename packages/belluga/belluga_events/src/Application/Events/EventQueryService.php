@@ -136,10 +136,6 @@ class EventQueryService
             'status' => $publication['status'] ?? 'draft',
             'publish_at' => $publishAt,
         ];
-        $payload['artist_ids'] = array_values(array_filter(array_map(
-            static fn ($artist): ?string => is_array($artist) ? (string) ($artist['id'] ?? '') : null,
-            $payload['artists'] ?? []
-        )));
         $payload['created_at'] = $event->created_at?->toJSON();
         $payload['updated_at'] = $event->updated_at?->toJSON();
         $payload['deleted_at'] = $event->deleted_at?->toJSON();
@@ -152,6 +148,10 @@ class EventQueryService
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             return false;
+        }
+
+        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
+            return true;
         }
 
         $parties = $this->normalizeEventParties($event->event_parties ?? []);
@@ -173,6 +173,10 @@ class EventQueryService
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             return false;
+        }
+
+        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
+            return true;
         }
 
         $parties = $this->normalizeEventParties($event->event_parties ?? []);
@@ -795,11 +799,7 @@ class EventQueryService
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
         $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles(
-            $eventParties,
-            $artists,
-            $venuePayload,
-        );
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
 
         $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
@@ -1049,7 +1049,8 @@ class EventQueryService
         }
 
         $query->where(function ($builder) use ($profileIds): void {
-            $builder->whereIn('event_parties.party_ref_id', $profileIds);
+            $builder->whereIn('event_parties.party_ref_id', $profileIds)
+                ->orWhereIn('place_ref.id', $profileIds);
         });
     }
 
@@ -1104,14 +1105,9 @@ class EventQueryService
 
     /**
      * @param  array<int, array<string, mixed>>  $eventParties
-     * @param  array<int, array<string, mixed>>  $artists
      * @return array<int, array<string, mixed>>
      */
-    private function resolveLinkedAccountProfiles(
-        array $eventParties,
-        array $artists,
-        ?array $venuePayload
-    ): array {
+    private function resolveLinkedAccountProfiles(array $eventParties): array {
         $items = [];
         $seenIds = [];
 
@@ -1154,33 +1150,21 @@ class EventQueryService
             ]);
         }
 
-        foreach ($artists as $artist) {
-            $push([
-                'id' => $artist['id'] ?? '',
-                'display_name' => $artist['display_name'] ?? '',
-                'slug' => $artist['slug'] ?? null,
-                'profile_type' => $artist['profile_type'] ?? 'artist',
-                'party_type' => 'artist',
-                'avatar_url' => $artist['avatar_url'] ?? null,
-                'cover_url' => $artist['cover_url'] ?? null,
-                'taxonomy_terms' => $artist['taxonomy_terms'] ?? [],
-            ]);
-        }
-
-        if (is_array($venuePayload)) {
-            $push([
-                'id' => $venuePayload['id'] ?? '',
-                'display_name' => $venuePayload['display_name'] ?? '',
-                'slug' => $venuePayload['slug'] ?? null,
-                'profile_type' => $venuePayload['profile_type'] ?? 'venue',
-                'party_type' => 'venue',
-                'avatar_url' => $venuePayload['avatar_url'] ?? null,
-                'cover_url' => $venuePayload['cover_url'] ?? null,
-                'taxonomy_terms' => $venuePayload['taxonomy_terms'] ?? [],
-            ]);
-        }
-
         return $items;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     */
+    private function eventReferencesPlaceRefProfile(Event $event, array $profileIds): bool
+    {
+        $placeRef = $this->normalizeArray($event->place_ref ?? null);
+        $placeRefId = trim((string) ($placeRef['id'] ?? ''));
+        if ($placeRefId === '') {
+            return false;
+        }
+
+        return in_array($placeRefId, $profileIds, true);
     }
 
     private function applyPublicPublicationFilter($query): void
