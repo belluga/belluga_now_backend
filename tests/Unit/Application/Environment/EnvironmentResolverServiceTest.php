@@ -8,6 +8,7 @@ use App\Application\Environment\EnvironmentResolverService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\TenantProfileType;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -64,6 +65,64 @@ class EnvironmentResolverServiceTest extends TestCase
 
         $this->assertSame('tenant', $result['type']);
         $this->assertSame($tenant->getMainDomain(), $result['main_domain']);
+    }
+
+    public function test_resolve_exposes_profile_type_type_asset_visual_in_environment_registry(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $type = new TenantProfileType();
+        $type->forceFill([
+            'type' => 'restaurant',
+            'label' => 'Restaurant',
+            'labels' => [
+                'singular' => 'Restaurant',
+                'plural' => 'Restaurants',
+            ],
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+            ],
+            'poi_visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+            ],
+            'type_asset_url' => 'https://tenant-beta.test/api/v1/media/account-profile-types/type-1/type_asset?v=123',
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+        $type->save();
+
+        $result = $this->service->resolve([
+            'app_domain' => 'tenant-beta.test',
+            'request_root' => 'https://tenant-beta.test',
+            'request_host' => 'tenant-beta.test',
+        ]);
+
+        $profileTypes = is_array($result['profile_types'] ?? null)
+            ? $result['profile_types']
+            : [];
+        $restaurant = collect($profileTypes)->firstWhere('type', 'restaurant');
+
+        $this->assertIsArray($restaurant);
+        $this->assertSame('Restaurant', data_get($restaurant, 'labels.singular'));
+        $this->assertSame('Restaurants', data_get($restaurant, 'labels.plural'));
+        $this->assertSame('image', data_get($restaurant, 'visual.mode'));
+        $this->assertSame('type_asset', data_get($restaurant, 'visual.image_source'));
+        $this->assertSame(
+            'https://tenant-beta.test/api/v1/media/account-profile-types/type-1/type_asset?v=123',
+            data_get($restaurant, 'visual.image_url')
+        );
+        $this->assertSame('image', data_get($restaurant, 'poi_visual.mode'));
+        $this->assertSame('type_asset', data_get($restaurant, 'poi_visual.image_source'));
+        $this->assertSame(
+            'https://tenant-beta.test/api/v1/media/account-profile-types/type-1/type_asset?v=123',
+            data_get($restaurant, 'poi_visual.image_url')
+        );
     }
 
     public function test_resolve_falls_back_to_landlord_environment(): void

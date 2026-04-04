@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -16,8 +17,13 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use MongoDB\BSON\ObjectId;
@@ -266,6 +272,164 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.display_name', 'Slug Detail Venue');
     }
 
+    public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_venue_occurrences(): void
+    {
+        Queue::fake();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Agenda Detail Venue',
+            'slug' => 'agenda-detail-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $futureEvent = $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Future Venue Event',
+            startsAt: Carbon::now()->addDay(),
+            endsAt: Carbon::now()->addDay()->addHours(2),
+        );
+        $secondFutureOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $futureEvent->_id)
+            ->firstOrFail()
+            ->replicate();
+        $secondFutureOccurrence->occurrence_index = 1;
+        $secondFutureOccurrence->occurrence_slug = 'future-venue-event-occ-2';
+        $secondFutureOccurrence->starts_at = Carbon::now()->addDays(2);
+        $secondFutureOccurrence->ends_at = Carbon::now()->addDays(2)->addHours(2);
+        $secondFutureOccurrence->effective_ends_at = Carbon::now()->addDays(2)->addHours(2);
+        $secondFutureOccurrence->save();
+        $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Past Venue Event',
+            startsAt: Carbon::now()->subDays(2),
+            endsAt: Carbon::now()->subDays(2)->addHours(2),
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/agenda-detail-venue"
+        );
+
+        $response->assertStatus(200);
+        $occurrences = $this->app->make(AccountProfileAgendaOccurrencesService::class)->forProfile($profile);
+
+        $this->assertCount(2, $occurrences);
+        $this->assertSame((string) $futureEvent->_id, $occurrences[0]['event_id'] ?? null);
+        $this->assertSame((string) $futureEvent->_id, $occurrences[1]['event_id'] ?? null);
+        $this->assertNotSame($occurrences[0]['occurrence_id'] ?? null, $occurrences[1]['occurrence_id'] ?? null);
+        $response->assertJsonCount(2, 'data.agenda_occurrences');
+        $response->assertJsonPath('data.agenda_occurrences.0.event_id', (string) $futureEvent->_id);
+        $response->assertJsonPath('data.agenda_occurrences.0.title', 'Future Venue Event');
+        $response->assertJsonPath('data.agenda_occurrences.1.event_id', (string) $futureEvent->_id);
+        $response->assertJsonPath('data.agenda_occurrences.1.title', 'Future Venue Event');
+    }
+
+    public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_artist_occurrences(): void
+    {
+        Queue::fake();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => false,
+            ],
+        ]);
+
+        $artistAccount = Account::create([
+            'name' => 'Artist Account',
+            'document' => 'DOC-ARTIST-AGENDA',
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $artistAccount->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Ananda Torres Agenda',
+            'slug' => 'ananda-torres-agenda',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $futureEvent = $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Future Artist Event',
+            startsAt: Carbon::now()->addHours(5),
+            endsAt: Carbon::now()->addHours(7),
+            asArtistHost: true,
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/ananda-torres-agenda"
+        );
+
+        $response->assertStatus(200);
+        $occurrences = $response->json('data.agenda_occurrences', []);
+        $this->assertCount(1, $occurrences);
+        $this->assertSame((string) $futureEvent->_id, $occurrences[0]['event_id'] ?? null);
+        $this->assertSame('Future Artist Event', $occurrences[0]['title'] ?? null);
+    }
+
+    public function test_public_account_profile_show_by_slug_uses_materialized_effective_end_for_open_occurrences(): void
+    {
+        Queue::fake();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Timed Agenda Venue',
+            'slug' => 'timed-agenda-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $liveEvent = $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Open Live Venue Event',
+            startsAt: Carbon::now()->subHours(2),
+            endsAt: null,
+        );
+        $expiredEvent = $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Expired Open Venue Event',
+            startsAt: Carbon::now()->subHours(4),
+            endsAt: null,
+        );
+
+        $liveOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $liveEvent->_id)
+            ->first();
+        $this->assertNotNull($liveOccurrence?->effective_ends_at);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/timed-agenda-venue"
+        );
+
+        $response->assertStatus(200);
+        $agendaOccurrences = $response->json('data.agenda_occurrences', []);
+        $this->assertCount(1, $agendaOccurrences);
+        $this->assertSame((string) $liveEvent->_id, $agendaOccurrences[0]['event_id'] ?? null);
+        $this->assertNotContains(
+            (string) $expiredEvent->_id,
+            array_map(
+                static fn (array $occurrence): ?string => $occurrence['event_id'] ?? null,
+                $agendaOccurrences,
+            ),
+        );
+    }
+
     public function test_public_account_profile_show_by_slug_returns_not_found_for_private_profile(): void
     {
         $this->createAccountUser([]);
@@ -284,6 +448,99 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(404);
+    }
+
+    private function createAgendaEventForAccountProfile(
+        AccountProfile $profile,
+        string $title,
+        Carbon $startsAt,
+        ?Carbon $endsAt = null,
+        bool $asArtistHost = false,
+    ): Event {
+        $event = Event::create([
+            'title' => $title,
+            'content' => 'Agenda event content',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'place_ref' => $asArtistHost
+                ? null
+                : [
+                    'type' => 'account_profile',
+                    'id' => (string) $profile->_id,
+                    'metadata' => [
+                        'display_name' => $profile->display_name,
+                    ],
+                ],
+            'type' => [
+                'id' => 'type-1',
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Show desc',
+                'icon' => null,
+                'color' => null,
+            ],
+            'venue' => $asArtistHost
+                ? null
+                : [
+                    'id' => (string) $profile->_id,
+                    'display_name' => $profile->display_name,
+                    'tagline' => 'Tag',
+                    'hero_image_url' => null,
+                    'logo_url' => null,
+                    'taxonomy_terms' => [],
+                ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => 'https://example.org/thumb.jpg',
+                ],
+            ],
+            'date_time_start' => $startsAt,
+            'date_time_end' => $endsAt,
+            'artists' => $asArtistHost
+                ? [[
+                    'id' => (string) $profile->_id,
+                    'display_name' => $profile->display_name,
+                    'avatar_url' => null,
+                    'highlight' => true,
+                    'genres' => ['mpb'],
+                    'taxonomy_terms' => [],
+                ]]
+                : [[
+                    'id' => 'artist-1',
+                    'display_name' => 'Artist One',
+                    'avatar_url' => null,
+                    'highlight' => true,
+                    'genres' => ['mpb'],
+                    'taxonomy_terms' => [],
+                ]],
+            'tags' => ['music'],
+            'categories' => ['culture'],
+            'taxonomy_terms' => [],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => Carbon::now()->subMinute(),
+            ],
+            'is_active' => true,
+        ]);
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
+            'date_time_start' => Carbon::instance($startsAt),
+            'date_time_end' => $endsAt !== null ? Carbon::instance($endsAt) : null,
+        ]]);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+
+        return $event;
     }
 
     public function test_public_account_profile_near_returns_distance_sorted_favoritable_profiles_only(): void

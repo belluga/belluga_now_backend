@@ -396,6 +396,38 @@ class InvitesFlowTest extends TestCaseTenant
         $sendResponse->assertJsonPath('created.0.receiver_user_id', (string) $this->receiver->_id);
     }
 
+    public function test_account_user_materializes_contact_hashes_and_import_matches_email_and_phone(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $phone = '+55 (27) 99999-1234';
+        $this->receiver->phones = [$phone];
+        $this->receiver->save();
+        $this->receiver->refresh();
+
+        $expectedEmailHash = hash('sha256', strtolower(trim((string) $this->receiver->emails[0])));
+        $expectedPhoneHash = hash('sha256', '5527999991234');
+
+        $this->assertContains($expectedEmailHash, (array) ($this->receiver->email_hashes ?? []));
+        $this->assertContains($expectedPhoneHash, (array) ($this->receiver->phone_hashes ?? []));
+
+        $importResponse = $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'email', 'hash' => $expectedEmailHash],
+                ['type' => 'phone', 'hash' => $expectedPhoneHash],
+            ],
+        ]);
+
+        $importResponse->assertOk();
+        $matches = collect($importResponse->json('matches'));
+        $this->assertCount(2, $matches);
+        $this->assertTrue($matches->every(fn (array $match): bool => ($match['user_id'] ?? null) === (string) $this->receiver->_id));
+        $this->assertEqualsCanonicalizing(
+            [$expectedEmailHash, $expectedPhoneHash],
+            $matches->pluck('contact_hash')->all(),
+        );
+    }
+
     public function test_share_materialize_rejects_anonymous_user(): void
     {
         Sanctum::actingAs($this->sender, ['*']);

@@ -758,9 +758,13 @@ class EventQueryService
             return [
                 'id' => isset($payload['id']) ? (string) $payload['id'] : '',
                 'display_name' => (string) ($displayName ?? ''),
+                'slug' => isset($payload['slug']) ? (string) $payload['slug'] : null,
+                'profile_type' => isset($payload['profile_type']) ? (string) $payload['profile_type'] : null,
                 'avatar_url' => $payload['avatar_url'] ?? null,
+                'cover_url' => $payload['cover_url'] ?? null,
                 'highlight' => (bool) ($payload['highlight'] ?? false),
                 'genres' => array_values($this->normalizeStringArray($payload['genres'] ?? [])),
+                'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
             ];
         }, $artists);
 
@@ -768,9 +772,13 @@ class EventQueryService
         $venuePayload = $venue === [] ? null : [
             'id' => isset($venue['id']) ? (string) $venue['id'] : '',
             'display_name' => (string) ($venueDisplay ?? ''),
+            'slug' => isset($venue['slug']) ? (string) $venue['slug'] : null,
+            'profile_type' => isset($venue['profile_type']) ? (string) $venue['profile_type'] : null,
             'tagline' => $venue['tagline'] ?? null,
             'hero_image_url' => $venue['hero_image_url'] ?? null,
             'logo_url' => $venue['logo_url'] ?? null,
+            'avatar_url' => $venue['avatar_url'] ?? $venue['logo_url'] ?? null,
+            'cover_url' => $venue['cover_url'] ?? $venue['hero_image_url'] ?? null,
             'taxonomy_terms' => $venue['taxonomy_terms'] ?? [],
         ];
 
@@ -787,6 +795,11 @@ class EventQueryService
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
         $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles(
+            $eventParties,
+            $artists,
+            $venuePayload,
+        );
 
         $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
@@ -828,6 +841,7 @@ class EventQueryService
                 'id' => isset($createdBy['id']) ? (string) $createdBy['id'] : '',
             ],
             'event_parties' => $eventParties,
+            'linked_account_profiles' => $linkedAccountProfiles,
             'capabilities' => $capabilities,
             'tags' => array_values(array_map('strval', $tags)),
             'taxonomy_terms' => $taxonomyTerms,
@@ -1086,6 +1100,87 @@ class EventQueryService
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @param  array<int, array<string, mixed>>  $artists
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveLinkedAccountProfiles(
+        array $eventParties,
+        array $artists,
+        ?array $venuePayload
+    ): array {
+        $items = [];
+        $seenIds = [];
+
+        $push = static function (array $payload) use (&$items, &$seenIds): void {
+            $id = trim((string) ($payload['id'] ?? ''));
+            $displayName = trim((string) ($payload['display_name'] ?? ''));
+            $profileType = trim((string) ($payload['profile_type'] ?? ''));
+
+            if ($id === '' || $displayName === '' || $profileType === '' || isset($seenIds[$id])) {
+                return;
+            }
+
+            $items[] = [
+                'id' => $id,
+                'display_name' => $displayName,
+                'slug' => isset($payload['slug']) ? (string) $payload['slug'] : null,
+                'profile_type' => $profileType,
+                'party_type' => isset($payload['party_type']) ? (string) $payload['party_type'] : null,
+                'avatar_url' => $payload['avatar_url'] ?? null,
+                'cover_url' => $payload['cover_url'] ?? null,
+                'taxonomy_terms' => is_array($payload['taxonomy_terms'] ?? null) ? $payload['taxonomy_terms'] : [],
+            ];
+            $seenIds[$id] = true;
+        };
+
+        foreach ($eventParties as $party) {
+            $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                ? $party['metadata']
+                : [];
+
+            $push([
+                'id' => $party['party_ref_id'] ?? '',
+                'display_name' => $metadata['display_name'] ?? '',
+                'slug' => $metadata['slug'] ?? null,
+                'profile_type' => $metadata['profile_type'] ?? null,
+                'party_type' => $party['party_type'] ?? null,
+                'avatar_url' => $metadata['avatar_url'] ?? null,
+                'cover_url' => $metadata['cover_url'] ?? null,
+                'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
+            ]);
+        }
+
+        foreach ($artists as $artist) {
+            $push([
+                'id' => $artist['id'] ?? '',
+                'display_name' => $artist['display_name'] ?? '',
+                'slug' => $artist['slug'] ?? null,
+                'profile_type' => $artist['profile_type'] ?? 'artist',
+                'party_type' => 'artist',
+                'avatar_url' => $artist['avatar_url'] ?? null,
+                'cover_url' => $artist['cover_url'] ?? null,
+                'taxonomy_terms' => $artist['taxonomy_terms'] ?? [],
+            ]);
+        }
+
+        if (is_array($venuePayload)) {
+            $push([
+                'id' => $venuePayload['id'] ?? '',
+                'display_name' => $venuePayload['display_name'] ?? '',
+                'slug' => $venuePayload['slug'] ?? null,
+                'profile_type' => $venuePayload['profile_type'] ?? 'venue',
+                'party_type' => 'venue',
+                'avatar_url' => $venuePayload['avatar_url'] ?? null,
+                'cover_url' => $venuePayload['cover_url'] ?? null,
+                'taxonomy_terms' => $venuePayload['taxonomy_terms'] ?? [],
+            ]);
+        }
+
+        return $items;
     }
 
     private function applyPublicPublicationFilter($query): void

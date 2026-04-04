@@ -10,6 +10,8 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -19,13 +21,14 @@ class AccountProfileRegistryManagementService
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly MapPoiProjectionRefService $mapPoiProjectionRefs,
+        private readonly AccountProfileTypeMediaService $mediaService,
     ) {}
 
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function create(array $payload): array
+    public function create(Request $request, array $payload): array
     {
         $type = trim((string) ($payload['type'] ?? ''));
         if (TenantProfileType::query()->where('type', $type)->exists()) {
@@ -35,17 +38,25 @@ class AccountProfileRegistryManagementService
         }
 
         $entry = $this->buildEntry($payload, $type);
+        $this->ensureTypeAssetRequirements(
+            $entry['visual'] ?? null,
+            $request,
+            null,
+            false,
+        );
 
         $model = TenantProfileType::create($entry);
+        $this->mediaService->applyUploads($request, $model);
+        $model = $model->fresh() ?? $model;
 
-        return $this->toPayload($model);
+        return $this->toPayload($model, $request->getSchemeAndHttpHost());
     }
 
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function update(string $type, array $payload): array
+    public function update(Request $request, string $type, array $payload): array
     {
         $type = trim($type);
         $model = TenantProfileType::query()->where('type', $type)->first();
@@ -75,9 +86,17 @@ class AccountProfileRegistryManagementService
             ? $entry['capabilities']
             : [];
         $nextPoiEnabled = (bool) ($nextCapabilities['is_poi_enabled'] ?? false);
-        $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->poi_visual ?? null);
-        $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['poi_visual'] ?? null);
+        $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->visual ?? $model->poi_visual ?? null);
+        $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['visual'] ?? $entry['poi_visual'] ?? null);
         $poiVisualChanged = $currentPoiVisual !== $nextPoiVisual;
+        $currentTypeAssetUrl = $this->normalizeTypeAssetUrl($model->type_asset_url ?? null);
+
+        $this->ensureTypeAssetRequirements(
+            $nextPoiVisual,
+            $request,
+            $currentTypeAssetUrl,
+            $request->boolean('remove_type_asset'),
+        );
 
         try {
             $model->fill($entry);
@@ -94,10 +113,15 @@ class AccountProfileRegistryManagementService
             ]);
         }
 
+        $this->mediaService->applyUploads($request, $model);
+        $model = $model->fresh() ?? $model;
+        $nextTypeAssetUrl = $this->normalizeTypeAssetUrl($model->type_asset_url ?? null);
+        $typeAssetChanged = $currentTypeAssetUrl !== $nextTypeAssetUrl;
         $forcedCheckpoint = $this->toCheckpoint($model->updated_at ?? null);
         $shouldRefreshMapProjection = $nextType !== $currentType
             || $currentPoiEnabled !== $nextPoiEnabled
-            || $poiVisualChanged;
+            || $poiVisualChanged
+            || $typeAssetChanged;
 
         if ($shouldRefreshMapProjection) {
             $queryType = $nextType === $currentType ? $nextType : $currentType;
@@ -133,7 +157,7 @@ class AccountProfileRegistryManagementService
             }
         }
 
-        return $this->toPayload($model->fresh() ?? $model);
+        return $this->toPayload($model, $request->getSchemeAndHttpHost());
     }
 
     public function previewDisableProjectionCount(string $type): int
@@ -170,12 +194,16 @@ class AccountProfileRegistryManagementService
     private function buildEntry(array $payload, string $type): array
     {
         $capabilities = $payload['capabilities'] ?? [];
+        $visual = $this->resolveIncomingVisual($payload);
+        $labels = $this->normalizeLabels($payload);
 
         return [
             'type' => $type,
-            'label' => trim((string) ($payload['label'] ?? '')),
+            'label' => $labels['singular'],
+            'labels' => $labels,
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
-            'poi_visual' => $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null),
+            'visual' => $visual,
+            'poi_visual' => $visual,
             'capabilities' => [
                 'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
@@ -197,18 +225,18 @@ class AccountProfileRegistryManagementService
     {
         $capabilities = $payload['capabilities'] ?? [];
         $currentCapabilities = $existing->capabilities ?? [];
+        $visual = $this->resolveIncomingVisual($payload, $existing->visual ?? $existing->poi_visual ?? null);
+        $labels = $this->normalizeLabels($payload, $existing);
 
         return [
             'type' => $resolvedType,
-            'label' => array_key_exists('label', $payload)
-                ? trim((string) $payload['label'])
-                : (string) ($existing->label ?? ''),
+            'label' => $labels['singular'],
+            'labels' => $labels,
             'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
                 ? $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? [])
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
-            'poi_visual' => array_key_exists('poi_visual', $payload)
-                ? $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null)
-                : $this->poiVisualNormalizer->normalize($existing->poi_visual ?? null),
+            'visual' => $visual,
+            'poi_visual' => $visual,
             'capabilities' => [
                 'is_favoritable' => array_key_exists('is_favoritable', $capabilities)
                     ? (bool) $capabilities['is_favoritable']
@@ -276,18 +304,23 @@ class AccountProfileRegistryManagementService
     /**
      * @return array<string, mixed>
      */
-    private function toPayload(TenantProfileType $model): array
+    private function toPayload(TenantProfileType $model, ?string $baseUrl = null): array
     {
+        $visual = $this->resolvePayloadVisual($model, $baseUrl);
+        $labels = $this->normalizeLabels([], $model);
+
         return [
             'type' => (string) $model->type,
-            'label' => (string) $model->label,
+            'label' => $labels['singular'],
+            'labels' => $labels,
             'allowed_taxonomies' => array_values(array_filter(
                 is_array($model->allowed_taxonomies ?? null)
                     ? $model->allowed_taxonomies
                     : [],
                 static fn ($value): bool => is_string($value) && $value !== ''
             )),
-            'poi_visual' => $this->poiVisualNormalizer->normalize($model->poi_visual ?? null),
+            'visual' => $visual,
+            'poi_visual' => $visual,
             'capabilities' => [
                 'is_favoritable' => (bool) ($model->capabilities['is_favoritable'] ?? false),
                 'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),
@@ -299,5 +332,116 @@ class AccountProfileRegistryManagementService
                 'has_events' => (bool) ($model->capabilities['has_events'] ?? false),
             ],
         ];
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function resolveIncomingVisual(array $payload, mixed $fallback = null): ?array
+    {
+        if (array_key_exists('visual', $payload)) {
+            return $this->poiVisualNormalizer->normalize($payload['visual'] ?? null);
+        }
+
+        if (array_key_exists('poi_visual', $payload)) {
+            return $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null);
+        }
+
+        return $this->poiVisualNormalizer->normalize($fallback);
+    }
+
+    /**
+     * @return array{singular: string, plural: string}
+     */
+    private function normalizeLabels(array $payload, ?TenantProfileType $existing = null): array
+    {
+        $existingLabels = is_array($existing?->labels ?? null)
+            ? $existing->labels
+            : [];
+        $existingSingular = trim((string) ($existingLabels['singular'] ?? $existing?->label ?? ''));
+        $existingPlural = trim((string) ($existingLabels['plural'] ?? ''));
+
+        $incomingLabels = isset($payload['labels']) && is_array($payload['labels'])
+            ? $payload['labels']
+            : [];
+        $incomingSingular = trim((string) ($incomingLabels['singular'] ?? ''));
+        $incomingPlural = trim((string) ($incomingLabels['plural'] ?? ''));
+        $legacyLabel = array_key_exists('label', $payload)
+            ? trim((string) ($payload['label'] ?? ''))
+            : '';
+
+        $singular = $incomingSingular !== ''
+            ? $incomingSingular
+            : ($legacyLabel !== '' ? $legacyLabel : $existingSingular);
+        if ($singular === '') {
+            $singular = trim((string) ($payload['type'] ?? $existing?->type ?? ''));
+        }
+
+        $plural = $incomingPlural !== ''
+            ? $incomingPlural
+            : ($existingPlural !== '' ? $existingPlural : Str::plural($singular));
+
+        return [
+            'singular' => $singular,
+            'plural' => $plural === '' ? Str::plural($singular) : $plural,
+        ];
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function resolvePayloadVisual(TenantProfileType $model, ?string $baseUrl = null): ?array
+    {
+        $visual = $this->poiVisualNormalizer->normalize($model->visual ?? $model->poi_visual ?? null);
+        if (! is_array($visual)) {
+            return null;
+        }
+
+        if (($visual['mode'] ?? null) !== 'image' || ($visual['image_source'] ?? null) !== 'type_asset') {
+            return $visual;
+        }
+
+        $rawUrl = $this->normalizeTypeAssetUrl($model->type_asset_url ?? null);
+        if ($rawUrl === null) {
+            return $visual;
+        }
+
+        $visual['image_url'] = $baseUrl !== null
+            ? $this->mediaService->normalizePublicUrl($baseUrl, $model, 'type_asset', $rawUrl)
+            : $rawUrl;
+
+        return $visual;
+    }
+
+    private function ensureTypeAssetRequirements(
+        ?array $visual,
+        Request $request,
+        ?string $existingTypeAssetUrl,
+        bool $removeTypeAsset,
+    ): void {
+        if (! is_array($visual)) {
+            return;
+        }
+
+        if (($visual['mode'] ?? null) !== 'image' || ($visual['image_source'] ?? null) !== 'type_asset') {
+            return;
+        }
+
+        $hasUpload = $request->hasFile('type_asset');
+        $hasExisting = $existingTypeAssetUrl !== null && ! $removeTypeAsset;
+        if ($hasUpload || $hasExisting) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'type_asset' => ['Type asset image is required when image_source is type_asset.'],
+        ]);
+    }
+
+    private function normalizeTypeAssetUrl(mixed $raw): ?string
+    {
+        $value = trim((string) $raw);
+
+        return $value === '' ? null : $value;
     }
 }

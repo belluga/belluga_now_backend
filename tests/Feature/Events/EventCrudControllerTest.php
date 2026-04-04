@@ -481,6 +481,25 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_create_persists_created_by_and_default_event_parties(): void
     {
+        $venueSlug = 'main-venue-linked-'.Str::lower(Str::random(6));
+        $artistSlug = 'dj-test-linked-'.Str::lower(Str::random(6));
+
+        $this->venue->slug = $venueSlug;
+        $this->venue->avatar_url = 'https://tenant.test/venue-avatar.png';
+        $this->venue->cover_url = 'https://tenant.test/venue-cover.png';
+        $this->venue->taxonomy_terms = [
+            ['type' => 'event_style', 'value' => 'showcase'],
+        ];
+        $this->venue->save();
+
+        $this->artist->slug = $artistSlug;
+        $this->artist->avatar_url = 'https://tenant.test/artist-avatar.png';
+        $this->artist->cover_url = 'https://tenant.test/artist-cover.png';
+        $this->artist->taxonomy_terms = [
+            ['type' => 'event_style', 'value' => 'showcase'],
+        ];
+        $this->artist->save();
+
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
         $response->assertStatus(201);
@@ -494,10 +513,22 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($venueParty);
         $this->assertSame((string) $this->venue->_id, (string) ($venueParty['party_ref_id'] ?? ''));
         $this->assertTrue((bool) data_get($venueParty, 'permissions.can_edit', false));
+        $this->assertSame('Main Venue', data_get($venueParty, 'metadata.display_name'));
+        $this->assertSame($venueSlug, data_get($venueParty, 'metadata.slug'));
+        $this->assertSame('venue', data_get($venueParty, 'metadata.profile_type'));
+        $this->assertSame('https://tenant.test/venue-avatar.png', data_get($venueParty, 'metadata.avatar_url'));
+        $this->assertSame('https://tenant.test/venue-cover.png', data_get($venueParty, 'metadata.cover_url'));
+        $this->assertSame('Showcase', data_get($venueParty, 'metadata.taxonomy_terms.0.name'));
 
         $this->assertNotNull($artistParty);
         $this->assertSame((string) $this->artist->_id, (string) ($artistParty['party_ref_id'] ?? ''));
         $this->assertTrue((bool) data_get($artistParty, 'permissions.can_edit', false));
+        $this->assertSame('DJ Test', data_get($artistParty, 'metadata.display_name'));
+        $this->assertSame($artistSlug, data_get($artistParty, 'metadata.slug'));
+        $this->assertSame('artist', data_get($artistParty, 'metadata.profile_type'));
+        $this->assertSame('https://tenant.test/artist-avatar.png', data_get($artistParty, 'metadata.avatar_url'));
+        $this->assertSame('https://tenant.test/artist-cover.png', data_get($artistParty, 'metadata.cover_url'));
+        $this->assertSame('Showcase', data_get($artistParty, 'metadata.taxonomy_terms.0.name'));
     }
 
     public function test_event_create_rejects_legacy_single_date_payload_without_occurrences(): void

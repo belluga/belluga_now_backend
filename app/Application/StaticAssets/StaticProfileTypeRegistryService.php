@@ -11,19 +11,21 @@ class StaticProfileTypeRegistryService
 {
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
+        private readonly StaticProfileTypeMediaService $mediaService,
     ) {}
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function registry(): array
+    public function registry(?string $baseUrl = null): array
     {
         return StaticProfileType::query()
             ->orderBy('type')
             ->get()
-            ->map(function (StaticProfileType $type): array {
+            ->map(function (StaticProfileType $type) use ($baseUrl): array {
                 $typeKey = trim((string) ($type->type ?? ''));
                 $mapCategory = trim((string) ($type->map_category ?? ''));
+                $visual = $this->resolveVisualPayload($type, $baseUrl);
 
                 return [
                     'type' => $typeKey,
@@ -35,7 +37,8 @@ class StaticProfileTypeRegistryService
                             : [],
                         static fn ($value): bool => is_string($value) && $value !== ''
                     )),
-                    'poi_visual' => $this->poiVisualNormalizer->normalize($type->poi_visual ?? null),
+                    'visual' => $visual,
+                    'poi_visual' => $visual,
                     'capabilities' => [
                         'is_poi_enabled' => (bool) ($type->capabilities['is_poi_enabled'] ?? false),
                         'has_bio' => (bool) ($type->capabilities['has_bio'] ?? false),
@@ -53,9 +56,9 @@ class StaticProfileTypeRegistryService
     /**
      * @return array<string, mixed>|null
      */
-    public function typeDefinition(string $profileType): ?array
+    public function typeDefinition(string $profileType, ?string $baseUrl = null): ?array
     {
-        foreach ($this->registry() as $entry) {
+        foreach ($this->registry($baseUrl) as $entry) {
             if (($entry['type'] ?? null) === $profileType) {
                 return $entry;
             }
@@ -91,8 +94,34 @@ class StaticProfileTypeRegistryService
     public function resolvePoiVisual(string $profileType): ?array
     {
         $definition = $this->typeDefinition($profileType);
-        $poiVisual = $definition['poi_visual'] ?? null;
+        $poiVisual = $definition['visual'] ?? $definition['poi_visual'] ?? null;
 
         return is_array($poiVisual) ? $poiVisual : null;
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function resolveVisualPayload(StaticProfileType $type, ?string $baseUrl = null): ?array
+    {
+        $visual = $this->poiVisualNormalizer->normalize($type->visual ?? $type->poi_visual ?? null);
+        if (! is_array($visual)) {
+            return null;
+        }
+
+        if (($visual['mode'] ?? null) !== 'image' || ($visual['image_source'] ?? null) !== 'type_asset') {
+            return $visual;
+        }
+
+        $rawUrl = is_string($type->type_asset_url ?? null) ? trim((string) $type->type_asset_url) : '';
+        if ($rawUrl === '') {
+            return $visual;
+        }
+
+        $visual['image_url'] = $baseUrl !== null
+            ? $this->mediaService->normalizePublicUrl($baseUrl, $type, 'type_asset', $rawUrl)
+            : $rawUrl;
+
+        return $visual;
     }
 }

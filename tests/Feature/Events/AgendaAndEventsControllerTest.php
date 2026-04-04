@@ -691,6 +691,86 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(404);
     }
 
+    public function test_event_detail_exposes_linked_account_profiles_for_dynamic_category_tabs(): void
+    {
+        $event = $this->createEvent([
+            'venue' => [
+                'id' => 'venue-1',
+                'display_name' => 'Carvoeiro',
+                'slug' => 'carvoeiro',
+                'profile_type' => 'restaurant',
+                'tagline' => 'Tag',
+                'hero_image_url' => 'https://example.org/venue-cover.jpg',
+                'logo_url' => 'https://example.org/venue-avatar.jpg',
+                'avatar_url' => 'https://example.org/venue-avatar.jpg',
+                'cover_url' => 'https://example.org/venue-cover.jpg',
+                'taxonomy_terms' => [
+                    ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
+                ],
+            ],
+            'artists' => [
+                [
+                    'id' => 'artist-1',
+                    'display_name' => 'Ananda Torres',
+                    'slug' => 'ananda-torres',
+                    'profile_type' => 'artist',
+                    'avatar_url' => 'https://example.org/artist-avatar.jpg',
+                    'cover_url' => 'https://example.org/artist-cover.jpg',
+                    'highlight' => false,
+                    'genres' => ['samba'],
+                    'taxonomy_terms' => [
+                        ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
+                    ],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => 'venue-1',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Carvoeiro',
+                        'slug' => 'carvoeiro',
+                        'profile_type' => 'restaurant',
+                        'avatar_url' => 'https://example.org/venue-avatar.jpg',
+                        'cover_url' => 'https://example.org/venue-cover.jpg',
+                        'taxonomy_terms' => [
+                            ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
+                        ],
+                    ],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => 'artist-1',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Ananda Torres',
+                        'slug' => 'ananda-torres',
+                        'profile_type' => 'artist',
+                        'avatar_url' => 'https://example.org/artist-avatar.jpg',
+                        'cover_url' => 'https://example.org/artist-cover.jpg',
+                        'taxonomy_terms' => [
+                            ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.linked_account_profiles.0.id', 'venue-1');
+        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'restaurant');
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', 'carvoeiro');
+        $response->assertJsonPath('data.linked_account_profiles.1.id', 'artist-1');
+        $response->assertJsonPath('data.linked_account_profiles.1.profile_type', 'artist');
+        $response->assertJsonPath('data.linked_account_profiles.1.slug', 'ananda-torres');
+        $response->assertJsonPath(
+            'data.linked_account_profiles.1.taxonomy_terms.0.name',
+            'Showcase'
+        );
+    }
+
     public function test_event_stream_returns_deltas(): void
     {
         $event = $this->createEvent(['title' => 'Stream Event']);

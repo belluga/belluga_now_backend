@@ -11,6 +11,8 @@ use MongoDB\BSON\UTCDateTime;
 
 class EventOccurrenceSyncService
 {
+    private const DEFAULT_EVENT_DURATION_HOURS = 3;
+
     /**
      * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
      */
@@ -25,6 +27,7 @@ class EventOccurrenceSyncService
         foreach ($occurrences as $index => $occurrence) {
             $start = $this->toCarbon($occurrence['date_time_start'] ?? null) ?? $now;
             $end = $this->toCarbon($occurrence['date_time_end'] ?? null);
+            $effectiveEnd = $this->resolveEffectiveEnd($start, $end);
             $eventTaxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
 
             $payload = [
@@ -52,6 +55,7 @@ class EventOccurrenceSyncService
                 'is_active' => (bool) ($event->is_active ?? true),
                 'starts_at' => $start,
                 'ends_at' => $end,
+                'effective_ends_at' => $effectiveEnd,
                 'updated_from_event_at' => $now,
                 'deleted_at' => null,
             ];
@@ -142,6 +146,15 @@ class EventOccurrenceSyncService
         }
 
         return $this->normalizeArray($event->geo_location ?? null);
+    }
+
+    private function resolveEffectiveEnd(Carbon $start, ?Carbon $end): Carbon
+    {
+        if ($end !== null) {
+            return $end;
+        }
+
+        return $start->copy()->addHours(self::DEFAULT_EVENT_DURATION_HOURS);
     }
 
     private function toCarbon(mixed $value): ?Carbon

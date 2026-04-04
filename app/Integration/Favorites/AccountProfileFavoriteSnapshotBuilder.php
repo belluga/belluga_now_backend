@@ -22,6 +22,13 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
 
         $now = Carbon::now();
 
+        $liveNowOccurrence = $this->baseOccurrenceQuery($targetId)
+            ->where('starts_at', '<=', $now)
+            ->where('effective_ends_at', '>', $now)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->first();
+
         $nextOccurrence = $this->baseOccurrenceQuery($targetId)
             ->where('starts_at', '>=', $now)
             ->orderBy('starts_at')
@@ -34,6 +41,8 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
             ->orderBy('_id', 'desc')
             ->first();
 
+        $liveNowOccurrenceId = $liveNowOccurrence ? (string) $liveNowOccurrence->getAttribute('_id') : null;
+        $liveNowOccurrenceAt = $liveNowOccurrence?->starts_at;
         $nextOccurrenceId = $nextOccurrence ? (string) $nextOccurrence->getAttribute('_id') : null;
         $nextOccurrenceAt = $nextOccurrence?->starts_at;
         $lastOccurrenceAt = $lastOccurrence?->starts_at;
@@ -45,12 +54,18 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
                 'slug' => $slug ?? '',
                 'display_name' => (string) ($profile->display_name ?? ''),
                 'avatar_url' => $profile->avatar_url ?? null,
+                'cover_url' => $profile->cover_url ?? null,
+                'profile_type' => $profile->profile_type ? (string) $profile->profile_type : null,
             ],
             'snapshot' => [
+                'live_now_event_occurrence_id' => $liveNowOccurrenceId,
+                'live_now_event_occurrence_at' => $liveNowOccurrenceAt,
                 'next_event_occurrence_id' => $nextOccurrenceId,
                 'next_event_occurrence_at' => $nextOccurrenceAt,
                 'last_event_occurrence_at' => $lastOccurrenceAt,
             ],
+            'live_now_event_occurrence_id' => $liveNowOccurrenceId,
+            'live_now_event_occurrence_at' => $liveNowOccurrenceAt,
             'next_event_occurrence_id' => $nextOccurrenceId,
             'next_event_occurrence_at' => $nextOccurrenceAt,
             'last_event_occurrence_at' => $lastOccurrenceAt,

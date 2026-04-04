@@ -22,6 +22,11 @@ class ArtistEventPartyMapper implements EventPartyMapperContract
     {
         return [
             'display_name' => isset($source['display_name']) ? (string) $source['display_name'] : null,
+            'slug' => isset($source['slug']) ? (string) $source['slug'] : null,
+            'profile_type' => isset($source['profile_type']) ? (string) $source['profile_type'] : null,
+            'avatar_url' => $source['avatar_url'] ?? null,
+            'cover_url' => $source['cover_url'] ?? null,
+            'taxonomy_terms' => is_array($source['taxonomy_terms'] ?? null) ? $source['taxonomy_terms'] : [],
         ];
     }
 }

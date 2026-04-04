@@ -149,6 +149,8 @@ class FavoritesQueryService
         $nextOccurrenceId = $snapshotDoc['next_event_occurrence_id'] ?? ($snapshot['next_event_occurrence_id'] ?? null);
         $nextOccurrenceAt = $snapshotDoc['next_event_occurrence_at'] ?? ($snapshot['next_event_occurrence_at'] ?? null);
         $lastOccurrenceAt = $snapshotDoc['last_event_occurrence_at'] ?? ($snapshot['last_event_occurrence_at'] ?? null);
+        $liveNowOccurrenceId = $snapshotDoc['live_now_event_occurrence_id'] ?? ($snapshot['live_now_event_occurrence_id'] ?? null);
+        $liveNowOccurrenceAt = $snapshotDoc['live_now_event_occurrence_at'] ?? ($snapshot['live_now_event_occurrence_at'] ?? null);
 
         return [
             'favorite_id' => $this->stringifyId($row['_id'] ?? null),
@@ -161,8 +163,12 @@ class FavoritesQueryService
                 'slug' => isset($target['slug']) ? (string) $target['slug'] : '',
                 'display_name' => isset($target['display_name']) ? (string) $target['display_name'] : '',
                 'avatar_url' => $target['avatar_url'] ?? null,
+                'cover_url' => $target['cover_url'] ?? null,
+                'profile_type' => isset($target['profile_type']) ? (string) $target['profile_type'] : null,
             ],
             'snapshot' => [
+                'live_now_event_occurrence_id' => $liveNowOccurrenceId ? (string) $liveNowOccurrenceId : null,
+                'live_now_event_occurrence_at' => $this->formatDate($liveNowOccurrenceAt),
                 'next_event_occurrence_id' => $nextOccurrenceId ? (string) $nextOccurrenceId : null,
                 'next_event_occurrence_at' => $this->formatDate($nextOccurrenceAt),
                 'last_event_occurrence_at' => $this->formatDate($lastOccurrenceAt),

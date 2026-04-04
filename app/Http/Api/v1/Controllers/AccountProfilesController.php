@@ -57,7 +57,7 @@ class AccountProfilesController extends Controller
         $profile = $this->profileQueryService->publicFindBySlugOrFail($account_profile_slug);
 
         return response()->json([
-            'data' => $this->formatter->format($profile),
+            'data' => $this->formatter->format($profile, includeAgendaOccurrences: true),
         ]);
     }
 

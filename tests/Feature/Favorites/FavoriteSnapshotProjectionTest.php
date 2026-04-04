@@ -129,22 +129,66 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $this->assertNull($this->loadSnapshot((string) $profile->_id));
     }
 
-    private function createProfile(string $displayName, string $slug): AccountProfile
+    public function test_snapshot_materializes_visual_preview_and_live_now_fields(): void
+    {
+        $profile = $this->createProfile(
+            displayName: 'Profile Visual Snapshot',
+            slug: 'profile-visual-snapshot',
+            profileType: 'restaurant',
+            avatarUrl: null,
+            coverUrl: 'https://cdn.test/profile-cover.png',
+        );
+
+        $liveOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->subMinutes(20),
+            endsAt: Carbon::now()->addMinutes(40),
+        );
+        $futureOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->addHours(6),
+            endsAt: Carbon::now()->addHours(8),
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+
+        $this->assertNotNull($snapshot);
+        $target = $this->toArray($snapshot['target'] ?? []);
+        $this->assertSame('restaurant', (string) ($target['profile_type'] ?? ''));
+        $this->assertSame('https://cdn.test/profile-cover.png', $target['cover_url'] ?? null);
+        $this->assertSame((string) $liveOccurrence->_id, (string) ($snapshot['live_now_event_occurrence_id'] ?? ''));
+        $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
+    }
+
+    private function createProfile(
+        string $displayName,
+        string $slug,
+        string $profileType = 'artist',
+        ?string $avatarUrl = null,
+        ?string $coverUrl = null,
+    ): AccountProfile
     {
         return AccountProfile::query()->create([
             'account_id' => (string) $this->account->_id,
-            'profile_type' => 'artist',
+            'profile_type' => $profileType,
             'display_name' => $displayName,
             'slug' => $slug,
             'is_active' => true,
             'is_verified' => false,
+            'avatar_url' => $avatarUrl,
+            'cover_url' => $coverUrl,
         ]);
     }
 
-    private function createOccurrence(string $profileId, Carbon $startsAt): EventOccurrence
+    private function createOccurrence(
+        string $profileId,
+        Carbon $startsAt,
+        ?Carbon $endsAt = null,
+    ): EventOccurrence
     {
         $eventId = 'event-'.uniqid('', true);
         $occurrenceSlug = str_replace('.', '-', $eventId).'-occ-1';
+        $resolvedEndsAt = $endsAt ?? $startsAt->copy()->addHours(2);
 
         return EventOccurrence::query()->create([
             'event_id' => $eventId,
@@ -172,7 +216,8 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
             'is_event_published' => true,
             'is_active' => true,
             'starts_at' => $startsAt,
-            'ends_at' => $startsAt->copy()->addHours(2),
+            'ends_at' => $resolvedEndsAt,
+            'effective_ends_at' => $resolvedEndsAt,
             'deleted_at' => null,
         ]);
     }

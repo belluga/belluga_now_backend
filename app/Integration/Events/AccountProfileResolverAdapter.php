@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integration\Events;
 
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,6 +16,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 {
     public function __construct(
         private readonly AccountProfileRegistryService $profileRegistryService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -50,10 +52,16 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             'venue' => [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
+                'slug' => $profile->slug ? (string) $profile->slug : null,
+                'profile_type' => (string) ($profile->profile_type ?? ''),
                 'tagline' => null,
                 'hero_image_url' => $profile->cover_url ?? null,
                 'logo_url' => $profile->avatar_url ?? null,
-                'taxonomy_terms' => $profile->taxonomy_terms ?? [],
+                'avatar_url' => $profile->avatar_url ?? null,
+                'cover_url' => $profile->cover_url ?? null,
+                'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
+                    is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+                ),
             ],
             'location' => $location,
         ];
@@ -89,7 +97,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ]);
         }
 
-        return $profiles->map(static function (AccountProfile $profile): array {
+        return $profiles->map(function (AccountProfile $profile): array {
             $taxonomy = $profile->taxonomy_terms ?? [];
             $genres = [];
 
@@ -109,10 +117,15 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
+                'slug' => $profile->slug ? (string) $profile->slug : null,
+                'profile_type' => (string) ($profile->profile_type ?? ''),
                 'avatar_url' => $profile->avatar_url ?? null,
+                'cover_url' => $profile->cover_url ?? null,
                 'highlight' => false,
                 'genres' => array_values(array_filter($genres, static fn ($item): bool => $item !== '')),
-                'taxonomy_terms' => $profile->taxonomy_terms ?? [],
+                'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
+                    is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+                ),
             ];
         })->all();
     }
