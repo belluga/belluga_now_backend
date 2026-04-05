@@ -53,6 +53,11 @@ scan_filtered "runtime still materializes venue as event_party" \
   packages/belluga/belluga_events/src \
   app
 
+scan "runtime still depends on artist-only resolver contract" \
+  'resolveArtistsByProfileIds|ArtistEventPartyMapper' \
+  packages/belluga/belluga_events/src \
+  app
+
 scan "event query still derives linked profiles with artists/venue fallback arguments" \
   'resolveLinkedAccountProfiles\([^)]*,|resolveLinkedAccountProfiles\([^)]*\$artists|resolveLinkedAccountProfiles\([^)]*\$venue' \
   packages/belluga/belluga_events/src/Application/Events/EventQueryService.php

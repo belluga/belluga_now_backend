@@ -546,10 +546,14 @@ class EventQueryService
             ];
 
             $termMatches[] = [
-                'artists.taxonomy_terms' => [
+                'event_parties' => [
                     '$elemMatch' => [
-                        'type' => $term['type'],
-                        'value' => $term['value'],
+                        'metadata.taxonomy_terms' => [
+                            '$elemMatch' => [
+                                'type' => $term['type'],
+                                'value' => $term['value'],
+                            ],
+                        ],
                     ],
                 ],
             ];
@@ -674,7 +678,7 @@ class EventQueryService
                 ['tags' => ['$regex' => $regex, '$options' => 'i']],
                 ['categories' => ['$regex' => $regex, '$options' => 'i']],
                 ['taxonomy_terms.value' => ['$regex' => $regex, '$options' => 'i']],
-                ['artists.display_name' => ['$regex' => $regex, '$options' => 'i']],
+                ['event_parties.metadata.display_name' => ['$regex' => $regex, '$options' => 'i']],
             ],
         ];
     }
@@ -751,26 +755,10 @@ class EventQueryService
         $placeRef = $this->normalizeArray($event->place_ref ?? null);
         $venue = $this->normalizeArray($event->venue ?? null);
         $thumb = $this->normalizeArray($event->thumb ?? null);
-        $artists = $this->normalizeArray($event->artists ?? []);
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $artists = $this->resolveArtistsReadProjection($eventParties);
         $tags = $this->normalizeArray($event->tags ?? []);
         $taxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
-
-        $artists = array_map(function ($artist): array {
-            $payload = $this->normalizeArray($artist);
-            $displayName = $payload['display_name'] ?? $payload['name'] ?? null;
-
-            return [
-                'id' => isset($payload['id']) ? (string) $payload['id'] : '',
-                'display_name' => (string) ($displayName ?? ''),
-                'slug' => isset($payload['slug']) ? (string) $payload['slug'] : null,
-                'profile_type' => isset($payload['profile_type']) ? (string) $payload['profile_type'] : null,
-                'avatar_url' => $payload['avatar_url'] ?? null,
-                'cover_url' => $payload['cover_url'] ?? null,
-                'highlight' => (bool) ($payload['highlight'] ?? false),
-                'genres' => array_values($this->normalizeStringArray($payload['genres'] ?? [])),
-                'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
-            ];
-        }, $artists);
 
         $venueDisplay = $venue['display_name'] ?? $venue['name'] ?? null;
         $venuePayload = $venue === [] ? null : [
@@ -798,7 +786,6 @@ class EventQueryService
         $occurrences = $this->resolveEventOccurrences($event);
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
-        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
 
         $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
@@ -1101,6 +1088,41 @@ class EventQueryService
         }
 
         return $normalized;
+    }
+
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveArtistsReadProjection(array $eventParties): array
+    {
+        return array_values(array_map(function (array $party): array {
+            $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                ? $party['metadata']
+                : [];
+
+            return [
+                'id' => (string) ($party['party_ref_id'] ?? ''),
+                'display_name' => (string) ($metadata['display_name'] ?? ''),
+                'slug' => isset($metadata['slug']) ? (string) $metadata['slug'] : null,
+                'profile_type' => isset($metadata['profile_type']) ? (string) $metadata['profile_type'] : (string) ($party['party_type'] ?? ''),
+                'avatar_url' => $metadata['avatar_url'] ?? null,
+                'cover_url' => $metadata['cover_url'] ?? null,
+                'highlight' => false,
+                'genres' => array_values($this->normalizeStringArray($metadata['genres'] ?? [])),
+                'taxonomy_terms' => is_array($metadata['taxonomy_terms'] ?? null) ? $metadata['taxonomy_terms'] : [],
+            ];
+        }, array_values(array_filter($eventParties, function (array $party): bool {
+            $partyType = trim((string) ($party['party_type'] ?? ''));
+            $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                ? $party['metadata']
+                : [];
+
+            return $partyType !== 'venue'
+                && trim((string) ($party['party_ref_id'] ?? '')) !== ''
+                && trim((string) ($metadata['display_name'] ?? '')) !== '';
+        }))));
     }
 
     /**

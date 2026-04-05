@@ -32,6 +32,8 @@ class InMemoryEventPartyMapperRegistry implements EventPartyMapperRegistryContra
 
     public function find(string $partyType): ?EventPartyMapperContract
     {
-        return $this->mappers[$partyType] ?? null;
+        return $this->mappers[$partyType]
+            ?? $this->mappers['*']
+            ?? null;
     }
 }

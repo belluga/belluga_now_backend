@@ -167,24 +167,11 @@ class EventManagementService
             $normalized['venue'] = $resolvedLocation['venue'];
         }
 
-        $eventPartiesSourceTouched = array_key_exists('event_parties', $payload) || $existing === null;
-        $normalized['artists'] = $this->resolveArtistPayloads(
-            array_key_exists('event_parties', $payload) && is_array($payload['event_parties'])
-                ? $payload['event_parties']
-                : null,
-            $existing
-        );
-
         if ($existing === null) {
             $normalized['created_by'] = $this->resolveCreatedByPrincipal($payload);
         }
 
-        $normalized['event_parties'] = $this->resolveEventParties(
-            $payload,
-            $existing,
-            $normalized['artists'],
-            $eventPartiesSourceTouched
-        );
+        $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
 
         return [
             'payload' => $normalized,

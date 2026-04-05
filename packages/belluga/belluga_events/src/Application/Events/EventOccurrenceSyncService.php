@@ -43,7 +43,7 @@ class EventOccurrenceSyncService
                 'place_ref' => $this->normalizeArray($event->place_ref ?? null),
                 'venue' => $this->normalizeArray($event->venue ?? null),
                 'geo_location' => $geoLocation,
-                'artists' => $this->normalizeArray($event->artists ?? []),
+                'artists' => $this->deriveArtistsReadProjection($this->normalizeArray($event->event_parties ?? [])),
                 'tags' => $this->normalizeArray($event->tags ?? []),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'taxonomy_terms' => $eventTaxonomyTerms,
@@ -146,6 +146,44 @@ class EventOccurrenceSyncService
         }
 
         return $this->normalizeArray($event->geo_location ?? null);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function deriveArtistsReadProjection(array $eventParties): array
+    {
+        $profiles = [];
+
+        foreach ($eventParties as $party) {
+            $partyPayload = $this->normalizeArray($party);
+            $partyType = trim((string) ($partyPayload['party_type'] ?? ''));
+            if ($partyType === 'venue') {
+                continue;
+            }
+
+            $metadata = $this->normalizeArray($partyPayload['metadata'] ?? []);
+            $profileId = trim((string) ($partyPayload['party_ref_id'] ?? ''));
+            $displayName = trim((string) ($metadata['display_name'] ?? ''));
+            if ($profileId === '' || $displayName === '') {
+                continue;
+            }
+
+            $profiles[] = [
+                'id' => $profileId,
+                'display_name' => $displayName,
+                'slug' => isset($metadata['slug']) ? (string) $metadata['slug'] : null,
+                'profile_type' => isset($metadata['profile_type']) ? (string) $metadata['profile_type'] : $partyType,
+                'avatar_url' => $metadata['avatar_url'] ?? null,
+                'cover_url' => $metadata['cover_url'] ?? null,
+                'highlight' => false,
+                'genres' => array_values($this->normalizeArray($metadata['genres'] ?? [])),
+                'taxonomy_terms' => $this->normalizeArray($metadata['taxonomy_terms'] ?? []),
+            ];
+        }
+
+        return $profiles;
     }
 
     private function resolveEffectiveEnd(Carbon $start, ?Carbon $end): Carbon

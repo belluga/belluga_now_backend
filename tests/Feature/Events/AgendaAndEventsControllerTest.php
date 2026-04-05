@@ -168,20 +168,35 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'title' => 'Live Discovery Slot',
             'date_time_start' => $now->copy()->subMinutes(15),
             'date_time_end' => $now->copy()->addMinutes(45),
-            'artists' => [
+            'artists' => [],
+            'event_parties' => [
                 [
-                    'id' => 'artist-live-1',
-                    'display_name' => 'Live Artist One',
-                    'avatar_url' => 'https://example.org/artist-live-1.jpg',
-                    'highlight' => true,
-                    'genres' => ['samba'],
+                    'party_type' => 'artist',
+                    'party_ref_id' => 'artist-live-1',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Live Artist One',
+                        'slug' => 'live-artist-one',
+                        'profile_type' => 'artist',
+                        'avatar_url' => 'https://example.org/artist-live-1.jpg',
+                        'cover_url' => null,
+                        'genres' => ['samba'],
+                        'taxonomy_terms' => [],
+                    ],
                 ],
                 [
-                    'id' => 'artist-live-2',
-                    'display_name' => 'Live Artist Two',
-                    'avatar_url' => null,
-                    'highlight' => false,
-                    'genres' => ['mpb'],
+                    'party_type' => 'band',
+                    'party_ref_id' => 'artist-live-2',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Live Artist Two',
+                        'slug' => 'live-artist-two',
+                        'profile_type' => 'band',
+                        'avatar_url' => null,
+                        'cover_url' => null,
+                        'genres' => ['mpb'],
+                        'taxonomy_terms' => [],
+                    ],
                 ],
             ],
         ]);
@@ -317,15 +332,22 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $this->createEvent([
             'title' => 'Artist Taxonomy Match',
-            'artists' => [
+            'event_parties' => [
                 [
-                    'id' => 'artist-3',
+                    'party_type' => 'artist',
+                    'party_ref_id' => 'artist-3',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
                     'display_name' => 'DJ Mar',
+                    'slug' => 'dj-mar',
+                    'profile_type' => 'artist',
                     'avatar_url' => null,
+                    'cover_url' => null,
                     'highlight' => false,
                     'genres' => ['house'],
                     'taxonomy_terms' => [
                         ['type' => 'music_genre', 'value' => 'samba'],
+                    ],
                     ],
                 ],
             ],
@@ -708,30 +730,16 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                     ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
                 ],
             ],
-            'artists' => [
-                [
-                    'id' => 'artist-1',
-                    'display_name' => 'Ananda Torres',
-                    'slug' => 'ananda-torres',
-                    'profile_type' => 'artist',
-                    'avatar_url' => 'https://example.org/artist-avatar.jpg',
-                    'cover_url' => 'https://example.org/artist-cover.jpg',
-                    'highlight' => false,
-                    'genres' => ['samba'],
-                    'taxonomy_terms' => [
-                        ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
-                    ],
-                ],
-            ],
+            'artists' => [],
             'event_parties' => [
                 [
-                    'party_type' => 'artist',
+                    'party_type' => 'band',
                     'party_ref_id' => 'artist-1',
                     'permissions' => ['can_edit' => true],
                     'metadata' => [
                         'display_name' => 'Ananda Torres',
                         'slug' => 'ananda-torres',
-                        'profile_type' => 'artist',
+                        'profile_type' => 'band',
                         'avatar_url' => 'https://example.org/artist-avatar.jpg',
                         'cover_url' => 'https://example.org/artist-cover.jpg',
                         'taxonomy_terms' => [
@@ -746,7 +754,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.linked_account_profiles');
         $response->assertJsonPath('data.linked_account_profiles.0.id', 'artist-1');
-        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'artist');
+        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'band');
         $response->assertJsonPath('data.linked_account_profiles.0.slug', 'ananda-torres');
         $response->assertJsonPath(
             'data.linked_account_profiles.0.taxonomy_terms.0.name',
@@ -961,21 +969,28 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ],
             'date_time_start' => $now->copy()->addDay(),
             'date_time_end' => $now->copy()->addDay()->addHours(2),
-            'artists' => [
-                [
-                    'id' => 'artist-1',
-                    'display_name' => 'Artist One',
-                    'avatar_url' => null,
-                    'highlight' => false,
-                    'genres' => ['rock'],
-                    'taxonomy_terms' => [
-                        ['type' => 'music_genre', 'value' => 'rock'],
-                    ],
-                ],
-            ],
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
+            'event_parties' => [
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => 'artist-1',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Artist One',
+                        'slug' => 'artist-one',
+                        'profile_type' => 'artist',
+                        'avatar_url' => null,
+                        'cover_url' => null,
+                        'highlight' => false,
+                        'genres' => ['rock'],
+                        'taxonomy_terms' => [
+                            ['type' => 'music_genre', 'value' => 'rock'],
+                        ],
+                    ],
+                ],
+            ],
             'publication' => [
                 'status' => 'published',
                 'publish_at' => $now->copy()->subMinute(),

@@ -48,7 +48,7 @@ class LegacyEventPartiesCanonicalizationService
 
         Event::query()
             ->orderBy('_id')
-            ->get()
+            ->cursor()
             ->each(function (Event $event) use (&$summary, $applyRepair): void {
                 $summary['scanned']++;
 
@@ -90,6 +90,7 @@ class LegacyEventPartiesCanonicalizationService
     /**
      * @return array{
      *   invalid: bool,
+     *   has_legacy_artists: bool,
      *   has_venue_party: bool,
      *   target_artist_ids: array<int, string>,
      *   canonical_artist_ids: array<int, string>,
@@ -102,6 +103,7 @@ class LegacyEventPartiesCanonicalizationService
         $legacyArtists = $this->normalizeArray($event->artists ?? []);
 
         $hasVenueParty = false;
+        $hasLegacyArtists = false;
         $targetArtistIds = [];
         $canonicalArtistIds = [];
         $artistPartiesById = [];
@@ -117,6 +119,7 @@ class LegacyEventPartiesCanonicalizationService
                 continue;
             }
 
+            $hasLegacyArtists = true;
             $targetArtistIds[] = $artistId;
         }
 
@@ -133,7 +136,7 @@ class LegacyEventPartiesCanonicalizationService
                 continue;
             }
 
-            if ($partyType !== 'artist' || $partyRefId === '') {
+            if ($partyRefId === '') {
                 continue;
             }
 
@@ -154,12 +157,14 @@ class LegacyEventPartiesCanonicalizationService
         $targetArtistIds = array_values(array_unique(array_merge($targetArtistIds, $canonicalArtistIds)));
         $canonicalArtistIds = array_values(array_unique($canonicalArtistIds));
 
-        $invalid = $hasVenueParty
+        $invalid = $hasLegacyArtists
+            || $hasVenueParty
             || $missingCanonicalMetadata
             || $targetArtistIds !== $canonicalArtistIds;
 
         return [
             'invalid' => $invalid,
+            'has_legacy_artists' => $hasLegacyArtists,
             'has_venue_party' => $hasVenueParty,
             'target_artist_ids' => $targetArtistIds,
             'canonical_artist_ids' => $canonicalArtistIds,
@@ -170,6 +175,7 @@ class LegacyEventPartiesCanonicalizationService
     /**
      * @param  array{
      *   invalid: bool,
+     *   has_legacy_artists: bool,
      *   has_venue_party: bool,
      *   target_artist_ids: array<int, string>,
      *   canonical_artist_ids: array<int, string>,
@@ -178,14 +184,9 @@ class LegacyEventPartiesCanonicalizationService
      */
     private function repairEvent(Event $event, array $analysis): void
     {
-        $artistMapper = $this->eventPartyMappers->find('artist');
-        if ($artistMapper === null) {
-            throw new \RuntimeException('Artist event party mapper is not registered.');
-        }
-
-        $resolvedArtists = $analysis['target_artist_ids'] === []
+        $resolvedProfiles = $analysis['target_artist_ids'] === []
             ? []
-            : $this->eventProfileResolver->resolveArtistsByProfileIds($analysis['target_artist_ids']);
+            : $this->eventProfileResolver->resolveEventPartyProfilesByIds($analysis['target_artist_ids']);
 
         $existingParties = $this->normalizeArray($event->event_parties ?? []);
         $rebuiltParties = [];
@@ -196,24 +197,31 @@ class LegacyEventPartiesCanonicalizationService
             }
 
             $partyType = trim((string) ($party['party_type'] ?? ''));
-            if ($partyType === 'venue' || $partyType === 'artist') {
+            $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
+            if ($partyType === 'venue' || in_array($partyRefId, $analysis['target_artist_ids'], true)) {
                 continue;
             }
 
             $rebuiltParties[] = $party;
         }
 
-        foreach ($resolvedArtists as $artist) {
-            if (! is_array($artist)) {
+        foreach ($resolvedProfiles as $profile) {
+            if (! is_array($profile)) {
                 continue;
             }
 
-            $artistId = trim((string) ($artist['id'] ?? ''));
-            if ($artistId === '') {
-                continue;
+            $profileId = trim((string) ($profile['id'] ?? ''));
+            $partyType = trim((string) ($profile['profile_type'] ?? ''));
+            if ($profileId === '' || $partyType === '' || $partyType === 'venue') {
+                throw new \RuntimeException('Legacy event party repair resolved an invalid account profile.');
             }
 
-            $existingParty = $analysis['artist_parties_by_id'][$artistId] ?? null;
+            $partyMapper = $this->eventPartyMappers->find($partyType);
+            if ($partyMapper === null) {
+                throw new \RuntimeException("Event party mapper [{$partyType}] is not registered.");
+            }
+
+            $existingParty = $analysis['artist_parties_by_id'][$profileId] ?? null;
             $canEdit = true;
             if (
                 is_array($existingParty)
@@ -223,21 +231,21 @@ class LegacyEventPartiesCanonicalizationService
             ) {
                 $canEdit = (bool) $existingParty['permissions']['can_edit'];
             } else {
-                $canEdit = $artistMapper->defaultCanEdit();
+                $canEdit = $partyMapper->defaultCanEdit();
             }
 
             $rebuiltParties[] = [
-                'party_type' => 'artist',
-                'party_ref_id' => $artistId,
+                'party_type' => $partyType,
+                'party_ref_id' => $profileId,
                 'permissions' => [
                     'can_edit' => $canEdit,
                 ],
-                'metadata' => $artistMapper->mapMetadata($artist),
+                'metadata' => $partyMapper->mapMetadata($profile),
             ];
         }
 
         $event->event_parties = array_values($rebuiltParties);
-        $event->artists = array_values($resolvedArtists);
+        $event->artists = null;
         $event->save();
 
         $this->occurrenceReconciliationService->reconcileEvent($event->fresh());
