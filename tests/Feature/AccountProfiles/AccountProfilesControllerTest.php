@@ -457,6 +457,40 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ?Carbon $endsAt = null,
         bool $asArtistHost = false,
     ): Event {
+        $eventParties = $asArtistHost
+            ? [[
+                'party_type' => $profile->profile_type,
+                'party_ref_id' => (string) $profile->_id,
+                'metadata' => [
+                    'display_name' => $profile->display_name,
+                    'slug' => $profile->slug,
+                    'profile_type' => $profile->profile_type,
+                    'avatar_url' => null,
+                    'cover_url' => null,
+                    'taxonomy_terms' => [],
+                ],
+                'permissions' => [
+                    'can_view' => true,
+                    'can_edit' => false,
+                ],
+            ]]
+            : [[
+                'party_type' => 'personal',
+                'party_ref_id' => 'personal-1',
+                'metadata' => [
+                    'display_name' => 'Performer One',
+                    'slug' => 'performer-one',
+                    'profile_type' => 'personal',
+                    'avatar_url' => null,
+                    'cover_url' => null,
+                    'taxonomy_terms' => [],
+                ],
+                'permissions' => [
+                    'can_view' => true,
+                    'can_edit' => false,
+                ],
+            ]];
+
         $event = Event::create([
             'title' => $title,
             'content' => 'Agenda event content',
@@ -506,23 +540,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ],
             'date_time_start' => $startsAt,
             'date_time_end' => $endsAt,
-            'artists' => $asArtistHost
-                ? [[
-                    'id' => (string) $profile->_id,
-                    'display_name' => $profile->display_name,
-                    'avatar_url' => null,
-                    'highlight' => true,
-                    'genres' => ['mpb'],
-                    'taxonomy_terms' => [],
-                ]]
-                : [[
-                    'id' => 'artist-1',
-                    'display_name' => 'Artist One',
-                    'avatar_url' => null,
-                    'highlight' => true,
-                    'genres' => ['mpb'],
-                    'taxonomy_terms' => [],
-                ]],
+            'event_parties' => $eventParties,
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],

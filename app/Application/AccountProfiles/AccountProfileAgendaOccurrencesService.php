@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 class AccountProfileAgendaOccurrencesService
 {
     public function __construct(
+        private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly EventQueryService $eventQueryService,
     ) {}
 
@@ -29,11 +30,11 @@ class AccountProfileAgendaOccurrencesService
             ->where('is_event_published', true)
             ->where('effective_ends_at', '>', Carbon::now());
 
-        if ($this->isArtistProfile($profile)) {
-            $query->where('artists.id', $profileId);
-        } else {
+        if ($this->usesPlaceRefAgendaMatching($profile)) {
             $query->where('place_ref.type', 'account_profile')
                 ->where('place_ref.id', $profileId);
+        } else {
+            $query->where('event_parties.party_ref_id', $profileId);
         }
 
         return $query
@@ -45,8 +46,10 @@ class AccountProfileAgendaOccurrencesService
             ->all();
     }
 
-    private function isArtistProfile(AccountProfile $profile): bool
+    private function usesPlaceRefAgendaMatching(AccountProfile $profile): bool
     {
-        return trim((string) ($profile->profile_type ?? '')) === 'artist';
+        return $this->profileRegistryService->isPoiEnabled(
+            trim((string) ($profile->profile_type ?? ''))
+        );
     }
 }
