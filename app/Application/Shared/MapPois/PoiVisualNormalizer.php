@@ -35,7 +35,7 @@ final class PoiVisualNormalizer
 
         if ($mode === 'image') {
             $imageSource = strtolower(trim((string) ($raw['image_source'] ?? '')));
-            if (! in_array($imageSource, ['avatar', 'cover'], true)) {
+            if (! in_array($imageSource, ['avatar', 'cover', 'type_asset'], true)) {
                 return null;
             }
 

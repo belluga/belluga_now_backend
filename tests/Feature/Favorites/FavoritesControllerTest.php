@@ -178,6 +178,34 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('items'));
     }
 
+    public function test_favorites_exposes_account_profile_visual_preview_and_live_snapshot_fields(): void
+    {
+        $profile = $this->createProfile('Profile Visual Payload', 'profile-visual-payload');
+
+        $this->insertSnapshot((string) $profile->_id, [
+            'next_event_occurrence_id' => 'occ-next',
+            'next_event_occurrence_at' => Carbon::parse('2026-03-25T12:00:00Z'),
+            'last_event_occurrence_at' => null,
+            'live_now_event_occurrence_id' => 'occ-live',
+            'live_now_event_occurrence_at' => Carbon::parse('2026-03-20T12:00:00Z'),
+        ], [
+            'display_name' => 'Profile Visual Payload',
+            'slug' => 'profile-visual-payload',
+            'avatar_url' => null,
+            'cover_url' => 'https://cdn.test/profile-cover.png',
+            'profile_type' => 'restaurant',
+        ]);
+
+        $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
+
+        $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('items.0.target.cover_url', 'https://cdn.test/profile-cover.png');
+        $response->assertJsonPath('items.0.target.profile_type', 'restaurant');
+        $response->assertJsonPath('items.0.snapshot.live_now_event_occurrence_id', 'occ-live');
+    }
+
     public function test_favorites_store_creates_edge_for_authenticated_identity(): void
     {
         $profile = $this->createProfile('Profile Store', 'profile-store');
@@ -311,8 +339,8 @@ class FavoritesControllerTest extends TestCaseTenant
     }
 
     /**
-     * @param  array{next_event_occurrence_id:?string,next_event_occurrence_at:mixed,last_event_occurrence_at:mixed}  $snapshot
-     * @param  array{display_name:string,slug:string}  $target
+     * @param  array{next_event_occurrence_id:?string,next_event_occurrence_at:mixed,last_event_occurrence_at:mixed,live_now_event_occurrence_id?:?string,live_now_event_occurrence_at?:mixed}  $snapshot
+     * @param  array{display_name:string,slug:string,avatar_url?:?string,cover_url?:?string,profile_type?:?string}  $target
      */
     private function insertSnapshot(string $profileId, array $snapshot, array $target): void
     {
@@ -330,6 +358,7 @@ class FavoritesControllerTest extends TestCaseTenant
 
         $nextOccurrenceAt = $toUtcDateTime($snapshot['next_event_occurrence_at'] ?? null);
         $lastOccurrenceAt = $toUtcDateTime($snapshot['last_event_occurrence_at'] ?? null);
+        $liveNowOccurrenceAt = $toUtcDateTime($snapshot['live_now_event_occurrence_at'] ?? null);
 
         $selector = [
             'registry_key' => 'account_profile',
@@ -346,16 +375,21 @@ class FavoritesControllerTest extends TestCaseTenant
                         'id' => $profileId,
                         'display_name' => $target['display_name'],
                         'slug' => $target['slug'],
-                        'avatar_url' => null,
+                        'avatar_url' => $target['avatar_url'] ?? null,
+                        'cover_url' => $target['cover_url'] ?? null,
+                        'profile_type' => $target['profile_type'] ?? null,
                     ],
                     'snapshot' => [
                         ...$snapshot,
                         'next_event_occurrence_at' => $nextOccurrenceAt,
                         'last_event_occurrence_at' => $lastOccurrenceAt,
+                        'live_now_event_occurrence_at' => $liveNowOccurrenceAt,
                     ],
                     'next_event_occurrence_id' => $snapshot['next_event_occurrence_id'],
                     'next_event_occurrence_at' => $nextOccurrenceAt,
                     'last_event_occurrence_at' => $lastOccurrenceAt,
+                    'live_now_event_occurrence_id' => $snapshot['live_now_event_occurrence_id'] ?? null,
+                    'live_now_event_occurrence_at' => $liveNowOccurrenceAt,
                     'navigation' => [
                         'kind' => 'account_profile',
                         'target_slug' => $target['slug'],

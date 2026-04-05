@@ -19,6 +19,10 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
 
         Route::get('/events/account_profile_candidates', [EventsController::class, 'accountProfileCandidates'])
             ->middleware('ability:events:read,events:create,events:update');
+        Route::get('/events/legacy_event_parties/summary', [EventsController::class, 'legacyEventPartiesSummary'])
+            ->middleware('ability:events:read,events:update');
+        Route::post('/events/legacy_event_parties/repair', [EventsController::class, 'repairLegacyEventParties'])
+            ->middleware('abilities:events:update');
         Route::get('/events', [EventsController::class, 'index'])
             ->middleware('abilities:events:read');
         Route::post('/events', [EventsController::class, 'store'])

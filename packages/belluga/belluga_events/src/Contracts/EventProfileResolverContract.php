@@ -17,10 +17,10 @@ interface EventProfileResolverContract
     public function resolvePhysicalHostByProfileId(string $profileId): array;
 
     /**
-     * @param  array<int, string>  $artistProfileIds
+     * @param  array<int, string>  $profileIds
      * @return array<int, array<string, mixed>>
      */
-    public function resolveArtistsByProfileIds(array $artistProfileIds): array;
+    public function resolveEventPartyProfilesByIds(array $profileIds): array;
 
     /**
      * @return array<int, string>

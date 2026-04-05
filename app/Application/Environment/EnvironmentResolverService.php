@@ -64,7 +64,7 @@ class EnvironmentResolverService
         $telemetry = $this->telemetrySettings->currentTelemetryConfig();
         $firebase = $this->pushSettings->currentFirebaseConfig();
         $push = $this->pushSettings->currentPushConfig();
-        $profileTypes = $this->profileRegistryService->registry();
+        $profileTypes = $this->profileRegistryService->registry($requestRoot);
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []

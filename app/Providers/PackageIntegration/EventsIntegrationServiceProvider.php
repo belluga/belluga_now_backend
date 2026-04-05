@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\AttendanceCommitmentReadAdapter;
-use App\Integration\Events\EventParties\ArtistEventPartyMapper;
-use App\Integration\Events\EventParties\VenueEventPartyMapper;
+use App\Integration\Events\EventParties\AccountProfileEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
@@ -80,10 +80,13 @@ class EventsIntegrationServiceProvider extends ServiceProvider
 
         $this->app->singleton(
             EventPartyMapperRegistryContract::class,
-            static function () {
+            function ($app) {
                 $registry = new InMemoryEventPartyMapperRegistry;
-                $registry->register(new VenueEventPartyMapper);
-                $registry->register(new ArtistEventPartyMapper);
+                $registry->register(
+                    new AccountProfileEventPartyMapper(
+                        $app->make(TaxonomyTermSummaryResolverService::class),
+                    ),
+                );
 
                 return $registry;
             }

@@ -136,10 +136,6 @@ class EventQueryService
             'status' => $publication['status'] ?? 'draft',
             'publish_at' => $publishAt,
         ];
-        $payload['artist_ids'] = array_values(array_filter(array_map(
-            static fn ($artist): ?string => is_array($artist) ? (string) ($artist['id'] ?? '') : null,
-            $payload['artists'] ?? []
-        )));
         $payload['created_at'] = $event->created_at?->toJSON();
         $payload['updated_at'] = $event->updated_at?->toJSON();
         $payload['deleted_at'] = $event->deleted_at?->toJSON();
@@ -152,6 +148,10 @@ class EventQueryService
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             return false;
+        }
+
+        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
+            return true;
         }
 
         $parties = $this->normalizeEventParties($event->event_parties ?? []);
@@ -173,6 +173,10 @@ class EventQueryService
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             return false;
+        }
+
+        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
+            return true;
         }
 
         $parties = $this->normalizeEventParties($event->event_parties ?? []);
@@ -542,10 +546,14 @@ class EventQueryService
             ];
 
             $termMatches[] = [
-                'artists.taxonomy_terms' => [
+                'event_parties' => [
                     '$elemMatch' => [
-                        'type' => $term['type'],
-                        'value' => $term['value'],
+                        'metadata.taxonomy_terms' => [
+                            '$elemMatch' => [
+                                'type' => $term['type'],
+                                'value' => $term['value'],
+                            ],
+                        ],
                     ],
                 ],
             ];
@@ -670,7 +678,7 @@ class EventQueryService
                 ['tags' => ['$regex' => $regex, '$options' => 'i']],
                 ['categories' => ['$regex' => $regex, '$options' => 'i']],
                 ['taxonomy_terms.value' => ['$regex' => $regex, '$options' => 'i']],
-                ['artists.display_name' => ['$regex' => $regex, '$options' => 'i']],
+                ['event_parties.metadata.display_name' => ['$regex' => $regex, '$options' => 'i']],
             ],
         ];
     }
@@ -747,30 +755,22 @@ class EventQueryService
         $placeRef = $this->normalizeArray($event->place_ref ?? null);
         $venue = $this->normalizeArray($event->venue ?? null);
         $thumb = $this->normalizeArray($event->thumb ?? null);
-        $artists = $this->normalizeArray($event->artists ?? []);
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $artists = $this->resolveArtistsReadProjection($eventParties);
         $tags = $this->normalizeArray($event->tags ?? []);
         $taxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
-
-        $artists = array_map(function ($artist): array {
-            $payload = $this->normalizeArray($artist);
-            $displayName = $payload['display_name'] ?? $payload['name'] ?? null;
-
-            return [
-                'id' => isset($payload['id']) ? (string) $payload['id'] : '',
-                'display_name' => (string) ($displayName ?? ''),
-                'avatar_url' => $payload['avatar_url'] ?? null,
-                'highlight' => (bool) ($payload['highlight'] ?? false),
-                'genres' => array_values($this->normalizeStringArray($payload['genres'] ?? [])),
-            ];
-        }, $artists);
 
         $venueDisplay = $venue['display_name'] ?? $venue['name'] ?? null;
         $venuePayload = $venue === [] ? null : [
             'id' => isset($venue['id']) ? (string) $venue['id'] : '',
             'display_name' => (string) ($venueDisplay ?? ''),
+            'slug' => isset($venue['slug']) ? (string) $venue['slug'] : null,
+            'profile_type' => isset($venue['profile_type']) ? (string) $venue['profile_type'] : null,
             'tagline' => $venue['tagline'] ?? null,
             'hero_image_url' => $venue['hero_image_url'] ?? null,
             'logo_url' => $venue['logo_url'] ?? null,
+            'avatar_url' => $venue['avatar_url'] ?? $venue['logo_url'] ?? null,
+            'cover_url' => $venue['cover_url'] ?? $venue['hero_image_url'] ?? null,
             'taxonomy_terms' => $venue['taxonomy_terms'] ?? [],
         ];
 
@@ -786,7 +786,7 @@ class EventQueryService
         $occurrences = $this->resolveEventOccurrences($event);
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
-        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
 
         $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
@@ -828,6 +828,7 @@ class EventQueryService
                 'id' => isset($createdBy['id']) ? (string) $createdBy['id'] : '',
             ],
             'event_parties' => $eventParties,
+            'linked_account_profiles' => $linkedAccountProfiles,
             'capabilities' => $capabilities,
             'tags' => array_values(array_map('strval', $tags)),
             'taxonomy_terms' => $taxonomyTerms,
@@ -1035,7 +1036,8 @@ class EventQueryService
         }
 
         $query->where(function ($builder) use ($profileIds): void {
-            $builder->whereIn('event_parties.party_ref_id', $profileIds);
+            $builder->whereIn('event_parties.party_ref_id', $profileIds)
+                ->orWhereIn('place_ref.id', $profileIds);
         });
     }
 
@@ -1086,6 +1088,105 @@ class EventQueryService
         }
 
         return $normalized;
+    }
+
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveArtistsReadProjection(array $eventParties): array
+    {
+        return array_values(array_map(function (array $party): array {
+            $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                ? $party['metadata']
+                : [];
+
+            return [
+                'id' => (string) ($party['party_ref_id'] ?? ''),
+                'display_name' => (string) ($metadata['display_name'] ?? ''),
+                'slug' => isset($metadata['slug']) ? (string) $metadata['slug'] : null,
+                'profile_type' => isset($metadata['profile_type']) ? (string) $metadata['profile_type'] : (string) ($party['party_type'] ?? ''),
+                'avatar_url' => $metadata['avatar_url'] ?? null,
+                'cover_url' => $metadata['cover_url'] ?? null,
+                'highlight' => false,
+                'genres' => array_values($this->normalizeStringArray($metadata['genres'] ?? [])),
+                'taxonomy_terms' => is_array($metadata['taxonomy_terms'] ?? null) ? $metadata['taxonomy_terms'] : [],
+            ];
+        }, array_values(array_filter($eventParties, function (array $party): bool {
+            $partyType = trim((string) ($party['party_type'] ?? ''));
+            $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                ? $party['metadata']
+                : [];
+
+            return $partyType !== 'venue'
+                && trim((string) ($party['party_ref_id'] ?? '')) !== ''
+                && trim((string) ($metadata['display_name'] ?? '')) !== '';
+        }))));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveLinkedAccountProfiles(array $eventParties): array {
+        $items = [];
+        $seenIds = [];
+
+        $push = static function (array $payload) use (&$items, &$seenIds): void {
+            $id = trim((string) ($payload['id'] ?? ''));
+            $displayName = trim((string) ($payload['display_name'] ?? ''));
+            $profileType = trim((string) ($payload['profile_type'] ?? ''));
+
+            if ($id === '' || $displayName === '' || $profileType === '' || isset($seenIds[$id])) {
+                return;
+            }
+
+            $items[] = [
+                'id' => $id,
+                'display_name' => $displayName,
+                'slug' => isset($payload['slug']) ? (string) $payload['slug'] : null,
+                'profile_type' => $profileType,
+                'party_type' => isset($payload['party_type']) ? (string) $payload['party_type'] : null,
+                'avatar_url' => $payload['avatar_url'] ?? null,
+                'cover_url' => $payload['cover_url'] ?? null,
+                'taxonomy_terms' => is_array($payload['taxonomy_terms'] ?? null) ? $payload['taxonomy_terms'] : [],
+            ];
+            $seenIds[$id] = true;
+        };
+
+        foreach ($eventParties as $party) {
+            $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                ? $party['metadata']
+                : [];
+
+            $push([
+                'id' => $party['party_ref_id'] ?? '',
+                'display_name' => $metadata['display_name'] ?? '',
+                'slug' => $metadata['slug'] ?? null,
+                'profile_type' => $metadata['profile_type'] ?? null,
+                'party_type' => $party['party_type'] ?? null,
+                'avatar_url' => $metadata['avatar_url'] ?? null,
+                'cover_url' => $metadata['cover_url'] ?? null,
+                'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
+            ]);
+        }
+
+        return $items;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     */
+    private function eventReferencesPlaceRefProfile(Event $event, array $profileIds): bool
+    {
+        $placeRef = $this->normalizeArray($event->place_ref ?? null);
+        $placeRefId = trim((string) ($placeRef['id'] ?? ''));
+        if ($placeRefId === '') {
+            return false;
+        }
+
+        return in_array($placeRefId, $profileIds, true);
     }
 
     private function applyPublicPublicationFilter($query): void

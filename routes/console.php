@@ -5,6 +5,7 @@ use App\Application\Security\ApiAbuseSignalRecorder;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
+use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
@@ -59,6 +60,17 @@ Artisan::command('api-security:abuse-signals:report {--hours=24}', function () {
 
     return 0;
 })->purpose('Print API abuse signal aggregate report for observe-mode/enforcement review.');
+
+Artisan::command('events:legacy-event-parties:repair {--dry-run}', function () {
+    $service = app(LegacyEventPartiesCanonicalizationService::class);
+    $summary = $this->option('dry-run')
+        ? $service->inspect()
+        : $service->repair();
+
+    $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+    return 0;
+})->purpose('Inspect or repair legacy events that still rely on artists/venue event_parties drift.');
 
 Schedule::call(static function (): void {
     app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {

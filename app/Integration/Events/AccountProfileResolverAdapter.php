@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integration\Events;
 
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,6 +16,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 {
     public function __construct(
         private readonly AccountProfileRegistryService $profileRegistryService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -50,46 +52,46 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             'venue' => [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
+                'slug' => $profile->slug ? (string) $profile->slug : null,
+                'profile_type' => (string) ($profile->profile_type ?? ''),
                 'tagline' => null,
                 'hero_image_url' => $profile->cover_url ?? null,
                 'logo_url' => $profile->avatar_url ?? null,
-                'taxonomy_terms' => $profile->taxonomy_terms ?? [],
+                'avatar_url' => $profile->avatar_url ?? null,
+                'cover_url' => $profile->cover_url ?? null,
+                'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
+                    is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+                ),
             ],
             'location' => $location,
         ];
     }
 
-    public function resolveArtistsByProfileIds(array $artistProfileIds): array
+    public function resolveEventPartyProfilesByIds(array $profileIds): array
     {
-        if ($artistProfileIds === []) {
+        if ($profileIds === []) {
             return [];
         }
 
         $profiles = AccountProfile::query()
-            ->whereIn('_id', array_values($artistProfileIds))
+            ->whereIn('_id', array_values($profileIds))
             ->get();
 
-        $resolvedIds = $profiles->pluck('_id')
-            ->map(static fn ($id): string => (string) $id)
-            ->all();
+        $profilesById = $profiles->keyBy(
+            static fn (AccountProfile $profile): string => (string) $profile->_id
+        );
 
-        $missing = array_diff($artistProfileIds, $resolvedIds);
+        $missing = array_diff($profileIds, array_keys($profilesById->all()));
         if ($missing !== []) {
             throw ValidationException::withMessages([
-                'artist_ids' => ['Some artists were not found.'],
+                'event_parties' => ['Some event parties were not found.'],
             ]);
         }
 
-        $invalid = $profiles->filter(
-            static fn (AccountProfile $profile): bool => $profile->profile_type !== 'artist'
-        );
-        if ($invalid->isNotEmpty()) {
-            throw ValidationException::withMessages([
-                'artist_ids' => ['All artists must be account profiles of type artist.'],
-            ]);
-        }
-
-        return $profiles->map(static function (AccountProfile $profile): array {
+        $resolved = [];
+        foreach ($profileIds as $profileId) {
+            /** @var AccountProfile $profile */
+            $profile = $profilesById[$profileId];
             $taxonomy = $profile->taxonomy_terms ?? [];
             $genres = [];
 
@@ -106,15 +108,22 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                 }
             }
 
-            return [
+            $resolved[] = [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
+                'slug' => $profile->slug ? (string) $profile->slug : null,
+                'profile_type' => (string) ($profile->profile_type ?? ''),
                 'avatar_url' => $profile->avatar_url ?? null,
+                'cover_url' => $profile->cover_url ?? null,
                 'highlight' => false,
                 'genres' => array_values(array_filter($genres, static fn ($item): bool => $item !== '')),
-                'taxonomy_terms' => $profile->taxonomy_terms ?? [],
+                'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
+                    is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+                ),
             ];
-        })->all();
+        }
+
+        return $resolved;
     }
 
     public function listProfileIdsForAccount(string $accountId): array

@@ -218,6 +218,29 @@ class AccountProfileQueryService extends AbstractQueryService
         ];
     }
 
+    public function publicFindBySlugOrFail(string $slug): AccountProfile
+    {
+        $normalizedSlug = trim($slug);
+        $allowedTypes = $this->favoritableProfileTypes();
+
+        if ($normalizedSlug === '' || $allowedTypes === []) {
+            throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$slug]);
+        }
+
+        $query = AccountProfile::query()
+            ->where('slug', $normalizedSlug)
+            ->where('is_active', true)
+            ->whereIn('profile_type', $allowedTypes);
+        $this->applyPublicVisibilityConstraint($query);
+
+        $profile = $query->first();
+        if (! $profile) {
+            throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$normalizedSlug]);
+        }
+
+        return $profile;
+    }
+
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
     {
         $query = $onlyTrashed ? AccountProfile::onlyTrashed() : AccountProfile::query();
