@@ -1024,6 +1024,98 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Published Event', $items[0]['title']);
     }
 
+    public function test_event_index_filters_by_temporal_buckets(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $now = Carbon::now();
+
+        $this->createEvent([
+            'title' => 'Past Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->subDays(2),
+            'date_time_end' => $now->copy()->subDay(),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Live Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->subHour(),
+            'date_time_end' => $now->copy()->addHour(),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Future Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->addHours(3),
+            'date_time_end' => $now->copy()->addHours(5),
+        ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?temporal=now,future");
+
+        $response->assertStatus(200);
+        $this->assertEqualsCanonicalizing(
+            ['Live Event', 'Future Event'],
+            collect($response->json('data'))->pluck('title')->all()
+        );
+
+        $pastResponse = $this->getJson("{$this->tenantAdminEventsBase}?temporal=past");
+
+        $pastResponse->assertStatus(200);
+        $this->assertSame(
+            ['Past Event'],
+            collect($pastResponse->json('data'))->pluck('title')->values()->all()
+        );
+    }
+
+    public function test_event_index_temporal_filter_is_independent_from_archived_dimension(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $now = Carbon::now();
+
+        $archivedPast = $this->createEvent([
+            'title' => 'Archived Past Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->subDays(2),
+            'date_time_end' => $now->copy()->subDay(),
+        ]);
+        $archivedPast->delete();
+
+        $archivedFuture = $this->createEvent([
+            'title' => 'Archived Future Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->addDay(),
+            'date_time_end' => $now->copy()->addDays(2),
+        ]);
+        $archivedFuture->delete();
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?archived=1&temporal=future");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            ['Archived Future Event'],
+            collect($response->json('data'))->pluck('title')->values()->all()
+        );
+    }
+
     public function test_tenant_admin_archived_events_list_normalizes_legacy_place_ref_id(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();

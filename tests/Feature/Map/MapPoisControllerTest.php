@@ -126,7 +126,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'category' => 'beach',
             'source_type' => 'poi',
             'location' => $location,
-            'priority' => 20,
+            'priority' => 120,
             'is_active' => true,
             'exact_key' => $exactKey,
         ]);
@@ -142,7 +142,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('poi.ref_slug', 'event-lookup');
         $response->assertJsonPath('poi.ref_path', '/event/event-lookup');
         $response->assertJsonPath('poi.stack_key', $exactKey);
-        $response->assertJsonPath('poi.stack_count', 2);
+        $response->assertJsonPath('poi.stack_count', 1);
         $response->assertJsonPath('poi.visual.mode', 'icon');
         $response->assertJsonPath('poi.visual.icon', 'event');
         $response->assertJsonPath('poi.visual.color', '#3355AA');
@@ -159,7 +159,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('message', 'POI not found.');
     }
 
-    public function test_map_pois_returns_stacks(): void
+    public function test_map_pois_event_dominance_hides_same_point_static_poi_from_stack(): void
     {
         $location = $this->point(-40.0, -20.0);
         $exactKey = $this->exactKey($location);
@@ -195,7 +195,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'category' => 'beach',
             'source_type' => 'poi',
             'location' => $location,
-            'priority' => 20,
+            'priority' => 200,
             'is_active' => true,
             'exact_key' => $exactKey,
         ]);
@@ -205,8 +205,9 @@ class MapPoisControllerTest extends TestCaseTenant
 
         $stacks = $response->json('stacks');
         $this->assertNotEmpty($stacks);
-        $this->assertEquals(2, $stacks[0]['stack_count']);
+        $this->assertEquals(1, $stacks[0]['stack_count']);
         $this->assertArrayHasKey('stack_key', $stacks[0]);
+        $this->assertSame('event', $stacks[0]['top_poi']['ref_type'] ?? null);
         $this->assertArrayHasKey('updated_at', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('title', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('subtitle', $stacks[0]['top_poi']);
@@ -218,6 +219,129 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertSame('#FFFFFF', $stacks[0]['top_poi']['visual']['icon_color'] ?? null);
         $this->assertArrayNotHasKey('tags', $stacks[0]['top_poi']);
         $this->assertArrayNotHasKey('taxonomy_terms', $stacks[0]['top_poi']);
+    }
+
+    public function test_map_pois_stack_key_keeps_multiple_events_and_hides_same_point_static_poi(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+        $exactKey = $this->exactKey($location);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-alpha',
+            'ref_slug' => 'event-alpha',
+            'ref_path' => '/event/event-alpha',
+            'name' => 'Event Alpha',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 40,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-beta',
+            'ref_slug' => 'event-beta',
+            'ref_path' => '/event/event-beta',
+            'name' => 'Event Beta',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 80,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-ignored',
+            'ref_slug' => 'static-ignored',
+            'ref_path' => '/static/static-ignored',
+            'name' => 'Static Ignored',
+            'category' => 'beach',
+            'source_type' => 'poi',
+            'location' => $location,
+            'priority' => 500,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?stack_key={$exactKey}"
+        );
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('stacks.0.stack_count', 2);
+        $items = collect($response->json('stacks.0.items') ?? []);
+        $this->assertCount(2, $items);
+        $this->assertSame(
+            ['event', 'event'],
+            $items->map(static fn (array $item): string => (string) ($item['ref_type'] ?? ''))->all()
+        );
+        $this->assertSame(
+            ['event-beta', 'event-alpha'],
+            $items->map(static fn (array $item): string => (string) ($item['ref_id'] ?? ''))->all()
+        );
+    }
+
+    public function test_map_pois_hides_local_only_stack_within_event_dominance_radius(): void
+    {
+        $eventLocation = $this->point(-40.00000, -20.00000);
+        $nearLocalLocation = $this->point(-40.00000, -20.00030);
+        $farLocalLocation = $this->point(-40.00000, -20.00150);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-anchor',
+            'ref_slug' => 'event-anchor',
+            'ref_path' => '/event/event-anchor',
+            'name' => 'Event Anchor',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $eventLocation,
+            'priority' => 60,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($eventLocation),
+        ]);
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => 'local-near',
+            'ref_slug' => 'local-near',
+            'ref_path' => '/account/local-near',
+            'name' => 'Local Near',
+            'category' => 'restaurant',
+            'source_type' => 'restaurant',
+            'location' => $nearLocalLocation,
+            'priority' => 999,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($nearLocalLocation),
+        ]);
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => 'local-far',
+            'ref_slug' => 'local-far',
+            'ref_path' => '/account/local-far',
+            'name' => 'Local Far',
+            'category' => 'restaurant',
+            'source_type' => 'restaurant',
+            'location' => $farLocalLocation,
+            'priority' => 999,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($farLocalLocation),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01"
+        );
+        $response->assertStatus(200);
+
+        $refIds = collect($response->json('stacks') ?? [])
+            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_id', ''))
+            ->all();
+
+        $this->assertContains('event-anchor', $refIds);
+        $this->assertContains('local-far', $refIds);
+        $this->assertNotContains('local-near', $refIds);
     }
 
     public function test_map_pois_exposes_visual_from_bson_type_projection_chain(): void

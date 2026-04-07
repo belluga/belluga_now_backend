@@ -90,6 +90,11 @@ class EventQueryService
             $query->whereRaw($this->buildSearchMatchExpression($searchQuery));
         }
 
+        $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
+        if ($temporalBuckets !== []) {
+            $this->applyManagementTemporalFilter($query, $temporalBuckets);
+        }
+
         if (! $isAdminContext) {
             $this->applyPublicPublicationFilter($query);
         }
@@ -98,6 +103,78 @@ class EventQueryService
             ->orderBy('date_time_start', 'desc')
             ->paginate($perPage)
             ->through(fn (Event $event): array => $this->formatManagementEvent($event));
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @return array<int, string>
+     */
+    private function extractManagementTemporalBuckets(array $queryParams): array
+    {
+        $raw = Arr::get($queryParams, 'temporal', []);
+        if (is_string($raw)) {
+            $raw = explode(',', $raw);
+        }
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $allowed = ['past', 'now', 'future'];
+        $normalized = [];
+        foreach ($raw as $value) {
+            if (! is_string($value)) {
+                continue;
+            }
+            $trimmed = trim($value);
+            if ($trimmed === '' || ! in_array($trimmed, $allowed, true)) {
+                continue;
+            }
+            $normalized[] = $trimmed;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    /**
+     * @param  array<int, string>  $temporalBuckets
+     */
+    private function applyManagementTemporalFilter(mixed $query, array $temporalBuckets): void
+    {
+        $now = new UTCDateTime(Carbon::now());
+        $effectiveEndExpr = [
+            '$ifNull' => [
+                '$date_time_end',
+                [
+                    '$add' => ['$date_time_start', self::DEFAULT_EVENT_DURATION_MS],
+                ],
+            ],
+        ];
+
+        $clauses = [];
+        if (in_array('past', $temporalBuckets, true)) {
+            $clauses[] = ['$lte' => [$effectiveEndExpr, $now]];
+        }
+        if (in_array('now', $temporalBuckets, true)) {
+            $clauses[] = [
+                '$and' => [
+                    ['$lte' => ['$date_time_start', $now]],
+                    ['$gt' => [$effectiveEndExpr, $now]],
+                ],
+            ];
+        }
+        if (in_array('future', $temporalBuckets, true)) {
+            $clauses[] = ['$gt' => ['$date_time_start', $now]];
+        }
+
+        if ($clauses === []) {
+            return;
+        }
+
+        $query->whereRaw([
+            '$expr' => count($clauses) === 1
+                ? $clauses[0]
+                : ['$or' => $clauses],
+        ]);
     }
 
     public function findByIdOrSlug(string $eventId): ?Event
