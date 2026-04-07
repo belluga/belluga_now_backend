@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Events;
 
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
+use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Tests\TestCase;
 
 class SchedulerBootstrapTest extends TestCase
@@ -14,6 +15,10 @@ class SchedulerBootstrapTest extends TestCase
         $this->assertTrue(
             class_exists(PublishScheduledEventsJob::class),
             'PublishScheduledEventsJob must be autoload-resolvable during console bootstrap.'
+        );
+        $this->assertTrue(
+            class_exists(RefreshExpiredEventMapPoisJob::class),
+            'RefreshExpiredEventMapPoisJob must be autoload-resolvable during console bootstrap.'
         );
 
         $this->artisan('schedule:list')->assertExitCode(0);
@@ -31,6 +36,8 @@ class SchedulerBootstrapTest extends TestCase
         $this->assertStringContainsString('PublishScheduledEventsJob::dispatch();', $routesConsole);
         $this->assertStringContainsString("->name('events:async:monitor')", $routesConsole);
         $this->assertStringContainsString("->name('events:occurrences:reconcile')", $routesConsole);
+        $this->assertStringContainsString("->name('events:map_pois:refresh_expired')", $routesConsole);
+        $this->assertStringContainsString('RefreshExpiredEventMapPoisJob::dispatch();', $routesConsole);
         $this->assertStringNotContainsString('ProcessTicketOutboxJob::dispatch();', $routesConsole);
         $this->assertStringNotContainsString('ExpireIssuedTicketUnitsJob::dispatch();', $routesConsole);
         $this->assertStringNotContainsString('Schedule::job(PublishScheduledEventsJob::class)->hourly();', $routesConsole);

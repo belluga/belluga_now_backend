@@ -23,6 +23,7 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
@@ -31,6 +32,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\UTCDateTime;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -80,8 +83,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
         $tenant->makeCurrent();
 
-        Event::query()->delete();
-        EventOccurrence::query()->delete();
+        Event::withTrashed()->forceDelete();
+        EventOccurrence::withTrashed()->forceDelete();
         EventType::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
@@ -721,6 +724,49 @@ class EventCrudControllerTest extends TestCaseTenant
         $secondRun->assertJsonPath('data.unchanged', 2);
     }
 
+    public function test_event_create_via_api_remains_valid_in_legacy_event_parties_summary(): void
+    {
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 0);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 1);
+    }
+
+    public function test_event_update_via_api_remains_valid_in_legacy_event_parties_summary(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'Updated Yet Canonical',
+        ]);
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.title', 'Updated Yet Canonical');
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 0);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 1);
+    }
+
+
     public function test_event_create_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
@@ -978,6 +1024,516 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Published Event', $items[0]['title']);
     }
 
+    public function test_tenant_admin_archived_events_list_normalizes_legacy_place_ref_id(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $draftArchived = $this->createEvent([
+            'title' => 'Draft Archived Event',
+            'publication' => ['status' => 'draft'],
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $this->venue->_id,
+            ],
+        ]);
+        $draftArchived->delete();
+
+        $publishedArchived = $this->createEvent([
+            'title' => 'Published Archived Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => Carbon::now()->subMinute(),
+            ],
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $this->venue->_id,
+            ],
+        ]);
+        $publishedArchived->delete();
+
+        $this->createEvent([
+            'title' => 'Active Draft Event',
+            'publication' => ['status' => 'draft'],
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $this->venue->_id,
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+
+        $draftItem = $items->firstWhere('title', 'Draft Archived Event');
+        $publishedItem = $items->firstWhere('title', 'Published Archived Event');
+
+        $this->assertIsArray($draftItem);
+        $this->assertIsArray($publishedItem);
+        $this->assertNull($items->firstWhere('title', 'Active Draft Event'));
+
+        $this->assertSame((string) $this->venue->_id, data_get($draftItem, 'place_ref.id'));
+        $this->assertSame('account_profile', data_get($draftItem, 'place_ref.type'));
+        $this->assertSame((string) $this->venue->_id, data_get($publishedItem, 'place_ref.id'));
+        $this->assertSame('account_profile', data_get($publishedItem, 'place_ref.type'));
+    }
+
+    public function test_tenant_admin_archived_events_list_normalizes_legacy_wrapped_date_leaves(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $archived = $this->createEvent([
+            'title' => 'Archived Legacy Dates Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => Carbon::parse('2026-03-01T09:59:00+00:00'),
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => 'https://cdn.example.com/thumb.png',
+                ],
+            ],
+            'occurrences' => [[
+                'date_time_start' => '2026-03-01T11:00:00+00:00',
+                'date_time_end' => '2026-03-01T12:00:00+00:00',
+            ]],
+        ]);
+        $archived->delete();
+
+        Event::withTrashed()
+            ->where('_id', $archived->getKey())
+            ->update([
+                'publication' => [
+                    'status' => 'published',
+                    'publish_at' => [
+                        '$date' => '2026-03-01T09:59:00.000Z',
+                    ],
+                ],
+                'date_time_start' => [
+                    '$date' => '2026-03-01T11:00:00.000Z',
+                ],
+                'date_time_end' => [
+                    '$date' => '2026-03-01T12:00:00.000Z',
+                ],
+            ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+
+        $response->assertStatus(200);
+        $item = collect($response->json('data'))->firstWhere('title', 'Archived Legacy Dates Event');
+        $this->assertIsArray($item);
+        $this->assertSame('2026-03-01T09:59:00+00:00', data_get($item, 'publication.publish_at'));
+        $this->assertSame('2026-03-01T11:00:00+00:00', data_get($item, 'date_time_start'));
+        $this->assertSame('2026-03-01T12:00:00+00:00', data_get($item, 'date_time_end'));
+        $this->assertSame('https://cdn.example.com/thumb.png', data_get($item, 'thumb.data.url'));
+    }
+
+    public function test_tenant_admin_archived_events_list_accepts_real_tenant_guarappari_fixture_shape(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $rows = $this->loadEventFixtureRows('tenant_guarappari.events.json');
+        $archivedRows = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => ($row['deleted_at'] ?? null) !== null
+        ));
+
+        foreach ($archivedRows as $row) {
+            $this->insertLegacyArchivedEventFixture($row);
+        }
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(count($archivedRows), $items);
+
+        $dbg = $items->firstWhere('slug', 'dbg');
+        $this->assertIsArray($dbg);
+        $this->assertSame('1', data_get($dbg, 'type.id'));
+        $this->assertNull(data_get($dbg, 'thumb'));
+        $this->assertNull(data_get($dbg, 'thumb.data.url'));
+        $this->assertIsString(data_get($dbg, 'date_time_start'));
+        $this->assertIsString(data_get($dbg, 'date_time_end'));
+        $this->assertIsString(data_get($dbg, 'publication.publish_at'));
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_supports_legacy_artist_underscore_id_shape(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacy = $this->createEvent([
+            'artists' => [
+                [
+                    '_id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'rock'],
+                    ],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => 'DJ Test',
+                        'profile_type' => 'artist',
+                    ],
+                ],
+            ],
+        ]);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $legacy = $legacy->fresh();
+        $this->assertCount(1, $legacy->event_parties);
+        $this->assertSame('artist', data_get($legacy->event_parties, '0.party_type'));
+        $this->assertSame((string) $this->artist->_id, data_get($legacy->event_parties, '0.party_ref_id'));
+        $this->assertSame((string) $this->artist->slug, data_get($legacy->event_parties, '0.metadata.slug'));
+        $this->assertNull($legacy->artists);
+    }
+
+    public function test_tenant_admin_legacy_event_parties_summary_scans_archived_invalid_events(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacyArchived = $this->createEvent([
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'rock'],
+                    ],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
+        ]);
+        $legacyArchived->delete();
+        $this->createEvent();
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.scanned', 2);
+        $response->assertJsonPath('data.invalid', 1);
+        $response->assertJsonPath('data.repaired', 0);
+        $response->assertJsonPath('data.failed', 0);
+        $response->assertJsonPath('data.unchanged', 1);
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_repairs_archived_events_and_keeps_occurrences_archived(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacyArchived = $this->createEvent([
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'rock'],
+                    ],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => 'DJ Test',
+                        'profile_type' => 'artist',
+                    ],
+                ],
+            ],
+        ]);
+        $legacyArchivedId = (string) $legacyArchived->_id;
+        $legacyArchived->delete();
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $legacyArchived = Event::withTrashed()->findOrFail($legacyArchivedId);
+        $this->assertNotNull($legacyArchived->deleted_at);
+        $this->assertCount(1, $legacyArchived->event_parties);
+        $this->assertSame('artist', data_get($legacyArchived->event_parties, '0.party_type'));
+        $this->assertSame((string) $this->artist->slug, data_get($legacyArchived->event_parties, '0.metadata.slug'));
+        $this->assertNull($legacyArchived->artists);
+
+        $occurrence = EventOccurrence::withTrashed()
+            ->where('event_id', $legacyArchivedId)
+            ->where('occurrence_index', 0)
+            ->first();
+        $this->assertNotNull($occurrence);
+        $this->assertNotNull($occurrence->deleted_at);
+        $this->assertCount(1, $occurrence->event_parties ?? []);
+        $this->assertSame('artist', data_get($occurrence->event_parties, '0.party_type'));
+        $this->assertSame((string) $this->artist->slug, data_get($occurrence->event_parties, '0.metadata.slug'));
+        $this->assertSame('DJ Test', data_get($occurrence->artists, '0.display_name'));
+        $this->assertSame((string) $this->artist->slug, data_get($occurrence->artists, '0.slug'));
+    }
+
+    public function test_tenant_admin_legacy_event_parties_summary_counts_archived_admin_payload_invalid_events(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacyArchived = $this->createEvent([
+            'title' => 'Archived Broken Thumb Event',
+            'type' => [
+                'name' => (string) $this->eventType->name,
+                'slug' => (string) $this->eventType->slug,
+                '_id' => (string) $this->eventType->_id,
+            ],
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $this->venue->_id,
+                'metadata' => [
+                    'display_name' => $this->venue->display_name,
+                ],
+            ],
+            'venue' => [
+                '_id' => (string) $this->venue->_id,
+                'display_name' => $this->venue->display_name,
+                'taxonomy_terms' => [],
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => ['broken' => true],
+                ],
+            ],
+        ]);
+        $legacyArchived->delete();
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.scanned', 1);
+        $response->assertJsonPath('data.invalid', 1);
+        $response->assertJsonPath('data.repaired', 0);
+        $response->assertJsonPath('data.failed', 0);
+        $response->assertJsonPath('data.unchanged', 0);
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_sanitizes_archived_admin_payload_invalid_events(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacyArchived = $this->createEvent([
+            'title' => 'Archived Broken Thumb Event',
+            'type' => [
+                'name' => (string) $this->eventType->name,
+                'slug' => (string) $this->eventType->slug,
+                '_id' => (string) $this->eventType->_id,
+            ],
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $this->venue->_id,
+                'metadata' => [
+                    'display_name' => $this->venue->display_name,
+                ],
+            ],
+            'venue' => [
+                '_id' => (string) $this->venue->_id,
+                'display_name' => $this->venue->display_name,
+                'taxonomy_terms' => [],
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => ['broken' => true],
+                ],
+            ],
+        ]);
+        $legacyArchivedId = (string) $legacyArchived->_id;
+        $legacyArchived->delete();
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $repaired = Event::withTrashed()->findOrFail($legacyArchivedId);
+        $this->assertSame((string) $this->eventType->_id, data_get($repaired->type, 'id'));
+        $this->assertSame((string) $this->venue->_id, data_get($repaired->place_ref, 'id'));
+        $this->assertSame((string) $this->venue->_id, data_get($repaired->venue, 'id'));
+        $this->assertNull($repaired->thumb);
+
+        $archivedList = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+        $archivedList->assertStatus(200);
+        $item = collect($archivedList->json('data'))->firstWhere('title', 'Archived Broken Thumb Event');
+        $this->assertIsArray($item);
+        $this->assertSame((string) $this->eventType->_id, data_get($item, 'type.id'));
+        $this->assertSame((string) $this->venue->_id, data_get($item, 'place_ref.id'));
+        $this->assertNull(data_get($item, 'thumb'));
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_sanitizes_archived_admin_payload_invalid_thumb_url_string(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacyArchived = $this->createEvent([
+            'title' => 'Archived Invalid Thumb Url Event',
+            'type' => [
+                'name' => (string) $this->eventType->name,
+                'slug' => (string) $this->eventType->slug,
+                '_id' => (string) $this->eventType->_id,
+            ],
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $this->venue->_id,
+                'metadata' => [
+                    'display_name' => $this->venue->display_name,
+                ],
+            ],
+            'venue' => [
+                '_id' => (string) $this->venue->_id,
+                'display_name' => $this->venue->display_name,
+                'taxonomy_terms' => [],
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => 'u',
+                ],
+            ],
+        ]);
+        $legacyArchivedId = (string) $legacyArchived->_id;
+        $legacyArchived->delete();
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 1);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $repaired = Event::withTrashed()->findOrFail($legacyArchivedId);
+        $this->assertNull($repaired->thumb);
+
+        $archivedList = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+        $archivedList->assertStatus(200);
+        $item = collect($archivedList->json('data'))->firstWhere('title', 'Archived Invalid Thumb Url Event');
+        $this->assertIsArray($item);
+        $this->assertNull(data_get($item, 'thumb'));
+    }
+
+    public function test_tenant_admin_events_list_matrix_distinguishes_active_and_archived_status_filters(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $activeDraft = $this->createEvent([
+            'title' => 'Active Draft Event',
+            'publication' => ['status' => 'draft'],
+        ]);
+
+        $archivedDraft = $this->createEvent([
+            'title' => 'Archived Draft Event',
+            'publication' => ['status' => 'draft'],
+        ]);
+        $archivedDraft->delete();
+
+        $archivedPublished = $this->createEvent([
+            'title' => 'Archived Published Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => Carbon::now()->subMinute(),
+            ],
+        ]);
+        $archivedPublished->delete();
+
+        $activeDraftResponse = $this->getJson("{$this->tenantAdminEventsBase}?status=draft");
+        $activeDraftResponse->assertStatus(200);
+        $this->assertSame(
+            ['Active Draft Event'],
+            collect($activeDraftResponse->json('data'))->pluck('title')->values()->all()
+        );
+
+        $archivedDraftResponse = $this->getJson("{$this->tenantAdminEventsBase}?status=draft&archived=1");
+        $archivedDraftResponse->assertStatus(200);
+        $this->assertSame(
+            ['Archived Draft Event'],
+            collect($archivedDraftResponse->json('data'))->pluck('title')->values()->all()
+        );
+
+        $allArchivedResponse = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+        $allArchivedResponse->assertStatus(200);
+        $this->assertEqualsCanonicalizing(
+            ['Archived Draft Event', 'Archived Published Event'],
+            collect($allArchivedResponse->json('data'))->pluck('title')->all()
+        );
+
+        $archivedPublishedResponse = $this->getJson("{$this->tenantAdminEventsBase}?status=published&archived=1");
+        $archivedPublishedResponse->assertStatus(200);
+        $this->assertSame(
+            ['Archived Published Event'],
+            collect($archivedPublishedResponse->json('data'))->pluck('title')->values()->all()
+        );
+    }
+
+
     public function test_event_update_changes_fields(): void
     {
         $venueSlug = 'main-venue-updated-'.Str::lower(Str::random(6));
@@ -1005,6 +1561,83 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.artists.0.slug', $artistSlug);
         $response->assertJsonCount(1, 'data.event_parties');
         $response->assertJsonPath('data.event_parties.0.metadata.slug', $artistSlug);
+    }
+
+    public function test_event_update_non_publication_fields_preserves_active_parent_occurrence_and_public_visibility(): void
+    {
+        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Visible Before Update',
+        ]));
+        $createResponse->assertStatus(201);
+        $eventId = (string) $createResponse->json('data.event_id');
+
+        $beforeAgenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
+        $beforeAgenda->assertStatus(200);
+        $beforeIds = collect($beforeAgenda->json('items'))->pluck('event_id')->map(fn ($id) => (string) $id)->all();
+        $this->assertContains($eventId, $beforeIds);
+
+        $updateResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'Visible After Update',
+        ]);
+        $updateResponse->assertStatus(200);
+        $updateResponse->assertJsonPath('data.title', 'Visible After Update');
+
+        $event = Event::withTrashed()->findOrFail($eventId);
+        $occurrence = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->first();
+        $this->assertNotNull($occurrence);
+        $this->assertNull($event->deleted_at);
+        $this->assertNull($occurrence->deleted_at);
+        $this->assertSame('published', data_get($event->publication, 'status'));
+        $this->assertSame('published', data_get($occurrence->publication, 'status'));
+        $this->assertTrue((bool) ($occurrence->is_event_published ?? false));
+
+        $afterAgenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
+        $afterAgenda->assertStatus(200);
+        $afterIds = collect($afterAgenda->json('items'))->pluck('event_id')->map(fn ($id) => (string) $id)->all();
+        $this->assertContains($eventId, $afterIds);
+    }
+
+    public function test_event_update_published_to_draft_reconciles_occurrence_and_admin_public_visibility(): void
+    {
+        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Transition To Draft',
+        ]));
+        $createResponse->assertStatus(201);
+        $eventId = (string) $createResponse->json('data.event_id');
+
+        $updateResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'publication' => ['status' => 'draft'],
+        ]);
+        $updateResponse->assertStatus(200);
+        $updateResponse->assertJsonPath('data.publication.status', 'draft');
+
+        $event = Event::withTrashed()->findOrFail($eventId);
+        $occurrence = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->first();
+        $this->assertNotNull($occurrence);
+        $this->assertNull($event->deleted_at);
+        $this->assertNull($occurrence->deleted_at);
+        $this->assertSame('draft', data_get($event->publication, 'status'));
+        $this->assertSame('draft', data_get($occurrence->publication, 'status'));
+        $this->assertFalse((bool) ($occurrence->is_event_published ?? true));
+
+        $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
+        $agenda->assertStatus(200);
+        $agendaIds = collect($agenda->json('items'))->pluck('event_id')->map(fn ($id) => (string) $id)->all();
+        $this->assertNotContains($eventId, $agendaIds);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $draftAdmin = $this->getJson("{$this->tenantAdminEventsBase}?status=draft");
+        $draftAdmin->assertStatus(200);
+        $draftIds = collect($draftAdmin->json('data'))->pluck('event_id')->map(fn ($id) => (string) $id)->all();
+        $this->assertContains($eventId, $draftIds);
     }
 
     public function test_event_update_preserves_omitted_artist_parties_on_partial_patch(): void
@@ -1292,6 +1925,112 @@ class EventCrudControllerTest extends TestCaseTenant
         }
     }
 
+    public function test_refresh_expired_event_map_pois_job_deactivates_stale_event_projections_without_event_mutation(): void
+    {
+        $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
+        Carbon::setTestNow($baseline);
+
+        try {
+            $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+                'occurrences' => [[
+                    'date_time_start' => $baseline->copy()->addHour()->toISOString(),
+                    'date_time_end' => $baseline->copy()->addHours(2)->toISOString(),
+                ]],
+            ]));
+            $createResponse->assertStatus(201);
+
+            $eventId = (string) $createResponse->json('data.event_id');
+            $event = Event::query()->find($eventId);
+            $this->assertNotNull($event);
+            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+
+            $activePoi = MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', $eventId)
+                ->first();
+
+            $this->assertNotNull($activePoi);
+            $this->assertTrue((bool) ($activePoi->is_active ?? false));
+
+            Carbon::setTestNow($baseline->copy()->addHours(5));
+
+            app()->call([new RefreshExpiredEventMapPoisJob, 'handle']);
+
+            $stalePoi = MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', $eventId)
+                ->first();
+
+            $this->assertNotNull($stalePoi);
+            $this->assertFalse((bool) ($stalePoi->is_active ?? true));
+            $this->assertSame([], $stalePoi->occurrence_facets ?? []);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_refresh_expired_event_map_pois_job_deletes_orphan_event_projections_even_when_inactive(): void
+    {
+        $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
+        Carbon::setTestNow($baseline);
+
+        try {
+            $activeResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+                'occurrences' => [[
+                    'date_time_start' => $baseline->copy()->addHour()->toISOString(),
+                    'date_time_end' => $baseline->copy()->addHours(2)->toISOString(),
+                ]],
+            ]));
+            $activeResponse->assertStatus(201);
+
+            $activeEventId = (string) $activeResponse->json('data.event_id');
+            $activeEvent = Event::query()->find($activeEventId);
+            $this->assertNotNull($activeEvent);
+            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($activeEvent);
+
+            $inactiveResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+                'occurrences' => [[
+                    'date_time_start' => $baseline->copy()->addHour()->toISOString(),
+                    'date_time_end' => $baseline->copy()->addHours(2)->toISOString(),
+                ]],
+            ]));
+            $inactiveResponse->assertStatus(201);
+
+            $inactiveEventId = (string) $inactiveResponse->json('data.event_id');
+            $inactiveEvent = Event::query()->find($inactiveEventId);
+            $this->assertNotNull($inactiveEvent);
+            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($inactiveEvent);
+
+            $inactivePoi = MapPoi::query()
+                ->where('ref_type', 'event')
+                ->where('ref_id', $inactiveEventId)
+                ->first();
+            $this->assertNotNull($inactivePoi);
+            $inactivePoi->forceFill(['is_active' => false]);
+            $inactivePoi->save();
+
+            Event::withTrashed()->where('_id', $activeEventId)->forceDelete();
+            Event::withTrashed()->where('_id', $inactiveEventId)->forceDelete();
+
+            app()->call([new RefreshExpiredEventMapPoisJob, 'handle']);
+
+            $this->assertFalse(
+                MapPoi::query()
+                    ->where('ref_type', 'event')
+                    ->where('ref_id', $activeEventId)
+                    ->exists()
+            );
+            $this->assertFalse(
+                MapPoi::query()
+                    ->where('ref_type', 'event')
+                    ->where('ref_id', $inactiveEventId)
+                    ->exists()
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_event_map_poi_capability_disable_and_reenable_is_non_destructive(): void
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
@@ -1538,6 +2277,29 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($deleted?->deleted_at);
         $occurrence = EventOccurrence::withTrashed()->where('event_id', (string) $event->_id)->first();
         $this->assertNotNull($occurrence?->deleted_at);
+    }
+
+    public function test_event_delete_moves_event_from_active_to_archived_admin_lists(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Delete Me Into Archived',
+        ]);
+
+        $response = $this->deleteJson("{$this->accountEventsBase}/{$event->_id}");
+        $response->assertStatus(200);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $activeList = $this->getJson($this->tenantAdminEventsBase);
+        $activeList->assertStatus(200);
+        $activeTitles = collect($activeList->json('data'))->pluck('title')->all();
+        $this->assertNotContains('Delete Me Into Archived', $activeTitles);
+
+        $archivedList = $this->getJson("{$this->tenantAdminEventsBase}?archived=1");
+        $archivedList->assertStatus(200);
+        $archivedTitles = collect($archivedList->json('data'))->pluck('title')->all();
+        $this->assertContains('Delete Me Into Archived', $archivedTitles);
     }
 
     public function test_event_delete_dispatches_map_projection_delete_job_via_lifecycle_event(): void
@@ -2065,6 +2827,67 @@ class EventCrudControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
 
         return $event->fresh();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadEventFixtureRows(string $fileName): array
+    {
+        $path = base_path("tests/Fixtures/Events/{$fileName}");
+        $decoded = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+        $rows = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
+
+        return array_values(array_filter(
+            is_array($rows) ? $rows : [],
+            static fn (mixed $row): bool => is_array($row)
+        ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function insertLegacyArchivedEventFixture(array $row): void
+    {
+        $document = $row;
+        $document['_id'] = $this->fixtureObjectId($row['_id'] ?? null);
+        $document['created_at'] = $this->fixtureUtcDateTime($row['created_at'] ?? null);
+        $document['updated_at'] = $this->fixtureUtcDateTime($row['updated_at'] ?? null);
+        $document['deleted_at'] = $this->fixtureUtcDateTime($row['deleted_at'] ?? null);
+
+        Event::raw(static fn ($collection) => $collection->insertOne($document));
+    }
+
+    private function fixtureObjectId(mixed $raw): ObjectId|string
+    {
+        $value = '';
+        if (is_array($raw)) {
+            $value = trim((string) ($raw['$oid'] ?? $raw['oid'] ?? ''));
+        } elseif (is_string($raw)) {
+            $value = trim($raw);
+        }
+
+        if ($value !== '' && preg_match('/^[a-f0-9]{24}$/i', $value) === 1) {
+            return new ObjectId($value);
+        }
+
+        return $value;
+    }
+
+    private function fixtureUtcDateTime(mixed $raw): ?UTCDateTime
+    {
+        $value = null;
+        if (is_array($raw)) {
+            $value = $raw['$date'] ?? $raw['date'] ?? null;
+        } else {
+            $value = $raw;
+        }
+
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        return new UTCDateTime((int) Carbon::parse($value)->valueOf());
     }
 
     /**

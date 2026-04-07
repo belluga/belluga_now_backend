@@ -15,6 +15,7 @@ class LegacyEventPartiesCanonicalizationService
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
         private readonly EventOccurrenceReconciliationService $occurrenceReconciliationService,
+        private readonly EventQueryService $eventQueryService,
     ) {}
 
     /**
@@ -46,7 +47,7 @@ class LegacyEventPartiesCanonicalizationService
             'failed' => 0,
         ];
 
-        Event::query()
+        Event::withTrashed()
             ->orderBy('_id')
             ->cursor()
             ->each(function (Event $event) use (&$summary, $applyRepair): void {
@@ -92,6 +93,7 @@ class LegacyEventPartiesCanonicalizationService
      *   invalid: bool,
      *   has_legacy_artists: bool,
      *   has_venue_party: bool,
+     *   has_invalid_management_payload: bool,
      *   target_artist_ids: array<int, string>,
      *   canonical_artist_ids: array<int, string>,
      *   artist_parties_by_id: array<string, array<string, mixed>>
@@ -108,13 +110,14 @@ class LegacyEventPartiesCanonicalizationService
         $canonicalArtistIds = [];
         $artistPartiesById = [];
         $missingCanonicalMetadata = false;
+        $managementPayloadIssues = $this->analyzeManagementPayloadContract($event);
 
         foreach ($legacyArtists as $artist) {
             if (! is_array($artist)) {
                 continue;
             }
 
-            $artistId = trim((string) ($artist['id'] ?? ''));
+            $artistId = $this->resolveLegacyArtistId($artist);
             if ($artistId === '') {
                 continue;
             }
@@ -160,12 +163,14 @@ class LegacyEventPartiesCanonicalizationService
         $invalid = $hasLegacyArtists
             || $hasVenueParty
             || $missingCanonicalMetadata
-            || $targetArtistIds !== $canonicalArtistIds;
+            || $targetArtistIds !== $canonicalArtistIds
+            || $managementPayloadIssues !== [];
 
         return [
             'invalid' => $invalid,
             'has_legacy_artists' => $hasLegacyArtists,
             'has_venue_party' => $hasVenueParty,
+            'has_invalid_management_payload' => $managementPayloadIssues !== [],
             'target_artist_ids' => $targetArtistIds,
             'canonical_artist_ids' => $canonicalArtistIds,
             'artist_parties_by_id' => $artistPartiesById,
@@ -177,6 +182,7 @@ class LegacyEventPartiesCanonicalizationService
      *   invalid: bool,
      *   has_legacy_artists: bool,
      *   has_venue_party: bool,
+     *   has_invalid_management_payload: bool,
      *   target_artist_ids: array<int, string>,
      *   canonical_artist_ids: array<int, string>,
      *   artist_parties_by_id: array<string, array<string, mixed>>
@@ -244,11 +250,49 @@ class LegacyEventPartiesCanonicalizationService
             ];
         }
 
-        $event->event_parties = array_values($rebuiltParties);
-        $event->artists = null;
-        $event->save();
+        $didMutate = false;
+        $normalizedEventParties = array_values($rebuiltParties);
+        if (($event->event_parties ?? []) !== $normalizedEventParties) {
+            $event->event_parties = $normalizedEventParties;
+            $didMutate = true;
+        }
+        if ($event->artists !== null) {
+            $event->artists = null;
+            $didMutate = true;
+        }
 
-        $this->occurrenceReconciliationService->reconcileEvent($event->fresh());
+        if ($this->canonicalizeManagementPayloadFields($event)) {
+            $didMutate = true;
+        }
+
+        if ($didMutate) {
+            $event->save();
+        }
+
+        $refreshed = Event::withTrashed()->find($event->getKey());
+        if (! $refreshed instanceof Event) {
+            throw new \RuntimeException('Legacy event party repair could not reload the updated event.');
+        }
+
+        $this->occurrenceReconciliationService->reconcileEvent($refreshed);
+    }
+
+
+    /**
+     * @param  array<string, mixed>  $artist
+     */
+    private function resolveLegacyArtistId(array $artist): string
+    {
+        $rawId = $artist['id'] ?? $artist['_id'] ?? null;
+
+        if (is_array($rawId)) {
+            $legacyOid = trim((string) ($rawId['$oid'] ?? $rawId['oid'] ?? ''));
+            if ($legacyOid !== '') {
+                return $legacyOid;
+            }
+        }
+
+        return trim((string) $rawId);
     }
 
     /**
@@ -273,5 +317,182 @@ class LegacyEventPartiesCanonicalizationService
         }
 
         return [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function analyzeManagementPayloadContract(Event $event): array
+    {
+        $payload = $this->eventQueryService->formatManagementEvent($event);
+        $issues = [];
+
+        if (! $this->isNonEmptyScalar($payload['event_id'] ?? null)) {
+            $issues[] = 'event_id';
+        }
+        if (! $this->isNonEmptyScalar($payload['slug'] ?? null)) {
+            $issues[] = 'slug';
+        }
+        if (! $this->isNonEmptyScalar($payload['title'] ?? null)) {
+            $issues[] = 'title';
+        }
+
+        $type = is_array($payload['type'] ?? null) ? $payload['type'] : null;
+        if ($type === null) {
+            $issues[] = 'type';
+        } else {
+            if (! $this->isNonEmptyScalar($type['name'] ?? null)) {
+                $issues[] = 'type.name';
+            }
+            if (! $this->isNonEmptyScalar($type['slug'] ?? null)) {
+                $issues[] = 'type.slug';
+            }
+        }
+
+        $publication = is_array($payload['publication'] ?? null) ? $payload['publication'] : null;
+        if ($publication === null || ! $this->isNonEmptyScalar($publication['status'] ?? null)) {
+            $issues[] = 'publication.status';
+        }
+
+        $placeRef = $payload['place_ref'] ?? null;
+        if ($placeRef !== null) {
+            if (! is_array($placeRef)) {
+                $issues[] = 'place_ref';
+            } else {
+                if (! $this->isNonEmptyScalar($placeRef['type'] ?? null)) {
+                    $issues[] = 'place_ref.type';
+                }
+                if (! $this->isNonEmptyScalar($placeRef['id'] ?? null)) {
+                    $issues[] = 'place_ref.id';
+                }
+            }
+        }
+
+        $rawThumb = $this->normalizeArray($event->thumb ?? null);
+        if ($rawThumb !== []) {
+            $rawThumbData = $this->normalizeArray($rawThumb['data'] ?? null);
+            $rawThumbUrl = $rawThumbData['url'] ?? $rawThumb['url'] ?? $rawThumb['uri'] ?? null;
+            if ($rawThumbUrl !== null && ! $this->isNullableAbsoluteUrl($rawThumbUrl)) {
+                $issues[] = 'thumb.data.url';
+            }
+        }
+
+        $thumb = is_array($payload['thumb'] ?? null) ? $payload['thumb'] : null;
+        if ($thumb !== null) {
+            $thumbData = is_array($thumb['data'] ?? null) ? $thumb['data'] : null;
+            $thumbUrl = $thumbData['url'] ?? $thumb['url'] ?? null;
+            if ($thumbUrl !== null && ! $this->isNullableAbsoluteUrl($thumbUrl)) {
+                $issues[] = 'thumb.data.url';
+            }
+        }
+
+        foreach (($payload['occurrences'] ?? []) as $index => $occurrence) {
+            if (! is_array($occurrence) || ! $this->isNonEmptyScalar($occurrence['date_time_start'] ?? null)) {
+                $issues[] = "occurrences.{$index}.date_time_start";
+            }
+        }
+
+        return array_values(array_unique($issues));
+    }
+
+    private function canonicalizeManagementPayloadFields(Event $event): bool
+    {
+        $didMutate = false;
+
+        $type = $this->normalizeArray($event->type ?? null);
+        if ($type !== []) {
+            $typeId = $this->resolveLegacyDocumentId($type);
+            if ($typeId !== '' && trim((string) ($type['id'] ?? '')) === '') {
+                $type['id'] = $typeId;
+                $event->type = $type;
+                $didMutate = true;
+            }
+        }
+
+        $placeRef = $this->normalizeArray($event->place_ref ?? null);
+        if ($placeRef !== []) {
+            $placeRefId = $this->resolveLegacyDocumentId($placeRef);
+            if ($placeRefId !== '' && trim((string) ($placeRef['id'] ?? '')) === '') {
+                $placeRef['id'] = $placeRefId;
+                $event->place_ref = $placeRef;
+                $didMutate = true;
+            }
+        }
+
+        $venue = $this->normalizeArray($event->venue ?? null);
+        if ($venue !== []) {
+            $venueId = $this->resolveLegacyDocumentId($venue);
+            if ($venueId !== '' && trim((string) ($venue['id'] ?? '')) === '') {
+                $venue['id'] = $venueId;
+                $event->venue = $venue;
+                $didMutate = true;
+            }
+        }
+
+        $thumb = $this->normalizeArray($event->thumb ?? null);
+        if ($thumb !== []) {
+            $thumbData = $this->normalizeArray($thumb['data'] ?? null);
+            $thumbUrl = $thumbData['url'] ?? $thumb['url'] ?? null;
+            if ($thumbUrl !== null && ! $this->isNullableAbsoluteUrl($thumbUrl)) {
+                $event->thumb = null;
+                $didMutate = true;
+            }
+        }
+
+        return $didMutate;
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     */
+    private function resolveLegacyDocumentId(array $document): string
+    {
+        $rawId = $document['id'] ?? $document['_id'] ?? null;
+
+        if (is_array($rawId)) {
+            return trim((string) ($rawId['$oid'] ?? $rawId['oid'] ?? ''));
+        }
+
+        return trim((string) $rawId);
+    }
+
+    private function isNonEmptyScalar(mixed $value): bool
+    {
+        if (! $this->isNullableScalar($value)) {
+            return false;
+        }
+
+        return trim((string) $value) !== '';
+    }
+
+    private function isNullableScalar(mixed $value): bool
+    {
+        return $value === null || is_scalar($value);
+    }
+
+    private function isNullableAbsoluteUrl(mixed $value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+
+        if (! is_scalar($value)) {
+            return false;
+        }
+
+        $normalized = trim((string) $value);
+        if ($normalized === '') {
+            return true;
+        }
+
+        $parsed = parse_url($normalized);
+        if (! is_array($parsed)) {
+            return false;
+        }
+
+        $scheme = strtolower(trim((string) ($parsed['scheme'] ?? '')));
+        $host = trim((string) ($parsed['host'] ?? ''));
+
+        return ($scheme === 'http' || $scheme === 'https') && $host !== '';
     }
 }
