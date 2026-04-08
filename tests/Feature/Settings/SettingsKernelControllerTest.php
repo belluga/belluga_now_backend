@@ -74,8 +74,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
                     'max_km' => 50,
                 ],
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'default_origin' => [
                     'lat' => -20.671339,

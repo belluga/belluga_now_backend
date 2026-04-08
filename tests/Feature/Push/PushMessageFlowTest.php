@@ -2057,6 +2057,46 @@ class PushMessageFlowTest extends TestCase
         $this->assertContains('invite_received', $payload['available_events'] ?? []);
     }
 
+    public function test_tenant_admin_telemetry_endpoints_use_tenant_admin_routes(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        $this->seedTelemetrySettings([]);
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['telemetry-settings:update']);
+
+        $this->withServerVariables([
+            'HTTP_HOST' => sprintf('%s.%s', $tenant->subdomain, $this->host),
+        ]);
+
+        $adminPath = 'admin/api/v1/settings/telemetry';
+
+        $store = $this->postJson($adminPath, [
+            'type' => 'mixpanel',
+            'token' => 'admin-mixpanel-token',
+            'events' => ['invite_received'],
+        ]);
+        $store->assertOk();
+        $store->assertJsonPath('data.0.type', 'mixpanel');
+        $store->assertJsonPath('data.0.token', 'admin-mixpanel-token');
+
+        $index = $this->getJson($adminPath);
+        $index->assertOk();
+        $index->assertJsonPath('data.0.type', 'mixpanel');
+        $index->assertJsonPath('data.0.token', 'admin-mixpanel-token');
+
+        $delete = $this->deleteJson($adminPath.'/mixpanel');
+        $delete->assertOk();
+        $delete->assertJsonCount(0, 'data');
+
+        $tenant->makeCurrent();
+        $settings = TenantSettings::current();
+        $this->assertNotNull($settings);
+        $telemetry = $settings?->getAttribute('telemetry') ?? [];
+        $this->assertSame([], $telemetry['trackers'] ?? []);
+    }
+
     public function test_tenant_push_enable_requires_config(): void
     {
         $tenant = Tenant::query()->firstOrFail();

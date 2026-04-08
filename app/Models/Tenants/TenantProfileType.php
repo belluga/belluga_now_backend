@@ -16,8 +16,11 @@ class TenantProfileType extends Model
     protected $fillable = [
         'type',
         'label',
+        'labels',
         'allowed_taxonomies',
+        'visual',
         'poi_visual',
+        'type_asset_url',
         'capabilities',
     ];
 

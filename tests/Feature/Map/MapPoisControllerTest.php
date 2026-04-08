@@ -64,8 +64,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::create([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
             ],
             'events' => [
@@ -100,7 +100,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-lookup',
             'ref_slug' => 'event-lookup',
-            'ref_path' => '/event/event-lookup',
+            'ref_path' => '/agenda/evento/event-lookup',
             'name' => 'Event Lookup',
             'subtitle' => 'Lookup subtitle',
             'category' => 'event',
@@ -126,7 +126,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'category' => 'beach',
             'source_type' => 'poi',
             'location' => $location,
-            'priority' => 20,
+            'priority' => 120,
             'is_active' => true,
             'exact_key' => $exactKey,
         ]);
@@ -140,9 +140,9 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('poi.ref_type', 'event');
         $response->assertJsonPath('poi.ref_id', 'event-lookup');
         $response->assertJsonPath('poi.ref_slug', 'event-lookup');
-        $response->assertJsonPath('poi.ref_path', '/event/event-lookup');
+        $response->assertJsonPath('poi.ref_path', '/agenda/evento/event-lookup');
         $response->assertJsonPath('poi.stack_key', $exactKey);
-        $response->assertJsonPath('poi.stack_count', 2);
+        $response->assertJsonPath('poi.stack_count', 1);
         $response->assertJsonPath('poi.visual.mode', 'icon');
         $response->assertJsonPath('poi.visual.icon', 'event');
         $response->assertJsonPath('poi.visual.color', '#3355AA');
@@ -159,7 +159,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('message', 'POI not found.');
     }
 
-    public function test_map_pois_returns_stacks(): void
+    public function test_map_pois_event_dominance_hides_same_point_static_poi_from_stack(): void
     {
         $location = $this->point(-40.0, -20.0);
         $exactKey = $this->exactKey($location);
@@ -168,7 +168,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-1',
             'ref_slug' => 'event-one',
-            'ref_path' => '/event/event-one',
+            'ref_path' => '/agenda/evento/event-one',
             'name' => 'Event One',
             'subtitle' => 'Live tonight',
             'category' => 'event',
@@ -195,7 +195,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'category' => 'beach',
             'source_type' => 'poi',
             'location' => $location,
-            'priority' => 20,
+            'priority' => 200,
             'is_active' => true,
             'exact_key' => $exactKey,
         ]);
@@ -205,8 +205,9 @@ class MapPoisControllerTest extends TestCaseTenant
 
         $stacks = $response->json('stacks');
         $this->assertNotEmpty($stacks);
-        $this->assertEquals(2, $stacks[0]['stack_count']);
+        $this->assertEquals(1, $stacks[0]['stack_count']);
         $this->assertArrayHasKey('stack_key', $stacks[0]);
+        $this->assertSame('event', $stacks[0]['top_poi']['ref_type'] ?? null);
         $this->assertArrayHasKey('updated_at', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('title', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('subtitle', $stacks[0]['top_poi']);
@@ -218,6 +219,129 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertSame('#FFFFFF', $stacks[0]['top_poi']['visual']['icon_color'] ?? null);
         $this->assertArrayNotHasKey('tags', $stacks[0]['top_poi']);
         $this->assertArrayNotHasKey('taxonomy_terms', $stacks[0]['top_poi']);
+    }
+
+    public function test_map_pois_stack_key_keeps_multiple_events_and_hides_same_point_static_poi(): void
+    {
+        $location = $this->point(-40.0, -20.0);
+        $exactKey = $this->exactKey($location);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-alpha',
+            'ref_slug' => 'event-alpha',
+            'ref_path' => '/agenda/evento/event-alpha',
+            'name' => 'Event Alpha',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 40,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-beta',
+            'ref_slug' => 'event-beta',
+            'ref_path' => '/agenda/evento/event-beta',
+            'name' => 'Event Beta',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $location,
+            'priority' => 80,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'static-ignored',
+            'ref_slug' => 'static-ignored',
+            'ref_path' => '/static/static-ignored',
+            'name' => 'Static Ignored',
+            'category' => 'beach',
+            'source_type' => 'poi',
+            'location' => $location,
+            'priority' => 500,
+            'is_active' => true,
+            'exact_key' => $exactKey,
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?stack_key={$exactKey}"
+        );
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('stacks.0.stack_count', 2);
+        $items = collect($response->json('stacks.0.items') ?? []);
+        $this->assertCount(2, $items);
+        $this->assertSame(
+            ['event', 'event'],
+            $items->map(static fn (array $item): string => (string) ($item['ref_type'] ?? ''))->all()
+        );
+        $this->assertSame(
+            ['event-beta', 'event-alpha'],
+            $items->map(static fn (array $item): string => (string) ($item['ref_id'] ?? ''))->all()
+        );
+    }
+
+    public function test_map_pois_hides_local_only_stack_within_event_dominance_radius(): void
+    {
+        $eventLocation = $this->point(-40.00000, -20.00000);
+        $nearLocalLocation = $this->point(-40.00000, -20.00030);
+        $farLocalLocation = $this->point(-40.00000, -20.00150);
+
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-anchor',
+            'ref_slug' => 'event-anchor',
+            'ref_path' => '/agenda/evento/event-anchor',
+            'name' => 'Event Anchor',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $eventLocation,
+            'priority' => 60,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($eventLocation),
+        ]);
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => 'local-near',
+            'ref_slug' => 'local-near',
+            'ref_path' => '/parceiro/local-near',
+            'name' => 'Local Near',
+            'category' => 'restaurant',
+            'source_type' => 'restaurant',
+            'location' => $nearLocalLocation,
+            'priority' => 999,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($nearLocalLocation),
+        ]);
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => 'local-far',
+            'ref_slug' => 'local-far',
+            'ref_path' => '/parceiro/local-far',
+            'name' => 'Local Far',
+            'category' => 'restaurant',
+            'source_type' => 'restaurant',
+            'location' => $farLocalLocation,
+            'priority' => 999,
+            'is_active' => true,
+            'exact_key' => $this->exactKey($farLocalLocation),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01"
+        );
+        $response->assertStatus(200);
+
+        $refIds = collect($response->json('stacks') ?? [])
+            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_id', ''))
+            ->all();
+
+        $this->assertContains('event-anchor', $refIds);
+        $this->assertContains('local-far', $refIds);
+        $this->assertNotContains('local-near', $refIds);
     }
 
     public function test_map_pois_exposes_visual_from_bson_type_projection_chain(): void
@@ -275,7 +399,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-2',
             'ref_slug' => 'event-two',
-            'ref_path' => '/event/event-two',
+            'ref_path' => '/agenda/evento/event-two',
             'name' => 'Event Two',
             'subtitle' => 'Venue Name',
             'category' => 'event',
@@ -298,7 +422,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $items = $response->json('items');
         $this->assertNotEmpty($items);
         $this->assertEquals('event-two', $items[0]['ref_slug']);
-        $this->assertEquals('/event/event-two', $items[0]['ref_path']);
+        $this->assertEquals('/agenda/evento/event-two', $items[0]['ref_path']);
         $this->assertNotEmpty($items[0]['tags']);
         $this->assertNotEmpty($items[0]['taxonomy_terms']);
         $this->assertArrayHasKey('time_start', $items[0]);
@@ -359,7 +483,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'projection_key' => 'event:event-now',
             'source_checkpoint' => 12345,
             'ref_slug' => 'event-now',
-            'ref_path' => '/event/event-now',
+            'ref_path' => '/agenda/evento/event-now',
             'name' => 'Event Now',
             'category' => 'event',
             'location' => $location,
@@ -386,6 +510,98 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($item, 'occurrence_facets.0.is_happening_now', false));
     }
 
+    public function test_map_pois_today_window_includes_today_and_excludes_tomorrow_events(): void
+    {
+        $timezone = 'America/Sao_Paulo';
+        $this->user->forceFill(['timezone' => $timezone])->save();
+
+        $now = Carbon::now($timezone);
+
+        $locationNow = $this->point(-40.0000, -20.0000);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-now',
+            'ref_slug' => 'event-now',
+            'ref_path' => '/agenda/evento/event-now',
+            'name' => 'Event Now',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationNow,
+            'priority' => 80,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->subHour()->utc(),
+            'active_window_end_at' => $now->copy()->addHour()->utc(),
+            'exact_key' => $this->exactKey($locationNow),
+        ]);
+
+        $locationLaterToday = $this->point(-40.0100, -20.0100);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-later-today',
+            'ref_slug' => 'event-later-today',
+            'ref_path' => '/agenda/evento/event-later-today',
+            'name' => 'Event Later Today',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationLaterToday,
+            'priority' => 70,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->addHours(2)->utc(),
+            'active_window_end_at' => $now->copy()->addHours(4)->utc(),
+            'exact_key' => $this->exactKey($locationLaterToday),
+        ]);
+
+        $locationTomorrow = $this->point(-40.0200, -20.0200);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-tomorrow',
+            'ref_slug' => 'event-tomorrow',
+            'ref_path' => '/agenda/evento/event-tomorrow',
+            'name' => 'Event Tomorrow',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationTomorrow,
+            'priority' => 60,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->addDay()->setTime(10, 0)->utc(),
+            'active_window_end_at' => $now->copy()->addDay()->setTime(12, 0)->utc(),
+            'exact_key' => $this->exactKey($locationTomorrow),
+        ]);
+
+        $locationYesterday = $this->point(-40.0300, -20.0300);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-yesterday-ended',
+            'ref_slug' => 'event-yesterday-ended',
+            'ref_path' => '/agenda/evento/event-yesterday-ended',
+            'name' => 'Event Yesterday Ended',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationYesterday,
+            'priority' => 50,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->subDay()->setTime(18, 0)->utc(),
+            'active_window_end_at' => $now->copy()->subDay()->setTime(22, 0)->utc(),
+            'exact_key' => $this->exactKey($locationYesterday),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0&source=event"
+        );
+        $response->assertStatus(200);
+
+        $slugs = collect($response->json('stacks') ?? [])
+            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_slug', ''))
+            ->filter()
+            ->values()
+            ->all();
+
+        $this->assertContains('event-now', $slugs);
+        $this->assertContains('event-later-today', $slugs);
+        $this->assertNotContains('event-tomorrow', $slugs);
+        $this->assertNotContains('event-yesterday-ended', $slugs);
+    }
+
     public function test_map_filters_returns_catalogs(): void
     {
         $location = $this->point(-40.0, -20.0);
@@ -393,8 +609,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     [
@@ -433,7 +649,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-3',
             'ref_slug' => 'event-three',
-            'ref_path' => '/event/event-three',
+            'ref_path' => '/agenda/evento/event-three',
             'name' => 'Event Three',
             'category' => 'event',
             'source_type' => 'show',
@@ -497,8 +713,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     new BSONDocument([
@@ -523,7 +739,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-visual',
             'ref_slug' => 'event-visual',
-            'ref_path' => '/event/event-visual',
+            'ref_path' => '/agenda/evento/event-visual',
             'name' => 'Event Visual',
             'category' => 'event',
             'source_type' => 'show',
@@ -552,8 +768,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     new BSONDocument([
@@ -607,8 +823,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     [
@@ -634,7 +850,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-only',
             'ref_slug' => 'event-only',
-            'ref_path' => '/event/event-only',
+            'ref_path' => '/agenda/evento/event-only',
             'name' => 'Event only',
             'category' => 'event',
             'source_type' => 'show',
@@ -661,7 +877,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-show',
             'ref_slug' => 'event-show',
-            'ref_path' => '/event/event-show',
+            'ref_path' => '/agenda/evento/event-show',
             'name' => 'Event Show',
             'category' => 'event',
             'source_type' => 'show',
@@ -674,7 +890,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-festival',
             'ref_slug' => 'event-festival',
-            'ref_path' => '/event/event-festival',
+            'ref_path' => '/agenda/evento/event-festival',
             'name' => 'Event Festival',
             'category' => 'event',
             'source_type' => 'festival',
@@ -720,7 +936,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'projection_key' => 'event:event-polygon',
             'source_checkpoint' => 223344,
             'ref_slug' => 'event-polygon',
-            'ref_path' => '/event/event-polygon',
+            'ref_path' => '/agenda/evento/event-polygon',
             'name' => 'Polygon Event',
             'category' => 'event',
             'location' => $this->point(-45.0, -25.0),

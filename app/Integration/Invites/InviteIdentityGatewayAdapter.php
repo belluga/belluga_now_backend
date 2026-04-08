@@ -87,41 +87,62 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
         $emails = $contactsCollection
             ->where('type', 'email')
             ->pluck('hash')
+            ->unique()
             ->all();
         $phones = $contactsCollection
             ->where('type', 'phone')
             ->pluck('hash')
+            ->unique()
             ->all();
 
         $matches = [];
 
-        AccountUser::query()->get()->each(function (AccountUser $user) use (&$matches, $emails, $phones): void {
-            foreach ((array) ($user->emails ?? []) as $email) {
-                $hash = $this->hashEmail((string) $email);
-                if ($hash !== null && in_array($hash, $emails, true)) {
-                    $matches[$hash] = [
-                        'contact_hash' => $hash,
-                        'type' => 'email',
-                        'user_id' => (string) $user->getAttribute('_id'),
-                        'display_name' => $this->userDisplayName($user),
-                        'avatar_url' => null,
-                    ];
-                }
-            }
+        $emailSet = array_fill_keys($emails, true);
+        $phoneSet = array_fill_keys($phones, true);
 
-            foreach ((array) ($user->phones ?? []) as $phone) {
-                $hash = $this->hashPhone((string) $phone);
-                if ($hash !== null && in_array($hash, $phones, true)) {
-                    $matches[$hash] = [
-                        'contact_hash' => $hash,
-                        'type' => 'phone',
-                        'user_id' => (string) $user->getAttribute('_id'),
-                        'display_name' => $this->userDisplayName($user),
-                        'avatar_url' => null,
-                    ];
-                }
-            }
-        });
+        if ($emails !== []) {
+            AccountUser::query()
+                ->whereIn('email_hashes', $emails)
+                ->get()
+                ->each(function (AccountUser $user) use (&$matches, $emailSet): void {
+                    foreach ((array) ($user->email_hashes ?? []) as $hash) {
+                        $hash = trim((string) $hash);
+                        if ($hash === '' || ! isset($emailSet[$hash])) {
+                            continue;
+                        }
+
+                        $matches[$hash] = [
+                            'contact_hash' => $hash,
+                            'type' => 'email',
+                            'user_id' => (string) $user->getAttribute('_id'),
+                            'display_name' => $this->userDisplayName($user),
+                            'avatar_url' => null,
+                        ];
+                    }
+                });
+        }
+
+        if ($phones !== []) {
+            AccountUser::query()
+                ->whereIn('phone_hashes', $phones)
+                ->get()
+                ->each(function (AccountUser $user) use (&$matches, $phoneSet): void {
+                    foreach ((array) ($user->phone_hashes ?? []) as $hash) {
+                        $hash = trim((string) $hash);
+                        if ($hash === '' || ! isset($phoneSet[$hash])) {
+                            continue;
+                        }
+
+                        $matches[$hash] = [
+                            'contact_hash' => $hash,
+                            'type' => 'phone',
+                            'user_id' => (string) $user->getAttribute('_id'),
+                            'display_name' => $this->userDisplayName($user),
+                            'avatar_url' => null,
+                        ];
+                    }
+                });
+        }
 
         return $matches;
     }
@@ -153,20 +174,6 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
     {
         return $this->nullableString($profile->display_name)
             ?? $this->nullableString($profile->slug);
-    }
-
-    private function hashEmail(string $email): ?string
-    {
-        $normalized = mb_strtolower(trim($email));
-
-        return $normalized === '' ? null : hash('sha256', $normalized);
-    }
-
-    private function hashPhone(string $phone): ?string
-    {
-        $normalized = preg_replace('/\D+/', '', $phone) ?? '';
-
-        return $normalized === '' ? null : hash('sha256', $normalized);
     }
 
     private function nullableString(mixed $value): ?string

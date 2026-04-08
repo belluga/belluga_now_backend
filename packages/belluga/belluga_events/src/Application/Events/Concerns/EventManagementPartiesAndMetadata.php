@@ -12,7 +12,6 @@ trait EventManagementPartiesAndMetadata
 {
     /**
      * @param  array<string, mixed>  $payload
-     * @param  array<string, mixed>  $venue
      * @param  array<int, array<string, mixed>>  $artists
      * @return array<int, array{
      *   party_type: string,
@@ -23,65 +22,17 @@ trait EventManagementPartiesAndMetadata
      */
     private function resolveEventParties(
         array $payload,
-        ?Event $existing,
-        array $venue,
-        array $artists,
-        bool $venueSourceTouched,
-        bool $artistsSourceTouched
+        ?Event $existing
     ): array {
         $existingRows = $this->normalizeEventPartiesMap($existing?->event_parties ?? []);
-        $resolved = $existingRows;
+        $resolved = [];
 
-        if ($venueSourceTouched) {
-            foreach ($resolved as $key => $row) {
-                if (($row['party_type'] ?? null) === 'venue') {
-                    unset($resolved[$key]);
-                }
-            }
-        }
-
-        if ($artistsSourceTouched) {
-            foreach ($resolved as $key => $row) {
-                if (($row['party_type'] ?? null) === 'artist') {
-                    unset($resolved[$key]);
-                }
-            }
-        }
-
-        $venueRefId = isset($venue['id']) ? trim((string) $venue['id']) : '';
-        if ($venueRefId !== '') {
-            $key = $this->eventPartyKey('venue', $venueRefId);
-            $resolved[$key] = $this->buildEventPartyRow(
-                'venue',
-                $venueRefId,
-                $venue,
-                $existingRows[$key] ?? null,
-                null,
-                null,
-                'event_parties'
-            );
-        }
-
-        foreach ($artists as $artist) {
-            if (! is_array($artist)) {
+        foreach ($existingRows as $key => $row) {
+            if (($row['party_type'] ?? null) === 'venue') {
                 continue;
             }
 
-            $artistRefId = isset($artist['id']) ? trim((string) $artist['id']) : '';
-            if ($artistRefId === '') {
-                continue;
-            }
-
-            $key = $this->eventPartyKey('artist', $artistRefId);
-            $resolved[$key] = $this->buildEventPartyRow(
-                'artist',
-                $artistRefId,
-                $artist,
-                $existingRows[$key] ?? null,
-                null,
-                null,
-                'event_parties'
-            );
+            $resolved[$key] = $row;
         }
 
         if (array_key_exists('event_parties', $payload)) {
@@ -108,6 +59,12 @@ trait EventManagementPartiesAndMetadata
                     ]);
                 }
 
+                if ($partyType === 'venue') {
+                    throw ValidationException::withMessages([
+                        "event_parties.{$index}.party_type" => ['venue must not be persisted in event_parties.'],
+                    ]);
+                }
+
                 $metadataOverride = isset($incomingRow['metadata']) && is_array($incomingRow['metadata'])
                     ? $incomingRow['metadata']
                     : null;
@@ -117,10 +74,21 @@ trait EventManagementPartiesAndMetadata
                 }
 
                 $key = $this->eventPartyKey($partyType, $partyRefId);
+                $resolvedSource = [];
+                if ($metadataOverride === null) {
+                    $resolvedSource = isset($resolved[$key]['metadata']) && is_array($resolved[$key]['metadata'])
+                        ? $resolved[$key]['metadata']
+                        : [];
+                    if ($resolvedSource === []) {
+                        throw ValidationException::withMessages([
+                            "event_parties.{$index}.metadata" => ['metadata is required for new event parties.'],
+                        ]);
+                    }
+                }
                 $resolved[$key] = $this->buildEventPartyRow(
                     $partyType,
                     $partyRefId,
-                    $metadataOverride ?? [],
+                    $metadataOverride ?? $resolvedSource,
                     $resolved[$key] ?? ($existingRows[$key] ?? null),
                     $overrideCanEdit,
                     $metadataOverride,
@@ -176,7 +144,21 @@ trait EventManagementPartiesAndMetadata
 
         $canEdit = $overrideCanEdit ?? $existingCanEdit ?? $mapper->defaultCanEdit();
 
-        $metadata = $metadataOverride ?? $mapper->mapMetadata($source);
+        $metadataSource = $metadataOverride ?? $source;
+        $displayName = trim((string) ($metadataSource['display_name'] ?? ''));
+        $slug = trim((string) ($metadataSource['slug'] ?? ''));
+        $profileType = trim((string) ($metadataSource['profile_type'] ?? ''));
+        if ($displayName === '' || $slug === '' || $profileType === '') {
+            throw ValidationException::withMessages([
+                str_replace('.party_type', '.metadata', $validationField) => ['display_name, slug and profile_type are required for event party metadata.'],
+            ]);
+        }
+        if ($profileType !== $partyType) {
+            throw ValidationException::withMessages([
+                $validationField => ["party_type [{$partyType}] must match metadata.profile_type [{$profileType}]."],
+            ]);
+        }
+        $metadata = $mapper->mapMetadata(is_array($metadataSource) ? $metadataSource : []);
         $metadata = is_array($metadata) ? $metadata : [];
 
         $row = [
@@ -293,27 +275,6 @@ trait EventManagementPartiesAndMetadata
         }
 
         return [];
-    }
-
-    /**
-     * @param  array<int, string>|null  $artistIds
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveArtistPayloads(?array $artistIds, ?Event $existing): array
-    {
-        $ids = $artistIds;
-        if ($ids === null) {
-            $current = $existing?->artists ?? [];
-            $current = is_array($current) ? $current : [];
-
-            return $current;
-        }
-
-        if ($ids === []) {
-            return [];
-        }
-
-        return $this->eventProfileResolver->resolveArtistsByProfileIds(array_values($ids));
     }
 
     private function normalizePublishAt(mixed $value): ?Carbon

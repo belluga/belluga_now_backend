@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountProfileMediaController;
+use App\Http\Api\v1\Controllers\AccountProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\EnvironmentController;
@@ -9,6 +10,7 @@ use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Controllers\StaticAssetMediaController;
+use App\Http\Api\v1\Controllers\StaticProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Events\Http\Api\v1\Controllers\EventMediaController;
@@ -26,12 +28,20 @@ Route::middleware('tenant')->group(function () {
         [AccountProfileMediaController::class, 'cover']
     );
     Route::get(
+        '/media/account-profile-types/{account_profile_type_id}/type_asset',
+        [AccountProfileTypeMediaController::class, 'typeAsset']
+    );
+    Route::get(
         '/media/static-assets/{static_asset_id}/avatar',
         [StaticAssetMediaController::class, 'avatar']
     );
     Route::get(
         '/media/static-assets/{static_asset_id}/cover',
         [StaticAssetMediaController::class, 'cover']
+    );
+    Route::get(
+        '/media/static-profile-types/{static_profile_type_id}/type_asset',
+        [StaticProfileTypeMediaController::class, 'typeAsset']
     );
     Route::get(
         '/media/events/{event_id}/cover',

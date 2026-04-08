@@ -15,6 +15,8 @@ class MapPoiQueryService
 {
     use MapPoiQueryFormatting;
 
+    private const EVENT_DOMINANCE_RADIUS_METERS = 50.0;
+
     public function __construct(
         private readonly MapPoiSettingsContract $settings,
         private readonly MapPoiTenantContextContract $tenantContext,
@@ -42,54 +44,7 @@ class MapPoiQueryService
             ];
         }
 
-        $pipeline = $this->buildBasePipeline($queryParams, $timezone, true);
-        $pipeline[] = [
-            '$addFields' => [
-                'ref_type_order' => [
-                    '$switch' => [
-                        'branches' => [
-                            ['case' => ['$eq' => ['$ref_type', 'event']], 'then' => 1],
-                            ['case' => ['$eq' => ['$ref_type', 'account_profile']], 'then' => 2],
-                            ['case' => ['$eq' => ['$ref_type', 'static']], 'then' => 3],
-                        ],
-                        'default' => 9,
-                    ],
-                ],
-            ],
-        ];
-        $pipeline[] = [
-            '$sort' => [
-                'priority' => -1,
-                'ref_type_order' => 1,
-                'ref_id' => 1,
-            ],
-        ];
-        $pipeline[] = [
-            '$group' => [
-                '_id' => '$exact_key',
-                'stack_count' => ['$sum' => 1],
-                'top_poi' => ['$first' => '$$ROOT'],
-                'center' => ['$first' => '$location'],
-            ],
-        ];
-        $pipeline[] = [
-            '$project' => [
-                '_id' => 0,
-                'stack_key' => '$_id',
-                'stack_count' => 1,
-                'top_poi' => 1,
-                'center' => 1,
-            ],
-        ];
-
-        $rawStacks = MapPoi::raw(function ($collection) use ($pipeline) {
-            return $collection->aggregate($pipeline);
-        });
-
-        $stacks = [];
-        foreach ($rawStacks as $stack) {
-            $stacks[] = $this->formatStackFromAggregate($stack);
-        }
+        $stacks = $this->resolveDominantStacks($queryParams, $timezone);
 
         return [
             'tenant_id' => $this->resolveTenantId(),
@@ -730,9 +685,172 @@ class MapPoiQueryService
      */
     private function resolveStackItems(array $queryParams, ?string $timezone, string $stackKey): array
     {
+        $items = $this->loadStackDocuments($queryParams, $timezone, $stackKey);
+        $dominantItems = $this->applyIntraStackEventDominance($items);
+
+        $formatted = [];
+        foreach ($dominantItems as $item) {
+            $formatted[] = $this->formatTopPoi($item);
+        }
+
+        return $formatted;
+    }
+
+    private function resolveStackCount(string $stackKey, ?string $timezone): int
+    {
+        $items = $this->loadStackDocuments([], $timezone, $stackKey);
+        $resolvedCount = count($this->applyIntraStackEventDominance($items));
+
+        return $resolvedCount > 0 ? $resolvedCount : 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveDominantStacks(array $queryParams, ?string $timezone): array
+    {
+        $pipeline = $this->buildBasePipeline($queryParams, $timezone, true);
+        $pipeline[] = $this->buildRefTypeOrderStage();
+        $pipeline[] = $this->buildStackSortStage();
+        $pipeline[] = [
+            '$group' => [
+                '_id' => '$exact_key',
+                'stack_count' => ['$sum' => 1],
+                'event_count' => [
+                    '$sum' => [
+                        '$cond' => [
+                            ['$eq' => ['$ref_type', 'event']],
+                            1,
+                            0,
+                        ],
+                    ],
+                ],
+                'top_poi' => ['$first' => '$$ROOT'],
+                'center' => ['$first' => '$location'],
+            ],
+        ];
+        $pipeline[] = [
+            '$project' => [
+                '_id' => 0,
+                'stack_key' => '$_id',
+                'stack_count' => 1,
+                'event_count' => 1,
+                'top_poi' => 1,
+                'center' => 1,
+            ],
+        ];
+
+        $rows = MapPoi::raw(function ($collection) use ($pipeline) {
+            return $collection->aggregate($pipeline);
+        });
+
+        $candidates = [];
+        $eventCenters = [];
+
+        foreach ($rows as $row) {
+            $data = $this->normalizeDocument($row);
+            $stackCount = (int) ($data['stack_count'] ?? 0);
+            if ($stackCount <= 0) {
+                continue;
+            }
+
+            $eventCount = (int) ($data['event_count'] ?? 0);
+            $displayCount = $eventCount > 0 ? $eventCount : $stackCount;
+            if ($displayCount <= 0) {
+                continue;
+            }
+
+            $center = $data['center'] ?? null;
+            $topPoi = $this->normalizeDocument($data['top_poi'] ?? null);
+
+            $candidate = [
+                'stack_key' => trim((string) ($data['stack_key'] ?? '')),
+                'center' => $center,
+                'stack_count' => $displayCount,
+                'top_poi' => $topPoi,
+                'has_event' => $eventCount > 0,
+            ];
+
+            if ($candidate['has_event']) {
+                $coordinates = $this->extractCoordinates($center) ?? $this->extractCoordinates($topPoi['location'] ?? null);
+                if ($coordinates !== null) {
+                    $eventCenters[] = $coordinates;
+                }
+            }
+
+            $candidates[] = $candidate;
+        }
+
+        $stacks = [];
+        foreach ($candidates as $candidate) {
+            if (
+                ! $candidate['has_event']
+                && $this->isWithinEventDominanceRadius(
+                    $candidate['center'] ?? ($candidate['top_poi']['location'] ?? null),
+                    $eventCenters
+                )
+            ) {
+                continue;
+            }
+
+            $stacks[] = [
+                'stack_key' => $candidate['stack_key'],
+                'center' => $this->formatLocation($candidate['center']),
+                'stack_count' => $candidate['stack_count'],
+                'top_poi' => $this->formatTopPoi($candidate['top_poi']),
+            ];
+        }
+
+        return array_values($stacks);
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadStackDocuments(array $queryParams, ?string $timezone, string $stackKey): array
+    {
         $queryParams['stack_key'] = $stackKey;
         $pipeline = $this->buildBasePipeline($queryParams, $timezone, true);
-        $pipeline[] = [
+        $pipeline[] = $this->buildRefTypeOrderStage();
+        $pipeline[] = $this->buildStackSortStage();
+
+        $items = MapPoi::raw(function ($collection) use ($pipeline) {
+            return $collection->aggregate($pipeline);
+        });
+
+        $normalized = [];
+        foreach ($items as $item) {
+            $normalized[] = $this->normalizeDocument($item);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyIntraStackEventDominance(array $items): array
+    {
+        $events = [];
+
+        foreach ($items as $item) {
+            if (($item['ref_type'] ?? null) === 'event') {
+                $events[] = $item;
+            }
+        }
+
+        return $events !== [] ? array_values($events) : array_values($items);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildRefTypeOrderStage(): array
+    {
+        return [
             '$addFields' => [
                 'ref_type_order' => [
                     '$switch' => [
@@ -746,48 +864,92 @@ class MapPoiQueryService
                 ],
             ],
         ];
-        $pipeline[] = [
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildStackSortStage(): array
+    {
+        return [
             '$sort' => [
-                'priority' => -1,
                 'ref_type_order' => 1,
+                'priority' => -1,
                 'ref_id' => 1,
             ],
         ];
-
-        $items = MapPoi::raw(function ($collection) use ($pipeline) {
-            return $collection->aggregate($pipeline);
-        });
-
-        $formatted = [];
-        foreach ($items as $item) {
-            $formatted[] = $this->formatTopPoi($item);
-        }
-
-        return $formatted;
     }
 
-    private function resolveStackCount(string $stackKey, ?string $timezone): int
+    /**
+     * @param  array<int, array{lat: float, lng: float}>  $eventCenters
+     */
+    private function isWithinEventDominanceRadius(mixed $location, array $eventCenters): bool
     {
-        $match = $this->buildMatchConditions([], $timezone);
-        $match['exact_key'] = $stackKey;
-
-        $pipeline = [
-            ['$match' => $match],
-            ['$count' => 'total'],
-        ];
-
-        $rows = MapPoi::raw(function ($collection) use ($pipeline) {
-            return $collection->aggregate($pipeline);
-        });
-
-        foreach ($rows as $row) {
-            $data = $this->normalizeDocument($row);
-            $resolvedCount = (int) ($data['total'] ?? 0);
-
-            return $resolvedCount > 0 ? $resolvedCount : 1;
+        $coordinates = $this->extractCoordinates($location);
+        if ($coordinates === null) {
+            return false;
         }
 
-        return 1;
+        foreach ($eventCenters as $eventCenter) {
+            if (
+                $this->distanceMetersBetween($coordinates, $eventCenter)
+                <= self::EVENT_DOMINANCE_RADIUS_METERS
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{lat: float, lng: float}|null
+     */
+    private function extractCoordinates(mixed $location): ?array
+    {
+        if (! is_array($location)) {
+            $location = $this->normalizeDocument($location);
+        }
+
+        $coordinates = $location['coordinates'] ?? null;
+        if (is_array($coordinates) && count($coordinates) >= 2) {
+            return [
+                'lat' => (float) $coordinates[1],
+                'lng' => (float) $coordinates[0],
+            ];
+        }
+
+        if (
+            array_key_exists('lat', $location)
+            && array_key_exists('lng', $location)
+        ) {
+            return [
+                'lat' => (float) $location['lat'],
+                'lng' => (float) $location['lng'],
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array{lat: float, lng: float}  $from
+     * @param  array{lat: float, lng: float}  $to
+     */
+    private function distanceMetersBetween(array $from, array $to): float
+    {
+        $earthRadiusMeters = 6371000.0;
+
+        $latFrom = deg2rad($from['lat']);
+        $latTo = deg2rad($to['lat']);
+        $latDelta = deg2rad($to['lat'] - $from['lat']);
+        $lngDelta = deg2rad($to['lng'] - $from['lng']);
+
+        $a = sin($latDelta / 2) ** 2
+            + cos($latFrom) * cos($latTo) * sin($lngDelta / 2) ** 2;
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return $earthRadiusMeters * $c;
     }
 
     /**

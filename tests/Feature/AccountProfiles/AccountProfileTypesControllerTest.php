@@ -10,6 +10,8 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -79,6 +81,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             [
                 'type' => 'venue',
                 'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
                 'allowed_taxonomies' => ['cuisine'],
                 'poi_visual' => [
                     'mode' => 'icon',
@@ -96,6 +102,9 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.type', 'venue');
+        $response->assertJsonPath('data.label', 'Venue');
+        $response->assertJsonPath('data.labels.singular', 'Venue');
+        $response->assertJsonPath('data.labels.plural', 'Venues');
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
@@ -134,6 +143,61 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'poi_visual.color',
             'poi_visual.icon_color',
         ]);
+    }
+
+    public function test_profile_type_create_accepts_canonical_visual_type_asset_upload(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'gallery',
+                'label' => 'Gallery',
+                'allowed_taxonomies' => ['art_style'],
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+                'type_asset' => UploadedFile::fake()->image('gallery.png', 320, 320),
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ],
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.visual.mode', 'image');
+        $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $typeAssetUrl = $response->json('data.visual.image_url');
+        $this->assertIsString($typeAssetUrl);
+        $this->assertStringContainsString('/api/v1/media/account-profile-types/', $typeAssetUrl);
+        $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
+
+        $model = TenantProfileType::query()->where('type', 'gallery')->firstOrFail();
+        $this->assertTypeAssetStored((string) $model->getKey(), 'account_profile_types');
+    }
+
+    public function test_profile_type_create_rejects_type_asset_visual_without_upload(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'gallery-missing',
+                'label' => 'Gallery Missing',
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type_asset']);
     }
 
     public function test_profile_type_create_rejects_duplicate_type(): void
@@ -534,6 +598,102 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertSame('item_media', data_get($projection->visual, 'source'));
     }
 
+
+    public function test_profile_type_update_type_asset_visual_change_rematerializes_projection_visual(): void
+    {
+        Storage::fake('public');
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+        MapPoi::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'poi_visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#AA3300',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-type-asset-change',
+            'profile_type' => 'venue',
+            'display_name' => 'Venue One',
+            'avatar_url' => 'https://cdn.example.com/account-profile-avatar.png',
+            'cover_url' => 'https://cdn.example.com/account-profile-cover.png',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => new ObjectId((string) $profile->_id),
+            'source_checkpoint' => 1,
+            'name' => 'Venue One',
+            'category' => 'venue',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#AA3300',
+                'icon_color' => '#FFFFFF',
+                'source' => 'type_definition',
+            ],
+        ]);
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profile_types/venue",
+            [
+                '_method' => 'PATCH',
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+                'type_asset' => UploadedFile::fake()->image('venue-type.png', 256, 256),
+            ],
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.visual.mode', 'image');
+        $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $typeAssetUrl = $response->json('data.visual.image_url');
+        $this->assertIsString($typeAssetUrl);
+        $this->assertStringContainsString('/api/v1/media/account-profile-types/', $typeAssetUrl);
+
+        $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $this->assertTypeAssetStored((string) $model->getKey(), 'account_profile_types');
+        $profileId = (string) $profile->_id;
+        $projectionQuery = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where(function ($query) use ($profileId): void {
+                $query->where('ref_id', $profileId)
+                    ->orWhere('ref_id', new ObjectId($profileId));
+            });
+
+        $this->assertSame(1, $projectionQuery->count());
+        $projection = $projectionQuery->firstOrFail();
+
+        $this->assertSame('image', data_get($projection->visual, 'mode'));
+        $this->assertSame($typeAssetUrl, data_get($projection->visual, 'image_uri'));
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
+    }
+
     public function test_profile_type_update_rejects_duplicate_type_rename(): void
     {
         TenantProfileType::query()->delete();
@@ -611,5 +771,28 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+    }
+
+    private function getMultipartHeaders(): array
+    {
+        return [
+            ...$this->getHeaders(),
+            'Content-Type' => 'multipart/form-data',
+        ];
+    }
+
+    private function assertTypeAssetStored(string $typeId, string $directory): string
+    {
+        $needle = "/{$directory}/{$typeId}/type_asset.";
+
+        foreach (Storage::disk('public')->allFiles() as $path) {
+            if (str_contains($path, $needle)) {
+                Storage::disk('public')->assertExists($path);
+
+                return $path;
+            }
+        }
+
+        $this->fail("Failed asserting that type asset exists for [{$typeId}] in [{$directory}].");
     }
 }

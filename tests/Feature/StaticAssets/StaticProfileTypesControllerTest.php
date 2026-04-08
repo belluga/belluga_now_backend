@@ -10,6 +10,8 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -138,6 +140,62 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
             'poi_visual.color',
             'poi_visual.icon_color',
         ]);
+    }
+
+    public function test_static_profile_type_create_accepts_canonical_visual_type_asset_upload(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}static_profile_types",
+            [
+                'type' => 'landmark',
+                'label' => 'Landmark',
+                'map_category' => 'historic',
+                'allowed_taxonomies' => ['region'],
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+                'type_asset' => UploadedFile::fake()->image('landmark.png', 320, 320),
+                'capabilities' => [
+                    'is_poi_enabled' => true,
+                    'has_content' => true,
+                ],
+            ],
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.visual.mode', 'image');
+        $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $typeAssetUrl = $response->json('data.visual.image_url');
+        $this->assertIsString($typeAssetUrl);
+        $this->assertStringContainsString('/api/v1/media/static-profile-types/', $typeAssetUrl);
+        $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
+
+        $model = StaticProfileType::query()->where('type', 'landmark')->firstOrFail();
+        $this->assertTypeAssetStored((string) $model->getKey(), 'static_profile_types');
+    }
+
+    public function test_static_profile_type_create_rejects_type_asset_visual_without_upload(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}static_profile_types",
+            [
+                'type' => 'landmark-missing',
+                'label' => 'Landmark Missing',
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type_asset']);
     }
 
     public function test_static_profile_type_create_rejects_duplicate_type(): void
@@ -563,6 +621,100 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $this->assertSame('item_media', data_get($projection->visual, 'source'));
     }
 
+    public function test_static_profile_type_update_type_asset_visual_change_rematerializes_projection_visual(): void
+    {
+        Storage::fake('public');
+        StaticProfileType::query()->delete();
+        StaticAsset::query()->delete();
+        MapPoi::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'beach',
+            'label' => 'Beach',
+            'map_category' => 'beach',
+            'allowed_taxonomies' => [],
+            'poi_visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#2266AA',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $asset = StaticAsset::create([
+            'profile_type' => 'beach',
+            'display_name' => 'Beach One',
+            'avatar_url' => 'https://cdn.example.com/static-avatar.png',
+            'cover_url' => 'https://cdn.example.com/static-cover.png',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => new ObjectId((string) $asset->_id),
+            'source_checkpoint' => 1,
+            'name' => 'Beach One',
+            'category' => 'beach',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#2266AA',
+                'icon_color' => '#FFFFFF',
+                'source' => 'type_definition',
+            ],
+        ]);
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}static_profile_types/beach",
+            [
+                '_method' => 'PATCH',
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+                'type_asset' => UploadedFile::fake()->image('beach-type.png', 256, 256),
+            ],
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.visual.mode', 'image');
+        $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $typeAssetUrl = $response->json('data.visual.image_url');
+        $this->assertIsString($typeAssetUrl);
+        $this->assertStringContainsString('/api/v1/media/static-profile-types/', $typeAssetUrl);
+
+        $model = StaticProfileType::query()->where('type', 'beach')->firstOrFail();
+        $this->assertTypeAssetStored((string) $model->getKey(), 'static_profile_types');
+        $assetId = (string) $asset->_id;
+        $projectionQuery = MapPoi::query()
+            ->where('ref_type', 'static')
+            ->where(function ($query) use ($assetId): void {
+                $query->where('ref_id', $assetId)
+                    ->orWhere('ref_id', new ObjectId($assetId));
+            });
+
+        $this->assertSame(1, $projectionQuery->count());
+        $projection = $projectionQuery->firstOrFail();
+
+        $this->assertSame('image', data_get($projection->visual, 'mode'));
+        $this->assertSame($typeAssetUrl, data_get($projection->visual, 'image_uri'));
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
+    }
+
     public function test_static_profile_type_update_rejects_duplicate_type_rename(): void
     {
         StaticProfileType::query()->delete();
@@ -642,5 +794,28 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+    }
+
+    private function getMultipartHeaders(): array
+    {
+        return [
+            ...$this->getHeaders(),
+            'Content-Type' => 'multipart/form-data',
+        ];
+    }
+
+    private function assertTypeAssetStored(string $typeId, string $directory): string
+    {
+        $needle = "/{$directory}/{$typeId}/type_asset.";
+
+        foreach (Storage::disk('public')->allFiles() as $path) {
+            if (str_contains($path, $needle)) {
+                Storage::disk('public')->assertExists($path);
+
+                return $path;
+            }
+        }
+
+        $this->fail("Failed asserting that type asset exists for [{$typeId}] in [{$directory}].");
     }
 }
