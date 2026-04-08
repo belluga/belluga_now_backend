@@ -6,6 +6,7 @@ namespace Tests\Feature\Tenants;
 
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\Event;
 use Tests\Helpers\TenantLabels;
@@ -128,5 +129,31 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             $content,
         );
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/nao-existe">', false);
+    }
+
+    public function test_static_asset_public_route_injects_static_asset_metadata(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $asset = StaticAsset::create([
+            'profile_type' => 'beach',
+            'display_name' => 'Praia das Virtudes',
+            'slug' => 'praia-das-virtudes',
+            'bio' => 'Faixa de areia com vista aberta para o mar.',
+            'content' => '<p>Quiosques, píer e um pôr do sol forte no fim da tarde.</p>',
+            'cover_url' => 'https://tenant.example/media/praia-cover.png',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.5001, -20.6701],
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_tenant_url}static/{$asset->slug}");
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $response->assertSee('<meta property="og:title" content="Praia das Virtudes | '.$this->tenant->name.'">', false);
+        $response->assertSee('<meta property="og:description" content="Quiosques, píer e um pôr do sol forte no fim da tarde.">', false);
+        $response->assertSee('<meta property="og:image" content="https://tenant.example/media/praia-cover.png">', false);
+        $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/static/praia-das-virtudes">', false);
     }
 }

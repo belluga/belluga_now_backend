@@ -7,6 +7,7 @@ namespace App\Application\PublicWeb;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Branding\BrandingManifestService;
+use App\Application\StaticAssets\StaticAssetQueryService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Belluga\Events\Application\Events\EventQueryService;
@@ -21,6 +22,7 @@ class PublicWebMetadataService
         private readonly AccountProfileQueryService $accountProfileQueryService,
         private readonly AccountProfileFormatterService $accountProfileFormatterService,
         private readonly EventQueryService $eventQueryService,
+        private readonly StaticAssetQueryService $staticAssetQueryService,
     ) {}
 
     /**
@@ -121,6 +123,40 @@ class PublicWebMetadataService
         ]);
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/agenda/evento/'.trim((string) ($payload['slug'] ?? $slug)));
         $metadata['type'] = 'article';
+
+        return $metadata;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function staticAssetMetadata(string $assetRef): array
+    {
+        $metadata = $this->defaultMetadata('/static/'.$assetRef);
+
+        try {
+            $asset = $this->staticAssetQueryService->findByIdOrSlug($assetRef);
+            $payload = $this->staticAssetQueryService->format($asset);
+        } catch (ModelNotFoundException) {
+            return $metadata;
+        }
+
+        $displayName = trim((string) ($payload['display_name'] ?? ''));
+        if ($displayName !== '') {
+            $metadata['title'] = "{$displayName} | {$metadata['site_name']}";
+        }
+
+        $metadata['description'] = $this->excerpt(
+            $this->sanitizeText((string) ($payload['content'] ?? ''))
+            ?: $this->sanitizeText((string) ($payload['bio'] ?? ''))
+            ?: $metadata['description']
+        );
+        $metadata['image'] = $this->resolveImageUrl([
+            $payload['cover_url'] ?? null,
+            $metadata['image'],
+        ]);
+        $metadata['canonical_url'] = $this->canonicalUrlForPath('/static/'.trim((string) ($payload['slug'] ?? $assetRef)));
+        $metadata['type'] = 'place';
 
         return $metadata;
     }

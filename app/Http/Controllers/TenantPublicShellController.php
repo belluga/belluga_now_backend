@@ -36,4 +36,15 @@ class TenantPublicShellController extends Controller
             ['Content-Type' => 'text/html; charset=UTF-8']
         );
     }
+
+    public function staticAsset(string $assetRef): Response
+    {
+        return response(
+            $this->shellRenderer->render(
+                $this->metadataService->staticAssetMetadata($assetRef)
+            ),
+            200,
+            ['Content-Type' => 'text/html; charset=UTF-8']
+        );
+    }
 }
