@@ -19,16 +19,16 @@ class StaticProfileTypesController extends Controller
         private readonly StaticProfileTypeRegistryManagementService $managementService,
     ) {}
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return response()->json([
-            'data' => $this->registryService->registry(),
+            'data' => $this->registryService->registry($request->getSchemeAndHttpHost()),
         ]);
     }
 
     public function store(StaticProfileTypeStoreRequest $request): JsonResponse
     {
-        $entry = $this->managementService->create($request->validated());
+        $entry = $this->managementService->create($request, $request->validated());
 
         return response()->json(['data' => $entry], 201);
     }
@@ -36,7 +36,7 @@ class StaticProfileTypesController extends Controller
     public function update(StaticProfileTypeUpdateRequest $request): JsonResponse
     {
         $profileType = (string) $request->route('profile_type', '');
-        $entry = $this->managementService->update($profileType, $request->validated());
+        $entry = $this->managementService->update($request, $profileType, $request->validated());
 
         return response()->json(['data' => $entry]);
     }

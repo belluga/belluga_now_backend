@@ -27,33 +27,41 @@ class EventOccurrenceReconciliationService
         });
     }
 
+    public function reconcileEvent(Event $event): void
+    {
+        $eventId = (string) $event->_id;
+        $occurrences = $this->resolveOccurrences($event);
+
+        if ($event->trashed()) {
+            $this->runTenantTransaction(function () use ($eventId, $occurrences, $event): void {
+                if ($occurrences !== []) {
+                    $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
+                }
+                $this->occurrenceSyncService->softDeleteByEventId($eventId, $event->deleted_at);
+            });
+
+            return;
+        }
+
+        if ($occurrences === []) {
+            Log::warning('events_occurrence_reconciliation_skipped_missing_schedule', [
+                'event_id' => $eventId,
+            ]);
+
+            return;
+        }
+
+        $this->runTenantTransaction(function () use ($event, $occurrences): void {
+            $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
+        });
+    }
+
     private function reconcileCurrentTenant(): void
     {
         Event::withTrashed()
             ->get()
             ->each(function (Event $event): void {
-                $eventId = (string) $event->_id;
-
-                if ($event->trashed()) {
-                    $this->runTenantTransaction(function () use ($eventId): void {
-                        $this->occurrenceSyncService->softDeleteByEventId($eventId);
-                    });
-
-                    return;
-                }
-
-                $occurrences = $this->resolveOccurrences($event);
-                if ($occurrences === []) {
-                    Log::warning('events_occurrence_reconciliation_skipped_missing_schedule', [
-                        'event_id' => $eventId,
-                    ]);
-
-                    return;
-                }
-
-                $this->runTenantTransaction(function () use ($event, $occurrences): void {
-                    $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
-                });
+                $this->reconcileEvent($event);
             });
     }
 

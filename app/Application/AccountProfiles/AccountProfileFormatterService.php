@@ -13,17 +13,18 @@ class AccountProfileFormatterService
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountProfileMediaService $mediaService,
+        private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
     ) {}
 
     /**
      * @return array<string, mixed>
      */
-    public function format(AccountProfile $profile): array
+    public function format(AccountProfile $profile, bool $includeAgendaOccurrences = false): array
     {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
 
-        return [
+        $payload = [
             'id' => (string) $profile->_id,
             'account_id' => (string) $profile->account_id,
             'profile_type' => $profile->profile_type,
@@ -52,6 +53,12 @@ class AccountProfileFormatterService
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+
+        if ($includeAgendaOccurrences) {
+            $payload['agenda_occurrences'] = $this->agendaOccurrencesService->forProfile($profile);
+        }
+
+        return $payload;
     }
 
     /**

@@ -27,7 +27,9 @@ class AccountUser extends Authenticatable
     protected $fillable = [
         'name',
         'emails',
+        'email_hashes',
         'phones',
+        'phone_hashes',
         'first_seen_at',
         'registered_at',
         'password',
@@ -63,7 +65,9 @@ class AccountUser extends Authenticatable
             $user->credentials ??= [];
             $user->consents ??= [];
             $user->emails ??= [];
+            $user->email_hashes ??= [];
             $user->phones ??= [];
+            $user->phone_hashes ??= [];
             $user->account_roles ??= [];
             $user->merged_source_ids ??= [];
             $user->promotion_audit ??= [];
@@ -74,6 +78,13 @@ class AccountUser extends Authenticatable
             if ($user->isRegisteredState() && $user->registered_at === null) {
                 $user->registered_at = $now;
             }
+        });
+
+        static::saving(function (AccountUser $user): void {
+            $user->emails ??= [];
+            $user->phones ??= [];
+            $user->email_hashes = self::hashEmails((array) $user->emails);
+            $user->phone_hashes = self::hashPhones((array) $user->phones);
         });
 
         static::updating(function (AccountUser $user): void {
@@ -147,5 +158,41 @@ class AccountUser extends Authenticatable
     private function isRegisteredState(): bool
     {
         return in_array($this->identity_state, ['registered', 'validated'], true);
+    }
+
+    /**
+     * @param  array<int, mixed>  $emails
+     * @return array<int, string>
+     */
+    private static function hashEmails(array $emails): array
+    {
+        $hashes = [];
+        foreach ($emails as $email) {
+            $normalized = mb_strtolower(trim((string) $email));
+            if ($normalized === '') {
+                continue;
+            }
+            $hashes[$normalized] = hash('sha256', $normalized);
+        }
+
+        return array_values($hashes);
+    }
+
+    /**
+     * @param  array<int, mixed>  $phones
+     * @return array<int, string>
+     */
+    private static function hashPhones(array $phones): array
+    {
+        $hashes = [];
+        foreach ($phones as $phone) {
+            $normalized = preg_replace('/\D+/', '', (string) $phone) ?? '';
+            if ($normalized === '') {
+                continue;
+            }
+            $hashes[$normalized] = hash('sha256', $normalized);
+        }
+
+        return array_values($hashes);
     }
 }

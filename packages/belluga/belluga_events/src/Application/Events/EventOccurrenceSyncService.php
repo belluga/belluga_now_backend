@@ -11,6 +11,8 @@ use MongoDB\BSON\UTCDateTime;
 
 class EventOccurrenceSyncService
 {
+    private const DEFAULT_EVENT_DURATION_HOURS = 3;
+
     /**
      * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
      */
@@ -25,6 +27,7 @@ class EventOccurrenceSyncService
         foreach ($occurrences as $index => $occurrence) {
             $start = $this->toCarbon($occurrence['date_time_start'] ?? null) ?? $now;
             $end = $this->toCarbon($occurrence['date_time_end'] ?? null);
+            $effectiveEnd = $this->resolveEffectiveEnd($start, $end);
             $eventTaxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
 
             $payload = [
@@ -40,7 +43,7 @@ class EventOccurrenceSyncService
                 'place_ref' => $this->normalizeArray($event->place_ref ?? null),
                 'venue' => $this->normalizeArray($event->venue ?? null),
                 'geo_location' => $geoLocation,
-                'artists' => $this->normalizeArray($event->artists ?? []),
+                'artists' => $this->deriveArtistsReadProjection($this->normalizeArray($event->event_parties ?? [])),
                 'tags' => $this->normalizeArray($event->tags ?? []),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'taxonomy_terms' => $eventTaxonomyTerms,
@@ -52,6 +55,7 @@ class EventOccurrenceSyncService
                 'is_active' => (bool) ($event->is_active ?? true),
                 'starts_at' => $start,
                 'ends_at' => $end,
+                'effective_ends_at' => $effectiveEnd,
                 'updated_from_event_at' => $now,
                 'deleted_at' => null,
             ];
@@ -97,9 +101,9 @@ class EventOccurrenceSyncService
         ]);
     }
 
-    public function softDeleteByEventId(string $eventId): void
+    public function softDeleteByEventId(string $eventId, mixed $deletedAt = null): void
     {
-        $now = Carbon::now();
+        $now = $this->toCarbon($deletedAt) ?? Carbon::now();
 
         EventOccurrence::query()->where('event_id', $eventId)->update([
             'deleted_at' => $now,
@@ -142,6 +146,53 @@ class EventOccurrenceSyncService
         }
 
         return $this->normalizeArray($event->geo_location ?? null);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function deriveArtistsReadProjection(array $eventParties): array
+    {
+        $profiles = [];
+
+        foreach ($eventParties as $party) {
+            $partyPayload = $this->normalizeArray($party);
+            $partyType = trim((string) ($partyPayload['party_type'] ?? ''));
+            if ($partyType === 'venue') {
+                continue;
+            }
+
+            $metadata = $this->normalizeArray($partyPayload['metadata'] ?? []);
+            $profileId = trim((string) ($partyPayload['party_ref_id'] ?? ''));
+            $displayName = trim((string) ($metadata['display_name'] ?? ''));
+            if ($profileId === '' || $displayName === '') {
+                continue;
+            }
+
+            $profiles[] = [
+                'id' => $profileId,
+                'display_name' => $displayName,
+                'slug' => isset($metadata['slug']) ? (string) $metadata['slug'] : null,
+                'profile_type' => isset($metadata['profile_type']) ? (string) $metadata['profile_type'] : $partyType,
+                'avatar_url' => $metadata['avatar_url'] ?? null,
+                'cover_url' => $metadata['cover_url'] ?? null,
+                'highlight' => false,
+                'genres' => array_values($this->normalizeArray($metadata['genres'] ?? [])),
+                'taxonomy_terms' => $this->normalizeArray($metadata['taxonomy_terms'] ?? []),
+            ];
+        }
+
+        return $profiles;
+    }
+
+    private function resolveEffectiveEnd(Carbon $start, ?Carbon $end): Carbon
+    {
+        if ($end !== null) {
+            return $end;
+        }
+
+        return $start->copy()->addHours(self::DEFAULT_EVENT_DURATION_HOURS);
     }
 
     private function toCarbon(mixed $value): ?Carbon

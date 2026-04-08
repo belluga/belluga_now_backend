@@ -55,10 +55,25 @@ Tenant-public transactional email send entrypoint.
 Payload:
 ```json
 {
-  "email": "lead@example.com",
-  "whatsapp": "27996419823",
-  "os": "Android",
-  "app_name": "Guarappari"
+  "app_name": "Guarappari",
+  "submitted_fields": [
+    {
+      "label": "Seu Nome",
+      "value": "Maria"
+    },
+    {
+      "label": "E-mail",
+      "value": "maria@example.com"
+    },
+    {
+      "label": "WhatsApp",
+      "value": "27996419823"
+    },
+    {
+      "label": "Qual o seu sistema operacional?",
+      "value": "Android"
+    }
+  ]
 }
 ```
 
@@ -82,7 +97,7 @@ Integration pending:
 ## Authentication And Authorization Boundary
 
 - Package-owned:
-  - request validation for public lead payload fields
+  - request validation for public lead payload envelope
   - provider delivery attempt and provider error translation
 - Host-owned:
   - tenant/public route mounting and middleware stack
@@ -100,7 +115,7 @@ Integration pending:
 
 ## Validation Rules
 
-- public endpoint validates only provider-agnostic lead fields
+- public endpoint validates a provider-agnostic ordered `submitted_fields` envelope
 - host-managed tenant `resend_email` settings validation mirrors Resend envelope expectations where feasible:
   - `from` allows sender syntax with optional friendly name
   - `to` max 50 recipients

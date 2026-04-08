@@ -10,6 +10,18 @@ use Illuminate\Validation\Rule;
 
 class EventIndexRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $temporal = $this->input('temporal');
+        if (is_string($temporal)) {
+            $parts = array_values(array_filter(
+                array_map(static fn (string $part): string => trim($part), explode(',', $temporal)),
+                static fn (string $part): bool => $part !== ''
+            ));
+            $this->merge(['temporal' => $parts]);
+        }
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -29,6 +41,11 @@ class EventIndexRequest extends FormRequest
                 'sometimes',
                 'string',
                 Rule::in(['published', 'publish_scheduled', 'draft', 'ended']),
+            ],
+            'temporal' => 'sometimes|array',
+            'temporal.*' => [
+                'string',
+                Rule::in(['past', 'now', 'future']),
             ],
         ];
     }

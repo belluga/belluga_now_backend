@@ -526,7 +526,9 @@ class MapPoiProjectionService
         $mode = strtolower(trim((string) ($poiVisual['mode'] ?? '')));
         if ($mode === 'image') {
             $imageSource = strtolower(trim((string) ($poiVisual['image_source'] ?? '')));
-            $imageUri = $this->resolveImageUriBySource($imageSource, $avatarUrl, $coverUrl);
+            $imageUri = $imageSource === 'type_asset'
+                ? $this->normalizeImageUri($poiVisual['image_url'] ?? null)
+                : $this->resolveImageUriBySource($imageSource, $avatarUrl, $coverUrl);
             if ($imageUri === null) {
                 return null;
             }
@@ -534,7 +536,7 @@ class MapPoiProjectionService
             return [
                 'mode' => 'image',
                 'image_uri' => $imageUri,
-                'source' => 'item_media',
+                'source' => $imageSource === 'type_asset' ? 'type_definition' : 'item_media',
             ];
         }
 
@@ -591,6 +593,15 @@ class MapPoiProjectionService
             default => null,
         };
 
+        if (! is_string($candidate)) {
+            return null;
+        }
+
+        return $this->normalizeImageUri($candidate);
+    }
+
+    private function normalizeImageUri(mixed $candidate): ?string
+    {
         if (! is_string($candidate)) {
             return null;
         }
@@ -847,6 +858,14 @@ class MapPoiProjectionService
     {
         if (! $slug) {
             return null;
+        }
+
+        if ($refType === 'account_profile') {
+            return '/parceiro/'.$slug;
+        }
+
+        if ($refType === 'event') {
+            return '/agenda/evento/'.$slug;
         }
 
         return '/'.$refType.'/'.$slug;

@@ -13,6 +13,7 @@ class MapPoiEventAsyncJobSignaturesAdapter implements EventAsyncJobSignaturesCon
         return [
             'Belluga\\Events\\',
             'Belluga\\MapPois\\Jobs\\UpsertMapPoiFromEventJob',
+            'Belluga\\MapPois\\Jobs\\RefreshExpiredEventMapPoisJob',
             'Belluga\\MapPois\\Jobs\\DeleteMapPoiByRefJob',
         ];
     }

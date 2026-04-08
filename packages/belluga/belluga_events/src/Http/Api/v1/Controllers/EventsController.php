@@ -7,6 +7,7 @@ namespace Belluga\Events\Http\Api\v1\Controllers;
 use Belluga\Events\Application\Events\EventManagementService;
 use Belluga\Events\Application\Events\EventMediaService;
 use Belluga\Events\Application\Events\EventQueryService;
+use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
@@ -28,6 +29,7 @@ class EventsController extends Controller
         private readonly EventProfileResolverContract $profileResolver,
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventMediaService $eventMediaService,
+        private readonly LegacyEventPartiesCanonicalizationService $legacyEventPartiesCanonicalizationService,
     ) {}
 
     public function index(EventIndexRequest $request): JsonResponse
@@ -64,6 +66,20 @@ class EventsController extends Controller
         );
 
         return response()->json($candidates->toArray());
+    }
+
+    public function legacyEventPartiesSummary(): JsonResponse
+    {
+        return response()->json([
+            'data' => $this->legacyEventPartiesCanonicalizationService->inspect(),
+        ]);
+    }
+
+    public function repairLegacyEventParties(): JsonResponse
+    {
+        return response()->json([
+            'data' => $this->legacyEventPartiesCanonicalizationService->repair(),
+        ]);
     }
 
     public function store(EventStoreRequest $request): JsonResponse

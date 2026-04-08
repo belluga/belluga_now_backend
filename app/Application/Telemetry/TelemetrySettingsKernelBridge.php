@@ -30,9 +30,11 @@ class TelemetrySettingsKernelBridge
      */
     public function patchTelemetryConfig(mixed $user, array $payload): array
     {
-        $updated = $this->settingsKernelService->patchNamespace('tenant', $user, 'telemetry', $payload);
+        $this->settingsKernelService->patchNamespace('tenant', $user, 'telemetry', $payload);
 
-        return $this->normalizeTelemetryConfig($updated);
+        // Reload the namespace from storage so mutation responses reflect the
+        // persisted canonical snapshot rather than any intermediate model state.
+        return $this->currentTelemetryConfig();
     }
 
     /**

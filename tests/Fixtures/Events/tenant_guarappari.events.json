@@ -1,0 +1,188 @@
+{
+  "data": [
+    {
+      "_id": { "$oid": "69a0ddc1768fd8904d0b6215" },
+      "title": "dbg",
+      "content": "x",
+      "type": { "name": "n", "slug": "s", "_id": "1" },
+      "venue": { "_id": "v1" },
+      "geo_location": { "type": "Point", "coordinates": [0, 0] },
+      "thumb": { "type": "image", "data": { "url": "u" } },
+      "date_time_start": { "$date": "2026-02-26T23:56:49.681Z" },
+      "date_time_end": { "$date": "2026-02-27T00:56:49.681Z" },
+      "artists": [],
+      "tags": [],
+      "categories": [],
+      "taxonomy_terms": [],
+      "publication": {
+        "status": "published",
+        "publish_at": { "$date": "2026-02-26T23:56:49.682Z" }
+      },
+      "is_active": true,
+      "slug": "dbg",
+      "updated_at": { "$date": "2026-03-02T11:44:23.720Z" },
+      "created_at": { "$date": "2026-02-26T23:56:49.892Z" },
+      "deleted_at": { "$date": "2026-03-02T11:44:23.720Z" }
+    },
+    {
+      "_id": { "$oid": "69a4f85dab237638d702d69d" },
+      "title": "Web Playwright Event 1772419163198",
+      "content": "Event created by real web Playwright flow.",
+      "type": {
+        "name": "Web Playwright",
+        "slug": "web-playwright",
+        "_id": "type-web-playwright"
+      },
+      "date_time_start": { "$date": "2026-03-03T02:39:24.829Z" },
+      "date_time_end": { "$date": "2026-03-03T04:39:24.829Z" },
+      "capabilities": {
+        "multiple_occurrences": { "enabled": false },
+        "map_poi": { "enabled": true, "discovery_scope": null }
+      },
+      "publication": { "status": "draft", "publish_at": null },
+      "location": {
+        "mode": "online",
+        "online": {
+          "url": "https://meet.example.org/playwright-room",
+          "platform": "jitsi"
+        }
+      },
+      "place_ref": null,
+      "geo_location": null,
+      "venue": [],
+      "artists": [],
+      "created_by": {
+        "type": "landlord_user",
+        "_id": "695c1810fee8b3839804dc8f"
+      },
+      "event_parties": [],
+      "slug": "web-playwright-event-1772419163198",
+      "updated_at": { "$date": "2026-03-02T02:40:21.281Z" },
+      "created_at": { "$date": "2026-03-02T02:39:25.110Z" },
+      "deleted_at": { "$date": "2026-03-02T02:40:21.281Z" }
+    },
+    {
+      "_id": { "$oid": "69a57808fbd60036f002f004" },
+      "title": "Evento Aleatório",
+      "content": "Evento super bacana com a Ananda.",
+      "type": { "name": "Violão e Voz", "slug": "violao-e-voz" },
+      "taxonomy_terms": [
+        { "type": "genre", "value": "brasilidades" },
+        { "type": "genre", "value": "samba" }
+      ],
+      "date_time_start": { "$date": "2026-03-04T01:00:00.000Z" },
+      "date_time_end": null,
+      "capabilities": {
+        "multiple_occurrences": { "enabled": false },
+        "map_poi": { "enabled": true, "discovery_scope": null }
+      },
+      "publication": {
+        "status": "published",
+        "publish_at": { "$date": "2026-03-03T14:34:26.337Z" }
+      },
+      "location": {
+        "mode": "physical",
+        "geo": { "type": "Point", "coordinates": [-40.495395, -20.671339] }
+      },
+      "place_ref": {
+        "type": "venue",
+        "metadata": { "display_name": "Palco Praça dos Namorados" },
+        "_id": "699484e07ff9c14645017027"
+      },
+      "geo_location": {
+        "type": "Point",
+        "coordinates": [-40.495395, -20.671339]
+      },
+      "venue": {
+        "display_name": "Palco Praça dos Namorados",
+        "tagline": null,
+        "hero_image_url": null,
+        "logo_url": null,
+        "taxonomy_terms": [],
+        "_id": "699484e07ff9c14645017027"
+      },
+      "artists": null,
+      "created_by": {
+        "type": "landlord_user",
+        "_id": "695c1810fee8b3839804dc8f"
+      },
+      "event_parties": [
+        {
+          "party_type": "artist",
+          "party_ref_id": "69949486be6cd999250a2507",
+          "permissions": { "can_edit": true },
+          "metadata": {
+            "display_name": "Ananda Torres",
+            "slug": "ananda-torres",
+            "profile_type": "artist",
+            "avatar_url": "https://guarappari.belluga.space/account-profiles/69949486be6cd999250a2507/avatar?v=1771359996",
+            "cover_url": "https://guarappari.belluga.space/account-profiles/69949486be6cd999250a2507/cover?v=1771359735",
+            "taxonomy_terms": [
+              { "type": "genre", "value": "brasilidades", "name": "Brasilidades" },
+              { "type": "genre", "value": "samba", "name": "Samba" }
+            ]
+          }
+        }
+      ],
+      "slug": "evento-aleatorio",
+      "updated_at": { "$date": "2026-04-07T08:56:38.902Z" },
+      "created_at": { "$date": "2026-03-02T11:44:08.912Z" },
+      "deleted_at": { "$date": "2026-03-03T23:25:21.150Z" }
+    },
+    {
+      "_id": { "$oid": "69aac4fe3a2f450d750ed804" },
+      "title": "Feira",
+      "content": "Feira",
+      "taxonomy_terms": [{ "type": "genre", "value": "teste" }],
+      "type": {
+        "name": "Feira",
+        "slug": "feira",
+        "description": "Feira comercial",
+        "icon": null,
+        "color": null,
+        "_id": "69aac4ddd37046e0fe017c86"
+      },
+      "date_time_start": { "$date": "2026-03-07T12:00:00.000Z" },
+      "date_time_end": null,
+      "capabilities": {
+        "multiple_occurrences": { "enabled": false },
+        "map_poi": { "enabled": true, "discovery_scope": null }
+      },
+      "publication": {
+        "status": "published",
+        "publish_at": { "$date": "2026-03-06T12:14:25.036Z" }
+      },
+      "location": {
+        "mode": "physical",
+        "geo": { "type": "Point", "coordinates": [-40.478583, -20.652125] }
+      },
+      "place_ref": {
+        "type": "venue",
+        "metadata": { "display_name": "Palco Praia do Morro" },
+        "_id": "69a846a6dd8a724c1a02caef"
+      },
+      "geo_location": {
+        "type": "Point",
+        "coordinates": [-40.478583, -20.652125]
+      },
+      "venue": {
+        "display_name": "Palco Praia do Morro",
+        "tagline": null,
+        "hero_image_url": null,
+        "logo_url": null,
+        "taxonomy_terms": [],
+        "_id": "69a846a6dd8a724c1a02caef"
+      },
+      "artists": null,
+      "created_by": {
+        "type": "landlord_user",
+        "_id": "695c1810fee8b3839804dc8f"
+      },
+      "event_parties": [],
+      "slug": "feira",
+      "updated_at": { "$date": "2026-04-07T08:56:40.809Z" },
+      "created_at": { "$date": "2026-03-06T12:13:50.122Z" },
+      "deleted_at": { "$date": "2026-03-11T13:44:38.338Z" }
+    }
+  ]
+}

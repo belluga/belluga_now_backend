@@ -27,5 +27,6 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::get('/events/{event_id}', [EventsController::class, 'show']);
         Route::get('/account_profiles', [AccountProfilesController::class, 'publicIndex']);
         Route::get('/account_profiles/near', [AccountProfilesController::class, 'publicNear']);
+        Route::get('/account_profiles/{account_profile_slug}', [AccountProfilesController::class, 'publicShowBySlug']);
         Route::get('/static_assets/{asset_ref}', [StaticAssetsController::class, 'showPublic']);
     });

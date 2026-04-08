@@ -8,6 +8,7 @@ use App\Jobs\Telemetry\DeliverTelemetryEventJob;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Favorites\Jobs\RebuildFavoriteSnapshotJob;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
+use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromStaticAssetJob;
@@ -37,6 +38,7 @@ class TenantAwareQueueJobsTest extends TestCase
             PublishScheduledEventsJob::class,
             RebuildFavoriteSnapshotJob::class,
             DeleteMapPoiByRefJob::class,
+            RefreshExpiredEventMapPoisJob::class,
             UpsertMapPoiFromAccountProfileJob::class,
             UpsertMapPoiFromEventJob::class,
             UpsertMapPoiFromStaticAssetJob::class,
