@@ -860,6 +860,14 @@ class MapPoiProjectionService
             return null;
         }
 
+        if ($refType === 'account_profile') {
+            return '/parceiro/'.$slug;
+        }
+
+        if ($refType === 'event') {
+            return '/agenda/evento/'.$slug;
+        }
+
         return '/'.$refType.'/'.$slug;
     }
 

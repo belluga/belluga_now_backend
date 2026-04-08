@@ -100,7 +100,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-lookup',
             'ref_slug' => 'event-lookup',
-            'ref_path' => '/event/event-lookup',
+            'ref_path' => '/agenda/evento/event-lookup',
             'name' => 'Event Lookup',
             'subtitle' => 'Lookup subtitle',
             'category' => 'event',
@@ -140,7 +140,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('poi.ref_type', 'event');
         $response->assertJsonPath('poi.ref_id', 'event-lookup');
         $response->assertJsonPath('poi.ref_slug', 'event-lookup');
-        $response->assertJsonPath('poi.ref_path', '/event/event-lookup');
+        $response->assertJsonPath('poi.ref_path', '/agenda/evento/event-lookup');
         $response->assertJsonPath('poi.stack_key', $exactKey);
         $response->assertJsonPath('poi.stack_count', 1);
         $response->assertJsonPath('poi.visual.mode', 'icon');
@@ -168,7 +168,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-1',
             'ref_slug' => 'event-one',
-            'ref_path' => '/event/event-one',
+            'ref_path' => '/agenda/evento/event-one',
             'name' => 'Event One',
             'subtitle' => 'Live tonight',
             'category' => 'event',
@@ -230,7 +230,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-alpha',
             'ref_slug' => 'event-alpha',
-            'ref_path' => '/event/event-alpha',
+            'ref_path' => '/agenda/evento/event-alpha',
             'name' => 'Event Alpha',
             'category' => 'event',
             'source_type' => 'show',
@@ -243,7 +243,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-beta',
             'ref_slug' => 'event-beta',
-            'ref_path' => '/event/event-beta',
+            'ref_path' => '/agenda/evento/event-beta',
             'name' => 'Event Beta',
             'category' => 'event',
             'source_type' => 'show',
@@ -294,7 +294,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-anchor',
             'ref_slug' => 'event-anchor',
-            'ref_path' => '/event/event-anchor',
+            'ref_path' => '/agenda/evento/event-anchor',
             'name' => 'Event Anchor',
             'category' => 'event',
             'source_type' => 'show',
@@ -307,7 +307,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'account_profile',
             'ref_id' => 'local-near',
             'ref_slug' => 'local-near',
-            'ref_path' => '/account/local-near',
+            'ref_path' => '/parceiro/local-near',
             'name' => 'Local Near',
             'category' => 'restaurant',
             'source_type' => 'restaurant',
@@ -320,7 +320,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'account_profile',
             'ref_id' => 'local-far',
             'ref_slug' => 'local-far',
-            'ref_path' => '/account/local-far',
+            'ref_path' => '/parceiro/local-far',
             'name' => 'Local Far',
             'category' => 'restaurant',
             'source_type' => 'restaurant',
@@ -399,7 +399,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-2',
             'ref_slug' => 'event-two',
-            'ref_path' => '/event/event-two',
+            'ref_path' => '/agenda/evento/event-two',
             'name' => 'Event Two',
             'subtitle' => 'Venue Name',
             'category' => 'event',
@@ -422,7 +422,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $items = $response->json('items');
         $this->assertNotEmpty($items);
         $this->assertEquals('event-two', $items[0]['ref_slug']);
-        $this->assertEquals('/event/event-two', $items[0]['ref_path']);
+        $this->assertEquals('/agenda/evento/event-two', $items[0]['ref_path']);
         $this->assertNotEmpty($items[0]['tags']);
         $this->assertNotEmpty($items[0]['taxonomy_terms']);
         $this->assertArrayHasKey('time_start', $items[0]);
@@ -483,7 +483,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'projection_key' => 'event:event-now',
             'source_checkpoint' => 12345,
             'ref_slug' => 'event-now',
-            'ref_path' => '/event/event-now',
+            'ref_path' => '/agenda/evento/event-now',
             'name' => 'Event Now',
             'category' => 'event',
             'location' => $location,
@@ -557,7 +557,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-3',
             'ref_slug' => 'event-three',
-            'ref_path' => '/event/event-three',
+            'ref_path' => '/agenda/evento/event-three',
             'name' => 'Event Three',
             'category' => 'event',
             'source_type' => 'show',
@@ -647,7 +647,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-visual',
             'ref_slug' => 'event-visual',
-            'ref_path' => '/event/event-visual',
+            'ref_path' => '/agenda/evento/event-visual',
             'name' => 'Event Visual',
             'category' => 'event',
             'source_type' => 'show',
@@ -758,7 +758,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-only',
             'ref_slug' => 'event-only',
-            'ref_path' => '/event/event-only',
+            'ref_path' => '/agenda/evento/event-only',
             'name' => 'Event only',
             'category' => 'event',
             'source_type' => 'show',
@@ -785,7 +785,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-show',
             'ref_slug' => 'event-show',
-            'ref_path' => '/event/event-show',
+            'ref_path' => '/agenda/evento/event-show',
             'name' => 'Event Show',
             'category' => 'event',
             'source_type' => 'show',
@@ -798,7 +798,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_type' => 'event',
             'ref_id' => 'event-festival',
             'ref_slug' => 'event-festival',
-            'ref_path' => '/event/event-festival',
+            'ref_path' => '/agenda/evento/event-festival',
             'name' => 'Event Festival',
             'category' => 'event',
             'source_type' => 'festival',
@@ -844,7 +844,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'projection_key' => 'event:event-polygon',
             'source_checkpoint' => 223344,
             'ref_slug' => 'event-polygon',
-            'ref_path' => '/event/event-polygon',
+            'ref_path' => '/agenda/evento/event-polygon',
             'name' => 'Polygon Event',
             'category' => 'event',
             'location' => $this->point(-45.0, -25.0),
