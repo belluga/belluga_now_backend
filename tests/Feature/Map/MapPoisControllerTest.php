@@ -64,8 +64,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::create([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
             ],
             'events' => [
@@ -510,6 +510,98 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($item, 'occurrence_facets.0.is_happening_now', false));
     }
 
+    public function test_map_pois_today_window_includes_today_and_excludes_tomorrow_events(): void
+    {
+        $timezone = 'America/Sao_Paulo';
+        $this->user->forceFill(['timezone' => $timezone])->save();
+
+        $now = Carbon::now($timezone);
+
+        $locationNow = $this->point(-40.0000, -20.0000);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-now',
+            'ref_slug' => 'event-now',
+            'ref_path' => '/agenda/evento/event-now',
+            'name' => 'Event Now',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationNow,
+            'priority' => 80,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->subHour()->utc(),
+            'active_window_end_at' => $now->copy()->addHour()->utc(),
+            'exact_key' => $this->exactKey($locationNow),
+        ]);
+
+        $locationLaterToday = $this->point(-40.0100, -20.0100);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-later-today',
+            'ref_slug' => 'event-later-today',
+            'ref_path' => '/agenda/evento/event-later-today',
+            'name' => 'Event Later Today',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationLaterToday,
+            'priority' => 70,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->addHours(2)->utc(),
+            'active_window_end_at' => $now->copy()->addHours(4)->utc(),
+            'exact_key' => $this->exactKey($locationLaterToday),
+        ]);
+
+        $locationTomorrow = $this->point(-40.0200, -20.0200);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-tomorrow',
+            'ref_slug' => 'event-tomorrow',
+            'ref_path' => '/agenda/evento/event-tomorrow',
+            'name' => 'Event Tomorrow',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationTomorrow,
+            'priority' => 60,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->addDay()->setTime(10, 0)->utc(),
+            'active_window_end_at' => $now->copy()->addDay()->setTime(12, 0)->utc(),
+            'exact_key' => $this->exactKey($locationTomorrow),
+        ]);
+
+        $locationYesterday = $this->point(-40.0300, -20.0300);
+        MapPoi::create([
+            'ref_type' => 'event',
+            'ref_id' => 'event-yesterday-ended',
+            'ref_slug' => 'event-yesterday-ended',
+            'ref_path' => '/agenda/evento/event-yesterday-ended',
+            'name' => 'Event Yesterday Ended',
+            'category' => 'event',
+            'source_type' => 'show',
+            'location' => $locationYesterday,
+            'priority' => 50,
+            'is_active' => true,
+            'active_window_start_at' => $now->copy()->subDay()->setTime(18, 0)->utc(),
+            'active_window_end_at' => $now->copy()->subDay()->setTime(22, 0)->utc(),
+            'exact_key' => $this->exactKey($locationYesterday),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0&source=event"
+        );
+        $response->assertStatus(200);
+
+        $slugs = collect($response->json('stacks') ?? [])
+            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_slug', ''))
+            ->filter()
+            ->values()
+            ->all();
+
+        $this->assertContains('event-now', $slugs);
+        $this->assertContains('event-later-today', $slugs);
+        $this->assertNotContains('event-tomorrow', $slugs);
+        $this->assertNotContains('event-yesterday-ended', $slugs);
+    }
+
     public function test_map_filters_returns_catalogs(): void
     {
         $location = $this->point(-40.0, -20.0);
@@ -517,8 +609,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     [
@@ -621,8 +713,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     new BSONDocument([
@@ -676,8 +768,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     new BSONDocument([
@@ -731,8 +823,8 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
                 'poi_time_window_days' => [
-                    'past' => 1,
-                    'future' => 30,
+                    'past' => 0,
+                    'future' => 0,
                 ],
                 'filters' => [
                     [
