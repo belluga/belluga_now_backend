@@ -6,6 +6,7 @@ namespace Tests\Feature\Tenants;
 
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\Event;
@@ -22,10 +23,16 @@ class PublicWebMetadataShellTest extends TestCaseTenant
 
     private string $previousShellPath = '';
 
+    private string $resolvedSiteName = '';
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->makeCanonicalTenantCurrent($this->tenant);
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->resolvedSiteName = trim((string) $tenant->name);
+        if ($this->resolvedSiteName === '') {
+            $this->resolvedSiteName = trim((string) (Tenant::current()?->name ?? $this->resolvedSiteName));
+        }
         $this->previousShellPath = (string) getenv('FLUTTER_WEB_SHELL_PATH');
         putenv('FLUTTER_WEB_SHELL_PATH='.realpath(__DIR__.'/../../Fixtures/PublicWeb/flutter_shell_index.html'));
     }
@@ -69,7 +76,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response = $this->get("{$this->base_tenant_url}parceiro/{$profile->slug}");
         $response->assertOk();
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
-        $response->assertSee('<meta property="og:title" content="Casa Marracini | '.$this->tenant->name.'">', false);
+        $response->assertSee('<meta property="og:title" content="Casa Marracini | '.$this->resolvedSiteName.'">', false);
         $response->assertSee('<meta property="og:description" content="Massa fresca e carta de vinhos curada.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/casa-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/parceiro/casa-marracini">', false);
@@ -110,7 +117,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response = $this->get("{$this->base_tenant_url}agenda/evento/{$event->slug}");
         $response->assertOk();
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
-        $response->assertSee('<meta property="og:title" content="Festival na Orla | '.$this->tenant->name.'">', false);
+        $response->assertSee('<meta property="og:title" content="Festival na Orla | '.$this->resolvedSiteName.'">', false);
         $response->assertSee('<meta property="og:description" content="Show ao pôr do sol em Guarapari.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/ananda-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-na-orla">', false);
@@ -121,7 +128,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $tenantOrigin = rtrim($this->base_tenant_url, '/');
         $response = $this->get("{$this->base_tenant_url}agenda/evento/nao-existe");
         $response->assertOk();
-        $response->assertSee('<meta property="og:title" content="'.$this->tenant->name.'">', false);
+        $response->assertSee('<meta property="og:title" content="'.$this->resolvedSiteName.'">', false);
         $content = $response->getContent();
         self::assertIsString($content);
         self::assertMatchesRegularExpression(
@@ -151,7 +158,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response = $this->get("{$this->base_tenant_url}static/{$asset->slug}");
         $response->assertOk();
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
-        $response->assertSee('<meta property="og:title" content="Praia das Virtudes | '.$this->tenant->name.'">', false);
+        $response->assertSee('<meta property="og:title" content="Praia das Virtudes | '.$this->resolvedSiteName.'">', false);
         $response->assertSee('<meta property="og:description" content="Quiosques, píer e um pôr do sol forte no fim da tarde.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/praia-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/static/praia-das-virtudes">', false);

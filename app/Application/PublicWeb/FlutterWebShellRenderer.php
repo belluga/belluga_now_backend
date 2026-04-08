@@ -82,13 +82,31 @@ class FlutterWebShellRenderer
      */
     private function shellCandidates(): array
     {
-        $configured = trim((string) env('FLUTTER_WEB_SHELL_PATH', ''));
+        $configured = $this->configuredShellPath();
 
         return [
             $configured !== '' ? $configured : null,
             base_path('../web-app/index.html'),
             '/var/www/flutter/index.html',
         ];
+    }
+
+    private function configuredShellPath(): string
+    {
+        $candidates = [
+            getenv('FLUTTER_WEB_SHELL_PATH'),
+            $_ENV['FLUTTER_WEB_SHELL_PATH'] ?? null,
+            $_SERVER['FLUTTER_WEB_SHELL_PATH'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $normalized = trim((string) $candidate);
+            if ($normalized !== '') {
+                return $normalized;
+            }
+        }
+
+        return '';
     }
 
     private function escape(string $value): string
