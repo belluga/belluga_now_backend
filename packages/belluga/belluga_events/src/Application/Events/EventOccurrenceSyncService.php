@@ -101,9 +101,9 @@ class EventOccurrenceSyncService
         ]);
     }
 
-    public function softDeleteByEventId(string $eventId): void
+    public function softDeleteByEventId(string $eventId, mixed $deletedAt = null): void
     {
-        $now = Carbon::now();
+        $now = $this->toCarbon($deletedAt) ?? Carbon::now();
 
         EventOccurrence::query()->where('event_id', $eventId)->update([
             'deleted_at' => $now,
