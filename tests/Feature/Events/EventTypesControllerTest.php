@@ -13,6 +13,8 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -127,6 +129,38 @@ class EventTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.description', null);
+    }
+
+    public function test_event_type_create_accepts_canonical_visual_type_asset_upload(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'description' => 'Tipo com imagem canônica',
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+                'type_asset' => UploadedFile::fake()->image('festival.png', 320, 320),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.visual.mode', 'image');
+        $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $typeAssetUrl = $response->json('data.visual.image_url');
+        $this->assertIsString($typeAssetUrl);
+        $this->assertStringContainsString('/api/v1/media/event-types/', $typeAssetUrl);
+        $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
+
+        $model = EventType::query()->where('slug', 'festival')->firstOrFail();
+        $this->assertTypeAssetStored((string) $model->getKey(), 'event_types');
     }
 
     public function test_event_type_update_accepts_null_description(): void
@@ -321,6 +355,277 @@ class EventTypesControllerTest extends TestCaseTenant
         $this->assertSame('#101010', data_get($after->visual, 'icon_color'));
     }
 
+    public function test_event_type_partial_legacy_patch_preserves_missing_icon_fields(): void
+    {
+        MapPoi::query()->delete();
+
+        $eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'description' => 'Tipo de evento: Show',
+            'icon' => 'music_note',
+            'color' => '#112233',
+            'icon_color' => '#FFFFFF',
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+            ],
+            'poi_visual' => [
+                'mode' => 'icon',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+            ],
+        ]);
+
+        $event = Event::query()->create([
+            'title' => 'Partial Visual Event',
+            'slug' => 'partial-visual-event',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Tipo de evento: Show',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'music_note',
+                    'color' => '#112233',
+                    'icon_color' => '#FFFFFF',
+                ],
+            ],
+            'content' => 'Visual content',
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => now()->subMinute()->toISOString(),
+            ],
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        EventOccurrence::query()->create([
+            'event_id' => (string) $event->_id,
+            'occurrence_index' => 0,
+            'occurrence_slug' => 'partial-visual-event-occ-1',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Tipo de evento: Show',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'music_note',
+                    'color' => '#112233',
+                    'icon_color' => '#FFFFFF',
+                ],
+            ],
+            'starts_at' => now()->addDay(),
+            'is_event_published' => true,
+        ]);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event->fresh());
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
+            [
+                'color' => '#334455',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.icon', 'music_note');
+        $response->assertJsonPath('data.color', '#334455');
+        $response->assertJsonPath('data.icon_color', '#FFFFFF');
+        $response->assertJsonPath('data.visual.icon', 'music_note');
+        $response->assertJsonPath('data.visual.color', '#334455');
+        $response->assertJsonPath('data.visual.icon_color', '#FFFFFF');
+
+        $updatedType = EventType::query()->findOrFail($eventType->_id);
+        $this->assertSame('music_note', $updatedType->icon);
+        $this->assertSame('#334455', $updatedType->color);
+        $this->assertSame('#FFFFFF', $updatedType->icon_color);
+        $this->assertSame('music_note', data_get($updatedType->visual, 'icon'));
+        $this->assertSame('#334455', data_get($updatedType->visual, 'color'));
+        $this->assertSame('#FFFFFF', data_get($updatedType->visual, 'icon_color'));
+
+        $updatedEvent = Event::query()->findOrFail($event->_id);
+        $this->assertSame('music_note', data_get($updatedEvent->type, 'icon'));
+        $this->assertSame('#334455', data_get($updatedEvent->type, 'color'));
+        $this->assertSame('#FFFFFF', data_get($updatedEvent->type, 'icon_color'));
+
+        $updatedOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->assertSame('music_note', data_get($updatedOccurrence->type, 'icon'));
+        $this->assertSame('#334455', data_get($updatedOccurrence->type, 'color'));
+        $this->assertSame('#FFFFFF', data_get($updatedOccurrence->type, 'icon_color'));
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->assertSame('music_note', data_get($projection->visual, 'icon'));
+        $this->assertSame('#334455', data_get($projection->visual, 'color'));
+        $this->assertSame('#FFFFFF', data_get($projection->visual, 'icon_color'));
+    }
+
+    public function test_event_type_update_cover_visual_rematerializes_related_event_map_pois(): void
+    {
+        MapPoi::query()->delete();
+
+        $eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'description' => 'Tipo de evento: Show',
+            'icon' => 'music_note',
+            'color' => '#112233',
+            'icon_color' => '#FFFFFF',
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+            ],
+            'poi_visual' => [
+                'mode' => 'icon',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+            ],
+        ]);
+
+        $event = Event::query()->create([
+            'title' => 'Visual Event',
+            'slug' => 'visual-event-cover',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Tipo de evento: Show',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'music_note',
+                    'color' => '#112233',
+                    'icon_color' => '#FFFFFF',
+                ],
+            ],
+            'content' => 'Visual content',
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => 'https://tenant-zeta.test/api/v1/media/events/event-cover/cover?v=1',
+                ],
+            ],
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => now()->subMinute()->toISOString(),
+            ],
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        EventOccurrence::query()->create([
+            'event_id' => (string) $event->_id,
+            'occurrence_index' => 0,
+            'occurrence_slug' => 'visual-event-cover-occ-1',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Tipo de evento: Show',
+                'icon' => 'music_note',
+                'color' => '#112233',
+                'icon_color' => '#FFFFFF',
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'music_note',
+                    'color' => '#112233',
+                    'icon_color' => '#FFFFFF',
+                ],
+            ],
+            'starts_at' => now()->addDay(),
+            'is_event_published' => true,
+        ]);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event->fresh());
+        $before = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->assertSame('icon', data_get($before->visual, 'mode'));
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
+            [
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'cover',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.visual.mode', 'image');
+        $response->assertJsonPath('data.visual.image_source', 'cover');
+        $response->assertJsonPath('data.poi_visual.mode', 'image');
+        $response->assertJsonPath('data.poi_visual.image_source', 'cover');
+
+        $updatedEvent = Event::query()->findOrFail($event->_id);
+        $this->assertSame('image', data_get($updatedEvent->type, 'visual.mode'));
+        $this->assertSame('cover', data_get($updatedEvent->type, 'visual.image_source'));
+
+        $after = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->assertSame('image', data_get($after->visual, 'mode'));
+        $this->assertSame(
+            'https://tenant-zeta.test/api/v1/media/events/event-cover/cover?v=1',
+            data_get($after->visual, 'image_uri')
+        );
+        $this->assertSame('item_media', data_get($after->visual, 'source'));
+    }
+
     public function test_event_type_delete_rejects_when_referenced_by_events(): void
     {
         $eventType = EventType::query()->create([
@@ -379,5 +684,28 @@ class EventTypesControllerTest extends TestCaseTenant
             pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
             tenantDomains: ['tenant-zeta.test']
         ));
+    }
+
+    private function getMultipartHeaders(): array
+    {
+        return [
+            ...$this->getHeaders(),
+            'Content-Type' => 'multipart/form-data',
+        ];
+    }
+
+    private function assertTypeAssetStored(string $typeId, string $directory): string
+    {
+        $needle = "/{$directory}/{$typeId}/type_asset.";
+
+        foreach (Storage::disk('public')->allFiles() as $path) {
+            if (str_contains($path, $needle)) {
+                Storage::disk('public')->assertExists($path);
+
+                return $path;
+            }
+        }
+
+        $this->fail("Failed asserting that type asset exists for [{$typeId}] in [{$directory}].");
     }
 }

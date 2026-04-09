@@ -863,6 +863,9 @@ class EventQueryService
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+        $typeVisual = $this->normalizeEventTypeVisual(
+            $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
+        );
 
         $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
@@ -883,6 +886,8 @@ class EventQueryService
                 'name' => $this->scalarString($type['name'] ?? null) ?? '',
                 'slug' => $this->scalarString($type['slug'] ?? null) ?? '',
                 'description' => $this->scalarString($type['description'] ?? null),
+                'visual' => $typeVisual,
+                'poi_visual' => $typeVisual,
                 'icon' => $this->scalarString($type['icon'] ?? null),
                 'color' => $this->scalarString($type['color'] ?? null),
                 'icon_color' => $this->scalarString($type['icon_color'] ?? null),
@@ -939,6 +944,37 @@ class EventQueryService
             'type' => $type ?? 'occurrence.updated',
             'updated_at' => $updatedAt ?? $deletedAt ?? $createdAt ?? Carbon::now()->toISOString(),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $visual
+     * @return array<string, mixed>|null
+     */
+    private function normalizeEventTypeVisual(array $visual): ?array
+    {
+        if ($visual === []) {
+            return null;
+        }
+
+        $mode = $this->scalarString($visual['mode'] ?? null);
+        if ($mode === 'icon') {
+            return [
+                'mode' => 'icon',
+                'icon' => $this->scalarString($visual['icon'] ?? null),
+                'color' => $this->scalarString($visual['color'] ?? null),
+                'icon_color' => $this->scalarString($visual['icon_color'] ?? null),
+            ];
+        }
+
+        if ($mode === 'image') {
+            return [
+                'mode' => 'image',
+                'image_source' => $this->scalarString($visual['image_source'] ?? null),
+                'image_url' => $this->absoluteUrlString($visual['image_url'] ?? null),
+            ];
+        }
+
+        return null;
     }
 
     /**

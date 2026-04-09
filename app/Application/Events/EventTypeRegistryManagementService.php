@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\Events;
 
+use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\EventType;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -16,15 +18,23 @@ class EventTypeRegistryManagementService
 {
     public function __construct(
         private readonly EventTypeRegistryService $registryService,
+        private readonly PoiVisualNormalizer $poiVisualNormalizer,
+        private readonly EventTypeMediaService $mediaService,
     ) {}
 
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function create(array $payload): array
+    public function create(Request $request, array $payload): array
     {
         $entry = $this->buildEntry($payload);
+        $this->ensureTypeAssetRequirements(
+            $entry['visual'] ?? null,
+            $request,
+            null,
+            false,
+        );
 
         if (EventType::query()->where('slug', $entry['slug'])->exists()) {
             throw ValidationException::withMessages([
@@ -46,25 +56,35 @@ class EventTypeRegistryManagementService
             ]);
         }
 
-        return $this->registryService->toPayload($model);
+        $this->mediaService->applyUploads($request, $model);
+        $model = $model->fresh() ?? $model;
+
+        return $this->registryService->toPayload($model, $request->getSchemeAndHttpHost());
     }
 
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function update(string $eventTypeId, array $payload): array
+    public function update(Request $request, string $eventTypeId, array $payload): array
     {
         $model = $this->findModelOrFail($eventTypeId);
 
         $entry = $this->mergeEntry($model, $payload);
-
         $slugChanged = $entry['slug'] !== (string) ($model->slug ?? '');
         if ($slugChanged && EventType::query()->where('slug', $entry['slug'])->exists()) {
             throw ValidationException::withMessages([
                 'slug' => ['Event type slug already exists.'],
             ]);
         }
+
+        $existingTypeAssetUrl = $this->normalizeNullableString($model->type_asset_url ?? null);
+        $this->ensureTypeAssetRequirements(
+            $entry['visual'] ?? null,
+            $request,
+            $existingTypeAssetUrl,
+            $request->boolean('remove_type_asset'),
+        );
 
         try {
             $model->fill($entry);
@@ -80,6 +100,9 @@ class EventTypeRegistryManagementService
                 'event_type' => ['Something went wrong when trying to update the event type.'],
             ]);
         }
+
+        $this->mediaService->applyUploads($request, $model);
+        $model = $model->fresh() ?? $model;
 
         $snapshot = $this->registryService->toPayload($model);
         $eventTypeId = (string) $snapshot['id'];
@@ -111,7 +134,7 @@ class EventTypeRegistryManagementService
             UpsertMapPoiFromEventJob::dispatch($eventId, $jobCheckpoint);
         }
 
-        return $snapshot;
+        return $this->registryService->toPayload($model, $request->getSchemeAndHttpHost());
     }
 
     public function delete(string $eventTypeId): void
@@ -145,13 +168,18 @@ class EventTypeRegistryManagementService
      */
     private function buildEntry(array $payload): array
     {
+        $visual = $this->resolveIncomingVisual($payload);
+        $legacy = $this->legacyFieldsFromVisual($visual);
+
         return [
             'name' => trim((string) ($payload['name'] ?? '')),
             'slug' => trim((string) ($payload['slug'] ?? '')),
             'description' => $this->normalizeNullableString($payload['description'] ?? null),
-            'icon' => $this->normalizeNullableString($payload['icon'] ?? null),
-            'color' => $this->normalizeNullableString($payload['color'] ?? null),
-            'icon_color' => $this->normalizeNullableString($payload['icon_color'] ?? null),
+            'visual' => $visual,
+            'poi_visual' => $visual,
+            'icon' => $legacy['icon'],
+            'color' => $legacy['color'],
+            'icon_color' => $legacy['icon_color'],
         ];
     }
 
@@ -161,6 +189,17 @@ class EventTypeRegistryManagementService
      */
     private function mergeEntry(EventType $existing, array $payload): array
     {
+        $visual = $this->resolveIncomingVisual(
+            $payload,
+            $existing->visual ?? $existing->poi_visual ?? [
+                'mode' => 'icon',
+                'icon' => $existing->icon,
+                'color' => $existing->color,
+                'icon_color' => $existing->icon_color,
+            ],
+        );
+        $legacy = $this->legacyFieldsFromVisual($visual);
+
         return [
             'name' => array_key_exists('name', $payload)
                 ? trim((string) $payload['name'])
@@ -171,16 +210,97 @@ class EventTypeRegistryManagementService
             'description' => array_key_exists('description', $payload)
                 ? $this->normalizeNullableString($payload['description'])
                 : $this->normalizeNullableString($existing->description ?? null),
-            'icon' => array_key_exists('icon', $payload)
-                ? $this->normalizeNullableString($payload['icon'])
-                : $this->normalizeNullableString($existing->icon ?? null),
-            'color' => array_key_exists('color', $payload)
-                ? $this->normalizeNullableString($payload['color'])
-                : $this->normalizeNullableString($existing->color ?? null),
-            'icon_color' => array_key_exists('icon_color', $payload)
-                ? $this->normalizeNullableString($payload['icon_color'])
-                : $this->normalizeNullableString($existing->icon_color ?? null),
+            'visual' => $visual,
+            'poi_visual' => $visual,
+            'icon' => $legacy['icon'],
+            'color' => $legacy['color'],
+            'icon_color' => $legacy['icon_color'],
         ];
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function resolveIncomingVisual(array $payload, mixed $fallback = null): ?array
+    {
+        if (array_key_exists('visual', $payload)) {
+            return $this->poiVisualNormalizer->normalize($payload['visual'] ?? null);
+        }
+
+        if (array_key_exists('poi_visual', $payload)) {
+            return $this->poiVisualNormalizer->normalize($payload['poi_visual'] ?? null);
+        }
+
+        if (
+            array_key_exists('icon', $payload)
+            || array_key_exists('color', $payload)
+            || array_key_exists('icon_color', $payload)
+        ) {
+            $legacyFallback = $this->legacyFieldsFromVisual(
+                $this->poiVisualNormalizer->normalize($fallback)
+            );
+
+            return $this->poiVisualNormalizer->normalize([
+                'mode' => 'icon',
+                'icon' => array_key_exists('icon', $payload)
+                    ? ($payload['icon'] ?? null)
+                    : $legacyFallback['icon'],
+                'color' => array_key_exists('color', $payload)
+                    ? ($payload['color'] ?? null)
+                    : $legacyFallback['color'],
+                'icon_color' => array_key_exists('icon_color', $payload)
+                    ? ($payload['icon_color'] ?? null)
+                    : $legacyFallback['icon_color'],
+            ]);
+        }
+
+        return $this->poiVisualNormalizer->normalize($fallback);
+    }
+
+    /**
+     * @param  array<string, string>|null  $visual
+     * @return array{icon: ?string, color: ?string, icon_color: ?string}
+     */
+    private function legacyFieldsFromVisual(?array $visual): array
+    {
+        if (! is_array($visual) || ($visual['mode'] ?? null) !== 'icon') {
+            return [
+                'icon' => null,
+                'color' => null,
+                'icon_color' => null,
+            ];
+        }
+
+        return [
+            'icon' => $this->normalizeNullableString($visual['icon'] ?? null),
+            'color' => $this->normalizeNullableString($visual['color'] ?? null),
+            'icon_color' => $this->normalizeNullableString($visual['icon_color'] ?? null),
+        ];
+    }
+
+    private function ensureTypeAssetRequirements(
+        ?array $visual,
+        Request $request,
+        ?string $existingTypeAssetUrl,
+        bool $removeTypeAsset,
+    ): void {
+        if (! is_array($visual)) {
+            return;
+        }
+
+        if (($visual['mode'] ?? null) !== 'image' || ($visual['image_source'] ?? null) !== 'type_asset') {
+            return;
+        }
+
+        $hasUpload = $request->hasFile('type_asset');
+        $hasExisting = $existingTypeAssetUrl !== null && ! $removeTypeAsset;
+        if ($hasUpload || $hasExisting) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'type_asset' => ['Type asset image is required when image_source is type_asset.'],
+        ]);
     }
 
     private function normalizeNullableString(mixed $value): ?string

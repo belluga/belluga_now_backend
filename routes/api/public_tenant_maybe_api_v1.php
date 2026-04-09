@@ -5,6 +5,7 @@ use App\Http\Api\v1\Controllers\AccountProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\EnvironmentController;
+use App\Http\Api\v1\Controllers\EventTypeMediaController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
@@ -30,6 +31,10 @@ Route::middleware('tenant')->group(function () {
     Route::get(
         '/media/account-profile-types/{account_profile_type_id}/type_asset',
         [AccountProfileTypeMediaController::class, 'typeAsset']
+    );
+    Route::get(
+        '/media/event-types/{event_type_id}/type_asset',
+        [EventTypeMediaController::class, 'typeAsset']
     );
     Route::get(
         '/media/static-assets/{static_asset_id}/avatar',
