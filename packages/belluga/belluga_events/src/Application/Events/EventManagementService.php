@@ -617,6 +617,9 @@ class EventManagementService
             'name' => $name,
             'slug' => $slug,
             'description' => $description === '' ? null : $description,
+            'visual' => is_array($resolved['visual'] ?? null)
+                ? $resolved['visual']
+                : (is_array($resolved['poi_visual'] ?? null) ? $resolved['poi_visual'] : null),
             'icon' => $resolved['icon'] ?? null,
             'color' => $resolved['color'] ?? null,
             'icon_color' => $resolved['icon_color'] ?? null,

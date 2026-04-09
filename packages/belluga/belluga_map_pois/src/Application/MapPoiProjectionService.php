@@ -566,6 +566,21 @@ class MapPoiProjectionService
     private function resolveEventProjectionVisual(object $event): ?array
     {
         $type = $this->normalizeArray($event->type ?? null);
+        $thumb = $this->normalizeArray($event->thumb ?? null);
+        $thumbData = $this->normalizeArray($thumb['data'] ?? null);
+        $poiVisual = $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null);
+
+        if ($poiVisual !== []) {
+            $resolved = $this->resolveProjectionVisual(
+                $poiVisual,
+                null,
+                $thumbData['url'] ?? null,
+            );
+            if ($resolved !== null) {
+                return $resolved;
+            }
+        }
+
         $icon = trim((string) ($type['icon'] ?? ''));
         $color = $this->normalizeHexColor($type['color'] ?? null);
         $iconColor = $this->normalizeHexColor($type['icon_color'] ?? '#FFFFFF');
