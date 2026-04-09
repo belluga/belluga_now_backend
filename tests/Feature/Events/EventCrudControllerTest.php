@@ -1916,6 +1916,54 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('type_definition', data_get($projection->visual, 'source'));
     }
 
+    public function test_event_create_projects_map_poi_with_event_type_type_asset_visual(): void
+    {
+        $this->eventType->fill([
+            'visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+                'image_url' => 'https://tenant-zeta.test/api/v1/media/event-types/type-1/type_asset?v=5',
+            ],
+            'poi_visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+                'image_url' => 'https://tenant-zeta.test/api/v1/media/event-types/type-1/type_asset?v=5',
+            ],
+            'type_asset_url' => 'https://tenant-zeta.test/api/v1/media/event-types/type-1/type_asset?v=5',
+            'icon' => null,
+            'color' => null,
+            'icon_color' => null,
+        ])->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $response->assertStatus(201);
+
+        $eventId = (string) $response->json('data.event_id');
+        $event = Event::query()->find($eventId);
+        $this->assertNotNull($event);
+        $this->assertSame('image', data_get($event->type, 'visual.mode'));
+        $this->assertSame('type_asset', data_get($event->type, 'visual.image_source'));
+        $this->assertSame(
+            'https://tenant-zeta.test/api/v1/media/event-types/type-1/type_asset?v=5',
+            data_get($event->type, 'visual.image_url')
+        );
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'event')
+            ->where('ref_id', $eventId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame('image', data_get($projection->visual, 'mode'));
+        $this->assertSame(
+            'https://tenant-zeta.test/api/v1/media/event-types/type-1/type_asset?v=5',
+            data_get($projection->visual, 'image_uri')
+        );
+        $this->assertSame('type_definition', data_get($projection->visual, 'source'));
+    }
+
     public function test_event_create_online_supports_range_discovery_scope_for_map_poi_projection(): void
     {
         $this->patchEventsSettings([
