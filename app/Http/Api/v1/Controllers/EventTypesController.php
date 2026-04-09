@@ -28,7 +28,7 @@ class EventTypesController extends Controller
 
     public function store(EventTypeStoreRequest $request): JsonResponse
     {
-        $entry = $this->managementService->create($request->validated());
+        $entry = $this->managementService->create($request, $request->validated());
 
         return response()->json(['data' => $entry], 201);
     }
@@ -36,7 +36,7 @@ class EventTypesController extends Controller
     public function update(EventTypeUpdateRequest $request): JsonResponse
     {
         $eventTypeId = (string) $request->route('event_type', '');
-        $entry = $this->managementService->update($eventTypeId, $request->validated());
+        $entry = $this->managementService->update($request, $eventTypeId, $request->validated());
 
         return response()->json(['data' => $entry]);
     }

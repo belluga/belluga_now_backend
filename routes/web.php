@@ -3,6 +3,7 @@
 use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\AccountProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\BrandingController;
+use App\Http\Api\v1\Controllers\EventTypeMediaController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
 use App\Http\Api\v1\Controllers\StaticAssetMediaController;
 use App\Http\Api\v1\Controllers\StaticProfileTypeMediaController;
@@ -31,6 +32,7 @@ Route::middleware('tenant-maybe')->group(function () {
     Route::get('/account-profile-types/{account_profile_type}/type_asset', [AccountProfileTypeMediaController::class, 'typeAsset']);
     Route::get('/static-assets/{static_asset}/avatar', [StaticAssetMediaController::class, 'avatar']);
     Route::get('/static-assets/{static_asset}/cover', [StaticAssetMediaController::class, 'cover']);
+    Route::get('/event-types/{event_type}/type_asset', [EventTypeMediaController::class, 'typeAsset']);
     Route::get('/static-profile-types/{static_profile_type}/type_asset', [StaticProfileTypeMediaController::class, 'typeAsset']);
     Route::get('/events/{event}/cover', [EventMediaController::class, 'cover']);
     Route::get('/map-filters/{key}/image', [MapFilterImageMediaController::class, 'show']);
