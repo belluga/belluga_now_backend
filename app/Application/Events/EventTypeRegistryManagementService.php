@@ -236,11 +236,21 @@ class EventTypeRegistryManagementService
             || array_key_exists('color', $payload)
             || array_key_exists('icon_color', $payload)
         ) {
+            $legacyFallback = $this->legacyFieldsFromVisual(
+                $this->poiVisualNormalizer->normalize($fallback)
+            );
+
             return $this->poiVisualNormalizer->normalize([
                 'mode' => 'icon',
-                'icon' => $payload['icon'] ?? null,
-                'color' => $payload['color'] ?? null,
-                'icon_color' => $payload['icon_color'] ?? null,
+                'icon' => array_key_exists('icon', $payload)
+                    ? ($payload['icon'] ?? null)
+                    : $legacyFallback['icon'],
+                'color' => array_key_exists('color', $payload)
+                    ? ($payload['color'] ?? null)
+                    : $legacyFallback['color'],
+                'icon_color' => array_key_exists('icon_color', $payload)
+                    ? ($payload['icon_color'] ?? null)
+                    : $legacyFallback['icon_color'],
             ]);
         }
 
