@@ -30,5 +30,15 @@ interface MapPoiSourceReaderContract
     /**
      * @return iterable<string>
      */
+    public function allTrashedAccountProfileIds(?\DateTimeInterface $deletedSince = null): iterable;
+
+    /**
+     * @return iterable<string>
+     */
     public function allStaticAssetIds(): iterable;
+
+    /**
+     * @return iterable<string>
+     */
+    public function allTrashedStaticAssetIds(?\DateTimeInterface $deletedSince = null): iterable;
 }

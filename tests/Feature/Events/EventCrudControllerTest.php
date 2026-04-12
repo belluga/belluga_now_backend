@@ -766,7 +766,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $summary->assertJsonPath('data.unchanged', 1);
     }
 
-
     public function test_event_create_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
@@ -1624,7 +1623,6 @@ class EventCrudControllerTest extends TestCaseTenant
             collect($archivedPublishedResponse->json('data'))->pluck('title')->values()->all()
         );
     }
-
 
     public function test_event_update_changes_fields(): void
     {
