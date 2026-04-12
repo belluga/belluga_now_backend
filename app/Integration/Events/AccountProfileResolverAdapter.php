@@ -232,7 +232,8 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      */
     private function queryRelatedAccountProfileCandidates(?string $likePattern): Builder
     {
-        $query = AccountProfile::query();
+        $query = AccountProfile::query()
+            ->where('profile_type', '!=', 'venue');
 
         if ($likePattern !== null) {
             $query->where(static function ($builder) use ($likePattern): void {

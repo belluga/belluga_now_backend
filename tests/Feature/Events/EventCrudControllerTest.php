@@ -191,6 +191,18 @@ class EventCrudControllerTest extends TestCaseTenant
         $publicResponse->assertStatus(200);
         $publicResponse->assertJsonPath('data.artists.0.profile_type', (string) $this->band->profile_type);
         $publicResponse->assertJsonPath('data.artists.0.slug', (string) $this->band->slug);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $adminResponse = $this->getJson($this->tenantAdminEventsBase);
+        $adminResponse->assertStatus(200);
+        $adminEvent = collect($adminResponse->json('data') ?? [])
+            ->firstWhere('event_id', (string) $stored->_id);
+        $this->assertIsArray($adminEvent);
+        $this->assertArrayNotHasKey('artists', $adminEvent);
+        $this->assertSame((string) $this->band->profile_type, data_get($adminEvent, 'linked_account_profiles.0.profile_type'));
+        $this->assertSame((string) $this->band->slug, data_get($adminEvent, 'linked_account_profiles.0.slug'));
     }
 
     public function test_event_create_stores_cover_upload_and_exposes_media_url(): void
@@ -284,53 +296,297 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type.id']);
     }
 
-    public function test_events_index_supports_text_search_query_param(): void
+    public function test_event_index_filters_by_venue_profile_id(): void
     {
-        $matching = $this->postJson(
-            $this->accountEventsBase,
-            $this->makeEventPayload([
-                'title' => 'Noite Solar Search Match',
-            ])
-        );
-        $matching->assertStatus(201);
-        $matchingId = (string) $matching->json('data.event_id');
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
 
-        $other = $this->postJson(
-            $this->accountEventsBase,
-            $this->makeEventPayload([
-                'title' => 'Evento Aleatorio Sem Match',
-            ])
-        );
-        $other->assertStatus(201);
-        $otherId = (string) $other->json('data.event_id');
+        $secondaryVenue = $this->createAccountProfile('venue', 'Secondary Venue');
 
-        $response = $this->getJson("{$this->accountEventsBase}?search=Solar&page=1&page_size=10");
+        $this->createEvent([
+            'title' => 'Main Venue Filter Match',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+            'venue' => [
+                'id' => (string) $this->venue->_id,
+                'display_name' => $this->venue->display_name,
+                'tagline' => null,
+                'hero_image_url' => null,
+                'logo_url' => null,
+                'taxonomy_terms' => [],
+            ],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Secondary Venue Filter Miss',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $secondaryVenue->_id,
+            ],
+            'venue' => [
+                'id' => (string) $secondaryVenue->_id,
+                'display_name' => $secondaryVenue->display_name,
+                'tagline' => null,
+                'hero_image_url' => null,
+                'logo_url' => null,
+                'taxonomy_terms' => [],
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?venue_profile_id={$this->venue->_id}"
+        );
 
         $response->assertStatus(200);
-        $ids = collect($response->json('data') ?? [])
-            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
-            ->all();
+        $this->assertSame(
+            ['Main Venue Filter Match'],
+            collect($response->json('data'))->pluck('title')->values()->all()
+        );
+    }
 
-        $this->assertContains($matchingId, $ids);
-        $this->assertNotContains($otherId, $ids);
+    public function test_event_index_filters_by_related_account_profile_id_without_matching_venue_semantics(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
 
-        $partialResponse = $this->getJson("{$this->accountEventsBase}?search=Sola&page=1&page_size=10");
-        $partialResponse->assertStatus(200);
-        $partialIds = collect($partialResponse->json('data') ?? [])
-            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
-            ->all();
+        $this->createEvent([
+            'title' => 'Band Related Filter Match',
+            'event_parties' => [
+                [
+                    'party_type' => (string) $this->band->profile_type,
+                    'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                        'slug' => (string) $this->band->slug,
+                        'profile_type' => (string) $this->band->profile_type,
+                        'avatar_url' => $this->band->avatar_url,
+                        'cover_url' => $this->band->cover_url,
+                        'taxonomy_terms' => is_array($this->band->taxonomy_terms ?? null)
+                            ? $this->band->taxonomy_terms
+                            : [],
+                    ],
+                ],
+            ],
+        ]);
 
-        $this->assertContains($matchingId, $partialIds);
-        $this->assertNotContains($otherId, $partialIds);
+        $this->createEvent([
+            'title' => 'Band Venue-shaped Filter Miss',
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                        'slug' => (string) $this->band->slug,
+                        'profile_type' => (string) $this->band->profile_type,
+                    ],
+                ],
+            ],
+        ]);
 
-        $containsResponse = $this->getJson("{$this->accountEventsBase}?search=olar&page=1&page_size=10");
-        $containsResponse->assertStatus(200);
-        $containsIds = collect($containsResponse->json('data') ?? [])
-            ->map(static fn (array $item): string => (string) ($item['event_id'] ?? ''))
-            ->all();
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?related_account_profile_id={$this->band->_id}"
+        );
 
-        $this->assertContains($matchingId, $containsIds);
-        $this->assertNotContains($otherId, $containsIds);
+        $response->assertStatus(200);
+        $this->assertSame(
+            ['Band Related Filter Match'],
+            collect($response->json('data'))->pluck('title')->values()->all()
+        );
+    }
+
+    public function test_event_index_filters_by_specific_date(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $targetDate = Carbon::now()->startOfDay()->addDays(3)->setHour(20);
+
+        $this->createEvent([
+            'title' => 'Specific Date Match',
+            'date_time_start' => $targetDate,
+            'date_time_end' => $targetDate->copy()->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Specific Date Miss',
+            'date_time_start' => $targetDate->copy()->addDay(),
+            'date_time_end' => $targetDate->copy()->addDay()->addHours(2),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?date={$targetDate->toDateString()}"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            ['Specific Date Match'],
+            collect($response->json('data'))->pluck('title')->values()->all()
+        );
+    }
+
+    public function test_event_index_rejects_legacy_search_query_param(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?search=legacy"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['search']);
+    }
+
+    public function test_event_index_rejects_page_size_above_safe_maximum(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $this->createEvent([
+            'title' => 'Page Size Clamp Event',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?page=1&page_size=999"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page_size']);
+    }
+
+    public function test_event_index_uses_stable_tie_break_order_for_matching_start_times(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $sharedStart = Carbon::now()->startOfDay()->addDays(7)->setHour(20);
+
+        $older = $this->createEvent([
+            'title' => 'Same Start Older',
+            'date_time_start' => $sharedStart,
+            'date_time_end' => $sharedStart->copy()->addHours(2),
+        ]);
+
+        $newer = $this->createEvent([
+            'title' => 'Same Start Newer',
+            'date_time_start' => $sharedStart,
+            'date_time_end' => $sharedStart->copy()->addHours(2),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?page=1&page_size=100"
+        );
+
+        $response->assertStatus(200);
+        $eventIds = collect($response->json('data'))
+            ->pluck('event_id')
+            ->values();
+        $newerIndex = $eventIds->search((string) $newer->_id);
+        $olderIndex = $eventIds->search((string) $older->_id);
+
+        $this->assertNotFalse($newerIndex);
+        $this->assertNotFalse($olderIndex);
+        $this->assertLessThan($olderIndex, $newerIndex);
+    }
+
+    public function test_event_index_composes_specific_date_temporal_and_profile_filters(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $targetDate = Carbon::now()->startOfDay()->addDays(5)->setHour(21);
+        $secondaryVenue = $this->createAccountProfile('venue', 'Secondary Venue');
+
+        $this->createEvent([
+            'title' => 'Composed Date Filter Match',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => (string) $this->band->profile_type,
+                    'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                        'slug' => (string) $this->band->slug,
+                        'profile_type' => (string) $this->band->profile_type,
+                    ],
+                ],
+            ],
+            'date_time_start' => $targetDate,
+            'date_time_end' => $targetDate->copy()->addHours(3),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Composed Date Wrong Day Miss',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => (string) $this->band->profile_type,
+                    'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                        'slug' => (string) $this->band->slug,
+                        'profile_type' => (string) $this->band->profile_type,
+                    ],
+                ],
+            ],
+            'date_time_start' => $targetDate->copy()->addDay(),
+            'date_time_end' => $targetDate->copy()->addDay()->addHours(3),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Composed Date Wrong Related Miss',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+            'date_time_start' => $targetDate,
+            'date_time_end' => $targetDate->copy()->addHours(3),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Composed Date Wrong Venue Miss',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $secondaryVenue->_id,
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => (string) $this->band->profile_type,
+                    'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                        'slug' => (string) $this->band->slug,
+                        'profile_type' => (string) $this->band->profile_type,
+                    ],
+                ],
+            ],
+            'date_time_start' => $targetDate,
+            'date_time_end' => $targetDate->copy()->addHours(3),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?date={$targetDate->toDateString()}&temporal=future&venue_profile_id={$this->venue->_id}&related_account_profile_id={$this->band->_id}"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            ['Composed Date Filter Match'],
+            collect($response->json('data'))->pluck('title')->values()->all()
+        );
     }
 
     public function test_event_account_profile_candidates_endpoint_allows_read_create_or_update_ability_and_returns_filtered_candidates(): void
@@ -385,6 +641,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonCount(2, 'data');
         $response->assertJsonPath('data.0.display_name', 'Zulu Collective 101');
         $response->assertJsonPath('data.1.display_name', 'Zulu Collective 102');
+    }
+
+    public function test_event_account_profile_candidates_endpoint_excludes_canonical_venue_profiles_from_related_results(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $venue = $this->createAccountProfile('venue', 'Selector Shared Venue');
+        $artist = $this->createAccountProfile('artist', 'Selector Shared Artist');
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&search=selector%20shared"
+        );
+
+        $response->assertStatus(200);
+
+        $candidates = collect($response->json('data') ?? []);
+        $candidateIds = $candidates->pluck('id')->values()->all();
+
+        $this->assertContains((string) $artist->_id, $candidateIds);
+        $this->assertNotContains((string) $venue->_id, $candidateIds);
     }
 
     public function test_event_account_profile_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
@@ -1081,6 +1358,68 @@ class EventCrudControllerTest extends TestCaseTenant
             ['Past Event'],
             collect($pastResponse->json('data'))->pluck('title')->values()->all()
         );
+    }
+
+    public function test_event_index_temporal_filter_uses_default_duration_when_end_is_missing(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        Carbon::setTestNow(Carbon::parse('2026-05-01T12:00:00Z'));
+        $now = Carbon::now();
+
+        $this->createEvent([
+            'title' => 'Past Null-End Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->subHours(5),
+            'date_time_end' => null,
+        ]);
+
+        $this->createEvent([
+            'title' => 'Live Null-End Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->subHour(),
+            'date_time_end' => null,
+        ]);
+
+        $this->createEvent([
+            'title' => 'Future Null-End Event',
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subDay(),
+            ],
+            'date_time_start' => $now->copy()->addHours(2),
+            'date_time_end' => null,
+        ]);
+
+        $nowResponse = $this->getJson("{$this->tenantAdminEventsBase}?temporal=now");
+        $nowResponse->assertStatus(200);
+        $this->assertSame(
+            ['Live Null-End Event'],
+            collect($nowResponse->json('data'))->pluck('title')->values()->all()
+        );
+
+        $pastResponse = $this->getJson("{$this->tenantAdminEventsBase}?temporal=past");
+        $pastResponse->assertStatus(200);
+        $this->assertSame(
+            ['Past Null-End Event'],
+            collect($pastResponse->json('data'))->pluck('title')->values()->all()
+        );
+
+        $futureResponse = $this->getJson("{$this->tenantAdminEventsBase}?temporal=future");
+        $futureResponse->assertStatus(200);
+        $this->assertSame(
+            ['Future Null-End Event'],
+            collect($futureResponse->json('data'))->pluck('title')->values()->all()
+        );
+
+        Carbon::setTestNow();
     }
 
     public function test_event_index_temporal_filter_is_independent_from_archived_dimension(): void

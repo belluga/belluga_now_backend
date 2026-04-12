@@ -11,6 +11,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class DomainController extends Controller
 {
@@ -18,6 +19,25 @@ class DomainController extends Controller
         private readonly TenantDomainManagementService $domainService,
         private readonly TelemetryEmitter $telemetry
     ) {}
+
+    public function index(Request $request): JsonResponse
+    {
+        $tenant = Tenant::resolve();
+        $page = (int) $request->get('page', 1) ?: 1;
+        $perPage = (int) $request->get('per_page', 15) ?: 15;
+        $paginator = $this->domainService->list($tenant, $page, $perPage);
+
+        return response()->json([
+            'data' => $paginator->getCollection()
+                ->map(fn (Domains $domain): array => $this->transform($domain))
+                ->values()
+                ->all(),
+            'total' => $paginator->total(),
+            'per_page' => $paginator->perPage(),
+            'current_page' => $paginator->currentPage(),
+            'last_page' => $paginator->lastPage(),
+        ]);
+    }
 
     public function store(DomainStoreRequest $request): JsonResponse
     {
@@ -123,6 +143,7 @@ class DomainController extends Controller
             'id' => (string) $domain->_id,
             'path' => $domain->path,
             'type' => $domain->type,
+            'status' => $domain->trashed() ? 'deleted' : 'active',
             'created_at' => $domain->created_at?->toJSON(),
             'updated_at' => $domain->updated_at?->toJSON(),
             'deleted_at' => $domain->deleted_at?->toJSON(),

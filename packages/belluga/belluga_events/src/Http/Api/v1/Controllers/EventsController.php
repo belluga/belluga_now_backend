@@ -34,13 +34,14 @@ class EventsController extends Controller
 
     public function index(EventIndexRequest $request): JsonResponse
     {
-        $perPage = (int) ($request->get('page_size') ?? 15);
-        $perPage = $perPage > 0 ? $perPage : 15;
+        $validated = $request->validated();
+        $perPage = isset($validated['page_size']) ? (int) $validated['page_size'] : 15;
+        $perPage = max(1, min($perPage, 100));
         $accountContextId = $this->resolveAccountFromRoute($request);
         $isAdmin = $this->isAdminContext($request);
 
         $paginator = $this->eventQueryService->paginateManagement(
-            $request->query(),
+            $validated,
             $request->boolean('archived'),
             $perPage,
             $isAdmin,
