@@ -43,14 +43,22 @@ Route::get('/me', [MeController::class, 'landlord'])
     ->middleware(['auth:sanctum']);
 
 Route::prefix('domains')
+    ->middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
-        Route::post('/', [DomainController::class, 'store']);
+        Route::get('/', [DomainController::class, 'index'])
+            ->middleware(['abilities:tenant-domains:read']);
 
-        Route::delete('/{domain_id}', [DomainController::class, 'destroy']);
+        Route::post('/', [DomainController::class, 'store'])
+            ->middleware(['abilities:tenant-domains:update']);
 
-        Route::post('/{domain_id}/restore', [DomainController::class, 'restore']);
+        Route::delete('/{domain_id}', [DomainController::class, 'destroy'])
+            ->middleware(['abilities:tenant-domains:update']);
 
-        Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy']);
+        Route::post('/{domain_id}/restore', [DomainController::class, 'restore'])
+            ->middleware(['abilities:tenant-domains:update']);
+
+        Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy'])
+            ->middleware(['abilities:tenant-domains:update']);
     });
 
 Route::prefix('appdomains')
