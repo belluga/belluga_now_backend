@@ -319,14 +319,26 @@ class EventQueryService
             $lat = (float) $coordinates[1];
         }
 
+        $resolvedOccurrences = $this->resolveEventOccurrences($event);
         $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'));
         $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'));
-        $occurrences = $dateTimeStart === null ? [] : [[
-            'occurrence_id' => null,
-            'occurrence_slug' => null,
-            'date_time_start' => $dateTimeStart,
-            'date_time_end' => $dateTimeEnd,
-        ]];
+        if (count($resolvedOccurrences) > 1) {
+            $occurrences = $resolvedOccurrences;
+            $dateTimeStart ??= $resolvedOccurrences[0]['date_time_start'] ?? null;
+            $dateTimeEnd ??= $resolvedOccurrences[0]['date_time_end'] ?? null;
+        } elseif ($dateTimeStart !== null) {
+            $occurrences = [[
+                'occurrence_id' => null,
+                'occurrence_slug' => null,
+                'date_time_start' => $dateTimeStart,
+                'date_time_end' => $dateTimeEnd,
+            ]];
+        } else {
+            $occurrences = $resolvedOccurrences;
+            $dateTimeStart = $resolvedOccurrences[0]['date_time_start'] ?? null;
+            $dateTimeEnd = $resolvedOccurrences[0]['date_time_end'] ?? null;
+        }
+        $createdBy = $this->normalizeArray($event->created_by ?? []);
 
         return [
             'event_id' => isset($event->_id) ? (string) $event->_id : '',
@@ -354,8 +366,13 @@ class EventQueryService
             'date_time_start' => $dateTimeStart,
             'date_time_end' => $dateTimeEnd,
             'occurrences' => $occurrences,
+            'created_by' => [
+                'type' => $this->scalarString($createdBy['type'] ?? null) ?? '',
+                'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
+            ],
             'event_parties' => $eventParties,
             'linked_account_profiles' => $linkedAccountProfiles,
+            'capabilities' => $this->resolveEventCapabilities($event),
             'taxonomy_terms' => $taxonomyTerms,
             'publication' => [
                 'status' => $this->scalarString($publication['status'] ?? null) ?? 'draft',

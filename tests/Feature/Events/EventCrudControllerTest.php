@@ -772,15 +772,26 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_account_events_account_profile_candidates_endpoint_uses_account_auth_boundary(): void
     {
+        $foreignVenueIds = collect();
+        foreach (range(1, 20) as $index) {
+            $foreignVenueIds->push((string) $this->createAccountProfile(
+                'venue',
+                sprintf('Main Decoy Venue %03d', $index)
+            )->_id);
+        }
+
         Sanctum::actingAs($this->user, ['events:create']);
 
         $response = $this->getJson("{$this->accountEventsBase}/account_profile_candidates?type=physical_host&search=main");
 
         $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data');
 
         $venues = collect($response->json('data') ?? []);
         $matchedVenue = $venues->firstWhere('id', (string) $this->venue->_id);
         $this->assertNotNull($matchedVenue);
+        $this->assertSame((string) $this->account->_id, data_get($matchedVenue, 'account_id'));
+        $this->assertSame([], $venues->pluck('id')->intersect($foreignVenueIds)->values()->all());
     }
 
     public function test_account_events_account_profile_candidates_endpoint_paginates_related_account_profiles_beyond_one_hundred_results(): void

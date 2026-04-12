@@ -149,7 +149,8 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         string $candidateType,
         ?string $search = null,
         int $page = 1,
-        int $perPage = 15
+        int $perPage = 15,
+        ?string $accountId = null
     ): LengthAwarePaginator
     {
         $normalizedPage = max(1, $page);
@@ -160,10 +161,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             : '%'.addcslashes($normalizedSearch, '%_\\').'%';
 
         $query = match ($candidateType) {
-            'related_account_profile' => $this->queryRelatedAccountProfileCandidates($likePattern),
+            'related_account_profile' => $this->queryRelatedAccountProfileCandidates($likePattern, $accountId),
             'physical_host' => $this->queryPhysicalHostCandidates(
                 $this->resolvePoiEnabledProfileTypes(),
-                $likePattern
+                $likePattern,
+                $accountId
             ),
             default => throw ValidationException::withMessages([
                 'type' => ['Unsupported account profile candidate type.'],
@@ -206,7 +208,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @param  array<int, string>  $profileTypes
      */
-    private function queryPhysicalHostCandidates(array $profileTypes, ?string $likePattern): Builder
+    private function queryPhysicalHostCandidates(
+        array $profileTypes,
+        ?string $likePattern,
+        ?string $accountId
+    ): Builder
     {
         if ($profileTypes === []) {
             return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
@@ -216,6 +222,10 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ->whereIn('profile_type', $profileTypes)
             ->whereNotNull('location.coordinates.0')
             ->whereNotNull('location.coordinates.1');
+
+        if ($accountId !== null) {
+            $query->where('account_id', $accountId);
+        }
 
         if ($likePattern !== null) {
             $query->where(static function ($builder) use ($likePattern): void {
@@ -230,10 +240,14 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @return Builder<AccountProfile>
      */
-    private function queryRelatedAccountProfileCandidates(?string $likePattern): Builder
+    private function queryRelatedAccountProfileCandidates(?string $likePattern, ?string $accountId): Builder
     {
         $query = AccountProfile::query()
             ->where('profile_type', '!=', 'venue');
+
+        if ($accountId !== null) {
+            $query->where('account_id', $accountId);
+        }
 
         if ($likePattern !== null) {
             $query->where(static function ($builder) use ($likePattern): void {
