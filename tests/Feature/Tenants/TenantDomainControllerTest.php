@@ -78,6 +78,29 @@ class TenantDomainControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.status', 'active');
     }
 
+    public function test_store_persists_domain_in_the_same_web_domain_source_used_for_tenant_resolution(): void
+    {
+        $domainPath = 'tenantkappa-route-check.test';
+
+        $storeResponse = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
+            'path' => $domainPath,
+        ]);
+
+        $storeResponse->assertCreated();
+
+        $environmentResponse = $this->getJson("http://{$domainPath}/api/v1/environment");
+
+        $environmentResponse->assertOk();
+        $environmentResponse->assertJsonPath('type', 'tenant');
+        $environmentResponse->assertJsonPath('subdomain', $this->tenantModel->subdomain);
+        $environmentResponse->assertJsonPath('domains.0', 'tenantkappa.test');
+        $this->assertContains($domainPath, $environmentResponse->json('domains', []));
+        $this->assertSame(
+            $domainPath,
+            parse_url((string) $environmentResponse->json('main_domain'), PHP_URL_HOST)
+        );
+    }
+
     public function test_store_rejects_duplicate_domain_for_same_tenant(): void
     {
         $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
