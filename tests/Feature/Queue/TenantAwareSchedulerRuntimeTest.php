@@ -7,6 +7,7 @@ namespace Tests\Feature\Queue;
 use App\Models\Landlord\Tenant;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Carbon;
@@ -32,6 +33,31 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
 
         $this->assertPublishedStatus($primaryTenant, $primaryEventId);
         $this->assertPublishedStatus($secondaryTenant, $secondaryEventId);
+    }
+
+    public function test_map_poi_orphan_cleanup_schedule_dispatches_expected_job_payload_for_each_tenant(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $processedJobs = $this->captureProcessedTenantJobsForJob(
+            CleanupOrphanedMapPoisJob::class,
+            fn () => $this->runScheduledCallbackByName('map_pois:cleanup_orphaned')
+        );
+
+        $this->assertCount(2, $processedJobs);
+        $this->assertEqualsCanonicalizing(
+            [
+                (string) $primaryTenant->getAttribute('_id'),
+                (string) $secondaryTenant->getAttribute('_id'),
+            ],
+            array_column($processedJobs, 'tenant_id')
+        );
+
+        foreach ($processedJobs as $processedJob) {
+            $this->assertSame(['account_profile', 'static'], $processedJob['job']->refTypes());
+            $this->assertSame(60, $processedJob['job']->deletedSinceMinutes());
+        }
     }
 
     private function runScheduledCallbackByName(string $name): void
@@ -72,6 +98,48 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
         $runner();
 
         return array_values(array_unique($tenantIds));
+    }
+
+    /**
+     * @return array<int, array{tenant_id: string, job: CleanupOrphanedMapPoisJob}>
+     */
+    private function captureProcessedTenantJobsForJob(string $jobClass, callable $runner): array
+    {
+        $processedJobs = [];
+
+        $this->app['events']->listen(JobProcessing::class, static function (JobProcessing $event) use (&$processedJobs, $jobClass): void {
+            $payload = $event->job->payload();
+            $displayName = (string) ($payload['displayName'] ?? '');
+            $commandName = (string) ($payload['data']['commandName'] ?? '');
+
+            if ($displayName !== $jobClass && $commandName !== $jobClass) {
+                return;
+            }
+
+            $tenantId = (string) (Tenant::current()?->getAttribute('_id') ?? '');
+            if ($tenantId === '') {
+                return;
+            }
+
+            $command = $payload['data']['command'] ?? null;
+            if (! is_string($command)) {
+                return;
+            }
+
+            $job = unserialize($command);
+            if (! $job instanceof $jobClass) {
+                return;
+            }
+
+            $processedJobs[] = [
+                'tenant_id' => $tenantId,
+                'job' => $job,
+            ];
+        });
+
+        $runner();
+
+        return $processedJobs;
     }
 
     private function createScheduledPublishEvent(Tenant $tenant, string $suffix): string

@@ -27,6 +27,22 @@ class MapPoiProjectionService
         $query->delete();
     }
 
+    /**
+     * @param  array<int, string>  $refIds
+     */
+    public function deleteByRefs(string $refType, array $refIds): void
+    {
+        [$stringRefIds, $objectRefIds] = $this->buildRefIdAlternativeSets($refIds);
+        if ($stringRefIds === [] && $objectRefIds === []) {
+            return;
+        }
+
+        $query = MapPoi::query()
+            ->where('ref_type', $refType);
+        $this->applyRefIdAlternativesConstraint($query, $stringRefIds, $objectRefIds);
+        $query->delete();
+    }
+
     public function upsertFromAccountProfile(object $profile, ?int $forcedCheckpoint = null): void
     {
         if (! $profile->profile_type) {
@@ -322,10 +338,33 @@ class MapPoiProjectionService
     {
         [$stringRefId, $objectRefId] = $this->buildRefIdAlternatives($refId);
 
-        $query->where(function ($nested) use ($stringRefId, $objectRefId): void {
-            $nested->where('ref_id', $stringRefId);
-            if ($objectRefId !== null) {
-                $nested->orWhere('ref_id', $objectRefId);
+        $this->applyRefIdAlternativesConstraint(
+            $query,
+            $stringRefId === '' ? [] : [$stringRefId],
+            $objectRefId === null ? [] : [$objectRefId]
+        );
+    }
+
+    /**
+     * @param  array<int, string>  $stringRefIds
+     * @param  array<int, ObjectId>  $objectRefIds
+     * @param  mixed  $query
+     */
+    private function applyRefIdAlternativesConstraint($query, array $stringRefIds, array $objectRefIds): void
+    {
+        $query->where(function ($nested) use ($stringRefIds, $objectRefIds): void {
+            if ($stringRefIds !== []) {
+                $nested->whereIn('ref_id', $stringRefIds);
+            }
+
+            if ($objectRefIds !== []) {
+                if ($stringRefIds !== []) {
+                    $nested->orWhereIn('ref_id', $objectRefIds);
+
+                    return;
+                }
+
+                $nested->whereIn('ref_id', $objectRefIds);
             }
         });
     }
@@ -349,6 +388,32 @@ class MapPoiProjectionService
         } catch (\Throwable) {
             return [$stringRefId, null];
         }
+    }
+
+    /**
+     * @param  array<int, string>  $refIds
+     * @return array{0: array<int, string>, 1: array<int, ObjectId>}
+     */
+    private function buildRefIdAlternativeSets(array $refIds): array
+    {
+        $stringRefIds = [];
+        $objectRefIds = [];
+
+        foreach ($refIds as $refId) {
+            [$stringRefId, $objectRefId] = $this->buildRefIdAlternatives($refId);
+            if ($stringRefId !== '') {
+                $stringRefIds[$stringRefId] = $stringRefId;
+            }
+
+            if ($objectRefId !== null) {
+                $objectRefIds[(string) $objectRefId] = $objectRefId;
+            }
+        }
+
+        return [
+            array_values($stringRefIds),
+            array_values($objectRefIds),
+        ];
     }
 
     /**

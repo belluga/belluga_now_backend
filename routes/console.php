@@ -9,6 +9,7 @@ use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
+use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -93,6 +94,15 @@ Schedule::call(static function (): void {
     app(EventOccurrenceReconciliationService::class)->reconcileAllTenants();
 })
     ->name('events:occurrences:reconcile')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();
+
+Schedule::call(static function (): void {
+    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
+        CleanupOrphanedMapPoisJob::dispatch(['account_profile', 'static'], 60);
+    });
+})
+    ->name('map_pois:cleanup_orphaned')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
