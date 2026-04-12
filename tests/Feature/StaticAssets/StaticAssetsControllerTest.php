@@ -11,6 +11,7 @@ use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Helpers\TenantLabels;
@@ -113,6 +114,73 @@ class StaticAssetsControllerTest extends TestCaseTenant
         );
         $publicBySlug->assertStatus(200);
         $publicBySlug->assertJsonPath('data.slug', $slug);
+    }
+
+    public function test_static_asset_delete_removes_map_poi_projection(): void
+    {
+        MapPoi::query()->delete();
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'poi',
+            'label' => 'POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $createResponse = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia Delete Projection',
+                'location' => ['lat' => -20.0, 'lng' => -40.0],
+            ],
+            $this->getHeaders()
+        );
+
+        $createResponse->assertStatus(201);
+        $assetId = (string) $createResponse->json('data.id');
+        $controlResponse = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'poi',
+                'display_name' => 'Praia Delete Control',
+                'location' => ['lat' => -20.1, 'lng' => -40.1],
+            ],
+            $this->getHeaders()
+        );
+        $controlResponse->assertStatus(201);
+        $controlAssetId = (string) $controlResponse->json('data.id');
+
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'static')
+                ->where('ref_id', $assetId)
+                ->exists()
+        );
+
+        $deleteResponse = $this->deleteJson(
+            "{$this->base_tenant_api_admin}static_assets/{$assetId}",
+            [],
+            $this->getHeaders()
+        );
+
+        $deleteResponse->assertStatus(200);
+        $this->assertFalse(
+            MapPoi::query()
+                ->where('ref_type', 'static')
+                ->where('ref_id', $assetId)
+                ->exists()
+        );
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'static')
+                ->where('ref_id', $controlAssetId)
+                ->exists()
+        );
     }
 
     public function test_static_asset_create_persists_avatar_and_cover_urls_without_file_upload(): void

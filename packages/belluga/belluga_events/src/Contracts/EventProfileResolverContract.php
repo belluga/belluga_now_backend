@@ -33,6 +33,7 @@ interface EventProfileResolverContract
         string $candidateType,
         ?string $search = null,
         int $page = 1,
-        int $perPage = 15
+        int $perPage = 15,
+        ?string $accountId = null
     ): LengthAwarePaginator;
 }

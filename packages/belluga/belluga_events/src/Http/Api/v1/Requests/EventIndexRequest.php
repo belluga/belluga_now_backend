@@ -34,9 +34,12 @@ class EventIndexRequest extends FormRequest
     {
         return [
             'page' => 'sometimes|integer|min:1',
-            'page_size' => 'sometimes|integer|min:1',
-            'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'page_size' => 'sometimes|integer|min:1|max:100',
             'archived' => 'sometimes|boolean',
+            'date' => 'sometimes|date_format:Y-m-d',
+            'search' => 'prohibited',
+            'venue_profile_id' => 'sometimes|string|max:'.InputConstraints::OBJECT_ID_LENGTH,
+            'related_account_profile_id' => 'sometimes|string|max:'.InputConstraints::OBJECT_ID_LENGTH,
             'status' => [
                 'sometimes',
                 'string',

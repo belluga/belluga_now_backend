@@ -13,6 +13,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -477,6 +478,223 @@ class AccountControllerTest extends TestCase
         );
         $this->assertNotNull(
             AccountProfile::onlyTrashed()->where('account_id', $accountId)->first()
+        );
+    }
+
+    public function test_delete_unmanaged_account_removes_related_account_profile_map_pois(): void
+    {
+        MapPoi::query()->delete();
+
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.673067,
+                'lng' => -40.498383,
+            ],
+        ]);
+        $createResponse->assertCreated();
+
+        $accountSlug = (string) $createResponse->json('data.account.slug');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $controlAccount = Account::create([
+            'name' => 'Control Account',
+            'document' => 'CTRL'.uniqid(),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $controlProfile = AccountProfile::create([
+            'account_id' => (string) $controlAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Control Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.497, -20.672],
+            ],
+            'is_active' => true,
+        ]);
+
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->exists()
+        );
+        MapPoi::query()->create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $controlProfile->_id,
+            'name' => 'Control Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.497, -20.672],
+            ],
+            'is_active' => true,
+        ]);
+
+        $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
+
+        $response->assertOk();
+        $this->assertFalse(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->exists()
+        );
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', (string) $controlProfile->_id)
+                ->exists()
+        );
+    }
+
+    public function test_delete_unmanaged_account_removes_previously_trashed_account_profile_map_pois(): void
+    {
+        MapPoi::query()->delete();
+
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.673067,
+                'lng' => -40.498383,
+            ],
+        ]);
+        $createResponse->assertCreated();
+
+        $accountSlug = (string) $createResponse->json('data.account.slug');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $trashedProfile = AccountProfile::query()->findOrFail($profileId);
+        $trashedProfile->delete();
+
+        $controlAccount = Account::create([
+            'name' => 'Trashed Control Account',
+            'document' => 'CTRL'.uniqid(),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $controlProfile = AccountProfile::create([
+            'account_id' => (string) $controlAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Trashed Control Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.497, -20.672],
+            ],
+            'is_active' => true,
+        ]);
+        MapPoi::query()->create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $controlProfile->_id,
+            'name' => 'Trashed Control Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.497, -20.672],
+            ],
+            'is_active' => true,
+        ]);
+
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->exists()
+        );
+
+        $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
+
+        $response->assertOk();
+        $this->assertFalse(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->exists()
+        );
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', (string) $controlProfile->_id)
+                ->exists()
+        );
+    }
+
+    public function test_force_delete_unmanaged_account_removes_related_account_profile_map_pois(): void
+    {
+        MapPoi::query()->delete();
+
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.673067,
+                'lng' => -40.498383,
+            ],
+        ]);
+        $createResponse->assertCreated();
+
+        $accountSlug = (string) $createResponse->json('data.account.slug');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $controlAccount = Account::create([
+            'name' => 'Force Delete Control Account',
+            'document' => 'CTRL'.uniqid(),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $controlProfile = AccountProfile::create([
+            'account_id' => (string) $controlAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Force Delete Control Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.497, -20.672],
+            ],
+            'is_active' => true,
+        ]);
+        MapPoi::query()->create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $controlProfile->_id,
+            'name' => 'Force Delete Control Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.497, -20.672],
+            ],
+            'is_active' => true,
+        ]);
+
+        $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}")
+            ->assertOk();
+
+        MapPoi::query()->create([
+            'ref_type' => 'account_profile',
+            'ref_id' => $profileId,
+            'name' => 'Force Delete Target Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.498, -20.673],
+            ],
+            'is_active' => true,
+        ]);
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->exists()
+        );
+
+        $response = $this->postJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}/force_delete");
+
+        $response->assertOk();
+        $this->assertFalse(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->exists()
+        );
+        $this->assertTrue(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', (string) $controlProfile->_id)
+                ->exists()
         );
     }
 

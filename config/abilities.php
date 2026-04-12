@@ -23,6 +23,8 @@ return [
         'tenant-roles:update',
         'tenant-roles:delete',
         'tenant-branding:update',
+        'tenant-domains:read',
+        'tenant-domains:update',
         'account-users:view',
         'account-users:create',
         'account-users:update',

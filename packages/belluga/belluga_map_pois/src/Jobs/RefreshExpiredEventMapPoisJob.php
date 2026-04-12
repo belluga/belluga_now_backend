@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\MapPois\Jobs;
 
+use Belluga\MapPois\Application\MapPoiOrphanCleanupService;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
@@ -33,33 +34,12 @@ class RefreshExpiredEventMapPoisJob implements ShouldQueue, TenantAware
     }
 
     public function handle(
+        MapPoiOrphanCleanupService $orphanCleanupService,
         MapPoiProjectionService $projectionService,
         MapPoiSourceReaderContract $sourceReader,
     ): void {
-        $this->deleteOrphanedEventPois($projectionService, $sourceReader);
+        $orphanCleanupService->cleanup(['event']);
         $this->refreshExpiredEventPois($projectionService, $sourceReader);
-    }
-
-    private function deleteOrphanedEventPois(
-        MapPoiProjectionService $projectionService,
-        MapPoiSourceReaderContract $sourceReader,
-    ): void {
-        MapPoi::query()
-            ->where('ref_type', 'event')
-            ->orderBy('_id')
-            ->cursor()
-            ->each(function (MapPoi $poi) use ($projectionService, $sourceReader): void {
-                $eventId = trim((string) ($poi->ref_id ?? ''));
-                if ($eventId === '') {
-                    return;
-                }
-
-                if ($sourceReader->findEventById($eventId) !== null) {
-                    return;
-                }
-
-                $projectionService->deleteByRef('event', $eventId);
-            });
     }
 
     private function refreshExpiredEventPois(

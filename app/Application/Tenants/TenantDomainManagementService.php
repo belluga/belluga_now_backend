@@ -6,6 +6,7 @@ namespace App\Application\Tenants;
 
 use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
@@ -13,13 +14,25 @@ use MongoDB\Driver\Exception\BulkWriteException;
 
 class TenantDomainManagementService
 {
+    public function list(Tenant $tenant, int $page = 1, int $perPage = 15): LengthAwarePaginator
+    {
+        $resolvedPerPage = max(1, min($perPage, 100));
+        $resolvedPage = max(1, $page);
+
+        return $tenant->domains()
+            ->where('type', Tenant::DOMAIN_TYPE_WEB)
+            ->orderByDesc('created_at')
+            ->orderByDesc('_id')
+            ->paginate($resolvedPerPage, ['*'], 'page', $resolvedPage);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
     public function create(Tenant $tenant, array $payload): Domains
     {
         $path = $this->normalizePath((string) $payload['path']);
-        $type = (string) ($payload['type'] ?? 'web');
+        $type = (string) ($payload['type'] ?? Tenant::DOMAIN_TYPE_WEB);
 
         if ($this->tenantHasDomain($tenant, $path)) {
             throw ValidationException::withMessages([
