@@ -156,7 +156,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_event_create_accepts_dynamic_account_profile_party_type_and_derives_public_artists_projection(): void
+    public function test_event_create_accepts_dynamic_account_profile_party_type_and_keeps_admin_and_public_read_models_separate(): void
     {
         $payload = $this->makeEventPayload([
             'event_parties' => [[
@@ -180,11 +180,17 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.event_parties.0.party_type', (string) $this->band->profile_type);
-        $response->assertJsonPath('data.artists.0.profile_type', (string) $this->band->profile_type);
-        $response->assertJsonPath('data.artists.0.slug', (string) $this->band->slug);
+        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', (string) $this->band->profile_type);
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $this->band->slug);
+        $this->assertNull(data_get($response->json(), 'data.artists'));
 
         $stored = Event::query()->findOrFail((string) $response->json('data.event_id'));
         $this->assertNull(data_get($stored->getAttributes(), 'artists'));
+
+        $publicResponse = $this->getJson("{$this->base_api_tenant}events/{$stored->_id}");
+        $publicResponse->assertStatus(200);
+        $publicResponse->assertJsonPath('data.artists.0.profile_type', (string) $this->band->profile_type);
+        $publicResponse->assertJsonPath('data.artists.0.slug', (string) $this->band->slug);
     }
 
     public function test_event_create_stores_cover_upload_and_exposes_media_url(): void
@@ -358,27 +364,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertStatus(200);
     }
 
-    public function test_event_account_profile_candidates_endpoint_paginates_artists_beyond_one_hundred_results(): void
+    public function test_event_account_profile_candidates_endpoint_paginates_related_account_profiles_beyond_one_hundred_results(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
 
         foreach (range(1, 102) as $index) {
             $this->createAccountProfile(
-                'artist',
-                sprintf('Zulu Artist %03d', $index)
+                'band',
+                sprintf('Zulu Collective %03d', $index)
             );
         }
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=artist&search=zulu&page=6&page_size=20");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&search=zulu&page=6&page_size=20");
 
         $response->assertStatus(200);
         $response->assertJsonPath('current_page', 6);
         $response->assertJsonPath('per_page', 20);
         $response->assertJsonPath('total', 102);
         $response->assertJsonCount(2, 'data');
-        $response->assertJsonPath('data.0.display_name', 'Zulu Artist 101');
-        $response->assertJsonPath('data.1.display_name', 'Zulu Artist 102');
+        $response->assertJsonPath('data.0.display_name', 'Zulu Collective 101');
+        $response->assertJsonPath('data.1.display_name', 'Zulu Collective 102');
     }
 
     public function test_event_account_profile_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
@@ -482,7 +488,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['account-users:view']);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=artist");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile");
 
         $response->assertStatus(403);
     }
@@ -500,26 +506,26 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($matchedVenue);
     }
 
-    public function test_account_events_account_profile_candidates_endpoint_paginates_artists_beyond_one_hundred_results(): void
+    public function test_account_events_account_profile_candidates_endpoint_paginates_related_account_profiles_beyond_one_hundred_results(): void
     {
         Sanctum::actingAs($this->user, ['events:create']);
 
         foreach (range(1, 102) as $index) {
             $this->createAccountProfile(
-                'artist',
-                sprintf('Scoped Zulu Artist %03d', $index)
+                'band',
+                sprintf('Scoped Zulu Collective %03d', $index)
             );
         }
 
-        $response = $this->getJson("{$this->accountEventsBase}/account_profile_candidates?type=artist&search=scoped%20zulu&page=6&page_size=20");
+        $response = $this->getJson("{$this->accountEventsBase}/account_profile_candidates?type=related_account_profile&search=scoped%20zulu&page=6&page_size=20");
 
         $response->assertStatus(200);
         $response->assertJsonPath('current_page', 6);
         $response->assertJsonPath('per_page', 20);
         $response->assertJsonPath('total', 102);
         $response->assertJsonCount(2, 'data');
-        $response->assertJsonPath('data.0.display_name', 'Scoped Zulu Artist 101');
-        $response->assertJsonPath('data.1.display_name', 'Scoped Zulu Artist 102');
+        $response->assertJsonPath('data.0.display_name', 'Scoped Zulu Collective 101');
+        $response->assertJsonPath('data.1.display_name', 'Scoped Zulu Collective 102');
     }
 
     public function test_event_create_persists_created_by_and_canonical_event_parties(): void
@@ -549,7 +555,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.created_by.type', 'account_user');
         $response->assertJsonPath('data.created_by.id', (string) $this->user->_id);
         $response->assertJsonPath('data.venue.slug', $venueSlug);
-        $response->assertJsonPath('data.artists.0.slug', $artistSlug);
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', $artistSlug);
 
         $parties = collect($response->json('data.event_parties') ?? []);
         $artistParty = $parties->firstWhere('party_type', 'artist');
@@ -1648,7 +1654,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.title', 'Updated Title');
         $response->assertJsonPath('data.publication.status', 'ended');
         $response->assertJsonPath('data.venue.slug', $venueSlug);
-        $response->assertJsonPath('data.artists.0.slug', $artistSlug);
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', $artistSlug);
         $response->assertJsonCount(1, 'data.event_parties');
         $response->assertJsonPath('data.event_parties.0.metadata.slug', $artistSlug);
     }

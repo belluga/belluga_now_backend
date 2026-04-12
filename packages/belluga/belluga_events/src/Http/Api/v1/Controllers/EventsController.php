@@ -168,9 +168,13 @@ class EventsController extends Controller
             }
         }
 
+        $payload = $this->isAdminContext($request)
+            ? $this->eventQueryService->formatManagementEvent($event)
+            : $this->eventQueryService->formatEvent($event, $this->resolveAuthenticatedUserId($request));
+
         return response()->json([
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
-            'data' => $this->eventQueryService->formatEvent($event, $this->resolveAuthenticatedUserId($request)),
+            'data' => $payload,
         ]);
     }
 

@@ -160,7 +160,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             : '%'.addcslashes($normalizedSearch, '%_\\').'%';
 
         $query = match ($candidateType) {
-            'artist' => $this->queryCandidatesByType('artist', $likePattern),
+            'related_account_profile' => $this->queryRelatedAccountProfileCandidates($likePattern),
             'physical_host' => $this->queryPhysicalHostCandidates(
                 $this->resolvePoiEnabledProfileTypes(),
                 $likePattern
@@ -230,10 +230,9 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @return Builder<AccountProfile>
      */
-    private function queryCandidatesByType(string $profileType, ?string $likePattern): Builder
+    private function queryRelatedAccountProfileCandidates(?string $likePattern): Builder
     {
-        $query = AccountProfile::query()
-            ->where('profile_type', $profileType);
+        $query = AccountProfile::query();
 
         if ($likePattern !== null) {
             $query->where(static function ($builder) use ($likePattern): void {

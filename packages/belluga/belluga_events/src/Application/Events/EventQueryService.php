@@ -198,6 +198,7 @@ class EventQueryService
     public function formatManagementEvent(Event $event): array
     {
         $payload = $this->formatEvent($event);
+        unset($payload['artists']);
 
         $publication = $event->publication ?? null;
         $publication = is_array($publication) ? $publication : (array) $publication;
