@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Events;
 
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
+use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
+use Illuminate\Console\Scheduling\Schedule;
 use Tests\TestCase;
 
 class SchedulerBootstrapTest extends TestCase
@@ -20,27 +22,31 @@ class SchedulerBootstrapTest extends TestCase
             class_exists(RefreshExpiredEventMapPoisJob::class),
             'RefreshExpiredEventMapPoisJob must be autoload-resolvable during console bootstrap.'
         );
+        $this->assertTrue(
+            class_exists(CleanupOrphanedMapPoisJob::class),
+            'CleanupOrphanedMapPoisJob must be autoload-resolvable during console bootstrap.'
+        );
 
         $this->artisan('schedule:list')->assertExitCode(0);
     }
 
     public function test_console_schedule_registers_current_event_dispatches_and_keeps_ticketing_jobs_removed(): void
     {
-        $routesConsole = file_get_contents(base_path('routes/console.php'));
+        $eventSummaries = collect($this->app->make(Schedule::class)->events())
+            ->map(static fn (object $event): ?string => method_exists($event, 'getSummaryForDisplay')
+                ? $event->getSummaryForDisplay()
+                : null)
+            ->filter()
+            ->values()
+            ->all();
 
-        $this->assertNotFalse($routesConsole);
-        $this->assertStringContainsString(
-            "->name('events:publication:publish_scheduled')",
-            $routesConsole
-        );
-        $this->assertStringContainsString('PublishScheduledEventsJob::dispatch();', $routesConsole);
-        $this->assertStringContainsString("->name('events:async:monitor')", $routesConsole);
-        $this->assertStringContainsString("->name('events:occurrences:reconcile')", $routesConsole);
-        $this->assertStringContainsString("->name('events:map_pois:refresh_expired')", $routesConsole);
-        $this->assertStringContainsString('RefreshExpiredEventMapPoisJob::dispatch();', $routesConsole);
-        $this->assertStringNotContainsString('ProcessTicketOutboxJob::dispatch();', $routesConsole);
-        $this->assertStringNotContainsString('ExpireIssuedTicketUnitsJob::dispatch();', $routesConsole);
-        $this->assertStringNotContainsString('Schedule::job(PublishScheduledEventsJob::class)->hourly();', $routesConsole);
-        $this->assertStringNotContainsString('Schedule::job(new ProcessTicketOutboxJob)->everyMinute();', $routesConsole);
+        $this->assertContains('events:publication:publish_scheduled', $eventSummaries);
+        $this->assertContains('events:async:monitor', $eventSummaries);
+        $this->assertContains('events:occurrences:reconcile', $eventSummaries);
+        $this->assertContains('map_pois:cleanup_orphaned', $eventSummaries);
+        $this->assertContains('events:map_pois:refresh_expired', $eventSummaries);
+        $this->assertNotContains('ProcessTicketOutboxJob', $eventSummaries);
+        $this->assertNotContains('ExpireIssuedTicketUnitsJob', $eventSummaries);
+        $this->assertNotContains(PublishScheduledEventsJob::class, $eventSummaries);
     }
 }

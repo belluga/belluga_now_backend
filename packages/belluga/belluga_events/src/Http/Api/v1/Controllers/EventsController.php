@@ -34,13 +34,14 @@ class EventsController extends Controller
 
     public function index(EventIndexRequest $request): JsonResponse
     {
-        $perPage = (int) ($request->get('page_size') ?? 15);
-        $perPage = $perPage > 0 ? $perPage : 15;
+        $validated = $request->validated();
+        $perPage = isset($validated['page_size']) ? (int) $validated['page_size'] : 15;
+        $perPage = max(1, min($perPage, 100));
         $accountContextId = $this->resolveAccountFromRoute($request);
         $isAdmin = $this->isAdminContext($request);
 
         $paginator = $this->eventQueryService->paginateManagement(
-            $request->query(),
+            $validated,
             $request->boolean('archived'),
             $perPage,
             $isAdmin,
@@ -57,12 +58,16 @@ class EventsController extends Controller
         $search = isset($validated['search']) ? trim((string) $validated['search']) : null;
         $page = isset($validated['page']) ? (int) $validated['page'] : 1;
         $perPage = isset($validated['per_page']) ? (int) $validated['per_page'] : (isset($validated['page_size']) ? (int) $validated['page_size'] : 15);
+        $accountContextId = $candidateType === 'physical_host'
+            ? $this->resolveAccountFromRoute($request)
+            : null;
 
         $candidates = $this->profileResolver->paginateAccountProfileCandidates(
             $candidateType,
             $search,
             $page,
-            $perPage
+            $perPage,
+            $accountContextId
         );
 
         return response()->json($candidates->toArray());
@@ -168,9 +173,13 @@ class EventsController extends Controller
             }
         }
 
+        $payload = $this->isAdminContext($request)
+            ? $this->eventQueryService->formatManagementEvent($event)
+            : $this->eventQueryService->formatEvent($event, $this->resolveAuthenticatedUserId($request));
+
         return response()->json([
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
-            'data' => $this->eventQueryService->formatEvent($event, $this->resolveAuthenticatedUserId($request)),
+            'data' => $payload,
         ]);
     }
 

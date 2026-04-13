@@ -80,9 +80,45 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
         }
     }
 
+    public function allTrashedAccountProfileIds(?\DateTimeInterface $deletedSince = null): iterable
+    {
+        $query = AccountProfile::onlyTrashed()
+            ->orderBy('deleted_at')
+            ->orderBy('_id');
+        if ($deletedSince !== null) {
+            $query->where('deleted_at', '>=', $deletedSince);
+        }
+
+        foreach ($query->cursor() as $profile) {
+            if (! isset($profile->_id)) {
+                continue;
+            }
+
+            yield (string) $profile->_id;
+        }
+    }
+
     public function allStaticAssetIds(): iterable
     {
         foreach (StaticAsset::query()->whereNull('deleted_at')->orderBy('_id')->cursor() as $asset) {
+            if (! isset($asset->_id)) {
+                continue;
+            }
+
+            yield (string) $asset->_id;
+        }
+    }
+
+    public function allTrashedStaticAssetIds(?\DateTimeInterface $deletedSince = null): iterable
+    {
+        $query = StaticAsset::onlyTrashed()
+            ->orderBy('deleted_at')
+            ->orderBy('_id');
+        if ($deletedSince !== null) {
+            $query->where('deleted_at', '>=', $deletedSince);
+        }
+
+        foreach ($query->cursor() as $asset) {
             if (! isset($asset->_id)) {
                 continue;
             }

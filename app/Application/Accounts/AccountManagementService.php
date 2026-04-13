@@ -6,8 +6,10 @@ namespace App\Application\Accounts;
 
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -17,7 +19,8 @@ class AccountManagementService
 {
     public function __construct(
         private readonly AccountQueryService $accountQueryService,
-        private readonly AccountOwnershipStateService $ownershipStateService
+        private readonly AccountOwnershipStateService $ownershipStateService,
+        private readonly MapPoiProjectionService $mapPoiProjectionService,
     ) {}
 
     public function paginateForUser(
@@ -168,11 +171,18 @@ class AccountManagementService
     public function delete(Account $account): void
     {
         $this->assertUnmanagedAccountForDelete($account);
+        $tenantConnection = DB::connection('tenant');
 
-        DB::connection('tenant')->transaction(static function () use ($account): void {
+        $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
+            $profileIds = $this->allAccountProfileIds($account);
+
             $account->accountProfiles()->delete();
             $account->roleTemplates()->delete();
             $account->delete();
+
+            $tenantConnection->afterCommit(
+                fn (): bool => $this->deleteMapPoiProjections($profileIds)
+            );
         });
     }
 
@@ -186,11 +196,18 @@ class AccountManagementService
     public function forceDelete(Account $account): void
     {
         $this->assertUnmanagedAccountForDelete($account);
+        $tenantConnection = DB::connection('tenant');
 
-        DB::connection('tenant')->transaction(static function () use ($account): void {
+        $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
+            $profileIds = $this->allAccountProfileIds($account);
+
             $account->accountProfiles()->withTrashed()->forceDelete();
             $account->roleTemplates()->withTrashed()->forceDelete();
             $account->forceDelete();
+
+            $tenantConnection->afterCommit(
+                fn (): bool => $this->deleteMapPoiProjections($profileIds)
+            );
         });
     }
 
@@ -229,5 +246,30 @@ class AccountManagementService
                 $user->save();
             }
         });
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function allAccountProfileIds(Account $account): array
+    {
+        return AccountProfile::query()
+            ->withTrashed()
+            ->where('account_id', (string) $account->_id)
+            ->get(['_id'])
+            ->map(static fn (AccountProfile $profile): string => trim((string) $profile->_id))
+            ->filter(static fn (string $id): bool => $id !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     */
+    private function deleteMapPoiProjections(array $profileIds): bool
+    {
+        $this->mapPoiProjectionService->deleteByRefs('account_profile', $profileIds);
+
+        return true;
     }
 }

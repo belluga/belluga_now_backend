@@ -121,6 +121,10 @@ Account scope:
 - `DELETE /api/v1/accounts/{account_slug}/events/{event_id}`
 - `GET /api/v1/accounts/{account_slug}/events/{event_id}`
 
+Management candidate discovery note:
+- `GET /events/account_profile_candidates` uses `type=related_account_profile|physical_host`.
+- `related_account_profile` is the generic event-party picker contract and must not hardcode one dynamic profile type such as `artist`.
+
 Auth and guard expectations are defined by host routes and middleware (`auth:sanctum`, `tenant`, `CheckTenantAccess`, `account`).
 
 ### Read contracts
@@ -153,8 +157,10 @@ Response item minimum:
 - `occurrences[]`
 - `created_by`
 - `event_parties[]`
+- `linked_account_profiles[]`
 - `capabilities`
 - `tags`, `taxonomy_terms`
+- `artists` remains a public read projection; management CRUD/detail responses should rely on `event_parties` + `linked_account_profiles` and may omit `artists`.
 
 #### `GET /events/{event_id}`
 
@@ -201,7 +207,6 @@ Optional:
 - `location.geo` (`Point`, coordinates)
 - `location.online` (required for `online|hybrid`)
 - `place_ref` (`{type,id,metadata?}`; required for `physical|hybrid`, `type=account_profile`)
-- `artist_ids[]`
 - `tags[]`
 - `categories[]`
 - `taxonomy_terms[]`
