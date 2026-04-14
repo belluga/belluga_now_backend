@@ -89,6 +89,7 @@ class EnvironmentResolverService
             'domains' => $explicitDomains,
             'app_domains' => $tenant->resolvedAppDomains(),
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
+            'branding_assets' => $this->resolveBrandingAssetState($branding),
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
@@ -123,6 +124,7 @@ class EnvironmentResolverService
             'main_domain' => $mainDomain,
             'landlord_domain' => $mainDomain,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
+            'branding_assets' => $this->resolveBrandingAssetState($branding),
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
@@ -154,6 +156,49 @@ class EnvironmentResolverService
         }
 
         return $branding['pwa_icon']['icon512_uri'] ?? null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
+     * @return array<string, mixed>
+     */
+    private function resolveBrandingAssetState(array $branding): array
+    {
+        $hasDedicatedFavicon = $this->hasNonEmptyBrandingValue(
+            $branding['logo_settings']['favicon_uri'] ?? null
+        );
+
+        return [
+            'favicon' => [
+                'has_dedicated_asset' => $hasDedicatedFavicon,
+                'uses_pwa_fallback' => ! $hasDedicatedFavicon && $this->hasPwaFaviconFallback($branding),
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
+     */
+    private function hasPwaFaviconFallback(array $branding): bool
+    {
+        $pwaIcon = $branding['pwa_icon'] ?? null;
+
+        if (! is_array($pwaIcon)) {
+            return false;
+        }
+
+        foreach (['icon192_uri', 'icon512_uri', 'source_uri'] as $key) {
+            if ($this->hasNonEmptyBrandingValue($pwaIcon[$key] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasNonEmptyBrandingValue(mixed $value): bool
+    {
+        return is_string($value) && trim($value) !== '';
     }
 
     /**

@@ -2,6 +2,9 @@
 
 namespace Tests\Api\v1\Tenants\Branding\Contracts;
 
+use App\Models\Landlord\Landlord;
+use App\Models\Landlord\Tenant;
+use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCaseTenant;
@@ -34,10 +37,21 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant
             'secondary_seed_color' => $response->json()['theme_data_settings']['secondary_seed_color'],
         ];
 
+        $tenant = Tenant::query()
+            ->where('slug', $this->tenant->slug)
+            ->firstOrFail();
+        $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
+            mainArray: Landlord::singleton()->branding_data ?? [],
+            overrideArray: $tenant->branding_data ?? [],
+        );
+        $themeDataSettings = is_array($branding['theme_data_settings'] ?? null)
+            ? $branding['theme_data_settings']
+            : [];
+
         $check_values = [
-            'brightness_default' => 'light',
-            'primary_seed_color' => '#FFFFFF',
-            'secondary_seed_color' => '#999999',
+            'brightness_default' => (string) ($themeDataSettings['brightness_default'] ?? ''),
+            'primary_seed_color' => (string) ($themeDataSettings['primary_seed_color'] ?? ''),
+            'secondary_seed_color' => (string) ($themeDataSettings['secondary_seed_color'] ?? ''),
         ];
 
         AssertEquals($resultData, $check_values);
@@ -209,8 +223,8 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant
                 'light_logo_uri' => $light_logo_uri,
                 'dark_logo_uri' => $dark_logo_uri,
                 'favicon_uri' => $landlord_favicon,
+                'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
             ],
-            'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
         ];
     }
 
@@ -227,6 +241,8 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant
     private function defaultBrandingPayload(): array
     {
         $favicon = UploadedFile::fake()->create('reset-favicon.ico', 10, 'image/vnd.microsoft.icon');
+        $lightIcon = UploadedFile::fake()->image('reset-light-icon.png', 128, 128);
+        $darkIcon = UploadedFile::fake()->image('reset-dark-icon.png', 128, 128);
 
         return [
             'theme_data_settings' => [
@@ -237,9 +253,11 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant
             'logo_settings' => [
                 'light_logo_uri' => UploadedFile::fake()->image('reset-light-logo.png', 350, 512),
                 'dark_logo_uri' => UploadedFile::fake()->image('reset-dark-logo.png', 350, 512),
+                'light_icon_uri' => $lightIcon,
+                'dark_icon_uri' => $darkIcon,
                 'favicon_uri' => $favicon,
+                'pwa_icon' => UploadedFile::fake()->image('reset-pwa-icon.png', 512, 512),
             ],
-            'pwa_icon' => UploadedFile::fake()->image('reset-pwa-icon.png', 512, 512),
         ];
     }
 }

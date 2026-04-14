@@ -122,6 +122,39 @@ class TenantBrandingManagementServiceTest extends TestCase
         );
     }
 
+    public function test_update_normalizes_missing_logo_keys_when_existing_branding_is_partial(): void
+    {
+        $this->tenant->branding_data = [
+            'logo_settings' => [
+                'light_logo_uri' => 'https://existing/light.svg',
+            ],
+            'theme_data_settings' => [
+                'brightness_default' => 'light',
+            ],
+        ];
+        $this->tenant->save();
+
+        $branding = $this->service->update(
+            $this->tenant->fresh(),
+            [
+                'theme_data_settings' => [
+                    'primary_seed_color' => '#ffffff',
+                ],
+            ]
+        );
+
+        $this->assertSame(
+            'https://existing/light.svg',
+            $branding['logo_settings']['light_logo_uri']
+        );
+        $this->assertArrayHasKey('light_icon_uri', $branding['logo_settings']);
+        $this->assertArrayHasKey('dark_icon_uri', $branding['logo_settings']);
+        $this->assertArrayHasKey('favicon_uri', $branding['logo_settings']);
+        $this->assertSame('', $branding['logo_settings']['light_icon_uri']);
+        $this->assertSame('', $branding['logo_settings']['dark_icon_uri']);
+        $this->assertSame('', $branding['logo_settings']['favicon_uri']);
+    }
+
     public function test_update_includes_pwa_variants(): void
     {
         $variants = [
@@ -138,6 +171,26 @@ class TenantBrandingManagementServiceTest extends TestCase
 
         $this->assertSame('https://cdn.example/pwa.png', $branding['pwa_icon']['source_uri']);
         $this->assertSame('https://cdn.example/pwa-192.png', $branding['pwa_icon']['icon192_uri']);
+    }
+
+    public function test_update_persists_tenant_name_and_keeps_slug_stable(): void
+    {
+        $originalSlug = (string) $this->tenant->slug;
+
+        $this->service->update(
+            $this->tenant,
+            [
+                'name' => 'Guarappari',
+                'logo_settings' => [],
+                'theme_data_settings' => [],
+            ]
+        );
+
+        $freshTenant = $this->tenant->fresh();
+
+        $this->assertSame('Guarappari', $freshTenant?->name);
+        $this->assertSame('Guarappari', $freshTenant?->short_name);
+        $this->assertSame($originalSlug, $freshTenant?->slug);
     }
 
     private function initializeSystem(): void
