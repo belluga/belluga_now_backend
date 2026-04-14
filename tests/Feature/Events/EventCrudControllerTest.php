@@ -484,6 +484,54 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertLessThan($olderIndex, $newerIndex);
     }
 
+    public function test_event_index_orders_nearest_start_first_by_default(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $baseStart = Carbon::now()->startOfDay()->addDays(3)->setHour(20);
+
+        $this->createEvent([
+            'title' => 'Farther Start Event',
+            'date_time_start' => $baseStart->copy()->addDays(2),
+            'date_time_end' => $baseStart->copy()->addDays(2)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Nearest Start Event',
+            'date_time_start' => $baseStart,
+            'date_time_end' => $baseStart->copy()->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Middle Start Event',
+            'date_time_start' => $baseStart->copy()->addDay(),
+            'date_time_end' => $baseStart->copy()->addDay()->addHours(2),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}?page=1&page_size=100"
+        );
+
+        $response->assertStatus(200);
+
+        $orderedTitles = collect($response->json('data'))
+            ->pluck('title')
+            ->filter(static fn ($title): bool => in_array($title, [
+                'Nearest Start Event',
+                'Middle Start Event',
+                'Farther Start Event',
+            ], true))
+            ->values()
+            ->all();
+
+        $this->assertSame([
+            'Nearest Start Event',
+            'Middle Start Event',
+            'Farther Start Event',
+        ], $orderedTitles);
+    }
+
     public function test_event_index_composes_specific_date_temporal_and_profile_filters(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
