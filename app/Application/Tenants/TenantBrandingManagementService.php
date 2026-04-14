@@ -29,6 +29,7 @@ class TenantBrandingManagementService
         array $uploadedLogos = [],
         array $pwaVariants = []
     ): array {
+        $this->applyTenantIdentity($tenant, $payload);
         $brandingPayload = $this->buildBrandingPayload($payload, $uploadedLogos, $pwaVariants);
 
         if (! empty($tenant->branding_data)) {
@@ -43,6 +44,21 @@ class TenantBrandingManagementService
         $tenant->save();
 
         return $tenant->branding_data ?? $brandingPayload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function applyTenantIdentity(Tenant $tenant, array $payload): void
+    {
+        $name = trim((string) ($this->stringValue($payload, 'name') ?? ''));
+
+        if ($name === '') {
+            return;
+        }
+
+        $tenant->name = $name;
+        $tenant->short_name = $name;
     }
 
     /**

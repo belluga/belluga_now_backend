@@ -140,6 +140,26 @@ class TenantBrandingManagementServiceTest extends TestCase
         $this->assertSame('https://cdn.example/pwa-192.png', $branding['pwa_icon']['icon192_uri']);
     }
 
+    public function test_update_persists_tenant_name_and_keeps_slug_stable(): void
+    {
+        $originalSlug = (string) $this->tenant->slug;
+
+        $this->service->update(
+            $this->tenant,
+            [
+                'name' => 'Guarappari',
+                'logo_settings' => [],
+                'theme_data_settings' => [],
+            ]
+        );
+
+        $freshTenant = $this->tenant->fresh();
+
+        $this->assertSame('Guarappari', $freshTenant?->name);
+        $this->assertSame('Guarappari', $freshTenant?->short_name);
+        $this->assertSame($originalSlug, $freshTenant?->slug);
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);

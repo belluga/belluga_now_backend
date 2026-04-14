@@ -37,7 +37,7 @@ class BrandingController extends Controller
 
     public function getFavicon(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('favicon_uri'));
+        return $this->brandingService->assetResponse($this->brandingService->resolveFaviconAsset());
     }
 
     public function getLogoLight(): Response|BinaryFileResponse

@@ -84,6 +84,35 @@ class TenantBrandingControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('branding_data.logo_settings.light_logo_uri'));
     }
 
+    public function test_update_persists_name_and_reflects_public_branding_metadata(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $originalSlug = (string) $tenant->slug;
+
+        $response = $this->withHeaders($this->headers)
+            ->postJson($this->baseUrl, [
+                'name' => 'Guarappari',
+            ]);
+
+        $response->assertOk();
+
+        $freshTenant = $tenant->fresh();
+
+        $this->assertSame('Guarappari', $freshTenant?->name);
+        $this->assertSame('Guarappari', $freshTenant?->short_name);
+        $this->assertSame($originalSlug, $freshTenant?->slug);
+
+        $this->withoutHeader('X-App-Domain')
+            ->getJson("{$this->base_api_tenant}environment")
+            ->assertOk()
+            ->assertJsonPath('name', 'Guarappari');
+
+        $this->get("{$this->base_tenant_url}manifest.json")
+            ->assertOk()
+            ->assertJsonPath('name', 'Guarappari')
+            ->assertJsonPath('short_name', 'Guarappari');
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);

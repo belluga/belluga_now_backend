@@ -64,6 +64,15 @@ class BrandingManifestService
         return $tenantValue ?: ($landlordBranding['pwa_icon'][$parameter] ?? null);
     }
 
+    public function resolveFaviconAsset(): ?string
+    {
+        $tenantBranding = Tenant::current()?->branding_data ?? [];
+        $landlordBranding = Landlord::singleton()->branding_data ?? [];
+
+        return $this->resolveFaviconAssetFromBranding($tenantBranding)
+            ?? $this->resolveFaviconAssetFromBranding($landlordBranding);
+    }
+
     public function resolveStoragePath(?string $uri): ?string
     {
         if (! $uri) {
@@ -84,6 +93,32 @@ class BrandingManifestService
         }
 
         return response()->file(Storage::disk('public')->path($localPath));
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
+     */
+    private function resolveFaviconAssetFromBranding(array $branding): ?string
+    {
+        $candidates = [
+            $branding['logo_settings']['favicon_uri'] ?? null,
+            $branding['pwa_icon']['icon192_uri'] ?? null,
+            $branding['pwa_icon']['icon512_uri'] ?? null,
+            $branding['pwa_icon']['source_uri'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate)) {
+                continue;
+            }
+
+            $normalized = trim($candidate);
+            if ($normalized !== '') {
+                return $normalized;
+            }
+        }
+
+        return null;
     }
 
     /**
