@@ -7,8 +7,8 @@ use App\Http\Controllers\Controller;
 use Belluga\DeepLinks\Application\DeepLinkAssociationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class BrandingController extends Controller
 {
@@ -21,8 +21,10 @@ class BrandingController extends Controller
     {
         $manifestData = $this->brandingService->buildManifest($request->host());
 
-        return response()->json($manifestData)
-            ->header('Content-Type', 'application/manifest+json');
+        return $this->withNoStoreHeaders(
+            response()->json($manifestData)
+                ->header('Content-Type', 'application/manifest+json')
+        );
     }
 
     public function getLogoSettingsParameter(string $parameter): string
@@ -37,42 +39,42 @@ class BrandingController extends Controller
 
     public function getFavicon(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('favicon_uri'));
+        return $this->brandingAssetResponse($this->brandingService->resolveFaviconAsset());
     }
 
     public function getLogoLight(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('light_logo_uri'));
+        return $this->brandingAssetResponse($this->getLogoSettingsParameter('light_logo_uri'));
     }
 
     public function getLogoDark(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('dark_logo_uri'));
+        return $this->brandingAssetResponse($this->getLogoSettingsParameter('dark_logo_uri'));
     }
 
     public function getMaskableIcon(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getPwaIconParameter('icon_maskable512_uri'));
+        return $this->brandingAssetResponse($this->getPwaIconParameter('icon_maskable512_uri'));
     }
 
     public function getIcon192(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getPwaIconParameter('icon192_uri'));
+        return $this->brandingAssetResponse($this->getPwaIconParameter('icon192_uri'));
     }
 
     public function getIcon512(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getPwaIconParameter('icon512_uri'));
+        return $this->brandingAssetResponse($this->getPwaIconParameter('icon512_uri'));
     }
 
     public function getIconLight(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('light_icon_uri'));
+        return $this->brandingAssetResponse($this->getLogoSettingsParameter('light_icon_uri'));
     }
 
     public function getIconDark(): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('dark_icon_uri'));
+        return $this->brandingAssetResponse($this->getLogoSettingsParameter('dark_icon_uri'));
     }
 
     public function getAssetLinks(): JsonResponse
@@ -87,5 +89,27 @@ class BrandingController extends Controller
         return response()->json(
             $this->deepLinkAssociationService->buildAppleAppSiteAssociation()
         )->header('Content-Type', 'application/json');
+    }
+
+    private function brandingAssetResponse(?string $path): Response|BinaryFileResponse
+    {
+        return $this->withNoStoreHeaders(
+            $this->brandingService->assetResponse($path)
+        );
+    }
+
+    /**
+     * @template T of Response
+     *
+     * @param  T  $response
+     * @return T
+     */
+    private function withNoStoreHeaders(Response $response): Response
+    {
+        $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', '0');
+
+        return $response;
     }
 }
