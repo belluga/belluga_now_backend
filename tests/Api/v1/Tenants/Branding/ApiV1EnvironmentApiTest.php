@@ -30,6 +30,8 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     {
         $tenant = $this->currentTenant();
         $tenant->makeCurrent();
+        $tenantRequestHost = parse_url($this->base_tenant_url, PHP_URL_HOST);
+        $this->assertIsString($tenantRequestHost);
 
         $response = $this->get("{$this->base_api_tenant}environment");
 
@@ -48,7 +50,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         ]);
         $response->assertJsonPath('type', 'tenant');
         $this->assertSame(
-            parse_url($tenant->getMainDomain(), PHP_URL_HOST),
+            $tenantRequestHost,
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
         $response->assertJsonPath('telemetry.location_freshness_minutes', 5);
@@ -58,42 +60,68 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     {
         $tenant = $this->currentTenant();
         $this->snapshotTenant($tenant);
-        $tenant->domains()->delete();
+        $tenant->domains()->withTrashed()->forceDelete();
         $tenant->domains = [];
         $tenant->save();
         $tenant->makeCurrent();
+        $tenantRequestHost = parse_url($this->base_tenant_url, PHP_URL_HOST);
+        $this->assertIsString($tenantRequestHost);
 
         $response = $this->get("{$this->base_api_tenant}environment");
 
         $response->assertStatus(200);
         $this->assertSame(
-            parse_url($tenant->getMainDomain(), PHP_URL_HOST),
+            $tenantRequestHost,
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
     }
 
-    public function test_environment_api_prefers_first_related_domain_when_no_main_flag_exists(): void
+    public function test_environment_api_on_subdomain_request_keeps_current_subdomain_without_projecting_it_into_domains(): void
     {
         $tenant = $this->currentTenant();
         $this->snapshotTenant($tenant);
-        $tenant->domains()->delete();
+        $tenant->domains()->withTrashed()->forceDelete();
         $tenant->domains()->create([
             'path' => 'custom-tenant-main.test',
             'type' => 'web',
         ]);
         $tenant->makeCurrent();
 
-        $response = $this->get("{$this->base_api_tenant}environment");
+        $subdomainHost = parse_url($this->base_tenant_url, PHP_URL_HOST);
+        $this->assertIsString($subdomainHost);
+
+        $response = $this->get("http://{$subdomainHost}/api/v1/environment");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            $subdomainHost,
+            parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
+        );
+        $this->assertSame(['custom-tenant-main.test'], $response->json('domains', []));
+    }
+
+    public function test_environment_api_on_custom_domain_request_uses_current_custom_domain_and_keeps_domains_explicit_only(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->domains()->withTrashed()->forceDelete();
+        $tenant->domains()->create([
+            'path' => 'custom-tenant-main.test',
+            'type' => 'web',
+        ]);
+        $tenant->makeCurrent();
+
+        $subdomainHost = parse_url($this->base_tenant_url, PHP_URL_HOST);
+        $this->assertIsString($subdomainHost);
+
+        $response = $this->get('http://custom-tenant-main.test/api/v1/environment');
 
         $response->assertStatus(200);
         $this->assertSame(
             'custom-tenant-main.test',
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
-        $this->assertSame(
-            'custom-tenant-main.test',
-            parse_url($tenant->getMainDomain(), PHP_URL_HOST)
-        );
+        $this->assertSame(['custom-tenant-main.test'], $response->json('domains', []));
     }
 
     public function test_environment_api_ignores_legacy_persisted_landlord_fallback_domains(): void
@@ -104,7 +132,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $canonicalSubdomain = $tenant->subdomain;
         $legacyFallbackDomain = "{$canonicalSubdomain}-legacy.$rootHost";
 
-        $tenant->domains()->delete();
+        $tenant->domains()->withTrashed()->forceDelete();
         $tenant->domains()->create([
             'path' => $legacyFallbackDomain,
             'type' => 'web',
@@ -119,10 +147,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             "{$canonicalSubdomain}.$rootHost",
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
-        $this->assertSame(
-            ["{$canonicalSubdomain}.$rootHost"],
-            $response->json('domains')
-        );
+        $this->assertSame([], $response->json('domains'));
     }
 
     public function test_environment_api_uses_telemetry_from_settings_kernel(): void
@@ -222,7 +247,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $tenant->update([
             'subdomain' => $this->tenantSnapshot['subdomain'],
         ]);
-        $tenant->domains()->delete();
+        $tenant->domains()->withTrashed()->forceDelete();
 
         $this->tenantSnapshot = null;
     }
