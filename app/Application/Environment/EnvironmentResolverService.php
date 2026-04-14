@@ -70,10 +70,11 @@ class EnvironmentResolverService
             overrideArray: $tenant->branding_data ?? []
         );
         $canonicalTenantMainDomain = $tenant->getMainDomain();
-        $resolvedDomains = $tenant->resolvedDomains();
+        $explicitDomains = $tenant->explicitDomains();
         $mainDomain = $this->resolveTenantMainDomain(
             tenantMainDomain: $canonicalTenantMainDomain,
-            domains: $resolvedDomains,
+            explicitDomains: $explicitDomains,
+            tenantSubdomain: $tenant->subdomain,
             requestRoot: $requestRoot,
             requestHost: $requestHost,
         );
@@ -85,7 +86,7 @@ class EnvironmentResolverService
             'subdomain' => $tenant->subdomain,
             'main_domain' => $mainDomain,
             'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
-            'domains' => $resolvedDomains,
+            'domains' => $explicitDomains,
             'app_domains' => $tenant->resolvedAppDomains(),
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
@@ -156,15 +157,15 @@ class EnvironmentResolverService
     }
 
     /**
-    /**
      * Web: use current tenant host as main_domain.
      * Mobile (resolved via app_domain on landlord host): keep canonical tenant main domain.
      *
-     * @param  array<int, string>  $domains
+     * @param  array<int, string>  $explicitDomains
      */
     private function resolveTenantMainDomain(
         string $tenantMainDomain,
-        array $domains,
+        array $explicitDomains,
+        ?string $tenantSubdomain,
         ?string $requestRoot,
         ?string $requestHost
     ): string {
@@ -175,16 +176,16 @@ class EnvironmentResolverService
         }
 
         $allowedHosts = [];
-        $tenantMainHost = $this->normalizeHost(parse_url($tenantMainDomain, PHP_URL_HOST));
-        if ($tenantMainHost !== null) {
-            $allowedHosts[$tenantMainHost] = true;
-        }
-
-        foreach ($domains as $domain) {
+        foreach ($explicitDomains as $domain) {
             $host = $this->normalizeHost(parse_url($this->forceHttps($domain), PHP_URL_HOST));
             if ($host !== null) {
                 $allowedHosts[$host] = true;
             }
+        }
+
+        $implicitSubdomainHost = $this->implicitTenantSubdomainHost($tenantSubdomain);
+        if ($implicitSubdomainHost !== null) {
+            $allowedHosts[$implicitSubdomainHost] = true;
         }
 
         if (! isset($allowedHosts[$normalizedRequestHost])) {
@@ -252,6 +253,27 @@ class EnvironmentResolverService
         $normalized = trim($normalized, '/');
 
         return $normalized === '' ? null : 'https://'.$normalized;
+    }
+
+    private function implicitTenantSubdomainHost(?string $subdomain): ?string
+    {
+        $normalizedSubdomain = $this->normalizeHost($subdomain);
+        if ($normalizedSubdomain === null) {
+            return null;
+        }
+
+        $configuredRootHost = $this->normalizeHost(parse_url((string) config('app.url'), PHP_URL_HOST));
+        if ($configuredRootHost === null) {
+            $configuredRootHost = $this->normalizeHost(
+                trim(Str::replace(['https://', 'http://'], '', (string) config('app.url')), '/')
+            );
+        }
+
+        if ($configuredRootHost === null) {
+            return null;
+        }
+
+        return sprintf('%s.%s', $normalizedSubdomain, $configuredRootHost);
     }
 
     private function defaultTelemetryLocationFreshnessMinutes(): int
