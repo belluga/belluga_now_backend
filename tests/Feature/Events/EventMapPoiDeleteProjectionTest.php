@@ -227,17 +227,8 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
             ],
             'event_parties' => [
                 [
-                    'party_type' => 'artist',
                     'party_ref_id' => (string) $this->artist->_id,
                     'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => $this->artist->display_name,
-                        'slug' => (string) $this->artist->slug,
-                        'profile_type' => (string) $this->artist->profile_type,
-                        'avatar_url' => $this->artist->avatar_url,
-                        'cover_url' => $this->artist->cover_url,
-                        'taxonomy_terms' => [],
-                    ],
                 ],
             ],
             'type' => [
