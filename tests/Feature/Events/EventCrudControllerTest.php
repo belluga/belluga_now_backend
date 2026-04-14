@@ -156,23 +156,12 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_event_create_accepts_dynamic_account_profile_party_type_and_keeps_admin_and_public_read_models_separate(): void
+    public function test_event_create_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
     {
         $payload = $this->makeEventPayload([
             'event_parties' => [[
-                'party_type' => (string) $this->band->profile_type,
                 'party_ref_id' => (string) $this->band->_id,
                 'permissions' => ['can_edit' => true],
-                'metadata' => [
-                    'display_name' => $this->band->display_name,
-                    'slug' => (string) $this->band->slug,
-                    'profile_type' => (string) $this->band->profile_type,
-                    'avatar_url' => $this->band->avatar_url,
-                    'cover_url' => $this->band->cover_url,
-                    'taxonomy_terms' => is_array($this->band->taxonomy_terms ?? null)
-                        ? $this->band->taxonomy_terms
-                        : [],
-                ],
             ]],
         ]);
 
@@ -180,6 +169,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.event_parties.0.party_type', (string) $this->band->profile_type);
+        $response->assertJsonPath('data.event_parties.0.metadata.profile_type', (string) $this->band->profile_type);
         $response->assertJsonPath('data.linked_account_profiles.0.profile_type', (string) $this->band->profile_type);
         $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $this->band->slug);
         $this->assertNull(data_get($response->json(), 'data.artists'));
@@ -1060,6 +1050,83 @@ class EventCrudControllerTest extends TestCaseTenant
         $summary->assertJsonPath('data.unchanged', 1);
     }
 
+    public function test_event_without_related_accounts_remains_valid_in_legacy_event_parties_summary_and_repair(): void
+    {
+        $event = $this->createEvent([
+            'event_parties' => [],
+            'artists' => null,
+        ]);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 0);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 1);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 0);
+        $repair->assertJsonPath('data.repaired', 0);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 1);
+
+        $fresh = $event->fresh();
+        $this->assertSame([], $fresh->event_parties ?? []);
+        $this->assertNull($fresh->artists);
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_restores_non_artist_related_profile_metadata_without_hardcoded_artist_dependency(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacy = $this->createEvent([
+            'artists' => null,
+            'event_parties' => [
+                [
+                    'party_type' => 'band',
+                    'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                    ],
+                ],
+            ],
+        ]);
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 1);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 0);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $legacy = $legacy->fresh();
+        $this->assertCount(1, $legacy->event_parties ?? []);
+        $this->assertSame('band', data_get($legacy->event_parties, '0.party_type'));
+        $this->assertSame((string) $this->band->_id, data_get($legacy->event_parties, '0.party_ref_id'));
+        $this->assertFalse((bool) data_get($legacy->event_parties, '0.permissions.can_edit'));
+        $this->assertSame((string) $this->band->slug, data_get($legacy->event_parties, '0.metadata.slug'));
+        $this->assertSame('band', data_get($legacy->event_parties, '0.metadata.profile_type'));
+        $this->assertSame($this->band->display_name, data_get($legacy->event_parties, '0.metadata.display_name'));
+        $this->assertNull($legacy->artists);
+    }
+
     public function test_event_create_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
@@ -1126,24 +1193,14 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['artist_ids']);
     }
 
-    public function test_event_create_rejects_unknown_event_party_type(): void
+    public function test_event_create_rejects_client_supplied_event_party_type(): void
     {
         $payload = $this->makeEventPayload([
             'event_parties' => [
                 [
-                    'party_type' => 'unknown_party',
                     'party_ref_id' => (string) $this->venue->_id,
                     'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => $this->venue->display_name,
-                        'slug' => (string) $this->venue->slug,
-                        'profile_type' => (string) $this->venue->profile_type,
-                        'avatar_url' => $this->venue->avatar_url,
-                        'cover_url' => $this->venue->cover_url,
-                        'taxonomy_terms' => is_array($this->venue->taxonomy_terms ?? null)
-                            ? $this->venue->taxonomy_terms
-                            : [],
-                    ],
+                    'party_type' => 'unknown_party',
                 ],
             ],
         ]);
@@ -1154,12 +1211,33 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['event_parties.0.party_type']);
     }
 
-    public function test_event_create_rejects_venue_event_party_type(): void
+    public function test_event_create_rejects_client_supplied_event_party_metadata(): void
     {
         $payload = $this->makeEventPayload([
             'event_parties' => [
                 [
-                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->venue->display_name,
+                        'slug' => (string) $this->venue->slug,
+                        'profile_type' => (string) $this->venue->profile_type,
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['event_parties.0.metadata']);
+    }
+
+    public function test_event_create_rejects_venue_account_profile_reference_in_event_parties(): void
+    {
+        $payload = $this->makeEventPayload([
+            'event_parties' => [
+                [
                     'party_ref_id' => (string) $this->venue->_id,
                     'permissions' => ['can_edit' => true],
                 ],
@@ -1169,7 +1247,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['event_parties.0.party_type']);
+        $response->assertJsonValidationErrors(['event_parties.0.party_ref_id']);
     }
 
     public function test_event_create_rejects_physical_host_without_location(): void
@@ -2086,7 +2164,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertContains($eventId, $draftIds);
     }
 
-    public function test_event_update_preserves_omitted_artist_parties_on_partial_patch(): void
+    public function test_event_update_replaces_related_account_parties_when_event_parties_is_present(): void
     {
         $secondArtist = $this->createAccountProfile('artist', 'DJ Two');
         $secondArtist->slug = 'dj-two-'.Str::lower(Str::random(6));
@@ -2150,37 +2228,68 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
             'event_parties' => [
                 [
-                    'party_type' => 'artist',
                     'party_ref_id' => (string) $this->artist->_id,
                     'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => $this->artist->display_name,
-                        'slug' => (string) $this->artist->slug,
-                        'profile_type' => (string) $this->artist->profile_type,
-                        'avatar_url' => $this->artist->avatar_url,
-                        'cover_url' => $this->artist->cover_url,
-                        'taxonomy_terms' => is_array($this->artist->taxonomy_terms ?? null)
-                            ? $this->artist->taxonomy_terms
-                            : [],
-                    ],
                 ],
             ],
         ]);
 
         $response->assertStatus(200);
-        $response->assertJsonCount(2, 'data.event_parties');
+        $response->assertJsonCount(1, 'data.event_parties');
 
         $parties = collect($response->json('data.event_parties'));
         $this->assertTrue(
             $parties->contains(fn (array $party): bool => ($party['party_ref_id'] ?? null) === (string) $this->artist->_id
                 && (bool) data_get($party, 'permissions.can_edit') === true)
         );
-        $this->assertTrue(
+        $this->assertFalse(
             $parties->contains(fn (array $party): bool => ($party['party_ref_id'] ?? null) === (string) $secondArtist->_id)
         );
 
         $fresh = $event->fresh();
-        $this->assertCount(2, $fresh->event_parties ?? []);
+        $this->assertCount(1, $fresh->event_parties ?? []);
+    }
+
+    public function test_event_update_remove_cover_multipart_can_clear_related_account_parties_with_json_empty_array(): void
+    {
+        Storage::fake('public');
+
+        $secondArtist = $this->createAccountProfile('artist', 'DJ Clear');
+        $secondArtist->slug = 'dj-clear-'.Str::lower(Str::random(6));
+        $secondArtist->save();
+
+        $created = $this->post(
+            $this->accountEventsBase,
+            array_merge($this->makeEventPayload([
+                'event_parties' => [
+                    [
+                        'party_ref_id' => (string) $this->artist->_id,
+                        'permissions' => ['can_edit' => true],
+                    ],
+                    [
+                        'party_ref_id' => (string) $secondArtist->_id,
+                        'permissions' => ['can_edit' => false],
+                    ],
+                ],
+            ]), [
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ]),
+        );
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->post("{$this->accountEventsBase}/{$eventId}", [
+            '_method' => 'PATCH',
+            'remove_cover' => '1',
+            'event_parties' => '[]',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(0, 'data.event_parties');
+        $this->assertNull($response->json('data.thumb'));
+
+        $fresh = Event::query()->findOrFail($eventId);
+        $this->assertSame([], $fresh->event_parties ?? []);
     }
 
     public function test_event_update_dispatches_map_projection_sync_job_via_lifecycle_event(): void
@@ -3200,19 +3309,8 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
             'event_parties' => [
                 [
-                    'party_type' => 'artist',
                     'party_ref_id' => (string) $this->artist->_id,
                     'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => $this->artist->display_name,
-                        'slug' => (string) $this->artist->slug,
-                        'profile_type' => (string) $this->artist->profile_type,
-                        'avatar_url' => $this->artist->avatar_url,
-                        'cover_url' => $this->artist->cover_url,
-                        'taxonomy_terms' => is_array($this->artist->taxonomy_terms ?? null)
-                            ? $this->artist->taxonomy_terms
-                            : [],
-                    ],
                 ],
             ],
             'type' => [
