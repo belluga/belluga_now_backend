@@ -6,6 +6,7 @@ namespace App\Application\Branding;
 
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -66,11 +67,12 @@ class BrandingManifestService
 
     public function resolveFaviconAsset(): ?string
     {
-        $tenantBranding = Tenant::current()?->branding_data ?? [];
-        $landlordBranding = Landlord::singleton()->branding_data ?? [];
+        $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
+            mainArray: Landlord::singleton()->branding_data ?? [],
+            overrideArray: Tenant::current()?->branding_data ?? [],
+        );
 
-        return $this->resolveFaviconAssetFromBranding($tenantBranding)
-            ?? $this->resolveFaviconAssetFromBranding($landlordBranding);
+        return $this->resolveFaviconAssetFromBranding($branding);
     }
 
     public function resolveStoragePath(?string $uri): ?string

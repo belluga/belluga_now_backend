@@ -7,6 +7,7 @@ namespace Tests\Unit\Application\Branding;
 use App\Application\Branding\BrandingManifestService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -90,6 +91,42 @@ class BrandingManifestServiceTest extends TestCase
         $response = $this->service->assetResponse($resolvedAsset);
 
         $this->assertSame(Storage::disk('public')->url($pwaIconPath), $resolvedAsset);
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function test_resolve_favicon_asset_keeps_landlord_dedicated_favicon_ahead_of_tenant_pwa_fallback(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordFaviconPath = 'landlord/favicon.ico';
+        $tenantPwaIconPath = "tenants/{$tenant->slug}/pwa/icon-192x192.png";
+
+        Storage::disk('public')->put($landlordFaviconPath, 'landlord-favicon');
+        Storage::disk('public')->put($tenantPwaIconPath, 'tenant-pwa-icon');
+
+        $landlord = Landlord::singleton();
+        $landlordBranding = $landlord->branding_data ?? [];
+        $landlordBranding['logo_settings']['favicon_uri'] = Storage::disk('public')->url($landlordFaviconPath);
+        $landlord->branding_data = $landlordBranding;
+        $landlord->save();
+
+        $tenantBranding = $tenant->branding_data ?? [];
+        $tenantBranding['logo_settings']['favicon_uri'] = '';
+        $tenantBranding['pwa_icon']['icon192_uri'] = Storage::disk('public')->url($tenantPwaIconPath);
+        $tenantBranding['pwa_icon']['icon512_uri'] = '';
+        $tenantBranding['pwa_icon']['source_uri'] = '';
+        $tenantBranding['pwa_icon']['icon_maskable512_uri'] = '';
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+        $tenant->fresh()?->makeCurrent();
+
+        $resolvedAsset = $this->service->resolveFaviconAsset();
+        $response = $this->service->assetResponse($resolvedAsset);
+
+        $this->assertSame(Storage::disk('public')->url($landlordFaviconPath), $resolvedAsset);
         $this->assertSame(200, $response->getStatusCode());
     }
 
