@@ -12,7 +12,6 @@ trait EventManagementPartiesAndMetadata
 {
     /**
      * @param  array<string, mixed>  $payload
-     * @param  array<int, array<string, mixed>>  $artists
      * @return array<int, array{
      *   party_type: string,
      *   party_ref_id: string,
@@ -24,80 +23,181 @@ trait EventManagementPartiesAndMetadata
         array $payload,
         ?Event $existing
     ): array {
-        $existingRows = $this->normalizeEventPartiesMap($existing?->event_parties ?? []);
-        $resolved = [];
+        $existingRows = array_values($this->normalizeEventPartiesMap($existing?->event_parties ?? []));
 
-        foreach ($existingRows as $key => $row) {
-            if (($row['party_type'] ?? null) === 'venue') {
-                continue;
-            }
-
-            $resolved[$key] = $row;
+        if (! array_key_exists('event_parties', $payload)) {
+            return $existingRows;
         }
 
-        if (array_key_exists('event_parties', $payload)) {
-            $incomingRows = $payload['event_parties'];
-            if (! is_array($incomingRows)) {
+        $incomingRows = $payload['event_parties'];
+        if (! is_array($incomingRows)) {
+            throw ValidationException::withMessages([
+                'event_parties' => ['event_parties must be an array.'],
+            ]);
+        }
+
+        $existingByRefId = [];
+        foreach ($existingRows as $row) {
+            $existingByRefId[(string) ($row['party_ref_id'] ?? '')] = $row;
+        }
+
+        $profileIds = [];
+        $overridesByRefId = [];
+
+        foreach ($incomingRows as $index => $incomingRow) {
+            if (! is_array($incomingRow)) {
                 throw ValidationException::withMessages([
-                    'event_parties' => ['event_parties must be an array.'],
+                    "event_parties.{$index}" => ['event party payload must be an object.'],
                 ]);
             }
 
-            foreach ($incomingRows as $index => $incomingRow) {
-                if (! is_array($incomingRow)) {
-                    throw ValidationException::withMessages([
-                        "event_parties.{$index}" => ['event party payload must be an object.'],
-                    ]);
-                }
+            $this->assertCanonicalEventPartyWriteShape($incomingRow, $index);
 
-                $partyType = trim((string) ($incomingRow['party_type'] ?? ''));
-                $partyRefId = trim((string) ($incomingRow['party_ref_id'] ?? ''));
-
-                if ($partyType === '' || $partyRefId === '') {
-                    throw ValidationException::withMessages([
-                        "event_parties.{$index}" => ['party_type and party_ref_id are required.'],
-                    ]);
-                }
-
-                if ($partyType === 'venue') {
-                    throw ValidationException::withMessages([
-                        "event_parties.{$index}.party_type" => ['venue must not be persisted in event_parties.'],
-                    ]);
-                }
-
-                $metadataOverride = isset($incomingRow['metadata']) && is_array($incomingRow['metadata'])
-                    ? $incomingRow['metadata']
-                    : null;
-                $overrideCanEdit = null;
-                if (isset($incomingRow['permissions']) && is_array($incomingRow['permissions']) && array_key_exists('can_edit', $incomingRow['permissions'])) {
-                    $overrideCanEdit = (bool) $incomingRow['permissions']['can_edit'];
-                }
-
-                $key = $this->eventPartyKey($partyType, $partyRefId);
-                $resolvedSource = [];
-                if ($metadataOverride === null) {
-                    $resolvedSource = isset($resolved[$key]['metadata']) && is_array($resolved[$key]['metadata'])
-                        ? $resolved[$key]['metadata']
-                        : [];
-                    if ($resolvedSource === []) {
-                        throw ValidationException::withMessages([
-                            "event_parties.{$index}.metadata" => ['metadata is required for new event parties.'],
-                        ]);
-                    }
-                }
-                $resolved[$key] = $this->buildEventPartyRow(
-                    $partyType,
-                    $partyRefId,
-                    $metadataOverride ?? $resolvedSource,
-                    $resolved[$key] ?? ($existingRows[$key] ?? null),
-                    $overrideCanEdit,
-                    $metadataOverride,
-                    "event_parties.{$index}.party_type"
-                );
+            $partyRefId = trim((string) ($incomingRow['party_ref_id'] ?? ''));
+            if ($partyRefId === '') {
+                throw ValidationException::withMessages([
+                    "event_parties.{$index}.party_ref_id" => ['party_ref_id is required.'],
+                ]);
             }
+
+            if (isset($overridesByRefId[$partyRefId])) {
+                throw ValidationException::withMessages([
+                    "event_parties.{$index}.party_ref_id" => ['Duplicate related account profiles are not allowed.'],
+                ]);
+            }
+
+            $overrideCanEdit = null;
+            if (
+                isset($incomingRow['permissions'])
+                && is_array($incomingRow['permissions'])
+                && array_key_exists('can_edit', $incomingRow['permissions'])
+            ) {
+                $overrideCanEdit = (bool) $incomingRow['permissions']['can_edit'];
+            }
+
+            $profileIds[] = $partyRefId;
+            $overridesByRefId[$partyRefId] = [
+                'index' => $index,
+                'override_can_edit' => $overrideCanEdit,
+                'existing_row' => $existingByRefId[$partyRefId] ?? null,
+            ];
         }
 
-        return array_values($resolved);
+        $resolvedProfiles = $this->eventProfileResolver->resolveEventPartyProfilesByIds($profileIds);
+        $resolvedProfilesByRefId = [];
+
+        foreach ($resolvedProfiles as $profile) {
+            if (! is_array($profile)) {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Resolved event party profile payload is invalid.'],
+                ]);
+            }
+
+            $resolvedPartyRefId = trim((string) ($profile['id'] ?? ''));
+            if ($resolvedPartyRefId === '') {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Resolved event party profile payload is invalid.'],
+                ]);
+            }
+
+            $resolvedProfilesByRefId[$resolvedPartyRefId] = $profile;
+        }
+
+        $missingProfileIds = array_values(
+            array_diff($profileIds, array_keys($resolvedProfilesByRefId))
+        );
+        if ($missingProfileIds !== []) {
+            $firstMissingId = $missingProfileIds[0];
+            $missingIndex = (int) ($overridesByRefId[$firstMissingId]['index'] ?? 0);
+
+            throw ValidationException::withMessages([
+                "event_parties.{$missingIndex}.party_ref_id" => ['Related account profile was not found.'],
+            ]);
+        }
+
+        $resolved = [];
+
+        foreach ($profileIds as $position => $partyRefId) {
+            $profile = $resolvedProfilesByRefId[$partyRefId] ?? null;
+            if (! is_array($profile)) {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Resolved event party profile order is invalid.'],
+                ]);
+            }
+
+            $profileType = trim((string) ($profile['profile_type'] ?? ''));
+
+            if (! isset($overridesByRefId[$partyRefId])) {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Resolved event party profile order is invalid.'],
+                ]);
+            }
+
+            $validationIndex = (int) ($overridesByRefId[$partyRefId]['index'] ?? $position);
+            if ($profileType === 'venue') {
+                throw ValidationException::withMessages([
+                    "event_parties.{$validationIndex}.party_ref_id" => ['Venue account profiles must stay on place_ref and cannot be persisted in event_parties.'],
+                ]);
+            }
+
+            $resolved[] = $this->buildEventPartyRow(
+                $profileType,
+                $partyRefId,
+                $profile,
+                is_array($overridesByRefId[$partyRefId]['existing_row'] ?? null)
+                    ? $overridesByRefId[$partyRefId]['existing_row']
+                    : null,
+                $overridesByRefId[$partyRefId]['override_can_edit'] ?? null,
+                "event_parties.{$validationIndex}.party_ref_id"
+            );
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @param  array<string, mixed>  $incomingRow
+     */
+    private function assertCanonicalEventPartyWriteShape(array $incomingRow, int $index): void
+    {
+        $allowedKeys = ['party_ref_id', 'permissions'];
+        $unexpectedKeys = array_values(array_diff(array_keys($incomingRow), $allowedKeys));
+
+        if (in_array('party_type', $unexpectedKeys, true)) {
+            throw ValidationException::withMessages([
+                "event_parties.{$index}.party_type" => ['party_type is inferred from party_ref_id and must not be sent by clients.'],
+            ]);
+        }
+
+        if (in_array('metadata', $unexpectedKeys, true)) {
+            throw ValidationException::withMessages([
+                "event_parties.{$index}.metadata" => ['metadata is generated by the backend and must not be sent by clients.'],
+            ]);
+        }
+
+        if ($unexpectedKeys !== []) {
+            throw ValidationException::withMessages([
+                "event_parties.{$index}" => ['Unsupported event party fields were provided.'],
+            ]);
+        }
+
+        if (array_key_exists('permissions', $incomingRow) && ! is_array($incomingRow['permissions'])) {
+            throw ValidationException::withMessages([
+                "event_parties.{$index}.permissions" => ['permissions must be an object.'],
+            ]);
+        }
+
+        if (isset($incomingRow['permissions']) && is_array($incomingRow['permissions'])) {
+            $unexpectedPermissionKeys = array_values(
+                array_diff(array_keys($incomingRow['permissions']), ['can_edit'])
+            );
+
+            if ($unexpectedPermissionKeys !== []) {
+                throw ValidationException::withMessages([
+                    "event_parties.{$index}.permissions" => ['permissions only supports can_edit.'],
+                ]);
+            }
+        }
     }
 
     /**
@@ -108,7 +208,6 @@ trait EventManagementPartiesAndMetadata
      *   permissions: array{can_edit: bool},
      *   metadata?: array<string, mixed>
      * }|null $existingRow
-     * @param  array<string, mixed>|null  $metadataOverride
      * @return array{
      *   party_type: string,
      *   party_ref_id: string,
@@ -122,7 +221,6 @@ trait EventManagementPartiesAndMetadata
         array $source,
         ?array $existingRow,
         ?bool $overrideCanEdit,
-        ?array $metadataOverride,
         string $validationField
     ): array {
         $mapper = $this->eventPartyMappers->find($partyType);
@@ -144,13 +242,12 @@ trait EventManagementPartiesAndMetadata
 
         $canEdit = $overrideCanEdit ?? $existingCanEdit ?? $mapper->defaultCanEdit();
 
-        $metadataSource = $metadataOverride ?? $source;
-        $displayName = trim((string) ($metadataSource['display_name'] ?? ''));
-        $slug = trim((string) ($metadataSource['slug'] ?? ''));
-        $profileType = trim((string) ($metadataSource['profile_type'] ?? ''));
+        $displayName = trim((string) ($source['display_name'] ?? ''));
+        $slug = trim((string) ($source['slug'] ?? ''));
+        $profileType = trim((string) ($source['profile_type'] ?? ''));
         if ($displayName === '' || $slug === '' || $profileType === '') {
             throw ValidationException::withMessages([
-                str_replace('.party_type', '.metadata', $validationField) => ['display_name, slug and profile_type are required for event party metadata.'],
+                $validationField => ['Resolved account profile metadata must include display_name, slug and profile_type.'],
             ]);
         }
         if ($profileType !== $partyType) {
@@ -158,7 +255,7 @@ trait EventManagementPartiesAndMetadata
                 $validationField => ["party_type [{$partyType}] must match metadata.profile_type [{$profileType}]."],
             ]);
         }
-        $metadata = $mapper->mapMetadata(is_array($metadataSource) ? $metadataSource : []);
+        $metadata = $mapper->mapMetadata($source);
         $metadata = is_array($metadata) ? $metadata : [];
 
         $row = [

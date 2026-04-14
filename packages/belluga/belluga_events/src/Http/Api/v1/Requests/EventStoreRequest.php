@@ -15,6 +15,16 @@ class EventStoreRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $eventParties = $this->decodeJsonArrayField($this->input('event_parties'));
+        if ($eventParties !== null) {
+            $this->merge([
+                'event_parties' => $eventParties,
+            ]);
+        }
+    }
+
     /**
      * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
      */
@@ -101,17 +111,32 @@ class EventStoreRequest extends FormRequest
             'capabilities.map_poi.discovery_scope.polygon.type' => 'required_if:capabilities.map_poi.discovery_scope.type,polygon|string|in:Polygon',
             'capabilities.map_poi.discovery_scope.polygon.coordinates' => 'required_if:capabilities.map_poi.discovery_scope.type,polygon|array|min:1',
             'event_parties' => 'sometimes|array',
-            'event_parties.*' => 'array',
-            'event_parties.*.party_type' => [
-                'required_with:event_parties',
-                'string',
-                'max:'.InputConstraints::NAME_MAX,
-                'not_in:venue',
-            ],
+            'event_parties.*' => 'array:party_ref_id,permissions',
+            'event_parties.*.party_type' => 'prohibited',
             'event_parties.*.party_ref_id' => 'required_with:event_parties|string|size:'.InputConstraints::OBJECT_ID_LENGTH,
-            'event_parties.*.permissions' => 'sometimes|array',
+            'event_parties.*.permissions' => 'sometimes|array:can_edit',
             'event_parties.*.permissions.can_edit' => 'sometimes|boolean',
-            'event_parties.*.metadata' => 'sometimes|array',
+            'event_parties.*.metadata' => 'prohibited',
         ];
+    }
+
+    private function decodeJsonArrayField(mixed $value): ?array
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        try {
+            $decoded = json_decode($trimmed, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return null;
+        }
+
+        return is_array($decoded) ? $decoded : null;
     }
 }

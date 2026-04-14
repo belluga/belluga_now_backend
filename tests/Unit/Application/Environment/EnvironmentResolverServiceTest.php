@@ -67,6 +67,31 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->assertSame($tenant->getMainDomain(), $result['main_domain']);
     }
 
+    public function test_resolve_on_subdomain_request_preserves_custom_domain_coexistence(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->domains()->delete();
+        $tenant->domains()->create([
+            'path' => 'tenant-beta-custom.test',
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+        ]);
+        $tenant->makeCurrent();
+
+        $subdomainHost = "{$tenant->subdomain}.{$this->rootHost()}";
+
+        $result = $this->service->resolve([
+            'request_root' => "https://{$subdomainHost}",
+            'request_host' => $subdomainHost,
+        ]);
+
+        $this->assertSame('tenant', $result['type']);
+        $this->assertSame("https://{$subdomainHost}", $result['main_domain']);
+        $this->assertSame(
+            ['tenant-beta-custom.test'],
+            $this->extractHosts($result['domains'] ?? [])
+        );
+    }
+
     public function test_resolve_exposes_profile_type_type_asset_visual_in_environment_registry(): void
     {
         $tenant = Tenant::query()->firstOrFail();
@@ -158,5 +183,31 @@ class EnvironmentResolverServiceTest extends TestCase
         );
 
         $service->initialize($payload);
+    }
+
+    private function rootHost(): string
+    {
+        $configuredUrl = (string) config('app.url');
+        $rootHost = parse_url($configuredUrl, PHP_URL_HOST);
+        if (is_string($rootHost) && $rootHost !== '') {
+            return $rootHost;
+        }
+
+        return trim(str_replace(['https://', 'http://'], '', $configuredUrl), '/');
+    }
+
+    /**
+     * @param  array<int, mixed>  $domains
+     * @return array<int, string>
+     */
+    private function extractHosts(array $domains): array
+    {
+        return collect($domains)
+            ->map(static fn (mixed $domain): ?string => is_string($domain)
+                ? parse_url(str_contains($domain, '://') ? $domain : "https://{$domain}", PHP_URL_HOST)
+                : null)
+            ->filter()
+            ->values()
+            ->all();
     }
 }
