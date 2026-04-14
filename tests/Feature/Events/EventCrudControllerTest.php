@@ -1050,6 +1050,66 @@ class EventCrudControllerTest extends TestCaseTenant
         $summary->assertJsonPath('data.unchanged', 1);
     }
 
+    public function test_event_update_without_event_parties_preserves_invalid_legacy_rows_until_explicit_repair(): void
+    {
+        $legacy = $this->createEvent([
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'rock'],
+                    ],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => $this->artist->display_name,
+                        'slug' => (string) $this->artist->slug,
+                        'profile_type' => (string) $this->artist->profile_type,
+                    ],
+                ],
+            ],
+        ]);
+
+        $beforeParties = $legacy->event_parties;
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$legacy->_id}", [
+            'title' => 'Updated But Still Legacy',
+        ]);
+
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.title', 'Updated But Still Legacy');
+        $updated->assertJsonCount(2, 'data.event_parties');
+        $updated->assertJsonPath('data.event_parties.0.party_type', 'venue');
+
+        $legacy = $legacy->fresh();
+        $this->assertSame($beforeParties, $legacy->event_parties);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 1);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 0);
+    }
+
     public function test_event_without_related_accounts_remains_valid_in_legacy_event_parties_summary_and_repair(): void
     {
         $event = $this->createEvent([
