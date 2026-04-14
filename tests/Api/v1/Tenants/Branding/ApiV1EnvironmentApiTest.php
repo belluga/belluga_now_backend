@@ -2,6 +2,7 @@
 
 namespace Tests\Api\v1\Tenants\Branding;
 
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
@@ -46,14 +47,54 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             'domains',
             'app_domains',
             'theme_data_settings',
+            'branding_assets' => [
+                'favicon' => [
+                    'has_dedicated_asset',
+                    'uses_pwa_fallback',
+                ],
+            ],
             'telemetry',
         ]);
         $response->assertJsonPath('type', 'tenant');
+        $response->assertJsonPath('branding_assets.favicon.has_dedicated_asset', true);
+        $response->assertJsonPath('branding_assets.favicon.uses_pwa_fallback', false);
         $this->assertSame(
             $tenantRequestHost,
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
         $response->assertJsonPath('telemetry.location_freshness_minutes', 5);
+    }
+
+    public function test_environment_api_exposes_when_favicon_route_is_using_pwa_fallback(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->makeCurrent();
+
+        $landlord = Landlord::singleton();
+        $originalLandlordBranding = $landlord->branding_data ?? [];
+
+        $tenantBranding = $tenant->branding_data ?? [];
+        $tenantBranding['logo_settings']['favicon_uri'] = '';
+        $tenantBranding['pwa_icon']['icon192_uri'] = 'https://tenant-sigma.test/storage/tenant-pwa-192.png';
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+
+        $landlordBranding = $landlord->branding_data ?? [];
+        $landlordBranding['logo_settings']['favicon_uri'] = '';
+        $landlord->branding_data = $landlordBranding;
+        $landlord->save();
+
+        try {
+            $response = $this->get("{$this->base_api_tenant}environment");
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('branding_assets.favicon.has_dedicated_asset', false);
+            $response->assertJsonPath('branding_assets.favicon.uses_pwa_fallback', true);
+        } finally {
+            $landlord->branding_data = $originalLandlordBranding;
+            $landlord->save();
+        }
     }
 
     public function test_environment_api_falls_back_to_subdomain_when_no_domains(): void

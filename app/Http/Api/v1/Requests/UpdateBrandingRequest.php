@@ -24,6 +24,7 @@ class UpdateBrandingRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
             'theme_data_settings' => ['sometimes', 'array'],
             'theme_data_settings.brightness_default' => ['sometimes', 'string', 'in:light,dark'],
             'theme_data_settings.primary_seed_color' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/'],

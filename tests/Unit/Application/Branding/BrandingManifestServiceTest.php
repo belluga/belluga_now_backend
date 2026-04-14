@@ -62,6 +62,37 @@ class BrandingManifestServiceTest extends TestCase
         $this->assertSame(404, $response->getStatusCode());
     }
 
+    public function test_resolve_favicon_asset_falls_back_to_tenant_pwa_icon(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $pwaIconPath = "tenants/{$tenant->slug}/pwa/icon-192x192.png";
+        Storage::disk('public')->put($pwaIconPath, 'tenant-pwa-icon');
+
+        $tenant->branding_data = [
+            'logo_settings' => [
+                'favicon_uri' => '',
+            ],
+            'pwa_icon' => [
+                'icon192_uri' => Storage::disk('public')->url($pwaIconPath),
+                'icon512_uri' => '',
+                'source_uri' => '',
+                'icon_maskable512_uri' => '',
+            ],
+        ];
+        $tenant->save();
+        $tenant->fresh()?->makeCurrent();
+
+        $resolvedAsset = $this->service->resolveFaviconAsset();
+        $response = $this->service->assetResponse($resolvedAsset);
+
+        $this->assertSame(Storage::disk('public')->url($pwaIconPath), $resolvedAsset);
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     private function initializeSystem(): void
     {
         /** @var SystemInitializationService $service */
