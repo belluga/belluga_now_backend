@@ -122,6 +122,39 @@ class TenantBrandingManagementServiceTest extends TestCase
         );
     }
 
+    public function test_update_normalizes_missing_logo_keys_when_existing_branding_is_partial(): void
+    {
+        $this->tenant->branding_data = [
+            'logo_settings' => [
+                'light_logo_uri' => 'https://existing/light.svg',
+            ],
+            'theme_data_settings' => [
+                'brightness_default' => 'light',
+            ],
+        ];
+        $this->tenant->save();
+
+        $branding = $this->service->update(
+            $this->tenant->fresh(),
+            [
+                'theme_data_settings' => [
+                    'primary_seed_color' => '#ffffff',
+                ],
+            ]
+        );
+
+        $this->assertSame(
+            'https://existing/light.svg',
+            $branding['logo_settings']['light_logo_uri']
+        );
+        $this->assertArrayHasKey('light_icon_uri', $branding['logo_settings']);
+        $this->assertArrayHasKey('dark_icon_uri', $branding['logo_settings']);
+        $this->assertArrayHasKey('favicon_uri', $branding['logo_settings']);
+        $this->assertSame('', $branding['logo_settings']['light_icon_uri']);
+        $this->assertSame('', $branding['logo_settings']['dark_icon_uri']);
+        $this->assertSame('', $branding['logo_settings']['favicon_uri']);
+    }
+
     public function test_update_includes_pwa_variants(): void
     {
         $variants = [

@@ -194,8 +194,8 @@ class ApiV1BrandingAdminTest extends TestCaseAuthenticated
                 'light_logo_uri' => $light_logo_uri,
                 'dark_logo_uri' => $dark_logo_uri,
                 'favicon_uri' => $landlord_favicon,
+                'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
             ],
-            'pwa_icon' => UploadedFile::fake()->image('dark-logo.png', 1024, 1024),
         ];
     }
 
@@ -220,9 +220,11 @@ class ApiV1BrandingAdminTest extends TestCaseAuthenticated
             'logo_settings' => [
                 'light_logo_uri' => UploadedFile::fake()->image('default-light-logo.png', 350, 512),
                 'dark_logo_uri' => UploadedFile::fake()->image('default-dark-logo.png', 400, 512),
+                'light_icon_uri' => UploadedFile::fake()->image('default-light-icon.png', 128, 128),
+                'dark_icon_uri' => UploadedFile::fake()->image('default-dark-icon.png', 128, 128),
                 'favicon_uri' => UploadedFile::fake()->create('default-favicon.ico', 24, 'image/vnd.microsoft.icon'),
+                'pwa_icon' => UploadedFile::fake()->image('default-pwa-icon.png', 1024, 1024),
             ],
-            'pwa_icon' => UploadedFile::fake()->image('default-pwa-icon.png', 1024, 1024),
         ];
     }
 }
