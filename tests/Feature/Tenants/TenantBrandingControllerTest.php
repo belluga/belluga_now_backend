@@ -107,10 +107,18 @@ class TenantBrandingControllerTest extends TestCaseTenant
             ->assertOk()
             ->assertJsonPath('name', 'Guarappari');
 
-        $this->get("{$this->base_tenant_url}manifest.json")
+        $manifestResponse = $this->get("{$this->base_tenant_url}manifest.json");
+
+        $manifestResponse
             ->assertOk()
             ->assertJsonPath('name', 'Guarappari')
             ->assertJsonPath('short_name', 'Guarappari');
+
+        $manifestCacheControl = (string) $manifestResponse->headers->get('Cache-Control');
+        $this->assertStringContainsString('no-store', $manifestCacheControl);
+        $this->assertStringContainsString('no-cache', $manifestCacheControl);
+        $this->assertStringContainsString('must-revalidate', $manifestCacheControl);
+        $this->assertStringContainsString('max-age=0', $manifestCacheControl);
     }
 
     private function initializeSystem(): void
