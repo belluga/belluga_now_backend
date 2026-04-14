@@ -112,7 +112,7 @@ class EventQueryService
         }
 
         return $query
-            ->orderBy('date_time_start', 'desc')
+            ->orderBy('date_time_start', $isAdminContext ? 'asc' : 'desc')
             ->orderBy('_id', 'desc')
             ->paginate($resolvedPerPage)
             ->through(fn (Event $event): array => $this->formatManagementEvent($event));
