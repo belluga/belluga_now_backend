@@ -30,6 +30,12 @@ class LandlordBrandingManagementService
         'icon_maskable512_uri' => '',
     ];
 
+    private const DEFAULT_PUBLIC_WEB_METADATA = [
+        'default_title' => '',
+        'default_description' => '',
+        'default_image' => '',
+    ];
+
     /**
      * @param  array<string, mixed>  $payload
      * @param  array<string, string>  $uploadedLogos
@@ -115,6 +121,20 @@ class LandlordBrandingManagementService
                 'secondary_seed_color' => $secondarySeedColor,
             ],
             'pwa_icon' => $pwaIcon,
+            'public_web_metadata' => [
+                'default_title' => (string) $this->stringValue(
+                    $payload,
+                    'public_web_metadata.default_title'
+                ),
+                'default_description' => (string) $this->stringValue(
+                    $payload,
+                    'public_web_metadata.default_description'
+                ),
+                'default_image' => (string) $this->stringValue(
+                    $payload,
+                    'public_web_metadata.default_image'
+                ),
+            ],
         ];
     }
 
@@ -148,10 +168,19 @@ class LandlordBrandingManagementService
             }
         }
 
+        $publicWebMetadata = self::DEFAULT_PUBLIC_WEB_METADATA;
+        $rawPublicWebMetadata = $brandingData['public_web_metadata'] ?? [];
+        if (is_array($rawPublicWebMetadata)) {
+            foreach (array_keys(self::DEFAULT_PUBLIC_WEB_METADATA) as $key) {
+                $publicWebMetadata[$key] = (string) ($rawPublicWebMetadata[$key] ?? '');
+            }
+        }
+
         return [
             'logo_settings' => $logoSettings,
             'theme_data_settings' => $themeDataSettings,
             'pwa_icon' => $pwaIcon,
+            'public_web_metadata' => $publicWebMetadata,
         ];
     }
 

@@ -172,6 +172,80 @@ class ModelMediaServiceTest extends TestCase
 
         $this->assertSame($external, $normalized);
     }
+
+    public function test_store_upload_can_be_used_outside_apply_uploads_for_nested_payloads(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/branding-public-web',
+            canonicalPublicPathPrefix: '/api/v1/media/branding-public-web',
+            storageDirectory: 'branding_public_web',
+            slots: ['default_image'],
+        );
+
+        $model = new FakeMediaModel('brand-123');
+        $storedUrl = $service->storeUpload(
+            baseUrl: 'https://tenant-zeta.test',
+            model: $model,
+            kind: 'default_image',
+            file: UploadedFile::fake()->image('default-image.jpg', 1200, 630),
+            definition: $definition,
+        );
+
+        $this->assertSame(
+            'https://tenant-zeta.test/api/v1/media/branding-public-web/brand-123/default_image?v='.time(),
+            preg_replace('/\?v=\d+$/', '?v='.time(), $storedUrl),
+        );
+        Storage::disk('public')->assertExists(
+            'tenants/tenant-zeta/branding_public_web/brand-123/default_image.jpg'
+        );
+    }
+
+    public function test_remove_upload_deletes_existing_slot_file(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/branding-public-web',
+            canonicalPublicPathPrefix: '/api/v1/media/branding-public-web',
+            storageDirectory: 'branding_public_web',
+            slots: ['default_image'],
+        );
+
+        $model = new FakeMediaModel('brand-456');
+        Storage::disk('public')->put(
+            'tenants/tenant-zeta/branding_public_web/brand-456/default_image.png',
+            'default-image'
+        );
+
+        $service->removeUpload(
+            model: $model,
+            kind: 'default_image',
+            definition: $definition,
+            baseUrl: 'https://tenant-zeta.test',
+        );
+
+        Storage::disk('public')->assertMissing(
+            'tenants/tenant-zeta/branding_public_web/brand-456/default_image.png'
+        );
+    }
 }
 
 final class FakeMediaModel

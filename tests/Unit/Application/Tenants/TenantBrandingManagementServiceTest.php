@@ -173,6 +173,36 @@ class TenantBrandingManagementServiceTest extends TestCase
         $this->assertSame('https://cdn.example/pwa-192.png', $branding['pwa_icon']['icon192_uri']);
     }
 
+    public function test_update_normalizes_public_web_metadata(): void
+    {
+        $this->tenant->branding_data = [
+            'public_web_metadata' => [
+                'default_title' => 'Guarappari em destaque',
+            ],
+        ];
+        $this->tenant->save();
+
+        $branding = $this->service->update(
+            $this->tenant->fresh(),
+            [
+                'public_web_metadata' => [
+                    'default_description' => 'Fallback institucional do tenant.',
+                ],
+            ]
+        );
+
+        $this->assertSame(
+            'Guarappari em destaque',
+            $branding['public_web_metadata']['default_title']
+        );
+        $this->assertSame(
+            'Fallback institucional do tenant.',
+            $branding['public_web_metadata']['default_description']
+        );
+        $this->assertArrayHasKey('default_image', $branding['public_web_metadata']);
+        $this->assertSame('', $branding['public_web_metadata']['default_image']);
+    }
+
     public function test_update_persists_tenant_name_and_keeps_slug_stable(): void
     {
         $originalSlug = (string) $this->tenant->slug;

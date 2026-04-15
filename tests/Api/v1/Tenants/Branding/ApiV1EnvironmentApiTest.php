@@ -53,16 +53,140 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
                     'uses_pwa_fallback',
                 ],
             ],
+            'public_web_metadata' => [
+                'default_title',
+                'default_description',
+                'default_image',
+            ],
             'telemetry',
         ]);
         $response->assertJsonPath('type', 'tenant');
-        $response->assertJsonPath('branding_assets.favicon.has_dedicated_asset', true);
-        $response->assertJsonPath('branding_assets.favicon.uses_pwa_fallback', false);
         $this->assertSame(
             $tenantRequestHost,
             parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
         );
         $response->assertJsonPath('telemetry.location_freshness_minutes', 5);
+    }
+
+    public function test_environment_api_exposes_when_favicon_route_has_dedicated_asset(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->makeCurrent();
+
+        $tenantBranding = $tenant->branding_data ?? [];
+        $tenantBranding['logo_settings']['favicon_uri'] = 'https://tenant-sigma.test/storage/tenant-favicon.ico';
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('branding_assets.favicon.has_dedicated_asset', true);
+        $response->assertJsonPath('branding_assets.favicon.uses_pwa_fallback', false);
+    }
+
+    public function test_environment_api_exposes_public_web_metadata_from_merged_branding(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->makeCurrent();
+
+        $landlord = Landlord::singleton();
+        $originalLandlordBranding = $landlord->branding_data ?? [];
+
+        $landlordBranding = $originalLandlordBranding;
+        $landlordBranding['public_web_metadata'] = [
+            'default_title' => 'Belluga fallback',
+            'default_description' => 'Descricao institucional do landlord.',
+            'default_image' => 'https://landlord.example/meta/default.jpg',
+        ];
+        $landlord->branding_data = $landlordBranding;
+        $landlord->save();
+
+        $tenantBranding = $tenant->branding_data ?? [];
+        $tenantBranding['public_web_metadata'] = [
+            'default_title' => 'Guarappari fallback',
+            'default_description' => 'Descricao institucional do tenant.',
+            'default_image' => 'https://tenant.example/meta/default.jpg',
+        ];
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+
+        try {
+            $response = $this->get("{$this->base_api_tenant}environment");
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('public_web_metadata.default_title', 'Guarappari fallback');
+            $response->assertJsonPath('public_web_metadata.default_description', 'Descricao institucional do tenant.');
+            $response->assertJsonPath('public_web_metadata.default_image', 'https://tenant.example/meta/default.jpg');
+        } finally {
+            $landlord->branding_data = $originalLandlordBranding;
+            $landlord->save();
+        }
+    }
+
+    public function test_environment_api_rewrites_internal_public_web_default_image_to_current_tenant_host(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->makeCurrent();
+
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $tenantBranding = $tenant->branding_data ?? [];
+        $tenantBranding['public_web_metadata'] = [
+            'default_title' => 'Guarappari fallback',
+            'default_description' => 'Descricao institucional do tenant.',
+            'default_image' => "https://belluga.space/storage/tenants/{$tenant->slug}/public-web/default-image.jpg",
+        ];
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $defaultImage = (string) $response->json('public_web_metadata.default_image');
+        $this->assertStringContainsString(
+            "{$tenantOrigin}/api/v1/media/branding-public-web/{$tenant->_id}/default_image",
+            $defaultImage
+        );
+        $this->assertStringContainsString('?v=', $defaultImage);
+    }
+
+    public function test_environment_api_does_not_inherit_landlord_public_web_metadata_when_tenant_has_no_override(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->makeCurrent();
+
+        $landlord = Landlord::singleton();
+        $originalLandlordBranding = $landlord->branding_data ?? [];
+
+        $landlordBranding = $originalLandlordBranding;
+        $landlordBranding['public_web_metadata'] = [
+            'default_title' => 'Belluga fallback',
+            'default_description' => 'Descricao institucional do landlord.',
+            'default_image' => 'https://landlord.example/meta/default.jpg',
+        ];
+        $landlord->branding_data = $landlordBranding;
+        $landlord->save();
+
+        $tenantBranding = $tenant->branding_data ?? [];
+        unset($tenantBranding['public_web_metadata']);
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+
+        try {
+            $response = $this->get("{$this->base_api_tenant}environment");
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('public_web_metadata.default_title', '');
+            $response->assertJsonPath('public_web_metadata.default_description', '');
+            $response->assertJsonPath('public_web_metadata.default_image', '');
+        } finally {
+            $landlord->branding_data = $originalLandlordBranding;
+            $landlord->save();
+        }
     }
 
     public function test_environment_api_exposes_when_favicon_route_is_using_pwa_fallback(): void
