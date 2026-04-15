@@ -121,6 +121,65 @@ class TenantBrandingControllerTest extends TestCaseTenant
         $this->assertStringContainsString('max-age=0', $manifestCacheControl);
     }
 
+    public function test_update_persists_public_web_default_image_using_canonical_media_url(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $canonicalPath = "/api/v1/media/branding-public-web/{$tenant->_id}/default_image";
+
+        $response = $this->withHeaders($this->headers)
+            ->post($this->baseUrl, [
+                'public_web_metadata' => [
+                    'default_image' => UploadedFile::fake()->image('default-image.jpg', 1200, 630),
+                ],
+            ]);
+
+        $response->assertOk();
+        $resolvedUrl = (string) $response->json('branding_data.public_web_metadata.default_image');
+        $this->assertStringContainsString($canonicalPath, $resolvedUrl);
+        $this->assertStringContainsString('?v=', $resolvedUrl);
+
+        $environment = $this->withoutHeader('X-App-Domain')
+            ->getJson("{$this->base_api_tenant}environment");
+
+        $environment->assertOk();
+        $environment->assertJsonPath('public_web_metadata.default_image', $resolvedUrl);
+
+        $mediaResponse = $this->get($resolvedUrl);
+
+        $mediaResponse->assertOk();
+        $mediaResponse->assertHeader('Content-Type', 'image/jpeg');
+    }
+
+    public function test_canonical_branding_media_route_serves_legacy_public_web_image(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $legacyFile = UploadedFile::fake()->image('legacy-default-image.jpg', 1200, 630);
+        $legacyPath = "tenants/{$tenant->slug}/public-web/default-image.jpg";
+        Storage::disk('public')->put($legacyPath, file_get_contents($legacyFile->getRealPath()));
+
+        $tenant->branding_data = array_replace_recursive(
+            $tenant->branding_data ?? [],
+            [
+                'public_web_metadata' => [
+                    'default_image' => "https://belluga.space/storage/{$legacyPath}",
+                ],
+            ]
+        );
+        $tenant->save();
+
+        $canonicalUrl = rtrim($this->base_tenant_url, '/')
+            ."/api/v1/media/branding-public-web/{$tenant->_id}/default_image";
+
+        $response = $this->get($canonicalUrl);
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'image/jpeg');
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);

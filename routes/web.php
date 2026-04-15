@@ -14,13 +14,18 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth'])->group(function () {});
 
-Route::middleware('guest')->group(function () {
-    Route::get('/', function () {
-        return view('welcome');
-    });
-});
-
 Route::middleware('tenant-maybe')->group(function () {
+    // Dynamic public shell is allowlist-only. Private/admin/API prefixes must not
+    // fall into tenant-public metadata rendering.
+    Route::get('/', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/descobrir', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/privacy-policy', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/mapa', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/mapa/poi', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/invite', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/convites', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/location/permission', [TenantPublicShellController::class, 'fallback']);
+    Route::get('/baixe-o-app', [TenantPublicShellController::class, 'fallback']);
     Route::get('/parceiro/{account_profile_slug}', [TenantPublicShellController::class, 'accountProfile']);
     Route::get('/agenda/evento/{event_slug}', [TenantPublicShellController::class, 'event']);
     Route::get('/static/{asset_ref}', [TenantPublicShellController::class, 'staticAsset']);

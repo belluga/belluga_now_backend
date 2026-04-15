@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
@@ -15,6 +16,7 @@ class TenantBrandingController
 
     public function __construct(
         private readonly TenantBrandingManagementService $brandingService,
+        private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
         private readonly TelemetryEmitter $telemetry
     ) {}
 
@@ -23,6 +25,13 @@ class TenantBrandingController
         $tenant = Tenant::resolve();
         $validated = $request->validated();
         $uploadedLogos = $this->processLogoUploads($request);
+        if ($request->hasFile('public_web_metadata.default_image')) {
+            $validated['public_web_metadata']['default_image'] = $this->brandingPublicWebMediaService->storeDefaultImage(
+                $request->getSchemeAndHttpHost(),
+                $tenant,
+                $request->file('public_web_metadata.default_image')
+            );
+        }
 
         $pwaVariants = [];
         if ($request->hasFile('logo_settings.pwa_icon')) {

@@ -38,6 +38,11 @@ class UpdateBrandingRequest extends FormRequest
             'logo_settings.favicon_uri' => ['sometimes', 'file', 'mimes:ico', 'mimetypes:image/x-icon,image/vnd.microsoft.icon', 'max:2048'],
 
             'logo_settings.pwa_icon' => ['sometimes', 'image', 'mimes:png', 'max:5120'],
+
+            'public_web_metadata' => ['sometimes', 'array'],
+            'public_web_metadata.default_title' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'public_web_metadata.default_description' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'public_web_metadata.default_image' => ['sometimes', 'image', 'mimes:jpg,jpeg,png,webp', 'max:'.InputConstraints::IMAGE_MAX_KB],
         ];
     }
 }

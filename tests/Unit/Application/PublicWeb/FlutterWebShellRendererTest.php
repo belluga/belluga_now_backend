@@ -50,6 +50,48 @@ class FlutterWebShellRendererTest extends TestCase
         @unlink($secondShell);
     }
 
+    public function test_render_injects_structured_image_metadata_when_available(): void
+    {
+        $shell = $this->createShellFile('STRUCTURED-SHELL');
+        $this->setShellPath($shell);
+        $renderer = new FlutterWebShellRenderer();
+
+        $html = $renderer->render(array_merge($this->metadata(), [
+            'image_secure_url' => 'https://tenant.example/media/teste.png',
+            'image_type' => 'image/png',
+            'image_width' => '1200',
+            'image_height' => '630',
+            'image_alt' => 'Shell Title',
+        ]));
+
+        self::assertStringContainsString(
+            '<meta property="og:image:secure_url" content="https://tenant.example/media/teste.png">',
+            $html
+        );
+        self::assertStringContainsString(
+            '<meta property="og:image:type" content="image/png">',
+            $html
+        );
+        self::assertStringContainsString(
+            '<meta property="og:image:width" content="1200">',
+            $html
+        );
+        self::assertStringContainsString(
+            '<meta property="og:image:height" content="630">',
+            $html
+        );
+        self::assertStringContainsString(
+            '<meta property="og:image:alt" content="Shell Title">',
+            $html
+        );
+        self::assertStringContainsString(
+            '<meta name="twitter:image:alt" content="Shell Title">',
+            $html
+        );
+
+        @unlink($shell);
+    }
+
     private function setShellPath(string $path): void
     {
         putenv('FLUTTER_WEB_SHELL_PATH='.$path);

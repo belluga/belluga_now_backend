@@ -31,13 +31,18 @@ class FlutterWebShellRenderer
             $sanitizedShell = $shell;
         }
 
-        $injectedMetadata = implode("\n        ", [
+        $injectedMetadata = implode("\n        ", array_filter([
             '<title>'.$this->escape($metadata['title'] ?? '').'</title>',
             '<meta name="description" content="'.$this->escape($metadata['description'] ?? '').'">',
             '<link rel="canonical" href="'.$this->escape($metadata['canonical_url'] ?? '').'">',
             '<meta property="og:title" content="'.$this->escape($metadata['title'] ?? '').'">',
             '<meta property="og:description" content="'.$this->escape($metadata['description'] ?? '').'">',
             '<meta property="og:image" content="'.$this->escape($metadata['image'] ?? '').'">',
+            $this->optionalMetaProperty('og:image:secure_url', $metadata['image_secure_url'] ?? null),
+            $this->optionalMetaProperty('og:image:type', $metadata['image_type'] ?? null),
+            $this->optionalMetaProperty('og:image:width', $metadata['image_width'] ?? null),
+            $this->optionalMetaProperty('og:image:height', $metadata['image_height'] ?? null),
+            $this->optionalMetaProperty('og:image:alt', $metadata['image_alt'] ?? null),
             '<meta property="og:url" content="'.$this->escape($metadata['canonical_url'] ?? '').'">',
             '<meta property="og:type" content="'.$this->escape($metadata['type'] ?? 'website').'">',
             '<meta property="og:site_name" content="'.$this->escape($metadata['site_name'] ?? '').'">',
@@ -45,7 +50,8 @@ class FlutterWebShellRenderer
             '<meta name="twitter:title" content="'.$this->escape($metadata['title'] ?? '').'">',
             '<meta name="twitter:description" content="'.$this->escape($metadata['description'] ?? '').'">',
             '<meta name="twitter:image" content="'.$this->escape($metadata['image'] ?? '').'">',
-        ]);
+            $this->optionalMetaName('twitter:image:alt', $metadata['image_alt'] ?? null),
+        ]));
 
         $rendered = preg_replace(
             '/<\/head>/i',
@@ -83,12 +89,36 @@ class FlutterWebShellRenderer
     private function shellCandidates(): array
     {
         $configured = $this->configuredShellPath();
+        $repositoryShell = $this->repositoryShellPath();
 
         return [
             $configured !== '' ? $configured : null,
-            base_path('../web-app/index.html'),
+            $repositoryShell,
             '/var/www/flutter/index.html',
         ];
+    }
+
+    private function repositoryShellPath(): ?string
+    {
+        if (! function_exists('app')) {
+            return null;
+        }
+
+        try {
+            $app = app();
+            if (! method_exists($app, 'basePath')) {
+                return null;
+            }
+
+            $basePath = $app->basePath();
+            if (! is_string($basePath) || trim($basePath) === '') {
+                return null;
+            }
+
+            return $basePath.'/../web-app/index.html';
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function configuredShellPath(): string
@@ -112,5 +142,25 @@ class FlutterWebShellRenderer
     private function escape(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    private function optionalMetaProperty(string $property, ?string $content): ?string
+    {
+        $normalized = trim((string) $content);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return '<meta property="'.$this->escape($property).'" content="'.$this->escape($normalized).'">';
+    }
+
+    private function optionalMetaName(string $name, ?string $content): ?string
+    {
+        $normalized = trim((string) $content);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return '<meta name="'.$this->escape($name).'" content="'.$this->escape($normalized).'">';
     }
 }

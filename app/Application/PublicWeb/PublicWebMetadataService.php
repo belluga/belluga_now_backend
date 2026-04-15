@@ -6,10 +6,12 @@ namespace App\Application\PublicWeb;
 
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Branding\BrandingManifestService;
 use App\Application\StaticAssets\StaticAssetQueryService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -23,6 +25,7 @@ class PublicWebMetadataService
         private readonly AccountProfileFormatterService $accountProfileFormatterService,
         private readonly EventQueryService $eventQueryService,
         private readonly StaticAssetQueryService $staticAssetQueryService,
+        private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
     ) {}
 
     /**
@@ -30,23 +33,38 @@ class PublicWebMetadataService
      */
     public function defaultMetadata(?string $path = null): array
     {
-        $tenant = Tenant::current();
-        $landlord = $tenant === null ? Landlord::singleton() : null;
+        $tenant = $this->currentTenant();
+        $landlord = $tenant === null ? $this->currentLandlord() : null;
+        $branding = $this->resolveCurrentBrandingData();
         $siteName = trim((string) ($tenant?->name ?? $landlord?->name ?? config('app.name', 'Belluga Now')));
         $siteName = $siteName !== '' ? $siteName : 'Belluga Now';
-        $description = trim((string) ($tenant?->description ?? ''));
+
+        $title = trim((string) data_get($branding, 'public_web_metadata.default_title', ''));
+        if ($title === '') {
+            $title = $siteName;
+        }
+
+        $description = trim((string) data_get($branding, 'public_web_metadata.default_description', ''));
+        if ($description === '') {
+            $description = trim((string) ($tenant?->description ?? ''));
+        }
         if ($description === '') {
             $description = "Descubra eventos, parceiros e lugares em {$siteName}.";
         }
 
-        return [
-            'title' => $siteName,
+        $metadata = [
+            'title' => $title,
             'description' => $this->excerpt($description),
-            'image' => $this->defaultImageUrl(),
+            'image' => $this->resolveImageUrl([
+                $this->resolveBrandingFallbackImage($tenant, $landlord),
+                $this->defaultImageUrl(),
+            ]),
             'canonical_url' => $this->canonicalUrlForPath($path),
             'site_name' => $siteName,
             'type' => 'website',
         ];
+
+        return $this->enrichImageMetadata($metadata, $tenant, $landlord);
     }
 
     /**
@@ -81,7 +99,7 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/parceiro/'.trim((string) ($payload['slug'] ?? $slug)));
         $metadata['type'] = 'profile';
 
-        return $metadata;
+        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
     }
 
     /**
@@ -124,7 +142,7 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/agenda/evento/'.trim((string) ($payload['slug'] ?? $slug)));
         $metadata['type'] = 'article';
 
-        return $metadata;
+        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
     }
 
     /**
@@ -158,13 +176,13 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/static/'.trim((string) ($payload['slug'] ?? $assetRef)));
         $metadata['type'] = 'place';
 
-        return $metadata;
+        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
     }
 
     private function canonicalUrlForPath(?string $path = null): string
     {
         $base = request()->getSchemeAndHttpHost();
-        $normalizedPath = trim((string) ($path ?? request()->getPathInfo() ?? '/'));
+        $normalizedPath = trim((string) ($path ?? request()->getRequestUri() ?? '/'));
         if ($normalizedPath === '') {
             $normalizedPath = '/';
         }
@@ -195,8 +213,8 @@ class PublicWebMetadataService
             if ($normalized === '') {
                 continue;
             }
-            if (Str::startsWith($normalized, ['http://', 'https://'])) {
-                return $this->normalizePublicUrl($normalized);
+            if (str_starts_with($normalized, 'http://') || str_starts_with($normalized, 'https://')) {
+                return $normalized;
             }
             if (str_starts_with($normalized, '/')) {
                 return request()->getSchemeAndHttpHost().$normalized;
@@ -208,41 +226,96 @@ class PublicWebMetadataService
         return request()->getSchemeAndHttpHost().'/logo-dark.png';
     }
 
-    private function normalizePublicUrl(string $url): string
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveCurrentBrandingData(): array
     {
-        $parts = parse_url($url);
-        if (! is_array($parts)) {
-            return $url;
-        }
+        $landlordBranding = $this->normalizeBrandingData($this->currentLandlord()->branding_data ?? null);
+        $tenantBranding = $this->normalizeBrandingData($this->currentTenant()?->branding_data ?? null);
 
-        $host = strtolower((string) ($parts['host'] ?? ''));
-        if ($host === '') {
-            return $url;
-        }
-
-        if (! $this->shouldRewriteToPublicHost($host)) {
-            return $url;
-        }
-
-        $path = (string) ($parts['path'] ?? '');
-        $query = isset($parts['query']) ? '?'.$parts['query'] : '';
-        $fragment = isset($parts['fragment']) ? '#'.$parts['fragment'] : '';
-
-        return request()->getSchemeAndHttpHost().$path.$query.$fragment;
+        return ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
+            mainArray: $landlordBranding,
+            overrideArray: $tenantBranding
+        );
     }
 
-    private function shouldRewriteToPublicHost(string $host): bool
+    private function currentTenant(): ?Tenant
     {
-        $requestHost = strtolower((string) request()->getHost());
-        if ($host === $requestHost) {
-            return false;
+        $tenant = Tenant::current();
+
+        if ($tenant === null) {
+            return null;
         }
 
-        if (in_array($host, ['localhost', '127.0.0.1', 'nginx', 'app', 'laravel'], true)) {
-            return true;
+        return $tenant->fresh() ?? $tenant;
+    }
+
+    private function currentLandlord(): Landlord
+    {
+        $landlord = Landlord::singleton();
+
+        return $landlord->fresh() ?? $landlord;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeBrandingData(mixed $branding): array
+    {
+        if (is_array($branding)) {
+            return $branding;
         }
 
-        return ! str_contains($host, '.');
+        if ($branding instanceof \Traversable) {
+            return iterator_to_array($branding);
+        }
+
+        if (is_object($branding) && method_exists($branding, 'toArray')) {
+            $normalized = $branding->toArray();
+
+            return is_array($normalized) ? $normalized : [];
+        }
+
+        return [];
+    }
+
+    private function resolveBrandingFallbackImage(?Tenant $tenant, ?Landlord $landlord): ?string
+    {
+        $baseUrl = request()->getSchemeAndHttpHost();
+
+        if ($tenant !== null) {
+            $tenantImage = trim((string) data_get(
+                $this->normalizeBrandingData($tenant->branding_data ?? null),
+                'public_web_metadata.default_image',
+                '',
+            ));
+
+            if ($tenantImage !== '') {
+                return $this->brandingPublicWebMediaService->normalizePublicUrl(
+                    $baseUrl,
+                    $tenant,
+                    $tenantImage,
+                );
+            }
+        }
+
+        $resolvedLandlord = $landlord ?? $this->currentLandlord();
+        $landlordImage = trim((string) data_get(
+            $this->normalizeBrandingData($resolvedLandlord->branding_data ?? null),
+            'public_web_metadata.default_image',
+            '',
+        ));
+
+        if ($landlordImage === '') {
+            return null;
+        }
+
+        return $this->brandingPublicWebMediaService->normalizePublicUrl(
+            $baseUrl,
+            $resolvedLandlord,
+            $landlordImage,
+        );
     }
 
     private function sanitizeText(string $value): string
@@ -259,6 +332,125 @@ class PublicWebMetadataService
         }
 
         return Str::limit($normalized, 180, '...');
+    }
+
+    /**
+     * @param  array<string, string>  $metadata
+     * @return array<string, string>
+     */
+    private function enrichImageMetadata(
+        array $metadata,
+        ?Tenant $tenant,
+        ?Landlord $landlord,
+    ): array {
+        $imageUrl = trim((string) ($metadata['image'] ?? ''));
+        $title = trim((string) ($metadata['title'] ?? $metadata['site_name'] ?? ''));
+
+        $metadata['image_secure_url'] = str_starts_with($imageUrl, 'https://')
+            ? $imageUrl
+            : '';
+        $metadata['image_type'] = $this->inferImageMimeType($imageUrl);
+        $metadata['image_width'] = '';
+        $metadata['image_height'] = '';
+        $metadata['image_alt'] = $title;
+
+        $properties = $this->resolveBrandingImagePropertiesForSelectedImage(
+            $tenant,
+            $landlord,
+            $imageUrl,
+        );
+
+        if ($properties !== []) {
+            if ($metadata['image_type'] === '' && trim((string) ($properties['type'] ?? '')) !== '') {
+                $metadata['image_type'] = trim((string) $properties['type']);
+            }
+            $metadata['image_width'] = trim((string) ($properties['width'] ?? ''));
+            $metadata['image_height'] = trim((string) ($properties['height'] ?? ''));
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * @return array{width:string,height:string,type:string}|array{}
+     */
+    private function resolveBrandingImagePropertiesForSelectedImage(
+        ?Tenant $tenant,
+        ?Landlord $landlord,
+        string $imageUrl,
+    ): array {
+        if ($imageUrl === '') {
+            return [];
+        }
+
+        $baseUrl = request()->getSchemeAndHttpHost();
+
+        if ($tenant !== null) {
+            $tenantBrandingImage = $this->resolveBrandablePublicWebImageUrl($tenant, $baseUrl);
+            if ($tenantBrandingImage !== null && $tenantBrandingImage === $imageUrl) {
+                return $this->brandingPublicWebMediaService->resolveImagePropertiesForBaseUrl(
+                    $tenant,
+                    $baseUrl,
+                );
+            }
+        }
+
+        $resolvedLandlord = $landlord ?? $this->currentLandlord();
+        $landlordBrandingImage = $this->resolveBrandablePublicWebImageUrl(
+            $resolvedLandlord,
+            $baseUrl,
+        );
+
+        if ($landlordBrandingImage !== null && $landlordBrandingImage === $imageUrl) {
+            return $this->brandingPublicWebMediaService->resolveImagePropertiesForBaseUrl(
+                $resolvedLandlord,
+                $baseUrl,
+            );
+        }
+
+        return [];
+    }
+
+    private function resolveBrandablePublicWebImageUrl(
+        Tenant|Landlord $brandable,
+        string $baseUrl,
+    ): ?string {
+        $rawImage = trim((string) data_get(
+            $this->normalizeBrandingData($brandable->branding_data ?? null),
+            'public_web_metadata.default_image',
+            '',
+        ));
+
+        if ($rawImage === '') {
+            return null;
+        }
+
+        return $this->brandingPublicWebMediaService->normalizePublicUrl(
+            $baseUrl,
+            $brandable,
+            $rawImage,
+        );
+    }
+
+    private function inferImageMimeType(string $imageUrl): string
+    {
+        if ($imageUrl === '') {
+            return '';
+        }
+
+        $path = parse_url($imageUrl, PHP_URL_PATH);
+        if (! is_string($path) || trim($path) === '') {
+            return '';
+        }
+
+        return match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            'ico' => 'image/vnd.microsoft.icon',
+            default => '',
+        };
     }
 
     /**

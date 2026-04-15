@@ -32,6 +32,7 @@ class EnvironmentController extends Controller
             'app_domains' => $resolved['app_domains'] ?? [],
             'theme_data_settings' => $resolved['theme_data_settings'] ?? [],
             'branding_assets' => $resolved['branding_assets'] ?? [],
+            'public_web_metadata' => $resolved['public_web_metadata'] ?? [],
             'telemetry' => $resolved['telemetry'] ?? [],
             'firebase' => $resolved['firebase'] ?? [],
             'push' => $resolved['push'] ?? [],
