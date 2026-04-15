@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Environment;
 
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
 use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Models\Landlord\Landlord;
@@ -21,6 +22,7 @@ class EnvironmentResolverService
         private readonly PushSettingsKernelBridge $pushSettings,
         private readonly TenantAppDomainResolverService $appDomainResolver,
         private readonly AccountProfileRegistryService $profileRegistryService,
+        private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
     ) {}
 
     /**
@@ -29,7 +31,12 @@ class EnvironmentResolverService
      */
     public function resolve(array $input): array
     {
-        $tenant = Tenant::current() ?? $this->locateTenant($input['app_domain'] ?? null);
+        $currentTenant = Tenant::current();
+        $tenant = $currentTenant?->fresh();
+        if ($tenant === null) {
+            $appDomain = $input['app_domain'] ?? null;
+            $tenant = $this->locateTenant(is_string($appDomain) ? $appDomain : null);
+        }
         $requestHost = $input['request_host'] ?? null;
 
         if ($tenant) {
@@ -65,9 +72,10 @@ class EnvironmentResolverService
         $firebase = $this->pushSettings->currentFirebaseConfig();
         $push = $this->pushSettings->currentPushConfig();
         $profileTypes = $this->profileRegistryService->registry($requestRoot);
+        $tenantBranding = $this->normalizeBrandingData($tenant->branding_data ?? null);
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
-            mainArray: $landlord->branding_data,
-            overrideArray: $tenant->branding_data ?? []
+            mainArray: $this->normalizeBrandingData($landlord->branding_data ?? null),
+            overrideArray: $tenantBranding
         );
         $canonicalTenantMainDomain = $tenant->getMainDomain();
         $explicitDomains = $tenant->explicitDomains();
@@ -90,6 +98,11 @@ class EnvironmentResolverService
             'app_domains' => $tenant->resolvedAppDomains(),
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'branding_assets' => $this->resolveBrandingAssetState($branding),
+            'public_web_metadata' => $this->resolvePublicWebMetadata(
+                $tenant,
+                $tenantBranding,
+                $requestRoot
+            ),
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
@@ -113,7 +126,7 @@ class EnvironmentResolverService
     private function landlordEnvironment(?string $requestRoot): array
     {
         $landlord = Landlord::singleton();
-        $branding = $landlord->branding_data ?? [];
+        $branding = $this->normalizeBrandingData($landlord->branding_data ?? null);
 
         $mainDomain = $this->normalizeRequestRoot($requestRoot)
             ?? $this->forceHttps((string) config('app.url'));
@@ -125,6 +138,11 @@ class EnvironmentResolverService
             'landlord_domain' => $mainDomain,
             'theme_data_settings' => $branding['theme_data_settings'] ?? [],
             'branding_assets' => $this->resolveBrandingAssetState($branding),
+            'public_web_metadata' => $this->resolvePublicWebMetadata(
+                $landlord,
+                $branding,
+                $requestRoot
+            ),
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
@@ -178,6 +196,40 @@ class EnvironmentResolverService
 
     /**
      * @param  array<string, mixed>  $branding
+     * @return array<string, string>
+     */
+    private function resolvePublicWebMetadata(
+        Tenant|Landlord $brandable,
+        array $branding,
+        ?string $requestRoot,
+    ): array
+    {
+        $metadata = $branding['public_web_metadata'] ?? [];
+
+        if (! is_array($metadata)) {
+            $metadata = [];
+        }
+
+        $defaultImage = (string) ($metadata['default_image'] ?? '');
+        if ($defaultImage !== '') {
+            $defaultImage = (string) (
+                $this->brandingPublicWebMediaService->normalizePublicUrl(
+                    $this->normalizeRequestRoot($requestRoot) ?? config('app.url'),
+                    $brandable,
+                    $defaultImage,
+                ) ?? ''
+            );
+        }
+
+        return [
+            'default_title' => (string) ($metadata['default_title'] ?? ''),
+            'default_description' => (string) ($metadata['default_description'] ?? ''),
+            'default_image' => $defaultImage,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
      */
     private function hasPwaFaviconFallback(array $branding): bool
     {
@@ -199,6 +251,28 @@ class EnvironmentResolverService
     private function hasNonEmptyBrandingValue(mixed $value): bool
     {
         return is_string($value) && trim($value) !== '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeBrandingData(mixed $branding): array
+    {
+        if (is_array($branding)) {
+            return $branding;
+        }
+
+        if ($branding instanceof \Traversable) {
+            return iterator_to_array($branding);
+        }
+
+        if (is_object($branding) && method_exists($branding, 'toArray')) {
+            $normalized = $branding->toArray();
+
+            return is_array($normalized) ? $normalized : [];
+        }
+
+        return [];
     }
 
     /**

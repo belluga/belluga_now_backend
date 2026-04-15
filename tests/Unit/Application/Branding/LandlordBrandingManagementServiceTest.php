@@ -68,6 +68,36 @@ class LandlordBrandingManagementServiceTest extends TestCase
         $this->assertSame('', $branding['logo_settings']['favicon_uri']);
     }
 
+    public function test_update_normalizes_public_web_metadata(): void
+    {
+        $this->landlordModel->branding_data = [
+            'public_web_metadata' => [
+                'default_title' => 'Belluga Home',
+            ],
+        ];
+        $this->landlordModel->save();
+
+        $branding = $this->service->update(
+            $this->landlordModel->fresh(),
+            [
+                'public_web_metadata' => [
+                    'default_description' => 'Fallback institucional do landlord.',
+                ],
+            ]
+        );
+
+        $this->assertSame(
+            'Belluga Home',
+            $branding['public_web_metadata']['default_title']
+        );
+        $this->assertSame(
+            'Fallback institucional do landlord.',
+            $branding['public_web_metadata']['default_description']
+        );
+        $this->assertArrayHasKey('default_image', $branding['public_web_metadata']);
+        $this->assertSame('', $branding['public_web_metadata']['default_image']);
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);

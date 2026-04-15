@@ -80,6 +80,25 @@ final class ModelMediaService
         return null;
     }
 
+    public function storeUpload(
+        string $baseUrl,
+        object $model,
+        string $kind,
+        UploadedFile $file,
+        MediaModelDefinition $definition,
+    ): string {
+        return $this->storeFile($file, $model, $kind, $baseUrl, $definition);
+    }
+
+    public function removeUpload(
+        object $model,
+        string $kind,
+        MediaModelDefinition $definition,
+        ?string $baseUrl = null,
+    ): void {
+        $this->deleteExisting($model, $kind, $baseUrl, $definition);
+    }
+
     public function buildPublicUrl(
         string $baseUrl,
         object $model,
