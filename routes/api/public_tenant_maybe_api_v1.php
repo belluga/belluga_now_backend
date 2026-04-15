@@ -4,6 +4,7 @@ use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\AccountProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
+use App\Http\Api\v1\Controllers\BrandingPublicWebMediaController;
 use App\Http\Api\v1\Controllers\EnvironmentController;
 use App\Http\Api\v1\Controllers\EventTypeMediaController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
@@ -19,6 +20,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('tenant')->group(function () {
     Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
+    Route::get(
+        '/media/branding-public-web/{branding_subject_id}/default_image',
+        [BrandingPublicWebMediaController::class, 'defaultImage']
+    );
     Route::get('/media/map-filters/{key}', [MapFilterImageMediaController::class, 'show']);
     Route::get(
         '/media/account-profiles/{account_profile_id}/avatar',

@@ -17,6 +17,7 @@ class BrandingData extends Model
         'theme_data_settings',
         'logo_settings',
         'pwa_icon',
+        'public_web_metadata',
     ];
 
     //    protected static $unguarded = true;
@@ -33,6 +34,7 @@ class BrandingData extends Model
             'theme_data_settings' => $this->theme_data_settings,
             'logo_settings' => $this->logo_settings,
             'pwa_icon' => $this->pwa_icon,
+            'public_web_metadata' => $this->public_web_metadata,
         ];
     }
 
