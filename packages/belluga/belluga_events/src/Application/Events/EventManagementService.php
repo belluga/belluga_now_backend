@@ -14,6 +14,7 @@ use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\EventContentHtmlSanitizer;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -117,7 +118,6 @@ class EventManagementService
 
         foreach ([
             'title',
-            'content',
             'thumb',
             'tags',
             'categories',
@@ -126,6 +126,12 @@ class EventManagementService
             if (array_key_exists($field, $payload)) {
                 $normalized[$field] = $payload[$field];
             }
+        }
+
+        if (array_key_exists('content', $payload)) {
+            $normalized['content'] = EventContentHtmlSanitizer::sanitize(
+                $payload['content'] ?? null
+            );
         }
 
         if (array_key_exists('type', $payload)) {
