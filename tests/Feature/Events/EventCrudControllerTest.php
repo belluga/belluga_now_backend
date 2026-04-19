@@ -156,6 +156,80 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_event_create_sanitizes_content_html_subset_and_preserves_emojis(): void
+    {
+        $payload = $this->makeEventPayload([
+            'content' => '<p><strong>Evento 🎉</strong> <u>underline</u> <a href="https://example.com">link</a> <s>riscado</s></p>',
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $eventId = (string) $response->json('data.event_id');
+        $stored = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $expected = '<p><strong>Evento 🎉</strong> underline link <s>riscado</s></p>';
+        $this->assertSame($expected, (string) $response->json('data.content'));
+        $this->assertSame($expected, $stored->content);
+        $this->assertSame($stored->content, $occurrence->content);
+        $this->assertStringNotContainsString('<u>', $stored->content);
+        $this->assertStringNotContainsString('<a', $stored->content);
+        $this->assertStringContainsString('<s>riscado</s>', $stored->content);
+        $this->assertStringContainsString('🎉', $stored->content);
+    }
+
+    public function test_event_create_strips_media_only_content_to_empty_string(): void
+    {
+        $payload = $this->makeEventPayload([
+            'content' => '<p><img src="https://example.com/banner.png" alt="Banner" /></p><p><br /></p>',
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(201);
+        $eventId = (string) $response->json('data.event_id');
+        $stored = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertSame('', (string) $response->json('data.content'));
+        $this->assertSame('', (string) $stored->content);
+        $this->assertSame('', (string) $occurrence->content);
+    }
+
+    public function test_event_update_sanitizes_plain_text_content_with_line_breaks(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patchJson(
+            "{$this->accountEventsBase}/{$eventId}",
+            [
+                'content' => "Linha 1 🎉\nLinha 2",
+            ],
+        );
+
+        $response->assertStatus(200);
+        $expected = '<p>Linha 1 🎉<br />Linha 2</p>';
+        $stored = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertSame($expected, (string) $response->json('data.content'));
+        $this->assertSame($expected, $stored->content);
+        $this->assertSame($expected, $occurrence->content);
+        $this->assertStringContainsString('🎉', $stored->content);
+    }
+
     public function test_event_create_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
     {
         $payload = $this->makeEventPayload([
