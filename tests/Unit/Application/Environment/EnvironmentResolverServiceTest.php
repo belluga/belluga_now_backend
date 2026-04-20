@@ -131,12 +131,12 @@ class EnvironmentResolverServiceTest extends TestCase
     public function test_resolve_on_subdomain_request_preserves_custom_domain_coexistence(): void
     {
         $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
         $tenant->domains()->delete();
         $tenant->domains()->create([
             'path' => 'tenant-beta-custom.test',
             'type' => Tenant::DOMAIN_TYPE_WEB,
         ]);
-        $tenant->makeCurrent();
 
         $subdomainHost = "{$tenant->subdomain}.{$this->rootHost()}";
 
