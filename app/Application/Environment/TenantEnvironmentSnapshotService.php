@@ -218,13 +218,19 @@ class TenantEnvironmentSnapshotService
         $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
         $hadPreviousTenantId = Context::has($contextKey);
         $previousTenantId = $hadPreviousTenantId ? Context::get($contextKey) : null;
+        $currentTenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
+        $restoreTenantId = $currentTenantId !== ''
+            ? $currentTenantId
+            : trim((string) ($previousTenantId ?? ''));
 
         Context::add($contextKey, $tenantId);
 
         try {
             RebuildTenantEnvironmentSnapshotJob::dispatch($reason, $context);
         } finally {
-            if ($hadPreviousTenantId) {
+            if ($restoreTenantId !== '') {
+                Context::add($contextKey, $restoreTenantId);
+            } elseif ($hadPreviousTenantId) {
                 Context::add($contextKey, $previousTenantId);
             } else {
                 Context::forget($contextKey);
