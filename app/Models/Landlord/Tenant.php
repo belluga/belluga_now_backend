@@ -7,6 +7,7 @@ namespace App\Models\Landlord;
 use App\Traits\HasOwner;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -181,6 +182,20 @@ class Tenant extends BaseTenant
         }
 
         return $tenant;
+    }
+
+    public function isCurrent(): bool
+    {
+        $currentTenant = static::current();
+        if (! $currentTenant instanceof self) {
+            return false;
+        }
+
+        $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
+        $contextTenantId = trim((string) Context::get($contextKey, ''));
+
+        return (string) $currentTenant->getKey() === (string) $this->getKey()
+            && $contextTenantId === (string) $this->getKey();
     }
 
     /**

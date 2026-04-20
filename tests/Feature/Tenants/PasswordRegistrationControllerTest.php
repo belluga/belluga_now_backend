@@ -7,6 +7,7 @@ namespace Tests\Feature\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use MongoDB\BSON\ObjectId;
@@ -57,6 +58,26 @@ class PasswordRegistrationControllerTest extends TestCase
         $user = \App\Models\Tenants\AccountUser::query()->findOrFail(new ObjectId($userId));
         $this->assertSame('registered', $user->identity_state);
         $this->assertTrue(Hash::check('Secret!234', (string) $user->password));
+    }
+
+    public function test_registers_new_identity_when_tenant_context_key_was_lost(): void
+    {
+        Context::forget((string) config('multitenancy.current_tenant_context_key', 'tenantId'));
+
+        $email = sprintf(
+            'feature-context-rebound-%s@example.org',
+            (string) Str::uuid()
+        );
+
+        $response = $this->withHeaders(['X-App-Domain' => 'tenant-nu.test'])
+            ->postJson(sprintf('http://%s.%s/api/v1/auth/register/password', 'tenant-nu', $this->host), [
+                'name' => 'Feature Context Rebound User',
+                'email' => $email,
+                'password' => 'Secret!234',
+            ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.identity_state', 'registered');
     }
 
     private function initializeSystem(): void
