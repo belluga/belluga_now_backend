@@ -9,6 +9,8 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -51,6 +53,65 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->assertSame('https://tenant-beta.test', $result['main_domain']);
         $this->assertArrayHasKey('landlord_domain', $result);
         $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
+    }
+
+    public function test_resolve_exposes_effective_tenant_public_auth_from_persisted_settings(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlord = LandlordSettings::current();
+        $originalLandlord = $landlord?->getAttribute('tenant_public_auth');
+        if ($landlord === null) {
+            $landlord = new LandlordSettings();
+            $landlord->setAttribute('_id', 'settings_root');
+        }
+        $tenantSettings = TenantSettings::current();
+        $originalTenant = $tenantSettings?->getAttribute('tenant_public_auth');
+        if ($tenantSettings === null) {
+            $tenantSettings = new TenantSettings();
+            $tenantSettings->setAttribute('_id', 'settings_root');
+        }
+
+        $landlord->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => true,
+        ]);
+        $tenantSettings->setAttribute('tenant_public_auth', [
+            'enabled_methods' => ['phone_otp'],
+        ]);
+
+        $landlord->save();
+        $tenantSettings->save();
+
+        try {
+            $result = $this->service->resolve([
+                'app_domain' => 'tenant-beta.test',
+                'request_root' => 'https://tenant-beta.test',
+                'request_host' => 'tenant-beta.test',
+            ]);
+
+            $this->assertSame(['password', 'phone_otp'], $result['settings']['tenant_public_auth']['available_methods'] ?? []);
+            $this->assertSame(['phone_otp'], $result['settings']['tenant_public_auth']['enabled_methods'] ?? []);
+            $this->assertSame(['phone_otp'], $result['settings']['tenant_public_auth']['effective_methods'] ?? []);
+            $this->assertSame('phone_otp', $result['settings']['tenant_public_auth']['effective_primary_method'] ?? null);
+        } finally {
+            if ($originalLandlord !== null) {
+                $landlord->setAttribute('tenant_public_auth', $originalLandlord);
+                $landlord->save();
+            } else {
+                $landlord->setAttribute('tenant_public_auth', null);
+                $landlord->save();
+            }
+
+            if ($originalTenant !== null) {
+                $tenantSettings->setAttribute('tenant_public_auth', $originalTenant);
+                $tenantSettings->save();
+            } else {
+                $tenantSettings->setAttribute('tenant_public_auth', null);
+                $tenantSettings->save();
+            }
+        }
     }
 
     public function test_resolve_tenant_on_landlord_host_keeps_canonical_tenant_main_domain(): void
@@ -160,6 +221,7 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->assertSame('http://landlord.test', $result['main_domain']);
         $this->assertSame('http://landlord.test', $result['landlord_domain']);
         $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
+        $this->assertArrayHasKey('tenant_public_auth', $result['settings'] ?? []);
     }
 
     private function initializeSystem(): void

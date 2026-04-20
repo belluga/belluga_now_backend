@@ -14,6 +14,7 @@ class CompositeSettingsPatchGuard implements SettingsNamespacePatchGuardContract
     public function __construct(
         private readonly AppLinksPatchGuard $appLinksPatchGuard,
         private readonly ResendEmailSettingsPatchGuard $resendEmailPatchGuard,
+        private readonly TenantPublicAuthMethodPatchGuard $tenantPublicAuthMethodPatchGuard,
     ) {}
 
     /**
@@ -28,5 +29,6 @@ class CompositeSettingsPatchGuard implements SettingsNamespacePatchGuardContract
     ): void {
         $this->appLinksPatchGuard->guard($scope, $user, $namespace, $payload, $definition);
         $this->resendEmailPatchGuard->guard($scope, $user, $namespace, $payload, $definition);
+        $this->tenantPublicAuthMethodPatchGuard->guard($scope, $user, $namespace, $payload, $definition);
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\Auth\TenantPublicAuthMethodResolver;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
@@ -19,6 +20,7 @@ class EnvironmentResolverService
 {
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings,
+        private readonly TenantPublicAuthMethodResolver $tenantPublicAuthMethodResolver,
         private readonly PushSettingsKernelBridge $pushSettings,
         private readonly TenantAppDomainResolverService $appDomainResolver,
         private readonly AccountProfileRegistryService $profileRegistryService,
@@ -71,6 +73,7 @@ class EnvironmentResolverService
         $telemetry = $this->telemetrySettings->currentTelemetryConfig();
         $firebase = $this->pushSettings->currentFirebaseConfig();
         $push = $this->pushSettings->currentPushConfig();
+        $tenantPublicAuth = $this->tenantPublicAuthMethodResolver->currentGovernance();
         $profileTypes = $this->profileRegistryService->registry($requestRoot);
         $tenantBranding = $this->normalizeBrandingData($tenant->branding_data ?? null);
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
@@ -116,6 +119,7 @@ class EnvironmentResolverService
             'profile_types' => $profileTypes,
             'settings' => [
                 'map_ui' => $settings?->getAttribute('map_ui') ?? [],
+                'tenant_public_auth' => $tenantPublicAuth,
             ],
         ];
     }
@@ -150,6 +154,9 @@ class EnvironmentResolverService
             'telemetry' => [
                 'location_freshness_minutes' => $this->defaultTelemetryLocationFreshnessMinutes(),
                 'trackers' => [],
+            ],
+            'settings' => [
+                'tenant_public_auth' => $this->tenantPublicAuthMethodResolver->currentLandlordGovernance(),
             ],
         ];
     }

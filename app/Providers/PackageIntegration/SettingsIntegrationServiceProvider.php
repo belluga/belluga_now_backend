@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
+use App\Integration\Settings\TenantPublicAuthMethodSettingsNamespaceRegistrar;
 use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Integration\Settings\CompositeSettingsPatchGuard;
 use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
@@ -31,6 +32,8 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
     {
         /** @var SettingsRegistryContract $registry */
         $registry = $this->app->make(SettingsRegistryContract::class);
+
+        $this->app->make(TenantPublicAuthMethodSettingsNamespaceRegistrar::class)->register($registry);
 
         $registry->register(new SettingsNamespaceDefinition(
             namespace: 'telemetry',

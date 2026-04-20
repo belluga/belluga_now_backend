@@ -10,6 +10,8 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
@@ -52,6 +54,36 @@ class AccountAuthenticationServiceTest extends TestCase
 
         $this->assertSame($this->user->emails[0], $result->user->emails[0]);
         $this->assertNotEmpty($result->plainTextToken);
+    }
+
+    public function test_password_login_remains_available_when_tenant_public_auth_is_pinned_to_phone_otp(): void
+    {
+        $landlord = LandlordSettings::current();
+        if ($landlord === null) {
+            $landlord = new LandlordSettings();
+            $landlord->setAttribute('_id', 'settings_root');
+        }
+        $landlord->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => true,
+        ]);
+        $landlord->save();
+
+        $tenantSettings = TenantSettings::current();
+        if ($tenantSettings === null) {
+            $tenantSettings = new TenantSettings();
+            $tenantSettings->setAttribute('_id', 'settings_root');
+        }
+        $tenantSettings->setAttribute('tenant_public_auth', [
+            'enabled_methods' => ['phone_otp'],
+        ]);
+        $tenantSettings->save();
+
+        $result = $this->service->login($this->user->emails[0], 'Secret!234', 'api-client');
+
+        $this->assertSame($this->user->emails[0], $result->user->emails[0]);
+        $this->assertNotEmpty($result->plainTextToken);
+        $this->assertTrue($this->user->fresh()?->password !== null);
     }
 
     public function test_login_throws_when_credentials_invalid(): void

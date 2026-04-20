@@ -43,6 +43,7 @@ class EventOccurrenceSyncService
                 'place_ref' => $this->normalizeArray($event->place_ref ?? null),
                 'venue' => $this->normalizeArray($event->venue ?? null),
                 'geo_location' => $geoLocation,
+                'linked_account_profiles' => $this->resolveLinkedAccountProfiles($this->normalizeArray($event->event_parties ?? [])),
                 'artists' => $this->deriveArtistsReadProjection($this->normalizeArray($event->event_parties ?? [])),
                 'tags' => $this->normalizeArray($event->tags ?? []),
                 'categories' => $this->normalizeArray($event->categories ?? []),
@@ -154,6 +155,22 @@ class EventOccurrenceSyncService
      */
     private function deriveArtistsReadProjection(array $eventParties): array
     {
+        return array_map(
+            static function (array $profile): array {
+                $profile['highlight'] = false;
+
+                return $profile;
+            },
+            $this->resolveLinkedAccountProfiles($eventParties)
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveLinkedAccountProfiles(array $eventParties): array
+    {
         $profiles = [];
 
         foreach ($eventParties as $party) {
@@ -177,7 +194,6 @@ class EventOccurrenceSyncService
                 'profile_type' => isset($metadata['profile_type']) ? (string) $metadata['profile_type'] : $partyType,
                 'avatar_url' => $metadata['avatar_url'] ?? null,
                 'cover_url' => $metadata['cover_url'] ?? null,
-                'highlight' => false,
                 'genres' => array_values($this->normalizeArray($metadata['genres'] ?? [])),
                 'taxonomy_terms' => $this->normalizeArray($metadata['taxonomy_terms'] ?? []),
             ];

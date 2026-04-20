@@ -160,6 +160,37 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
     }
 
+    public function test_snapshot_rebuilds_from_linked_account_profiles_without_artists_or_venue(): void
+    {
+        $profile = $this->createProfile(
+            displayName: 'Profile Linked Snapshot',
+            slug: 'profile-linked-snapshot',
+        );
+
+        $this->createOccurrence(
+            profileId: 'legacy-venue-placeholder',
+            startsAt: Carbon::now()->addHour(),
+            endsAt: Carbon::now()->addHours(2),
+            linkedAccountProfiles: [
+                [
+                    'id' => (string) $profile->_id,
+                    'display_name' => (string) $profile->display_name,
+                    'slug' => (string) $profile->slug,
+                    'profile_type' => (string) $profile->profile_type,
+                    'avatar_url' => $profile->avatar_url ?? null,
+                    'cover_url' => $profile->cover_url ?? null,
+                ],
+            ],
+            includeVenue: false,
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame((string) $profile->_id, (string) data_get($snapshot, 'target.id'));
+        $this->assertSame((string) $profile->slug, (string) data_get($snapshot, 'target.slug'));
+    }
+
     private function createProfile(
         string $displayName,
         string $slug,
@@ -184,6 +215,8 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         string $profileId,
         Carbon $startsAt,
         ?Carbon $endsAt = null,
+        array $linkedAccountProfiles = [],
+        bool $includeVenue = true,
     ): EventOccurrence
     {
         $eventId = 'event-'.uniqid('', true);
@@ -204,10 +237,11 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
                     'coordinates' => [-40.0, -20.0],
                 ],
             ],
-            'venue' => [
+            'venue' => $includeVenue ? [
                 'id' => $profileId,
                 'display_name' => 'Profile Venue',
-            ],
+            ] : [],
+            'linked_account_profiles' => $linkedAccountProfiles,
             'artists' => [],
             'publication' => [
                 'status' => 'published',

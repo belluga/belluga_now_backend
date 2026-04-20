@@ -83,6 +83,7 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
             ->where('is_event_published', true)
             ->where(static function (Builder $query) use ($profileId): void {
                 $query->where('venue.id', $profileId)
+                    ->orWhere('linked_account_profiles.id', $profileId)
                     ->orWhere('artists.id', $profileId);
             });
     }
