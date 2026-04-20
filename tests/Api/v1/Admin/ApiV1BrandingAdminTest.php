@@ -67,6 +67,14 @@ class ApiV1BrandingAdminTest extends TestCaseAuthenticated
 
         $colorUpdate = $respoonse->json()['branding_data']['theme_data_settings']['primary_seed_color'];
         AssertEquals($colorUpdate, '#CCCCCC');
+        $this->assertStringContainsString(
+            '/logo-light.png',
+            (string) $respoonse->json()['branding_data']['logo_settings']['light_logo_uri']
+        );
+        $this->assertStringContainsString(
+            '/icon/icon-source.png',
+            (string) $respoonse->json()['branding_data']['pwa_icon']['source_uri']
+        );
     }
 
     public function test_manifest()
@@ -122,6 +130,13 @@ class ApiV1BrandingAdminTest extends TestCaseAuthenticated
     public function test_icon512()
     {
         $response = $this->_getIcon('512x512');
+        $response->assertStatus(200);
+        $response->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_icon_source()
+    {
+        $response = $this->_getIcon('source');
         $response->assertStatus(200);
         $response->assertHeader('Content-Type', 'image/png');
     }

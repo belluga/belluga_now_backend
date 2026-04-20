@@ -20,14 +20,14 @@ class BrandingControllerTest extends TestCase
 
         $brandingService->expects($this->once())
             ->method('resolveFaviconAsset')
-            ->willReturn('/storage/tenants/test/pwa/icon-192x192.png');
+            ->willReturn('https://tenant-sigma.test/favicon.ico?v=tenant-favicon');
 
         $filePath = tempnam(sys_get_temp_dir(), 'branding-favicon-');
         File::put($filePath, 'png-fallback');
 
         $brandingService->expects($this->once())
             ->method('assetResponse')
-            ->with('/storage/tenants/test/pwa/icon-192x192.png')
+            ->with('https://tenant-sigma.test/favicon.ico?v=tenant-favicon')
             ->willReturn(response()->file($filePath, [
                 'Content-Type' => 'image/png',
             ]));
