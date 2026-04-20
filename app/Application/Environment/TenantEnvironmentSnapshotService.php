@@ -8,6 +8,7 @@ use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantEnvironmentSnapshot;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
 
 class TenantEnvironmentSnapshotService
@@ -83,51 +84,22 @@ class TenantEnvironmentSnapshotService
             return;
         }
 
-        $memoKey = sprintf('%s:%s', (string) $tenant->getKey(), $reason);
-        if (isset($this->dispatchMemo[$memoKey])) {
-            return;
-        }
-
-        $this->dispatchMemo[$memoKey] = true;
-        RebuildTenantEnvironmentSnapshotJob::dispatch($reason, $context);
+        $this->dispatchRefreshForTenantId((string) $tenant->getKey(), $reason, $context);
     }
 
     public function dispatchRefreshForTenant(Tenant $tenant, string $reason, array $context = []): void
     {
-        $currentTenant = Tenant::current();
-        $tenant->makeCurrent();
-
-        try {
-            $this->dispatchRefreshForCurrentTenant($reason, $context);
-        } finally {
-            $tenant->forgetCurrent();
-
-            if ($currentTenant instanceof Tenant) {
-                $currentTenant->makeCurrent();
-            }
-        }
+        $this->dispatchRefreshForTenantId((string) $tenant->getKey(), $reason, $context);
     }
 
     public function dispatchRefreshForAllTenants(string $reason, array $context = []): void
     {
-        $currentTenant = Tenant::current();
-
         foreach (Tenant::query()->get() as $tenant) {
             if (! $tenant instanceof Tenant) {
                 continue;
             }
 
-            $tenant->makeCurrent();
-
-            try {
-                $this->dispatchRefreshForCurrentTenant($reason, $context);
-            } finally {
-                $tenant->forgetCurrent();
-            }
-        }
-
-        if ($currentTenant instanceof Tenant) {
-            $currentTenant->makeCurrent();
+            $this->dispatchRefreshForTenant($tenant, $reason, $context);
         }
     }
 
@@ -225,6 +197,39 @@ class TenantEnvironmentSnapshotService
     private function hasUsableSnapshot(TenantEnvironmentSnapshot $snapshot): bool
     {
         return is_array($snapshot->snapshot) && $snapshot->snapshot !== [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function dispatchRefreshForTenantId(string $tenantId, string $reason, array $context = []): void
+    {
+        if ($tenantId === '') {
+            return;
+        }
+
+        $memoKey = sprintf('%s:%s', $tenantId, $reason);
+        if (isset($this->dispatchMemo[$memoKey])) {
+            return;
+        }
+
+        $this->dispatchMemo[$memoKey] = true;
+
+        $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
+        $hadPreviousTenantId = Context::has($contextKey);
+        $previousTenantId = $hadPreviousTenantId ? Context::get($contextKey) : null;
+
+        Context::add($contextKey, $tenantId);
+
+        try {
+            RebuildTenantEnvironmentSnapshotJob::dispatch($reason, $context);
+        } finally {
+            if ($hadPreviousTenantId) {
+                Context::add($contextKey, $previousTenantId);
+            } else {
+                Context::forget($contextKey);
+            }
+        }
     }
 
     /**
