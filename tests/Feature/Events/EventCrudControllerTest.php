@@ -3259,6 +3259,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $occurrence = EventOccurrence::query()->where('event_id', $eventId)->first();
         $this->assertNotNull($occurrence);
         $this->assertSame('Canonical Event Title', (string) $occurrence->title);
+        $this->assertSame(
+            data_get($occurrence, 'event_parties.0.metadata.slug'),
+            data_get($occurrence, 'linked_account_profiles.0.slug')
+        );
     }
 
     public function test_event_occurrence_reconciliation_soft_deletes_occurrences_for_deleted_events(): void

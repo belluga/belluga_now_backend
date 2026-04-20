@@ -6,6 +6,7 @@ use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 
@@ -341,6 +342,52 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('telemetry.trackers.0.type', 'mixpanel');
         $response->assertJsonPath('telemetry.trackers.0.token', 'kernel-token');
         $response->assertJsonPath('telemetry.trackers.0.events.0', 'invite_received');
+    }
+
+    public function test_environment_api_exposes_tenant_public_auth_from_persisted_settings(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        $landlord = LandlordSettings::current();
+        $originalLandlordAuth = $landlord?->getAttribute('tenant_public_auth');
+        if ($landlord === null) {
+            $landlord = new LandlordSettings();
+            $landlord->setAttribute('_id', 'settings_root');
+        }
+
+        $tenantSettings = TenantSettings::current();
+        $originalTenantAuth = $tenantSettings?->getAttribute('tenant_public_auth');
+        if ($tenantSettings === null) {
+            $tenantSettings = new TenantSettings();
+            $tenantSettings->setAttribute('_id', 'settings_root');
+        }
+
+        $landlord->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => true,
+        ]);
+        $tenantSettings->setAttribute('tenant_public_auth', [
+            'enabled_methods' => ['phone_otp'],
+        ]);
+        $landlord->save();
+        $tenantSettings->save();
+
+        try {
+            $response = $this->get("{$this->base_api_tenant}environment");
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('settings.tenant_public_auth.available_methods.0', 'password');
+            $response->assertJsonPath('settings.tenant_public_auth.available_methods.1', 'phone_otp');
+            $response->assertJsonPath('settings.tenant_public_auth.enabled_methods.0', 'phone_otp');
+            $response->assertJsonPath('settings.tenant_public_auth.effective_methods.0', 'phone_otp');
+            $response->assertJsonPath('settings.tenant_public_auth.effective_primary_method', 'phone_otp');
+        } finally {
+            $landlord->setAttribute('tenant_public_auth', $originalLandlordAuth);
+            $landlord->save();
+            $tenantSettings->setAttribute('tenant_public_auth', $originalTenantAuth);
+            $tenantSettings->save();
+        }
     }
 
     public function test_environment_api_exposes_map_ui_default_origin_from_settings(): void
