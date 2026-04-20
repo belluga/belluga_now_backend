@@ -11,6 +11,7 @@ use App\Application\Telemetry\TelemetrySettingsKernelBridge;
 use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Support\Str;
 
 class EnvironmentResolverService
