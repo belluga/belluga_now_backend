@@ -7,9 +7,11 @@ namespace Tests\Unit\Application\LandlordTenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\LandlordTenants\TenantLifecycleService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\TenantRoleTemplate;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -146,6 +148,19 @@ class TenantLifecycleServiceTest extends TestCase
         ]);
 
         $this->assertSame('Updated description for Gamma Retail.', $updated->description);
+    }
+
+    public function test_update_dispatches_environment_snapshot_refresh_without_current_tenant_context(): void
+    {
+        $tenant = $this->service->create($this->makeTenantPayload('Snapshot Delta'), $this->operator)['tenant'];
+
+        Queue::fake();
+
+        $this->service->update($tenant, [
+            'name' => 'Snapshot Delta Updated',
+        ]);
+
+        Queue::assertPushed(RebuildTenantEnvironmentSnapshotJob::class);
     }
 
     public function test_delete_soft_deletes_tenant(): void

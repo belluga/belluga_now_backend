@@ -85,23 +85,16 @@ class EnvironmentSnapshotIntegrationServiceProvider extends ServiceProvider
         });
 
         Tenant::saved(function (Tenant $tenant): void {
-            $currentTenant = Tenant::current();
-            if (! $currentTenant || (string) $currentTenant->getKey() !== (string) $tenant->getKey()) {
-                return;
-            }
-
-            $this->snapshotService()->dispatchRefreshForCurrentTenant(
+            $this->dispatchRefreshForTenantRecord(
+                $tenant,
                 'tenant_record_updated',
                 ['tenant_id' => (string) $tenant->getKey()],
             );
         });
 
         Domains::saved(function (Domains $domain): void {
-            if (! Tenant::current()) {
-                return;
-            }
-
-            $this->snapshotService()->dispatchRefreshForCurrentTenant(
+            $this->dispatchRefreshForDomainRecord(
+                $domain,
                 'tenant_domain_updated',
                 [
                     'domain_id' => (string) $domain->getKey(),
@@ -111,11 +104,8 @@ class EnvironmentSnapshotIntegrationServiceProvider extends ServiceProvider
         });
 
         Domains::deleted(function (Domains $domain): void {
-            if (! Tenant::current()) {
-                return;
-            }
-
-            $this->snapshotService()->dispatchRefreshForCurrentTenant(
+            $this->dispatchRefreshForDomainRecord(
+                $domain,
                 'tenant_domain_deleted',
                 [
                     'domain_id' => (string) $domain->getKey(),
@@ -125,11 +115,8 @@ class EnvironmentSnapshotIntegrationServiceProvider extends ServiceProvider
         });
 
         Domains::restored(function (Domains $domain): void {
-            if (! Tenant::current()) {
-                return;
-            }
-
-            $this->snapshotService()->dispatchRefreshForCurrentTenant(
+            $this->dispatchRefreshForDomainRecord(
+                $domain,
                 'tenant_domain_restored',
                 [
                     'domain_id' => (string) $domain->getKey(),
@@ -160,5 +147,45 @@ class EnvironmentSnapshotIntegrationServiceProvider extends ServiceProvider
     private function snapshotService(): TenantEnvironmentSnapshotService
     {
         return $this->app->make(TenantEnvironmentSnapshotService::class);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function dispatchRefreshForTenantRecord(
+        Tenant $tenant,
+        string $reason,
+        array $context = [],
+    ): void {
+        $currentTenant = Tenant::current();
+        if ($currentTenant && (string) $currentTenant->getKey() === (string) $tenant->getKey()) {
+            $this->snapshotService()->dispatchRefreshForCurrentTenant($reason, $context);
+
+            return;
+        }
+
+        $this->snapshotService()->dispatchRefreshForTenant($tenant, $reason, $context);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function dispatchRefreshForDomainRecord(
+        Domains $domain,
+        string $reason,
+        array $context = [],
+    ): void {
+        $tenant = $domain->tenant()->withTrashed()->first();
+        if ($tenant instanceof Tenant) {
+            $this->dispatchRefreshForTenantRecord($tenant, $reason, $context);
+
+            return;
+        }
+
+        if (! Tenant::current()) {
+            return;
+        }
+
+        $this->snapshotService()->dispatchRefreshForCurrentTenant($reason, $context);
     }
 }
