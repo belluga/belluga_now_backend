@@ -15,6 +15,25 @@ trait RefreshLandlordAndTenantDatabases
 {
     protected static bool $migrationsRan = false;
 
+    protected function prepareAuthenticatedHarnessState(): void
+    {
+        if (! property_exists(static::class, 'bootstrapped')) {
+            return;
+        }
+
+        if (static::$bootstrapped) {
+            return;
+        }
+
+        if (! method_exists($this, 'initializeSystem')) {
+            return;
+        }
+
+        $this->refreshLandlordAndTenantDatabases();
+        $this->initializeSystem();
+        static::$bootstrapped = true;
+    }
+
     protected function migrationCommand(): string
     {
         $landlordDsn = (string) env('DB_URI_LANDLORD', '');
@@ -31,6 +50,10 @@ trait RefreshLandlordAndTenantDatabases
 
     protected function refreshLandlordAndTenantDatabases(): void
     {
+        if (property_exists(static::class, 'bootstrapped')) {
+            static::$bootstrapped = false;
+        }
+
         $this->resetRuntimeState();
 
         $tenantDatabaseNames = Tenant::query()
@@ -145,6 +168,14 @@ trait RefreshLandlordAndTenantDatabases
 
         Landlord::forgetSingletonCache();
         Log::withoutContext();
+        $this->resetGlobalLabelState();
+    }
+
+    private function resetGlobalLabelState(): void
+    {
+        global $params;
+
+        $params = [];
     }
 
     protected function tenantMigrationPathArgs(): string
