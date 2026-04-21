@@ -16,6 +16,7 @@ use App\Models\Tenants\TenantProfileType;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Queue;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -194,6 +195,52 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             'forced snapshot rebuild failure',
             (string) $failedSnapshot?->last_rebuild_error
         );
+    }
+
+    public function test_dispatch_refresh_for_specific_tenant_preserves_current_tenant_context(): void
+    {
+        $primaryTenant = $this->currentTenant();
+
+        $secondaryTenant = Tenant::query()
+            ->where('_id', '!=', $primaryTenant->getKey())
+            ->first();
+        $createdSecondaryTenant = false;
+
+        if (! $secondaryTenant instanceof Tenant) {
+            $secondaryTenant = Tenant::create([
+                'name' => 'Environment Snapshot Secondary',
+                'subdomain' => 'environment-snapshot-secondary',
+                'app_domains' => ['com.environment.snapshot.secondary'],
+            ]);
+            $createdSecondaryTenant = true;
+        }
+
+        try {
+            $primaryTenant->makeCurrent();
+
+            app(TenantEnvironmentSnapshotService::class)->dispatchRefreshForTenant(
+                $secondaryTenant,
+                'test_preserve_current_tenant_context',
+            );
+
+            $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
+
+            $this->assertSame(
+                (string) $primaryTenant->getKey(),
+                (string) (Tenant::current()?->getKey() ?? ''),
+            );
+            $this->assertSame(
+                (string) $primaryTenant->getKey(),
+                trim((string) Context::get($contextKey, '')),
+            );
+        } finally {
+            $primaryTenant->makeCurrent();
+
+            if ($createdSecondaryTenant) {
+                $secondaryTenant->domains()->withTrashed()->forceDelete();
+                $secondaryTenant->forceDelete();
+            }
+        }
     }
 
     public function test_environment_api_exposes_when_favicon_route_has_dedicated_asset(): void
@@ -573,6 +620,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $this->tenantSnapshot = [
             'id' => (string) $tenant->getKey(),
             'subdomain' => $tenant->subdomain,
+            'branding_data' => $tenant->branding_data,
         ];
     }
 
@@ -583,10 +631,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         }
 
         $tenant = Tenant::query()->findOrFail($this->tenantSnapshot['id']);
+        $tenant->makeCurrent();
         $tenant->update([
             'subdomain' => $this->tenantSnapshot['subdomain'],
+            'branding_data' => $this->tenantSnapshot['branding_data'],
         ]);
         $tenant->domains()->withTrashed()->forceDelete();
+        Tenant::forgetCurrent();
 
         $this->tenantSnapshot = null;
     }

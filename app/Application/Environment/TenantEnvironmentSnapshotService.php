@@ -218,7 +218,8 @@ class TenantEnvironmentSnapshotService
         $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
         $hadPreviousTenantId = Context::has($contextKey);
         $previousTenantId = $hadPreviousTenantId ? Context::get($contextKey) : null;
-        $currentTenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
+        $previousCurrentTenant = Tenant::current();
+        $currentTenantId = trim((string) ($previousCurrentTenant?->getKey() ?? ''));
         $restoreTenantId = $currentTenantId !== ''
             ? $currentTenantId
             : trim((string) ($previousTenantId ?? ''));
@@ -228,12 +229,24 @@ class TenantEnvironmentSnapshotService
         try {
             RebuildTenantEnvironmentSnapshotJob::dispatch($reason, $context);
         } finally {
+            $restoreTenant = null;
             if ($restoreTenantId !== '') {
-                Context::add($contextKey, $restoreTenantId);
-            } elseif ($hadPreviousTenantId) {
-                Context::add($contextKey, $previousTenantId);
+                $restoreTenant = $previousCurrentTenant instanceof Tenant
+                    && (string) $previousCurrentTenant->getKey() === $restoreTenantId
+                    ? $previousCurrentTenant
+                    : Tenant::query()->find($restoreTenantId);
+            }
+
+            if ($restoreTenant instanceof Tenant) {
+                $restoreTenant->makeCurrent();
             } else {
-                Context::forget($contextKey);
+                Tenant::forgetCurrent();
+
+                if ($hadPreviousTenantId) {
+                    Context::add($contextKey, $previousTenantId);
+                } else {
+                    Context::forget($contextKey);
+                }
             }
         }
     }

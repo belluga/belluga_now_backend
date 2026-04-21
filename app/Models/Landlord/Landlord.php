@@ -31,10 +31,15 @@ class Landlord extends Model
         });
     }
 
+    public static function forgetSingletonCache(): void
+    {
+        Cache::forget(self::CACHE_KEY);
+    }
+
     protected static function booted(): void
     {
-        static::saved(fn () => Cache::forget(self::CACHE_KEY));
-        static::deleted(fn () => Cache::forget(self::CACHE_KEY));
+        static::saved(fn () => self::forgetSingletonCache());
+        static::deleted(fn () => self::forgetSingletonCache());
     }
 
     public function getManifestData(): array

@@ -5,7 +5,9 @@ namespace Tests\Traits;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -29,6 +31,8 @@ trait RefreshLandlordAndTenantDatabases
 
     protected function refreshLandlordAndTenantDatabases(): void
     {
+        $this->resetRuntimeState();
+
         $tenantDatabaseNames = Tenant::query()
             ->pluck('database')
             ->filter()
@@ -99,6 +103,8 @@ trait RefreshLandlordAndTenantDatabases
             'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
         ]);
 
+        $this->resetRuntimeState();
+
         if (static::$migrationsRan) {
             return;
         }
@@ -121,7 +127,24 @@ trait RefreshLandlordAndTenantDatabases
         Landlord::query()->delete();
         Tenant::query()->forceDelete();
 
+        $this->resetRuntimeState();
+
         static::$migrationsRan = true;
+    }
+
+    private function resetRuntimeState(): void
+    {
+        Tenant::forgetCurrent();
+        Account::current()?->forget();
+
+        Context::forget((string) config('multitenancy.current_tenant_context_key', 'tenantId'));
+        Context::forget('accountId');
+
+        app()->forgetInstance((string) config('multitenancy.current_tenant_container_key', 'currentTenant'));
+        app()->forgetInstance('currentAccount');
+
+        Landlord::forgetSingletonCache();
+        Log::withoutContext();
     }
 
     protected function tenantMigrationPathArgs(): string
