@@ -158,7 +158,11 @@ class EnvironmentSnapshotIntegrationServiceProvider extends ServiceProvider
         array $context = [],
     ): void {
         $currentTenant = Tenant::current();
-        if ($currentTenant && (string) $currentTenant->getKey() === (string) $tenant->getKey()) {
+        if (
+            $currentTenant
+            && $currentTenant->isCurrent()
+            && (string) $currentTenant->getKey() === (string) $tenant->getKey()
+        ) {
             $this->snapshotService()->dispatchRefreshForCurrentTenant($reason, $context);
 
             return;
@@ -182,7 +186,8 @@ class EnvironmentSnapshotIntegrationServiceProvider extends ServiceProvider
             return;
         }
 
-        if (! Tenant::current()) {
+        $currentTenant = Tenant::current();
+        if (! $currentTenant || ! $currentTenant->isCurrent()) {
             return;
         }
 

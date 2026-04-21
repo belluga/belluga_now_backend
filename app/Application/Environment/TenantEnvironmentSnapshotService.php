@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Environment;
 
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantEnvironmentSnapshot;
 use Illuminate\Support\Carbon;
@@ -80,7 +81,7 @@ class TenantEnvironmentSnapshotService
     public function dispatchRefreshForCurrentTenant(string $reason, array $context = []): void
     {
         $tenant = Tenant::current();
-        if (! $tenant) {
+        if (! $tenant || ! $tenant->isCurrent()) {
             return;
         }
 
@@ -204,7 +205,7 @@ class TenantEnvironmentSnapshotService
      */
     private function dispatchRefreshForTenantId(string $tenantId, string $reason, array $context = []): void
     {
-        if ($tenantId === '') {
+        if ($tenantId === '' || ! $this->landlordSnapshotContextAvailable()) {
             return;
         }
 
@@ -249,6 +250,11 @@ class TenantEnvironmentSnapshotService
                 }
             }
         }
+    }
+
+    private function landlordSnapshotContextAvailable(): bool
+    {
+        return Landlord::query()->exists();
     }
 
     /**
