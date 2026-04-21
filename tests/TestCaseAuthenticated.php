@@ -15,7 +15,12 @@ abstract class TestCaseAuthenticated extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->prepareAuthenticatedHarnessState();
         $this->ensureSystemInitialized();
+    }
+
+    protected function prepareAuthenticatedHarnessState(): void
+    {
     }
 
     protected string $base_api_url {
