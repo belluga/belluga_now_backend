@@ -1,6 +1,7 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Security\ApiAbuseSignalRecorder;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
@@ -42,6 +43,78 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 
     return 0;
 })->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+
+Artisan::command('tenant:environment-snapshot:repair {tenant_slug?} {--all} {--reason=manual_repair}', function () {
+    /** @var TenantEnvironmentSnapshotService $service */
+    $service = app(TenantEnvironmentSnapshotService::class);
+    $reason = trim((string) $this->option('reason'));
+    if ($reason === '') {
+        $reason = 'manual_repair';
+    }
+
+    if ($this->option('all')) {
+        $count = 0;
+
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $tenant->makeCurrent();
+
+            try {
+                $snapshot = $service->repair($tenant, $reason, [
+                    'trigger' => 'console',
+                    'all' => true,
+                ]);
+                $count++;
+
+                $this->line(json_encode([
+                    'tenant_slug' => (string) $tenant->slug,
+                    ...$service->summarize($snapshot),
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            } finally {
+                $tenant->forgetCurrent();
+            }
+        }
+
+        $this->info(sprintf('Rebuilt tenant environment snapshots: %d', $count));
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug === '') {
+        $this->error('Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+    if (! $tenant) {
+        $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+        return 1;
+    }
+
+    $tenant->makeCurrent();
+
+    try {
+        $snapshot = $service->repair($tenant, $reason, [
+            'trigger' => 'console',
+            'tenant_slug' => $tenantSlug,
+        ]);
+
+        $this->line(json_encode([
+            'tenant_slug' => $tenantSlug,
+            ...$service->summarize($snapshot),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    } finally {
+        $tenant->forgetCurrent();
+    }
+
+    return 0;
+})->purpose('Synchronously rebuild tenant environment snapshots for one tenant or for every tenant.');
 
 Artisan::command('api-security:abuse-signals:prune', function () {
     $result = app(ApiAbuseSignalRecorder::class)->pruneExpired();

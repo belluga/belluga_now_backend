@@ -13,6 +13,7 @@ return [
     Belluga\DeepLinks\DeepLinksServiceProvider::class,
     Belluga\Email\EmailServiceProvider::class,
     App\Providers\PackageIntegration\MediaIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\EnvironmentSnapshotIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\SettingsIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\EventsIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\MapPoisIntegrationServiceProvider::class,

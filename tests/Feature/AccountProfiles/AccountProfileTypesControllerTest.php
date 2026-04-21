@@ -95,6 +95,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
+                    'is_reference_location_enabled' => true,
                 ],
             ],
             $this->getHeaders()
@@ -106,10 +107,39 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.labels.singular', 'Venue');
         $response->assertJsonPath('data.labels.plural', 'Venues');
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
+        $response->assertJsonPath('data.capabilities.is_reference_location_enabled', true);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
         $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
+    }
+
+    public function test_profile_type_create_disables_reference_location_when_poi_is_disabled(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'hotel',
+                'label' => 'Hotel',
+                'labels' => [
+                    'singular' => 'Hotel',
+                    'plural' => 'Hotels',
+                ],
+                'allowed_taxonomies' => ['hospitality'],
+                'capabilities' => [
+                    'is_poi_enabled' => false,
+                    'is_reference_location_enabled' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
+
+        $model = TenantProfileType::query()->where('type', 'hotel')->firstOrFail();
+        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
     }
 
     public function test_profile_type_create_validation(): void
@@ -721,6 +751,61 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['type']);
+    }
+
+    public function test_profile_type_update_disables_reference_location_when_poi_is_turned_off(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+                'is_reference_location_enabled' => true,
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue",
+            [
+                'capabilities' => [
+                    'is_poi_enabled' => false,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
+
+        $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
+    }
+
+    public function test_profile_type_index_exposes_effective_reference_location_capability(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'hotel',
+            'label' => 'Hotel',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_poi_enabled' => false,
+                'is_reference_location_enabled' => true,
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.0.capabilities.is_poi_enabled', false);
+        $response->assertJsonPath('data.0.capabilities.is_reference_location_enabled', false);
     }
 
     public function test_profile_type_delete(): void
