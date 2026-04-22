@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountProfilesController;
+use App\Http\Api\v1\Controllers\DiscoveryFiltersController;
 use App\Http\Api\v1\Controllers\EventAttendanceController;
 use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Middleware\CheckTenantAccess;
@@ -19,6 +20,7 @@ require base_path('routes/api/packages/project_tenant_public_api_v1/email.php');
 Route::middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
         Route::get('/agenda', [AgendaController::class, 'index']);
+        Route::get('/discovery-filters/{surface}', [DiscoveryFiltersController::class, 'show']);
         Route::get('/events', [EventsController::class, 'index']);
         Route::get('/events/stream', [EventStreamController::class, 'stream']);
         Route::get('/events/attendance/confirmed', [EventAttendanceController::class, 'index']);

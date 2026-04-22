@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Application\Taxonomies;
 
+use App\Jobs\Taxonomies\RepairTaxonomyTermSnapshotsJob;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class TaxonomyTermManagementService
@@ -71,23 +73,27 @@ class TaxonomyTermManagementService
         if (array_key_exists('slug', $payload)) {
             $slug = $this->normalizeSlug($payload['slug'] ?? '');
             if ($slug !== (string) $term->slug) {
-                if (TaxonomyTerm::query()
-                    ->where('taxonomy_id', (string) $taxonomy->_id)
-                    ->where('slug', $slug)
-                    ->exists()) {
-                    throw ValidationException::withMessages([
-                        'slug' => ['Term slug already exists in this taxonomy.'],
-                    ]);
-                }
-                $term->slug = $slug;
+                throw ValidationException::withMessages([
+                    'slug' => ['Term slug cannot be changed after creation. Use an explicit migration workflow.'],
+                ]);
             }
         }
 
+        $previousName = (string) ($term->name ?? '');
         if (array_key_exists('name', $payload)) {
             $term->name = trim((string) $payload['name']);
         }
 
         $term->save();
+
+        if ((string) ($term->name ?? '') !== $previousName) {
+            DB::connection('tenant')->afterCommit(
+                static fn () => RepairTaxonomyTermSnapshotsJob::dispatch(
+                    (string) ($taxonomy->slug ?? ''),
+                    (string) ($term->slug ?? '')
+                )
+            );
+        }
 
         return $this->toPayload($term);
     }

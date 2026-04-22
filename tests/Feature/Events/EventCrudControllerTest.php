@@ -1393,6 +1393,19 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.taxonomy_terms.0.type', 'event_style');
         $response->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
+        $response->assertJsonPath('data.taxonomy_terms.0.name', 'Showcase');
+        $response->assertJsonPath('data.taxonomy_terms.0.taxonomy_name', 'Event Style');
+        $response->assertJsonPath('data.taxonomy_terms.0.label', 'Showcase');
+
+        $eventId = (string) $response->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertSame('Showcase', data_get($event->taxonomy_terms, '0.name'));
+        $this->assertSame('Event Style', data_get($occurrence->taxonomy_terms, '0.taxonomy_name'));
     }
 
     public function test_event_create_rejects_scheduled_without_publish_at(): void
@@ -2535,21 +2548,20 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
-    public function test_event_create_rejects_multiple_occurrences_when_capability_is_not_effective(): void
+    public function test_event_create_allows_multiple_occurrences_without_tenant_or_event_capability(): void
     {
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences']);
+        $response->assertStatus(201);
+        $this->assertCount(2, $response->json('data.occurrences'));
+        $this->assertArrayNotHasKey(
+            'multiple_occurrences',
+            $response->json('data.capabilities') ?? []
+        );
     }
 
     public function test_event_create_exposes_map_poi_capability_by_default_when_tenant_allows_it(): void
@@ -2953,27 +2965,16 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Locked POI Name', (string) ($freshPoi->name ?? ''));
     }
 
-    public function test_event_create_allows_multiple_occurrences_when_tenant_settings_enable_it(): void
+    public function test_event_create_allows_multiple_occurrences_by_default(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-            'capabilities.multiple_occurrences.max_occurrences' => 2,
-        ])->assertStatus(200);
-
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(201);
         $this->assertCount(2, $response->json('data.occurrences'));
-        $response->assertJsonPath('data.capabilities.multiple_occurrences.enabled', true);
         $eventId = (string) $response->json('data.event_id');
         $this->assertSame(
             2,
@@ -2981,42 +2982,157 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_event_create_rejects_above_tenant_max_occurrences(): void
+    public function test_event_create_persists_occurrence_owned_profiles_location_override_and_programming_items(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-            'capabilities.multiple_occurrences.max_occurrences' => 2,
-        ])->assertStatus(200);
-
-        $payload = $this->makeEventPayload([
-            'occurrences' => $this->makeOccurrences(3),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+            'permissions' => ['can_edit' => false],
+        ]];
+        $occurrences[1]['location'] = [
+            'mode' => 'online',
+            'online' => [
+                'url' => 'https://example.org/live',
+                'label' => 'Transmissao ao vivo',
             ],
+        ];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.occurrences.1.has_location_override', true);
+        $response->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+
+        $eventId = (string) $response->json('data.event_id');
+        $firstOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $this->assertFalse((bool) ($firstOccurrence->has_location_override ?? false));
+        $this->assertSame((string) $this->venue->_id, data_get($firstOccurrence, 'place_ref.id'));
+        $this->assertSame([], $firstOccurrence->programming_items ?? []);
+
+        $this->assertTrue((bool) ($secondOccurrence->has_location_override ?? false));
+        $this->assertSame('online', data_get($secondOccurrence, 'location_override.location.mode'));
+        $this->assertSame('https://example.org/live', data_get($secondOccurrence, 'location_override.location.online.url'));
+        $this->assertSame('online', data_get($secondOccurrence, 'location.mode'));
+        $this->assertNull(data_get($secondOccurrence, 'place_ref'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'event_parties.0.party_ref_id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'event_parties.1.party_ref_id'));
+        $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'linked_account_profiles.1.id'));
+        $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Show com a banda', data_get($secondOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'Renamed without occurrence payload',
         ]);
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.occurrences.1.has_location_override', true);
+        $updated->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $updated->assertJsonPath('data.occurrences.1.programming_count', 1);
 
-        $response = $this->postJson($this->accountEventsBase, $payload);
-
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences']);
+        $freshSecondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+        $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertSame('online', data_get($freshSecondOccurrence, 'location_override.location.mode'));
+        $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
     }
 
-    public function test_event_create_treats_zero_tenant_max_as_null_limit(): void
+    public function test_public_event_detail_selects_occurrence_and_returns_all_dates_with_selected_highlight(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-            'capabilities.multiple_occurrences.max_occurrences' => 0,
-        ])->assertStatus(200);
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[1]['location'] = [
+            'mode' => 'online',
+            'online' => [
+                'url' => 'https://example.org/live',
+                'label' => 'Transmissao ao vivo',
+            ],
+        ];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+        ]];
 
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$secondOccurrence->_id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.occurrence_id', (string) $secondOccurrence->_id);
+        $response->assertJsonPath('data.occurrences.0.is_selected', false);
+        $response->assertJsonPath('data.occurrences.1.is_selected', true);
+        $response->assertJsonPath('data.location.mode', 'online');
+        $response->assertJsonPath('data.location.online.url', 'https://example.org/live');
+        $response->assertJsonPath('data.place_ref', null);
+        $response->assertJsonPath('data.latitude', null);
+        $response->assertJsonPath('data.longitude', null);
+        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $this->artist->_id);
+        $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
+
+        $staleResponse = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence=000000000000000000000000");
+        $staleResponse->assertStatus(200);
+        $staleResponse->assertJsonPath('data.occurrences.0.is_selected', true);
+        $staleResponse->assertJsonPath('data.occurrences.1.is_selected', false);
+    }
+
+    public function test_event_create_requires_programming_title_when_more_than_one_profile_is_linked(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'account_profile_ids' => [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+            ],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.title',
+        ]);
+    }
+
+    public function test_event_create_allows_three_occurrences_without_tenant_max_guard(): void
+    {
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(3),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
@@ -3025,27 +3141,14 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertCount(3, $response->json('data.occurrences'));
     }
 
-    public function test_event_update_without_schedule_mutation_keeps_stored_occurrences_when_tenant_disables_capability(): void
+    public function test_event_update_without_schedule_mutation_keeps_stored_occurrences(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-        ])->assertStatus(200);
-
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]));
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => false,
-        ])->assertStatus(200);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Renamed without touching schedule',
@@ -3053,37 +3156,23 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $this->assertCount(2, $response->json('data.occurrences'));
-        $this->assertNull($response->json('data.capabilities.multiple_occurrences'));
     }
 
-    public function test_event_update_with_schedule_mutation_rejects_multiple_occurrences_when_capability_not_effective(): void
+    public function test_event_update_with_schedule_mutation_allows_multiple_occurrences_without_capability(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-        ])->assertStatus(200);
-
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]));
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
 
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => false,
-        ])->assertStatus(200);
-
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => $this->makeOccurrences(2),
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences']);
+        $response->assertStatus(200);
+        $this->assertCount(2, $response->json('data.occurrences'));
     }
 
     public function test_event_update_returns404_when_missing(): void

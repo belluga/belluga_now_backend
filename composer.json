@@ -51,6 +51,10 @@
         },
         {
             "type": "path",
+            "url": "packages/belluga/belluga_discovery_filters"
+        },
+        {
+            "type": "path",
             "url": "packages/belluga/belluga_invites"
         },
         {
@@ -74,6 +78,7 @@
             "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",
             "Belluga\\Invites\\": "packages/belluga/belluga_invites/src/",
             "Belluga\\MapPois\\": "packages/belluga/belluga_map_pois/src/",
+            "Belluga\\DiscoveryFilters\\": "packages/belluga/belluga_discovery_filters/src/",
             "Belluga\\Favorites\\": "packages/belluga/belluga_favorites/src/",
             "Belluga\\Media\\": "packages/belluga/belluga_media/src/",
             "Belluga\\DeepLinks\\": "packages/belluga/belluga_deep_links/src/",

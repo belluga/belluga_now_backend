@@ -10,6 +10,7 @@ use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\AttendanceCommitmentReadAdapter;
 use App\Integration\Events\EventParties\AccountProfileEventPartyMapper;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
+use App\Integration\Events\EventTaxonomySnapshotResolverAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
@@ -26,6 +27,7 @@ use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
@@ -46,6 +48,11 @@ class EventsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             EventTaxonomyValidationContract::class,
             EventTaxonomyValidationAdapter::class
+        );
+
+        $this->app->bind(
+            EventTaxonomySnapshotResolverContract::class,
+            EventTaxonomySnapshotResolverAdapter::class
         );
 
         $this->app->bind(
@@ -159,41 +166,6 @@ class EventsIntegrationServiceProvider extends ServiceProvider
                     ],
                     'order' => 20,
                 ],
-                'capabilities.multiple_occurrences.allow_multiple' => [
-                    'type' => 'boolean',
-                    'nullable' => false,
-                    'label' => 'Allow Multiple Occurrences',
-                    'label_i18n_key' => 'settings.events.capabilities.multiple_occurrences.allow_multiple.label',
-                    'default' => false,
-                    'group' => 'capabilities.multiple_occurrences',
-                    'group_label' => 'Multiple Occurrences',
-                    'group_label_i18n_key' => 'settings.events.group.capabilities.multiple_occurrences.label',
-                    'order' => 30,
-                ],
-                'capabilities.multiple_occurrences.max_occurrences' => [
-                    'type' => 'integer',
-                    'nullable' => true,
-                    'label' => 'Maximum Occurrences',
-                    'label_i18n_key' => 'settings.events.capabilities.multiple_occurrences.max_occurrences.label',
-                    'default' => null,
-                    'group' => 'capabilities.multiple_occurrences',
-                    'group_label' => 'Multiple Occurrences',
-                    'group_label_i18n_key' => 'settings.events.group.capabilities.multiple_occurrences.label',
-                    'visible_if' => [
-                        'groups' => [
-                            [
-                                'rules' => [
-                                    [
-                                        'field_id' => 'events.capabilities.multiple_occurrences.allow_multiple',
-                                        'operator' => 'equals',
-                                        'value' => true,
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                    'order' => 40,
-                ],
                 'capabilities.map_poi.available' => [
                     'type' => 'boolean',
                     'nullable' => false,
@@ -203,7 +175,7 @@ class EventsIntegrationServiceProvider extends ServiceProvider
                     'group' => 'capabilities.map_poi',
                     'group_label' => 'Map POI',
                     'group_label_i18n_key' => 'settings.events.group.capabilities.map_poi.label',
-                    'order' => 50,
+                    'order' => 30,
                 ],
             ],
             order: 20,

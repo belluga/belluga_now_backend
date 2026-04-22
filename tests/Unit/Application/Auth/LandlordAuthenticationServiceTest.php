@@ -6,6 +6,7 @@ namespace Tests\Unit\Application\Auth;
 
 use App\Application\Auth\LandlordAuthenticationService;
 use App\Exceptions\Auth\InvalidCredentialsException;
+use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Support\Facades\Hash;
 use PHPUnit\Framework\Attributes\Group;
@@ -42,6 +43,24 @@ class LandlordAuthenticationServiceTest extends TestCase
 
         $this->assertSame('landlord@example.org', $result->user->emails[0]);
         $this->assertNotEmpty($result->plainTextToken);
+    }
+
+    public function test_login_expands_wildcard_to_discovery_filter_settings_ability(): void
+    {
+        $role = LandlordRole::create([
+            'name' => 'Root Admin',
+            'permissions' => ['*'],
+        ]);
+        $role->users()->save($this->user);
+
+        $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
+
+        $token = $this->user->tokens()->first();
+        $this->assertNotNull($token);
+        $this->assertContains(
+            'discovery-filters-settings:update',
+            $token->abilities ?? []
+        );
     }
 
     public function test_login_throws_on_invalid_credentials(): void

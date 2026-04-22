@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\StaticAsset;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
@@ -17,6 +18,7 @@ class StaticAssetManagementService
     public function __construct(
         private readonly StaticProfileTypeRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     /**
@@ -42,20 +44,10 @@ class StaticAssetManagementService
             }
         }
 
-        $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
-        if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
-            $this->taxonomyValidationService->assertTermsAllowedForStaticAsset($taxonomyTerms);
-            $allowedTaxonomies = $definition['allowed_taxonomies'] ?? [];
-            $allowedTaxonomies = is_array($allowedTaxonomies) ? $allowedTaxonomies : [];
-
-            $types = $this->extractTypes($taxonomyTerms);
-            $invalid = array_diff($types, $allowedTaxonomies);
-            if ($invalid !== []) {
-                throw ValidationException::withMessages([
-                    'taxonomy_terms' => ['Some taxonomy types are not allowed for this static profile type.'],
-                ]);
-            }
-        }
+        $payload['taxonomy_terms'] = $this->resolveTaxonomyTerms(
+            is_array($payload['taxonomy_terms'] ?? null) ? $payload['taxonomy_terms'] : [],
+            $definition
+        );
 
         try {
             $asset = DB::connection('tenant')->transaction(function () use ($payload): StaticAsset {
@@ -112,20 +104,10 @@ class StaticAssetManagementService
         }
 
         if (array_key_exists('taxonomy_terms', $attributes)) {
-            $taxonomyTerms = $attributes['taxonomy_terms'] ?? [];
-            if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
-                $this->taxonomyValidationService->assertTermsAllowedForStaticAsset($taxonomyTerms);
-                $allowedTaxonomies = $definition['allowed_taxonomies'] ?? [];
-                $allowedTaxonomies = is_array($allowedTaxonomies) ? $allowedTaxonomies : [];
-
-                $types = $this->extractTypes($taxonomyTerms);
-                $invalid = array_diff($types, $allowedTaxonomies);
-                if ($invalid !== []) {
-                    throw ValidationException::withMessages([
-                        'taxonomy_terms' => ['Some taxonomy types are not allowed for this static profile type.'],
-                    ]);
-                }
-            }
+            $attributes['taxonomy_terms'] = $this->resolveTaxonomyTerms(
+                is_array($attributes['taxonomy_terms'] ?? null) ? $attributes['taxonomy_terms'] : [],
+                $definition
+            );
         }
 
         if (array_key_exists('location', $attributes)) {
@@ -216,5 +198,31 @@ class StaticAssetManagementService
         }
 
         return array_values(array_unique($types));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $taxonomyTerms
+     * @param  array<string, mixed>  $definition
+     * @return array<int, array{type: string, value: string, name: string, taxonomy_name: string, label: string}>
+     */
+    private function resolveTaxonomyTerms(array $taxonomyTerms, array $definition): array
+    {
+        if ($taxonomyTerms === []) {
+            return [];
+        }
+
+        $this->taxonomyValidationService->assertTermsAllowedForStaticAsset($taxonomyTerms);
+        $allowedTaxonomies = $definition['allowed_taxonomies'] ?? [];
+        $allowedTaxonomies = is_array($allowedTaxonomies) ? $allowedTaxonomies : [];
+
+        $types = $this->extractTypes($taxonomyTerms);
+        $invalid = array_diff($types, $allowedTaxonomies);
+        if ($invalid !== []) {
+            throw ValidationException::withMessages([
+                'taxonomy_terms' => ['Some taxonomy types are not allowed for this static profile type.'],
+            ]);
+        }
+
+        return $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
     }
 }

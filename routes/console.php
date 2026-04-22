@@ -1,8 +1,10 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Security\ApiAbuseSignalRecorder;
+use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
@@ -146,6 +148,138 @@ Artisan::command('events:legacy-event-parties:repair {--dry-run}', function () {
 
     return 0;
 })->purpose('Inspect or repair legacy events that still rely on artists/venue event_parties drift.');
+
+Artisan::command('taxonomies:term-snapshots:repair {tenant_slug?} {--all} {--type=} {--value=}', function () {
+    $taxonomyType = trim((string) $this->option('type'));
+    $termValue = trim((string) $this->option('value'));
+    $taxonomyType = $taxonomyType === '' ? null : $taxonomyType;
+    $termValue = $termValue === '' ? null : $termValue;
+
+    $runCurrentTenant = function (?string $tenantSlug = null) use ($taxonomyType, $termValue): array {
+        $summary = app(TaxonomySnapshotBackfillService::class)->repair($taxonomyType, $termValue);
+        if ($tenantSlug !== null) {
+            $summary['tenant_slug'] = $tenantSlug;
+        }
+
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return $summary;
+    };
+
+    if ($this->option('all')) {
+        $count = 0;
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $tenant->makeCurrent();
+            try {
+                $runCurrentTenant((string) $tenant->slug);
+                $count++;
+            } finally {
+                $tenant->forgetCurrent();
+            }
+        }
+
+        $this->info(sprintf('Repaired taxonomy term snapshots for tenants: %d', $count));
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug !== '') {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+
+        $tenant->makeCurrent();
+        try {
+            $runCurrentTenant($tenantSlug);
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        return 0;
+    }
+
+    if (! Tenant::current()) {
+        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $runCurrentTenant((string) Tenant::current()?->slug);
+
+    return 0;
+})->purpose('Repair denormalized taxonomy term display snapshots for tenant read models.');
+
+Artisan::command('discovery-filters:backfill-map-ui {tenant_slug?} {--all} {--force}', function () {
+    $runCurrentTenant = function (?string $tenantSlug = null): array {
+        $summary = app(DiscoveryFilterMapUiBackfillService::class)
+            ->backfillCurrentTenant(force: (bool) $this->option('force'));
+        if ($tenantSlug !== null) {
+            $summary['tenant_slug'] = $tenantSlug;
+        }
+
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return $summary;
+    };
+
+    if ($this->option('all')) {
+        $count = 0;
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $tenant->makeCurrent();
+            try {
+                $runCurrentTenant((string) $tenant->slug);
+                $count++;
+            } finally {
+                $tenant->forgetCurrent();
+            }
+        }
+
+        $this->info(sprintf('Processed discovery filter map-ui backfill for tenants: %d', $count));
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug !== '') {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+
+        $tenant->makeCurrent();
+        try {
+            $runCurrentTenant($tenantSlug);
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        return 0;
+    }
+
+    if (! Tenant::current()) {
+        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $runCurrentTenant((string) Tenant::current()?->slug);
+
+    return 0;
+})->purpose('Backfill legacy map_ui.filters into canonical discovery_filters public_map.primary.');
 
 Schedule::call(static function (): void {
     app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {

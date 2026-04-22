@@ -9,7 +9,6 @@ use Belluga\Events\Application\Operations\PackageEventAsyncJobSignatures;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MapPoiCapabilityHandler;
-use Belluga\Events\Capabilities\MultipleOccurrencesCapabilityHandler;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
@@ -19,6 +18,7 @@ use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
@@ -34,7 +34,6 @@ class EventsServiceProvider extends ServiceProvider
     {
         $this->app->singleton(EventCapabilityRegistryContract::class, static function () {
             $registry = new InMemoryEventCapabilityRegistry;
-            $registry->register(new MultipleOccurrencesCapabilityHandler);
             $registry->register(new MapPoiCapabilityHandler);
 
             return $registry;
@@ -44,6 +43,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->app->singletonIf(EventAsyncJobSignaturesContract::class, PackageEventAsyncJobSignatures::class);
 
         $this->ensureHostBinding(EventTaxonomyValidationContract::class);
+        $this->ensureHostBinding(EventTaxonomySnapshotResolverContract::class);
         $this->ensureHostBinding(EventTypeResolverContract::class);
         $this->ensureHostBinding(EventProfileResolverContract::class);
         $this->ensureHostBinding(EventAccountResolverContract::class);

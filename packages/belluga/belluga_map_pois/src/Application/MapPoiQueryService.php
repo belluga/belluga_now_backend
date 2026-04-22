@@ -181,6 +181,9 @@ class MapPoiQueryService
                     'type' => '$taxonomy_terms.type',
                     'value' => '$taxonomy_terms.value',
                 ],
+                'name' => ['$first' => '$taxonomy_terms.name'],
+                'taxonomy_name' => ['$first' => '$taxonomy_terms.taxonomy_name'],
+                'label' => ['$first' => '$taxonomy_terms.label'],
                 'count' => ['$sum' => 1],
             ]],
             ['$sort' => ['count' => -1, '_id.type' => 1, '_id.value' => 1]],
@@ -248,10 +251,17 @@ class MapPoiQueryService
             if (! $type || ! $value) {
                 continue;
             }
+            $name = $this->normalizeOptionalString($rowData['name'] ?? null)
+                ?? $this->normalizeOptionalString($rowData['label'] ?? null)
+                ?? (string) $value;
+            $taxonomyName = $this->normalizeOptionalString($rowData['taxonomy_name'] ?? null)
+                ?? (string) $type;
             $taxonomyItems[] = [
                 'type' => (string) $type,
                 'value' => (string) $value,
-                'label' => (string) $value,
+                'name' => $name,
+                'taxonomy_name' => $taxonomyName,
+                'label' => $name,
                 'count' => (int) ($rowData['count'] ?? 0),
             ];
         }

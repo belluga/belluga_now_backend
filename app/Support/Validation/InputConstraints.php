@@ -14,6 +14,8 @@ final class InputConstraints
 
     public const DESCRIPTION_MAX = 1000;
 
+    public const ACCOUNT_PROFILE_RICH_TEXT_MAX_BYTES = 102400;
+
     public const EMAIL_MAX = 255;
 
     public const EMAIL_ARRAY_MAX = 10;

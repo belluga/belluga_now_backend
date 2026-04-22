@@ -43,6 +43,7 @@ return [
         'push-messages:update',
         'push-messages:delete',
         'push-messages:send',
+        'discovery-filters-settings:update',
         'map-pois-settings:update',
         'push-settings:update',
         'telemetry-settings:update',

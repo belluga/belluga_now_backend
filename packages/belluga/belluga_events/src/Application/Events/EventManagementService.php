@@ -7,6 +7,7 @@ namespace Belluga\Events\Application\Events;
 use Belluga\Events\Application\Events\Concerns\EventManagementPartiesAndMetadata;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Domain\Events\EventCreated;
@@ -29,6 +30,7 @@ class EventManagementService
 
     public function __construct(
         private readonly EventTaxonomyValidationContract $taxonomyValidationService,
+        private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventTypeResolverContract $eventTypeResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
@@ -106,7 +108,7 @@ class EventManagementService
      *   payload: array<string, mixed>,
      *   schedule: array{
      *     touched: bool,
-     *     occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
+     *     occurrences: array<int, array<string, mixed>>,
      *     date_time_start: Carbon|null,
      *     date_time_end: Carbon|null
      *   }
@@ -142,6 +144,9 @@ class EventManagementService
             $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
             if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
                 $this->taxonomyValidationService->assertTermsAllowedForEvent($taxonomyTerms);
+                $normalized['taxonomy_terms'] = $this->taxonomySnapshotResolver->resolve($taxonomyTerms);
+            } else {
+                $normalized['taxonomy_terms'] = [];
             }
         }
 
@@ -189,7 +194,7 @@ class EventManagementService
      * @param  array<string, mixed>  $payload
      * @return array{
      *   touched: bool,
-     *   occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
+     *   occurrences: array<int, array<string, mixed>>,
      *   date_time_start: Carbon|null,
      *   date_time_end: Carbon|null
      * }
@@ -199,7 +204,7 @@ class EventManagementService
         $hasOccurrences = array_key_exists('occurrences', $payload);
 
         if ($hasOccurrences) {
-            $occurrences = $this->normalizeOccurrences($payload['occurrences']);
+            $occurrences = $this->normalizeOccurrences($payload['occurrences'], $payload);
 
             return $this->buildScheduleResult(true, $occurrences);
         }
@@ -222,9 +227,10 @@ class EventManagementService
     }
 
     /**
-     * @return array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>
+     * @param  array<string, mixed>  $rootPayload
+     * @return array<int, array<string, mixed>>
      */
-    private function normalizeOccurrences(mixed $occurrences): array
+    private function normalizeOccurrences(mixed $occurrences, array $rootPayload): array
     {
         if (! is_array($occurrences) || $occurrences === []) {
             throw ValidationException::withMessages([
@@ -258,9 +264,21 @@ class EventManagementService
 
             $this->assertOccurrenceBounds($start, $end, "occurrences.{$index}.date_time_end");
 
+            $ownEventParties = array_key_exists('event_parties', $occurrence)
+                ? $this->resolveEventParties(['event_parties' => $occurrence['event_parties']], null)
+                : [];
+            $locationOverride = $this->resolveOccurrenceLocationOverride($occurrence, $rootPayload);
+
             $normalized[] = [
                 'date_time_start' => $start,
                 'date_time_end' => $end,
+                'event_parties' => $ownEventParties,
+                'has_location_override' => $locationOverride !== null,
+                'location_override' => $locationOverride,
+                'programming_items' => $this->resolveProgrammingItems(
+                    $occurrence['programming_items'] ?? [],
+                    "occurrences.{$index}.programming_items"
+                ),
             ];
         }
 
@@ -272,10 +290,10 @@ class EventManagementService
     }
 
     /**
-     * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
+     * @param  array<int, array<string, mixed>>  $occurrences
      * @return array{
      *   touched: bool,
-     *   occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
+     *   occurrences: array<int, array<string, mixed>>,
      *   date_time_start: Carbon|null,
      *   date_time_end: Carbon|null
      * }
@@ -293,7 +311,7 @@ class EventManagementService
     }
 
     /**
-     * @return array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>
+     * @return array<int, array<string, mixed>>
      */
     private function extractExistingOccurrences(?Event $existing): array
     {
@@ -329,6 +347,10 @@ class EventManagementService
             $occurrences[] = [
                 'date_time_start' => $start,
                 'date_time_end' => $end,
+                'event_parties' => $this->normalizeArray($occurrence->own_event_parties ?? []),
+                'has_location_override' => (bool) ($occurrence->has_location_override ?? false),
+                'location_override' => $this->normalizeNullableArray($occurrence->location_override ?? null),
+                'programming_items' => $this->normalizeArray($occurrence->programming_items ?? []),
             ];
         }
 
@@ -585,6 +607,176 @@ class EventManagementService
     }
 
     /**
+     * @param  array<string, mixed>  $occurrence
+     * @param  array<string, mixed>  $rootPayload
+     * @return array{
+     *   location: array<string, mixed>,
+     *   place_ref: array<string, mixed>|null,
+     *   geo_location: array<string, mixed>|null,
+     *   venue: array<string, mixed>
+     * }|null
+     */
+    private function resolveOccurrenceLocationOverride(array $occurrence, array $rootPayload): ?array
+    {
+        if (! array_key_exists('location', $occurrence) && ! array_key_exists('place_ref', $occurrence)) {
+            return null;
+        }
+
+        $payload = [];
+        if (array_key_exists('location', $occurrence)) {
+            $payload['location'] = $occurrence['location'];
+        }
+        if (array_key_exists('place_ref', $occurrence)) {
+            $payload['place_ref'] = $occurrence['place_ref'];
+        }
+        if (array_key_exists('_account_context_id', $rootPayload)) {
+            $payload['_account_context_id'] = $rootPayload['_account_context_id'];
+        }
+
+        $resolved = $this->resolveLocationAndPlacePayload($payload, null);
+
+        return [
+            'location' => $resolved['location'],
+            'place_ref' => $resolved['place_ref'],
+            'geo_location' => $resolved['geo_location'],
+            'venue' => $resolved['venue'],
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveProgrammingItems(mixed $items, string $field): array
+    {
+        if ($items === null || $items === []) {
+            return [];
+        }
+
+        if (! is_array($items)) {
+            throw ValidationException::withMessages([
+                $field => ['programming_items must be an array.'],
+            ]);
+        }
+
+        $normalized = [];
+
+        foreach ($items as $index => $item) {
+            if (! is_array($item)) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}" => ['programming item payload must be an object.'],
+                ]);
+            }
+
+            $time = trim((string) ($item['time'] ?? ''));
+            if (! preg_match('/^\d{2}:\d{2}$/', $time)) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.time" => ['time must use HH:MM format.'],
+                ]);
+            }
+
+            $title = isset($item['title']) ? trim((string) $item['title']) : '';
+            $profileIds = $this->normalizeProgrammingProfileIds(
+                $item['account_profile_ids'] ?? [],
+                "{$field}.{$index}.account_profile_ids"
+            );
+
+            if (count($profileIds) > 1 && $title === '') {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.title" => ['title is required when more than one linked Account Profile is selected.'],
+                ]);
+            }
+
+            $normalized[] = [
+                'time' => $time,
+                'title' => $title === '' ? null : $title,
+                'account_profile_ids' => $profileIds,
+                'linked_account_profiles' => $this->resolveProgrammingLinkedProfiles($profileIds),
+            ];
+        }
+
+        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeProgrammingProfileIds(mixed $items, string $field): array
+    {
+        if ($items === null || $items === []) {
+            return [];
+        }
+
+        if (! is_array($items)) {
+            throw ValidationException::withMessages([
+                $field => ['account_profile_ids must be an array.'],
+            ]);
+        }
+
+        $ids = [];
+        foreach ($items as $index => $item) {
+            $id = trim((string) $item);
+            if ($id === '') {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}" => ['account_profile_id is required.'],
+                ]);
+            }
+
+            if (! in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveProgrammingLinkedProfiles(array $profileIds): array
+    {
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $resolved = $this->eventProfileResolver->resolveEventPartyProfilesByIds($profileIds);
+        $profilesById = [];
+        foreach ($resolved as $profile) {
+            if (! is_array($profile)) {
+                continue;
+            }
+            $id = trim((string) ($profile['id'] ?? ''));
+            if ($id !== '') {
+                $profilesById[$id] = $profile;
+            }
+        }
+
+        $profiles = [];
+        foreach ($profileIds as $profileId) {
+            $profile = $profilesById[$profileId] ?? null;
+            if (! is_array($profile)) {
+                continue;
+            }
+
+            $profiles[] = [
+                'id' => $profileId,
+                'display_name' => trim((string) ($profile['display_name'] ?? '')),
+                'slug' => isset($profile['slug']) ? (string) $profile['slug'] : null,
+                'profile_type' => isset($profile['profile_type']) ? (string) $profile['profile_type'] : '',
+                'avatar_url' => $profile['avatar_url'] ?? null,
+                'cover_url' => $profile['cover_url'] ?? null,
+                'taxonomy_terms' => $this->taxonomySnapshotResolver->ensureSnapshots(
+                    is_array($profile['taxonomy_terms'] ?? null) ? $profile['taxonomy_terms'] : []
+                ),
+            ];
+        }
+
+        return $profiles;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function resolveEventTypePayload(mixed $value): array
@@ -637,15 +829,9 @@ class EventManagementService
      */
     private function normalizeNullableArray(mixed $value): ?array
     {
-        if ($value === null) {
-            return null;
-        }
+        $normalized = $this->normalizeArray($value);
 
-        if (! is_array($value)) {
-            return null;
-        }
-
-        return $value;
+        return $normalized === [] ? null : $normalized;
     }
 
     /**

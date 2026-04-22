@@ -6,6 +6,8 @@ namespace App\Integration\MapPois;
 
 use App\Application\Media\MapFilterImageStorageService;
 use App\Models\Tenants\TenantSettings;
+use Belluga\DiscoveryFilters\Data\DiscoveryFilterDefinition;
+use Belluga\DiscoveryFilters\Services\DiscoveryFilterCatalogService;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use MongoDB\Model\BSONDocument;
 
@@ -13,6 +15,7 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
 {
     public function __construct(
         private readonly MapFilterImageStorageService $mapFilterImageStorageService,
+        private readonly DiscoveryFilterCatalogService $discoveryFilterCatalogService,
     ) {}
 
     public function resolveEventsSettings(): array
@@ -29,6 +32,11 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
         $mapUi = $this->normalizeDocument($settings?->getAttribute('map_ui'));
         if ($mapUi === []) {
             return [];
+        }
+
+        $canonicalMapFilters = $this->mapCanonicalFiltersForPublicMap();
+        if ($canonicalMapFilters !== []) {
+            $mapUi['filters'] = $canonicalMapFilters;
         }
 
         $filters = $this->normalizeList($mapUi['filters'] ?? null);
@@ -82,6 +90,97 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
         $mapUi['filters'] = $normalizedFilters;
 
         return $mapUi;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function mapCanonicalFiltersForPublicMap(): array
+    {
+        $definitions = $this->discoveryFilterCatalogService->surfaceDefinitions('public_map.primary');
+        if ($definitions === []) {
+            return [];
+        }
+
+        $filters = [];
+        foreach ($definitions as $definition) {
+            if ($definition->target !== 'map_poi') {
+                continue;
+            }
+
+            $filter = [
+                'key' => $definition->key,
+                'label' => $definition->label,
+                'override_marker' => $definition->overrideMarker,
+                'query' => $this->mapCanonicalDefinitionToMapQuery($definition),
+            ];
+
+            if ($definition->imageUri !== null) {
+                $filter['image_uri'] = $definition->imageUri;
+            }
+            if ($definition->markerOverride !== null) {
+                $filter['marker_override'] = $definition->markerOverride;
+            }
+
+            $filters[] = $filter;
+        }
+
+        return $filters;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function mapCanonicalDefinitionToMapQuery(DiscoveryFilterDefinition $definition): array
+    {
+        $query = [];
+        $source = $this->mapCanonicalEntityToMapSource($definition->entities[0] ?? null);
+        if ($source !== null) {
+            $query['source'] = $source;
+        }
+
+        $types = [];
+        foreach ($definition->typesByEntity as $entityTypes) {
+            foreach ($entityTypes as $type) {
+                $candidate = strtolower(trim((string) $type));
+                if ($candidate !== '') {
+                    $types[$candidate] = true;
+                }
+            }
+        }
+        if ($types !== []) {
+            $query['types'] = array_keys($types);
+        }
+
+        $taxonomy = [];
+        foreach ($definition->taxonomyValuesByGroup as $group => $values) {
+            $groupKey = strtolower(trim((string) $group));
+            foreach ($values as $value) {
+                $valueKey = strtolower(trim((string) $value));
+                if ($valueKey === '') {
+                    continue;
+                }
+                $taxonomy[] = str_contains($valueKey, ':') || $groupKey === ''
+                    ? $valueKey
+                    : "{$groupKey}:{$valueKey}";
+            }
+        }
+        $taxonomy = array_values(array_unique($taxonomy));
+        if ($taxonomy !== []) {
+            $query['taxonomy'] = $taxonomy;
+        }
+
+        return $query;
+    }
+
+    private function mapCanonicalEntityToMapSource(?string $entity): ?string
+    {
+        return match (strtolower(trim((string) $entity))) {
+            'event' => 'event',
+            'account_profile' => 'account_profile',
+            'static_asset' => 'static',
+            default => null,
+        };
     }
 
     public function resolveMapIngestSettings(): array

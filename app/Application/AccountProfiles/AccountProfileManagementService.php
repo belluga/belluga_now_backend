@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Application\Taxonomies\TaxonomyValidationService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
@@ -18,6 +19,7 @@ class AccountProfileManagementService
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     /**
@@ -35,6 +37,8 @@ class AccountProfileManagementService
      */
     public function createWithinCurrentTransaction(array $payload): AccountProfile
     {
+        $payload = AccountProfileRichTextSanitizer::sanitizePayload($payload);
+
         $profileType = (string) $payload['profile_type'];
 
         if (! $this->registryService->typeDefinition($profileType)) {
@@ -65,6 +69,9 @@ class AccountProfileManagementService
                 $profileType,
                 $taxonomyTerms
             );
+            $payload['taxonomy_terms'] = $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
+        } elseif (array_key_exists('taxonomy_terms', $payload)) {
+            $payload['taxonomy_terms'] = [];
         }
 
         try {
@@ -97,6 +104,8 @@ class AccountProfileManagementService
      */
     public function update(AccountProfile $profile, array $attributes): AccountProfile
     {
+        $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
+
         $profileType = $profile->profile_type;
         if (array_key_exists('profile_type', $attributes)) {
             $profileType = (string) $attributes['profile_type'];
@@ -126,6 +135,9 @@ class AccountProfileManagementService
                     $profileType,
                     $taxonomyTerms
                 );
+                $attributes['taxonomy_terms'] = $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
+            } else {
+                $attributes['taxonomy_terms'] = [];
             }
         }
 

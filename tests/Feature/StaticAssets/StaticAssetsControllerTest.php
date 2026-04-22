@@ -98,6 +98,11 @@ class StaticAssetsControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(201);
+        $response->assertJsonPath('data.taxonomy_terms.0.type', 'cuisine');
+        $response->assertJsonPath('data.taxonomy_terms.0.value', 'italian');
+        $response->assertJsonPath('data.taxonomy_terms.0.name', 'Italian');
+        $response->assertJsonPath('data.taxonomy_terms.0.taxonomy_name', 'Cuisine');
+        $response->assertJsonPath('data.taxonomy_terms.0.label', 'Italian');
         $assetId = $response->json('data.id');
         $slug = $response->json('data.slug');
 
@@ -107,6 +112,8 @@ class StaticAssetsControllerTest extends TestCaseTenant
         );
         $publicById->assertStatus(200);
         $publicById->assertJsonPath('data.display_name', 'Praia Azul');
+        $publicById->assertJsonPath('data.taxonomy_terms.0.name', 'Italian');
+        $publicById->assertJsonPath('data.taxonomy_terms.0.taxonomy_name', 'Cuisine');
 
         $publicBySlug = $this->getJson(
             "{$this->base_api_tenant}static_assets/{$slug}",
@@ -114,6 +121,14 @@ class StaticAssetsControllerTest extends TestCaseTenant
         );
         $publicBySlug->assertStatus(200);
         $publicBySlug->assertJsonPath('data.slug', $slug);
+        $publicBySlug->assertJsonPath('data.taxonomy_terms.0.label', 'Italian');
+
+        $poi = MapPoi::query()
+            ->where('ref_type', 'static')
+            ->where('ref_id', (string) $assetId)
+            ->firstOrFail();
+        $this->assertSame('Italian', data_get($poi->taxonomy_terms, '0.name'));
+        $this->assertSame('Cuisine', data_get($poi->taxonomy_terms, '0.taxonomy_name'));
     }
 
     public function test_static_asset_delete_removes_map_poi_projection(): void

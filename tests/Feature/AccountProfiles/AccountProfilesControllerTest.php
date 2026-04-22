@@ -231,6 +231,47 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
+    public function test_public_account_profile_index_filters_by_taxonomy_terms_on_backend(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Italian Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Japanese Account',
+            'document' => 'DOC-JAPANESE-FILTER',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Japanese Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'japanese'],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?taxonomy[0][type]=cuisine&taxonomy[0][value]=italian"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Italian Venue', $items->first()['display_name'] ?? null);
+    }
+
     public function test_public_account_profile_index_returns_empty_when_top_level_profile_type_is_non_favoritable(): void
     {
         $this->createAccountUser([]);
@@ -639,6 +680,111 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertLessThan(
             (float) ($items->last()['distance_meters'] ?? INF),
             (float) ($items->first()['distance_meters'] ?? 0)
+        );
+    }
+
+    public function test_public_account_profile_near_filters_by_taxonomy_terms_on_backend(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nearby Italian Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0002, -20.0002],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Nearby Japanese Account',
+            'document' => 'DOC-NEAR-JAPANESE-FILTER',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nearby Japanese Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'japanese'],
+            ],
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0003, -20.0003],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10&taxonomy[0][type]=cuisine&taxonomy[0][value]=italian"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Nearby Italian Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_near_accepts_multiple_profile_types(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'restaurant',
+            'label' => 'Restaurant',
+            'allowed_taxonomies' => ['cuisine'],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Typed Venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0002, -20.0002],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Typed Restaurant Account',
+            'document' => 'DOC-NEAR-TYPES-FILTER',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'restaurant',
+            'display_name' => 'Typed Restaurant',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0003, -20.0003],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10&profile_type[]=venue&profile_type[]=restaurant"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(2, $items);
+        $this->assertSame(
+            ['venue', 'restaurant'],
+            $items->pluck('profile_type')->values()->all()
         );
     }
 
@@ -1178,6 +1324,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.account_profile.taxonomy_terms.0.type', 'cuisine');
         $response->assertJsonPath('data.account_profile.taxonomy_terms.0.value', 'italian');
+        $response->assertJsonPath('data.account_profile.taxonomy_terms.0.name', 'Italian');
+        $response->assertJsonPath('data.account_profile.taxonomy_terms.0.taxonomy_name', 'Cuisine');
+        $response->assertJsonPath('data.account_profile.taxonomy_terms.0.label', 'Italian');
     }
 
     public function test_account_profile_update_replaces_avatar_upload(): void
