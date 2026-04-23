@@ -182,7 +182,11 @@ class EventManagementService
             $normalized['created_by'] = $this->resolveCreatedByPrincipal($payload);
         }
 
-        $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
+        $eventParties = $this->resolveEventParties($payload, $existing);
+        $normalized['event_parties'] = $this->mergeEventPartiesByKey(
+            $eventParties,
+            $this->resolveProgrammingEventParties($schedule['occurrences'])
+        );
 
         return [
             'payload' => $normalized,
@@ -267,14 +271,18 @@ class EventManagementService
             $ownEventParties = array_key_exists('event_parties', $occurrence)
                 ? $this->resolveEventParties(['event_parties' => $occurrence['event_parties']], null)
                 : [];
-            $locationOverride = $this->resolveOccurrenceLocationOverride($occurrence, $rootPayload);
+            if (array_key_exists('location', $occurrence) || array_key_exists('place_ref', $occurrence)) {
+                throw ValidationException::withMessages([
+                    "occurrences.{$index}.location" => ['Occurrences do not accept location overrides. Use event location or programming item place_ref.'],
+                ]);
+            }
 
             $normalized[] = [
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $ownEventParties,
-                'has_location_override' => $locationOverride !== null,
-                'location_override' => $locationOverride,
+                'has_location_override' => false,
+                'location_override' => null,
                 'programming_items' => $this->resolveProgrammingItems(
                     $occurrence['programming_items'] ?? [],
                     "occurrences.{$index}.programming_items"
@@ -348,8 +356,8 @@ class EventManagementService
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $this->normalizeArray($occurrence->own_event_parties ?? []),
-                'has_location_override' => (bool) ($occurrence->has_location_override ?? false),
-                'location_override' => $this->normalizeNullableArray($occurrence->location_override ?? null),
+                'has_location_override' => false,
+                'location_override' => null,
                 'programming_items' => $this->normalizeArray($occurrence->programming_items ?? []),
             ];
         }
@@ -679,6 +687,16 @@ class EventManagementService
                 $item['account_profile_ids'] ?? [],
                 "{$field}.{$index}.account_profile_ids"
             );
+            $placeRef = $this->normalizeProgrammingPlaceRef(
+                $item['place_ref'] ?? null,
+                "{$field}.{$index}.place_ref"
+            );
+            $locationProfile = $placeRef === null
+                ? null
+                : $this->resolveProgrammingLocationProfile(
+                    $placeRef,
+                    "{$field}.{$index}.place_ref.id"
+                );
 
             if (count($profileIds) > 1 && $title === '') {
                 throw ValidationException::withMessages([
@@ -691,12 +709,129 @@ class EventManagementService
                 'title' => $title === '' ? null : $title,
                 'account_profile_ids' => $profileIds,
                 'linked_account_profiles' => $this->resolveProgrammingLinkedProfiles($profileIds),
+                'place_ref' => $placeRef,
+                'location_profile' => $locationProfile,
             ];
         }
 
         usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
 
         return $normalized;
+    }
+
+    /**
+     * @return array{type: string, id: string}|null
+     */
+    private function normalizeProgrammingPlaceRef(mixed $value, string $field): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_array($value)) {
+            throw ValidationException::withMessages([
+                $field => ['place_ref payload must be an object.'],
+            ]);
+        }
+
+        $type = trim((string) ($value['type'] ?? ''));
+        $id = trim((string) ($value['id'] ?? ''));
+        if ($type === '' || $id === '') {
+            throw ValidationException::withMessages([
+                $field => ['place_ref.type and place_ref.id are required.'],
+            ]);
+        }
+        if ($type !== 'account_profile') {
+            throw ValidationException::withMessages([
+                "{$field}.type" => ['place_ref.type must be account_profile.'],
+            ]);
+        }
+
+        return [
+            'type' => $type,
+            'id' => $id,
+        ];
+    }
+
+    /**
+     * @param  array{type: string, id: string}  $placeRef
+     * @return array<string, mixed>
+     */
+    private function resolveProgrammingLocationProfile(array $placeRef, string $field): array
+    {
+        try {
+            $resolved = $this->eventProfileResolver->resolvePhysicalHostByProfileId((string) $placeRef['id']);
+        } catch (ValidationException $exception) {
+            throw ValidationException::withMessages([
+                $field => $exception->errors()['place_ref.id'] ?? ['Programming location account profile is invalid.'],
+            ]);
+        }
+
+        return $this->normalizeArray($resolved['venue'] ?? []);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveProgrammingEventParties(array $occurrences): array
+    {
+        $profileIds = [];
+        foreach ($occurrences as $occurrence) {
+            foreach ($this->normalizeArray($occurrence['programming_items'] ?? []) as $item) {
+                $programmingItem = $this->normalizeArray($item);
+                foreach ($this->normalizeArray($programmingItem['account_profile_ids'] ?? []) as $profileId) {
+                    $normalizedProfileId = trim((string) $profileId);
+                    if ($normalizedProfileId !== '' && ! in_array($normalizedProfileId, $profileIds, true)) {
+                        $profileIds[] = $normalizedProfileId;
+                    }
+                }
+            }
+        }
+
+        if ($profileIds === []) {
+            return [];
+        }
+
+        return $this->resolveEventParties([
+            'event_parties' => array_map(
+                static fn (string $profileId): array => [
+                    'party_ref_id' => $profileId,
+                ],
+                $profileIds
+            ),
+        ], null);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $base
+     * @param  array<int, array<string, mixed>>  $additional
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeEventPartiesByKey(array $base, array $additional): array
+    {
+        $merged = [];
+        $seen = [];
+
+        foreach ([$base, $additional] as $rows) {
+            foreach ($rows as $row) {
+                $partyType = trim((string) ($row['party_type'] ?? ''));
+                $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
+                if ($partyType === '' || $partyRefId === '') {
+                    continue;
+                }
+
+                $key = $this->eventPartyKey($partyType, $partyRefId);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+
+                $merged[] = $row;
+                $seen[$key] = true;
+            }
+        }
+
+        return $merged;
     }
 
     /**

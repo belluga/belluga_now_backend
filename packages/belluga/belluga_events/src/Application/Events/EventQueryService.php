@@ -90,13 +90,27 @@ class EventQueryService
         }
 
         $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
-        if ($temporalBuckets !== []) {
-            $this->applyManagementTemporalFilter($query, $temporalBuckets);
-        }
-
         $specificDate = $this->extractManagementSpecificDate($queryParams);
-        if ($specificDate !== null) {
-            $this->applyManagementSpecificDateFilter($query, $specificDate);
+        if (! $includeArchived && ($temporalBuckets !== [] || $specificDate !== null)) {
+            $matchingOccurrenceEventIds = $this->resolveManagementOccurrenceEventIds(
+                $temporalBuckets,
+                $specificDate,
+                $isAdminContext
+            );
+
+            if ($matchingOccurrenceEventIds === []) {
+                $query->where('_id', '__no_match__');
+            } else {
+                $query->whereIn('_id', $this->buildEventIdCandidates($matchingOccurrenceEventIds));
+            }
+        } else {
+            if ($temporalBuckets !== []) {
+                $this->applyManagementTemporalFilter($query, $temporalBuckets);
+            }
+
+            if ($specificDate !== null) {
+                $this->applyManagementSpecificDateFilter($query, $specificDate);
+            }
         }
 
         $venueProfileId = $this->extractManagementProfileFilterId($queryParams, 'venue_profile_id');
@@ -235,6 +249,90 @@ class EventQueryService
             ->where('date_time_start', '<', $nextDayStart);
     }
 
+    /**
+     * @param  array<int, string>  $temporalBuckets
+     * @return array<int, string>
+     */
+    private function resolveManagementOccurrenceEventIds(
+        array $temporalBuckets,
+        ?Carbon $specificDate,
+        bool $isAdminContext
+    ): array {
+        $query = EventOccurrence::query();
+
+        if (! $isAdminContext) {
+            $query->where('is_event_published', true);
+        }
+
+        if ($temporalBuckets !== []) {
+            $this->applyManagementOccurrenceTemporalFilter($query, $temporalBuckets);
+        }
+
+        if ($specificDate !== null) {
+            $this->applyManagementOccurrenceSpecificDateFilter($query, $specificDate);
+        }
+
+        return $query
+            ->orderBy('starts_at')
+            ->pluck('event_id')
+            ->map(static fn (mixed $value): string => trim((string) $value))
+            ->filter(static fn (string $value): bool => $value !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string>  $temporalBuckets
+     */
+    private function applyManagementOccurrenceTemporalFilter(mixed $query, array $temporalBuckets): void
+    {
+        $now = new UTCDateTime(Carbon::now());
+        $effectiveEndExpr = [
+            '$ifNull' => [
+                '$effective_ends_at',
+                [
+                    '$add' => ['$starts_at', self::DEFAULT_EVENT_DURATION_MS],
+                ],
+            ],
+        ];
+
+        $clauses = [];
+        if (in_array('past', $temporalBuckets, true)) {
+            $clauses[] = ['$lte' => [$effectiveEndExpr, $now]];
+        }
+        if (in_array('now', $temporalBuckets, true)) {
+            $clauses[] = [
+                '$and' => [
+                    ['$lte' => ['$starts_at', $now]],
+                    ['$gt' => [$effectiveEndExpr, $now]],
+                ],
+            ];
+        }
+        if (in_array('future', $temporalBuckets, true)) {
+            $clauses[] = ['$gt' => ['$starts_at', $now]];
+        }
+
+        if ($clauses === []) {
+            return;
+        }
+
+        $query->whereRaw([
+            '$expr' => count($clauses) === 1
+                ? $clauses[0]
+                : ['$or' => $clauses],
+        ]);
+    }
+
+    private function applyManagementOccurrenceSpecificDateFilter(mixed $query, Carbon $specificDate): void
+    {
+        $dayStart = new UTCDateTime($specificDate->copy()->startOfDay());
+        $nextDayStart = new UTCDateTime($specificDate->copy()->addDay()->startOfDay());
+
+        $query->where('starts_at', '>=', $dayStart)
+            ->where('starts_at', '<', $nextDayStart);
+    }
+
     private function applyManagementVenueFilter(mixed $query, string $venueProfileId): void
     {
         $profileIds = $this->buildProfileIdCandidates($venueProfileId);
@@ -271,7 +369,31 @@ class EventQueryService
             }
         }
 
-        return Event::query()->where('slug', $eventId)->first();
+        $bySlug = Event::query()->where('slug', $eventId)->first();
+        if ($bySlug) {
+            return $bySlug;
+        }
+
+        $occurrence = EventOccurrence::query()
+            ->where('occurrence_slug', $eventId)
+            ->first();
+        if (! $occurrence) {
+            return null;
+        }
+
+        $parentEventId = isset($occurrence->event_id) ? (string) $occurrence->event_id : '';
+        if ($parentEventId === '') {
+            return null;
+        }
+
+        if ($this->looksLikeObjectId($parentEventId)) {
+            $parent = Event::query()->where('_id', new ObjectId($parentEventId))->first();
+            if ($parent) {
+                return $parent;
+            }
+        }
+
+        return Event::query()->where('_id', $parentEventId)->first();
     }
 
     /**
@@ -1285,6 +1407,27 @@ class EventQueryService
         return $candidates;
     }
 
+    /**
+     * @param  array<int, string>  $eventIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildEventIdCandidates(array $eventIds): array
+    {
+        $candidates = [];
+        foreach ($eventIds as $eventId) {
+            $normalized = trim($eventId);
+            if ($normalized === '') {
+                continue;
+            }
+            $candidates[] = $normalized;
+            if ($this->looksLikeObjectId($normalized)) {
+                $candidates[] = new ObjectId($normalized);
+            }
+        }
+
+        return $candidates;
+    }
+
     private function resolveSelectedOccurrence(Event $event, ?string $occurrenceRef): ?EventOccurrence
     {
         $eventId = isset($event->_id) ? (string) $event->_id : '';
@@ -1382,8 +1525,8 @@ class EventQueryService
                 'date_time_start' => $start,
                 'date_time_end' => $this->formatDate($this->extractRawAttribute($event, 'ends_at')),
                 'is_selected' => true,
-                'has_location_override' => (bool) ($event->has_location_override ?? false),
-                'location_override' => $this->normalizeNullableArray($event->location_override ?? null),
+                'has_location_override' => false,
+                'location_override' => null,
                 'own_event_parties' => $this->normalizeEventParties($event->own_event_parties ?? []),
                 'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($event->own_linked_account_profiles ?? []),
                 'programming_items' => $programmingItems,
@@ -1409,8 +1552,8 @@ class EventQueryService
                         'date_time_start' => $this->formatDate($this->extractRawAttribute($occurrence, 'starts_at')),
                         'date_time_end' => $this->formatDate($this->extractRawAttribute($occurrence, 'ends_at')),
                         'is_selected' => $selectedOccurrenceId !== null && $occurrenceId === $selectedOccurrenceId,
-                        'has_location_override' => (bool) ($occurrence->has_location_override ?? false),
-                        'location_override' => $this->normalizeNullableArray($occurrence->location_override ?? null),
+                        'has_location_override' => false,
+                        'location_override' => null,
                         'own_event_parties' => $this->normalizeEventParties($occurrence->own_event_parties ?? []),
                         'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($occurrence->own_linked_account_profiles ?? []),
                         'programming_items' => $programmingItems,
@@ -1685,12 +1828,31 @@ class EventQueryService
                 'title' => $this->scalarString($item['title'] ?? null),
                 'account_profile_ids' => array_values(array_map('strval', $this->normalizeArray($item['account_profile_ids'] ?? []))),
                 'linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($item['linked_account_profiles'] ?? []),
+                'place_ref' => $this->normalizeNullableArray($item['place_ref'] ?? null),
+                'location_profile' => $this->normalizeLinkedAccountProfileSummary($item['location_profile'] ?? null),
             ];
         }
 
         usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
 
         return $normalized;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function normalizeLinkedAccountProfileSummary(mixed $profile): ?array
+    {
+        $payload = $this->normalizeArray($profile);
+        if ($payload === []) {
+            return null;
+        }
+
+        if (array_key_exists('taxonomy_terms', $payload)) {
+            $payload['taxonomy_terms'] = $this->ensureTaxonomySnapshots($payload['taxonomy_terms']);
+        }
+
+        return $payload;
     }
 
     /**

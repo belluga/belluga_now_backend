@@ -177,31 +177,6 @@ class EventOccurrenceSyncService
      */
     private function resolveEffectiveLocationPayload(Event $event, array $occurrence, array $eventGeoLocation): array
     {
-        $hasOverride = (bool) ($occurrence['has_location_override'] ?? false);
-        $locationOverride = $this->normalizeArray($occurrence['location_override'] ?? null);
-
-        if ($hasOverride && $locationOverride !== []) {
-            $location = $this->normalizeArray($locationOverride['location'] ?? []);
-            $placeRef = $this->normalizeNullableArray($locationOverride['place_ref'] ?? null);
-            $venue = $this->normalizeArray($locationOverride['venue'] ?? []);
-            $geoLocation = $this->normalizeNullableArray($locationOverride['geo_location'] ?? null)
-                ?? $this->normalizeNullableArray($location['geo'] ?? null);
-
-            return [
-                'location' => $location,
-                'place_ref' => $placeRef,
-                'venue' => $venue,
-                'geo_location' => $geoLocation,
-                'has_location_override' => true,
-                'location_override' => [
-                    'location' => $location,
-                    'place_ref' => $placeRef,
-                    'geo_location' => $geoLocation,
-                    'venue' => $venue,
-                ],
-            ];
-        }
-
         return [
             'location' => $this->normalizeArray($event->location ?? []),
             'place_ref' => $this->normalizeNullableArray($event->place_ref ?? null),
@@ -341,6 +316,8 @@ class EventOccurrenceSyncService
                 'title' => $item['title'] ?? null,
                 'account_profile_ids' => array_values($this->normalizeArray($item['account_profile_ids'] ?? [])),
                 'linked_account_profiles' => $linkedProfiles,
+                'place_ref' => $this->normalizeNullableArray($item['place_ref'] ?? null),
+                'location_profile' => $this->normalizeNullableArray($item['location_profile'] ?? null),
             ];
         }
 

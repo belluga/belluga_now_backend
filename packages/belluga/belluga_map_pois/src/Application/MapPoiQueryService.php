@@ -7,6 +7,7 @@ namespace Belluga\MapPois\Application;
 use Belluga\MapPois\Application\Concerns\MapPoiQueryFormatting;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
+use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\UTCDateTime;
@@ -20,6 +21,7 @@ class MapPoiQueryService
     public function __construct(
         private readonly MapPoiSettingsContract $settings,
         private readonly MapPoiTenantContextContract $tenantContext,
+        private readonly MapPoiTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
     ) {}
 
     /**
@@ -265,6 +267,7 @@ class MapPoiQueryService
                 'count' => (int) ($rowData['count'] ?? 0),
             ];
         }
+        $taxonomyItems = $this->resolveTaxonomyItemSnapshots($taxonomyItems);
 
         return [
             'tenant_id' => $this->resolveTenantId(),
@@ -272,6 +275,47 @@ class MapPoiQueryService
             'tags' => $tagItems,
             'taxonomy_terms' => $taxonomyItems,
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveTaxonomyItemSnapshots(array $items): array
+    {
+        if ($items === []) {
+            return [];
+        }
+
+        $resolvedByToken = [];
+        foreach ($this->taxonomySnapshotResolver->resolve($items) as $resolved) {
+            $type = strtolower(trim((string) ($resolved['type'] ?? '')));
+            $value = strtolower(trim((string) ($resolved['value'] ?? '')));
+            if ($type === '' || $value === '') {
+                continue;
+            }
+            $resolvedByToken["{$type}:{$value}"] = $resolved;
+        }
+
+        foreach ($items as $index => $item) {
+            $type = strtolower(trim((string) ($item['type'] ?? '')));
+            $value = strtolower(trim((string) ($item['value'] ?? '')));
+            $resolved = $resolvedByToken["{$type}:{$value}"] ?? null;
+            if ($resolved === null) {
+                continue;
+            }
+
+            $name = $this->normalizeOptionalString($resolved['name'] ?? null)
+                ?? $this->normalizeOptionalString($resolved['label'] ?? null)
+                ?? (string) ($item['name'] ?? $value);
+            $taxonomyName = $this->normalizeOptionalString($resolved['taxonomy_name'] ?? null)
+                ?? (string) ($item['taxonomy_name'] ?? $type);
+            $items[$index]['name'] = $name;
+            $items[$index]['taxonomy_name'] = $taxonomyName;
+            $items[$index]['label'] = $this->normalizeOptionalString($resolved['label'] ?? null) ?? $name;
+        }
+
+        return $items;
     }
 
     /**

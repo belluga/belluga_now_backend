@@ -621,6 +621,16 @@ class MapPoisControllerTest extends TestCaseTenant
     public function test_map_filters_returns_catalogs(): void
     {
         $location = $this->point(-40.0, -20.0);
+        $taxonomy = Taxonomy::create([
+            'slug' => 'map_cuisine',
+            'name' => 'Cuisine',
+            'applies_to' => ['event', 'account_profile', 'static_asset'],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'italian',
+            'name' => 'Italian',
+        ]);
 
         TenantSettings::query()->firstOrFail()->update([
             'map_ui' => [
@@ -675,14 +685,14 @@ class MapPoisControllerTest extends TestCaseTenant
             'tags' => ['live'],
             'taxonomy_terms' => [
                 [
-                    'type' => 'cuisine',
+                    'type' => 'map_cuisine',
                     'value' => 'italian',
-                    'name' => 'Italian',
-                    'taxonomy_name' => 'Cuisine',
-                    'label' => 'Italian',
+                    'name' => 'italian',
+                    'taxonomy_name' => 'map_cuisine',
+                    'label' => 'italian',
                 ],
             ],
-            'taxonomy_terms_flat' => ['cuisine:italian'],
+            'taxonomy_terms_flat' => ['map_cuisine:italian'],
             'exact_key' => $this->exactKey($location),
         ]);
         MapPoi::create([
@@ -705,7 +715,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('categories'));
         $this->assertNotEmpty($response->json('tags'));
         $this->assertNotEmpty($response->json('taxonomy_terms'));
-        $response->assertJsonPath('taxonomy_terms.0.type', 'cuisine');
+        $response->assertJsonPath('taxonomy_terms.0.type', 'map_cuisine');
         $response->assertJsonPath('taxonomy_terms.0.value', 'italian');
         $response->assertJsonPath('taxonomy_terms.0.name', 'Italian');
         $response->assertJsonPath('taxonomy_terms.0.taxonomy_name', 'Cuisine');
@@ -896,7 +906,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('categories.1.count', 0);
     }
 
-    public function test_map_filters_use_canonical_discovery_filter_surface_when_available(): void
+    public function test_map_filters_prefer_canonical_public_map_discovery_surface_over_legacy_map_ui_filters(): void
     {
         $location = $this->point(-40.0, -20.0);
 
@@ -974,19 +984,15 @@ class MapPoisControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
         $response->assertStatus(200);
 
-        $response->assertJsonPath('categories.0.key', 'events');
-        $response->assertJsonPath('categories.0.label', 'Eventos');
-        $response->assertJsonPath('categories.0.count', 1);
-        $response->assertJsonPath('categories.0.query.source', 'event');
-        $response->assertJsonPath('categories.0.query.types.0', 'show');
-        $response->assertJsonPath('categories.0.query.taxonomy.0', 'music_genre:rock');
-        $response->assertJsonPath('categories.0.override_marker', true);
-        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
-
         $keys = collect($response->json('categories') ?? [])
             ->map(static fn (array $category): string => (string) ($category['key'] ?? ''))
             ->all();
+        $this->assertContains('events', $keys);
         $this->assertNotContains('legacy', $keys);
+        $response->assertJsonPath('categories.0.key', 'events');
+        $response->assertJsonPath('categories.0.query.source', 'event');
+        $response->assertJsonPath('categories.0.query.types.0', 'show');
+        $response->assertJsonPath('categories.0.query.taxonomy.0', 'music_genre:rock');
     }
 
     public function test_discovery_filters_backfill_map_ui_filters_is_idempotent(): void
@@ -1142,6 +1148,135 @@ class MapPoisControllerTest extends TestCaseTenant
             'music_genre_public',
             collect($response->json('type_options.event.0.allowed_taxonomies') ?? [])->all()
         );
+    }
+
+    public function test_home_events_catalog_derives_type_filters_and_full_taxonomy_options_without_admin_settings(): void
+    {
+        $taxonomy = Taxonomy::create([
+            'slug' => 'music_genre_home',
+            'name' => 'Gênero musical home',
+            'applies_to' => 'event',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'rock',
+            'name' => 'Rock',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'samba',
+            'name' => 'Samba',
+        ]);
+        EventType::create([
+            'name' => 'Home Show',
+            'slug' => 'home_show',
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'music_note',
+                'color' => '#D71920',
+                'icon_color' => '#FFFFFF',
+            ],
+        ]);
+        TenantSettings::query()->firstOrFail()->update([
+            'discovery_filters' => [
+                'surfaces' => [
+                    'public_map.primary' => [
+                        'filters' => [
+                            [
+                                'key' => 'configured_map_only',
+                                'target' => 'map_poi',
+                                'label' => 'Configurado apenas no mapa',
+                                'query' => ['entities' => ['event']],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/home.events");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('surface', 'home.events');
+        $homeShowFilter = collect($response->json('filters') ?? [])
+            ->firstWhere('key', 'home_show');
+        $this->assertNotNull($homeShowFilter);
+        $this->assertSame('Home Show', data_get($homeShowFilter, 'label'));
+        $this->assertSame('event_occurrence', data_get($homeShowFilter, 'target'));
+        $this->assertSame('music_note', data_get($homeShowFilter, 'icon'));
+        $this->assertSame('#D71920', data_get($homeShowFilter, 'color'));
+        $this->assertSame('event', data_get($homeShowFilter, 'query.entities.0'));
+        $this->assertSame('home_show', data_get($homeShowFilter, 'query.types_by_entity.event.0'));
+        $response->assertJsonPath('taxonomy_options.music_genre_home.label', 'Gênero musical home');
+        $this->assertSame(
+            ['rock', 'samba'],
+            collect($response->json('taxonomy_options.music_genre_home.terms') ?? [])
+                ->pluck('value')
+                ->values()
+                ->all()
+        );
+        $homeShowType = collect($response->json('type_options.event') ?? [])
+            ->firstWhere('value', 'home_show');
+        $this->assertNotNull($homeShowType);
+        $this->assertContains(
+            'music_genre_home',
+            collect(data_get($homeShowType, 'allowed_taxonomies') ?? [])->all()
+        );
+    }
+
+    public function test_discovery_account_profiles_catalog_derives_type_filters_and_full_taxonomy_options_without_admin_settings(): void
+    {
+        $taxonomy = Taxonomy::create([
+            'slug' => 'cuisine',
+            'name' => 'Cozinha',
+            'applies_to' => 'account_profile',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'japanese',
+            'name' => 'Japonesa',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $taxonomy->_id,
+            'slug' => 'italian',
+            'name' => 'Italiana',
+        ]);
+        TenantProfileType::create([
+            'type' => 'restaurant',
+            'label' => 'Restaurante',
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'restaurant',
+                'color' => '#A94A00',
+                'icon_color' => '#FFFFFF',
+            ],
+        ]);
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/discovery.account_profiles");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('surface', 'discovery.account_profiles');
+        $restaurantFilter = collect($response->json('filters') ?? [])
+            ->firstWhere('key', 'restaurant');
+        $this->assertNotNull($restaurantFilter);
+        $this->assertSame('Restaurante', data_get($restaurantFilter, 'label'));
+        $this->assertSame('account_profile', data_get($restaurantFilter, 'target'));
+        $this->assertSame('restaurant', data_get($restaurantFilter, 'icon'));
+        $this->assertSame('#A94A00', data_get($restaurantFilter, 'color'));
+        $this->assertSame('account_profile', data_get($restaurantFilter, 'query.entities.0'));
+        $this->assertSame('restaurant', data_get($restaurantFilter, 'query.types_by_entity.account_profile.0'));
+        $response->assertJsonPath('taxonomy_options.cuisine.label', 'Cozinha');
+        $this->assertSame(
+            ['italian', 'japanese'],
+            collect($response->json('taxonomy_options.cuisine.terms') ?? [])
+                ->pluck('value')
+                ->values()
+                ->all()
+        );
+        $restaurantType = collect($response->json('type_options.account_profile') ?? [])
+            ->firstWhere('value', 'restaurant');
+        $this->assertNotNull($restaurantType);
+        $this->assertSame([], collect(data_get($restaurantType, 'allowed_taxonomies') ?? [])->all());
     }
 
     public function test_map_pois_supports_source_and_types_filters(): void

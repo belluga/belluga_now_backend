@@ -178,7 +178,7 @@ class EventsController extends Controller
             : $this->eventQueryService->formatEventDetail(
                 $event,
                 $this->resolveAuthenticatedUserId($request),
-                is_string($request->query('occurrence')) ? $request->query('occurrence') : null
+                is_string($request->query('occurrence')) ? $request->query('occurrence') : $eventId
             );
 
         return response()->json([

@@ -6,8 +6,6 @@ namespace App\Integration\MapPois;
 
 use App\Application\Media\MapFilterImageStorageService;
 use App\Models\Tenants\TenantSettings;
-use Belluga\DiscoveryFilters\Data\DiscoveryFilterDefinition;
-use Belluga\DiscoveryFilters\Services\DiscoveryFilterCatalogService;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use MongoDB\Model\BSONDocument;
 
@@ -15,7 +13,6 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
 {
     public function __construct(
         private readonly MapFilterImageStorageService $mapFilterImageStorageService,
-        private readonly DiscoveryFilterCatalogService $discoveryFilterCatalogService,
     ) {}
 
     public function resolveEventsSettings(): array
@@ -30,13 +27,12 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
     {
         $settings = TenantSettings::current();
         $mapUi = $this->normalizeDocument($settings?->getAttribute('map_ui'));
+        $canonicalFilters = $this->canonicalMapFilters($settings?->getAttribute('discovery_filters'));
+        if ($canonicalFilters !== []) {
+            $mapUi['filters'] = $canonicalFilters;
+        }
         if ($mapUi === []) {
             return [];
-        }
-
-        $canonicalMapFilters = $this->mapCanonicalFiltersForPublicMap();
-        if ($canonicalMapFilters !== []) {
-            $mapUi['filters'] = $canonicalMapFilters;
         }
 
         $filters = $this->normalizeList($mapUi['filters'] ?? null);
@@ -95,92 +91,139 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function mapCanonicalFiltersForPublicMap(): array
+    private function canonicalMapFilters(mixed $discoveryFilters): array
     {
-        $definitions = $this->discoveryFilterCatalogService->surfaceDefinitions('public_map.primary');
-        if ($definitions === []) {
+        $settings = $this->normalizeDocument($discoveryFilters);
+        $surfaces = $this->normalizeDocument($settings['surfaces'] ?? null);
+        $surface = $this->normalizeDocument($surfaces['public_map.primary'] ?? null);
+        $filters = $this->normalizeList($surface['filters'] ?? null);
+        if ($filters === []) {
             return [];
         }
 
-        $filters = [];
-        foreach ($definitions as $definition) {
-            if ($definition->target !== 'map_poi') {
+        $canonical = [];
+        foreach ($filters as $filter) {
+            $normalized = $this->normalizeDocument($filter);
+            if ($normalized === []) {
                 continue;
             }
 
-            $filter = [
-                'key' => $definition->key,
-                'label' => $definition->label,
-                'override_marker' => $definition->overrideMarker,
-                'query' => $this->mapCanonicalDefinitionToMapQuery($definition),
+            $key = strtolower(trim((string) ($normalized['key'] ?? '')));
+            $label = trim((string) ($normalized['label'] ?? ''));
+            if ($key === '' || $label === '') {
+                continue;
+            }
+
+            $canonical[] = [
+                'key' => $key,
+                'label' => $label,
+                ...($this->normalizeOptionalString($normalized['image_uri'] ?? null) !== null
+                    ? ['image_uri' => $this->normalizeOptionalString($normalized['image_uri'] ?? null)]
+                    : []),
+                'override_marker' => (bool) ($normalized['override_marker'] ?? false),
+                ...($this->normalizeDocument($normalized['marker_override'] ?? null) !== []
+                    ? ['marker_override' => $this->normalizeDocument($normalized['marker_override'] ?? null)]
+                    : []),
+                'query' => $this->canonicalMapFilterQuery(
+                    $this->normalizeDocument($normalized['query'] ?? null)
+                ),
             ];
-
-            if ($definition->imageUri !== null) {
-                $filter['image_uri'] = $definition->imageUri;
-            }
-            if ($definition->markerOverride !== null) {
-                $filter['marker_override'] = $definition->markerOverride;
-            }
-
-            $filters[] = $filter;
         }
 
-        return $filters;
+        return $canonical;
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{source: string|null, types: array<int, string>, taxonomy: array<int, string>, tags: array<int, string>, categories: array<int, string>}
      */
-    private function mapCanonicalDefinitionToMapQuery(DiscoveryFilterDefinition $definition): array
+    private function canonicalMapFilterQuery(array $query): array
     {
-        $query = [];
-        $source = $this->mapCanonicalEntityToMapSource($definition->entities[0] ?? null);
-        if ($source !== null) {
-            $query['source'] = $source;
-        }
+        $entities = $this->normalizeStringList($query['entities'] ?? null);
+        $typesByEntity = $this->normalizeDocument($query['types_by_entity'] ?? null);
+        $taxonomyByGroup = $this->normalizeDocument($query['taxonomy'] ?? null);
 
-        $types = [];
-        foreach ($definition->typesByEntity as $entityTypes) {
-            foreach ($entityTypes as $type) {
-                $candidate = strtolower(trim((string) $type));
-                if ($candidate !== '') {
-                    $types[$candidate] = true;
-                }
-            }
-        }
-        if ($types !== []) {
-            $query['types'] = array_keys($types);
-        }
-
-        $taxonomy = [];
-        foreach ($definition->taxonomyValuesByGroup as $group => $values) {
-            $groupKey = strtolower(trim((string) $group));
-            foreach ($values as $value) {
-                $valueKey = strtolower(trim((string) $value));
-                if ($valueKey === '') {
-                    continue;
-                }
-                $taxonomy[] = str_contains($valueKey, ':') || $groupKey === ''
-                    ? $valueKey
-                    : "{$groupKey}:{$valueKey}";
-            }
-        }
-        $taxonomy = array_values(array_unique($taxonomy));
-        if ($taxonomy !== []) {
-            $query['taxonomy'] = $taxonomy;
-        }
-
-        return $query;
+        return [
+            'source' => count($entities) === 1 ? $this->mapEntityToSource($entities[0]) : null,
+            'types' => $this->flattenTypesByEntity($entities, $typesByEntity),
+            'taxonomy' => $this->flattenTaxonomyByGroup($taxonomyByGroup),
+            'tags' => $this->normalizeStringList($query['tags'] ?? null),
+            'categories' => $this->normalizeStringList($query['category_keys'] ?? ($query['categories'] ?? null)),
+        ];
     }
 
-    private function mapCanonicalEntityToMapSource(?string $entity): ?string
+    private function mapEntityToSource(string $entity): ?string
     {
-        return match (strtolower(trim((string) $entity))) {
+        return match (strtolower(trim($entity))) {
             'event' => 'event',
             'account_profile' => 'account_profile',
-            'static_asset' => 'static',
+            'static_asset' => 'static_asset',
             default => null,
         };
+    }
+
+    /**
+     * @param  array<int, string>  $entities
+     * @param  array<string, mixed>  $typesByEntity
+     * @return array<int, string>
+     */
+    private function flattenTypesByEntity(array $entities, array $typesByEntity): array
+    {
+        $types = [];
+        foreach ($entities as $entity) {
+            foreach ($this->normalizeStringList($typesByEntity[$entity] ?? null) as $type) {
+                $types[$type] = $type;
+            }
+        }
+
+        return array_values($types);
+    }
+
+    /**
+     * @param  array<string, mixed>  $taxonomyByGroup
+     * @return array<int, string>
+     */
+    private function flattenTaxonomyByGroup(array $taxonomyByGroup): array
+    {
+        $tokens = [];
+        foreach ($taxonomyByGroup as $taxonomy => $values) {
+            $taxonomyKey = strtolower(trim((string) $taxonomy));
+            if ($taxonomyKey === '') {
+                continue;
+            }
+            foreach ($this->normalizeStringList($values) as $value) {
+                $tokens["{$taxonomyKey}:{$value}"] = "{$taxonomyKey}:{$value}";
+            }
+        }
+
+        return array_values($tokens);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        $items = is_string($value) ? [$value] : $this->normalizeList($value);
+        $normalized = [];
+        foreach ($items as $item) {
+            $token = strtolower(trim((string) $item));
+            if ($token !== '') {
+                $normalized[$token] = $token;
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = trim($value);
+
+        return $normalized === '' ? null : $normalized;
     }
 
     public function resolveMapIngestSettings(): array
