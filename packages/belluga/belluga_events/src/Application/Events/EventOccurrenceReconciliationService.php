@@ -56,10 +56,11 @@ class EventOccurrenceReconciliationService
         });
     }
 
-    private function reconcileCurrentTenant(): void
+    public function reconcileCurrentTenant(): void
     {
         Event::withTrashed()
-            ->get()
+            ->orderBy('_id')
+            ->cursor()
             ->each(function (Event $event): void {
                 $this->reconcileEvent($event);
             });

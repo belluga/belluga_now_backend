@@ -149,6 +149,55 @@ Artisan::command('events:legacy-event-parties:repair {--dry-run}', function () {
     return 0;
 })->purpose('Inspect or repair legacy events that still rely on artists/venue event_parties drift.');
 
+Artisan::command('events:occurrences:repair {tenant_slug?} {--all}', function () {
+    /** @var EventOccurrenceReconciliationService $service */
+    $service = app(EventOccurrenceReconciliationService::class);
+
+    if ($this->option('all')) {
+        $service->reconcileAllTenants();
+        $this->info('Reconciled event occurrences for all tenants (manual repair mode).');
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug !== '') {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+
+        $tenant->makeCurrent();
+        try {
+            $service->reconcileCurrentTenant();
+            $this->info(sprintf(
+                'Reconciled event occurrences for tenant [%s] (manual repair mode).',
+                $tenantSlug
+            ));
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        return 0;
+    }
+
+    if (! Tenant::current()) {
+        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $service->reconcileCurrentTenant();
+    $this->info(sprintf(
+        'Reconciled event occurrences for tenant [%s] (manual repair mode).',
+        (string) Tenant::current()?->slug
+    ));
+
+    return 0;
+})->purpose('Explicit manual repair for event occurrence projections; not part of recurring scheduler runtime.');
+
 Artisan::command('taxonomies:term-snapshots:repair {tenant_slug?} {--all} {--type=} {--value=}', function () {
     $taxonomyType = trim((string) $this->option('type'));
     $termValue = trim((string) $this->option('value'));
@@ -295,13 +344,6 @@ Schedule::call(static function (): void {
 })
     ->name('events:async:monitor')
     ->everyMinute()
-    ->withoutOverlapping();
-
-Schedule::call(static function (): void {
-    app(EventOccurrenceReconciliationService::class)->reconcileAllTenants();
-})
-    ->name('events:occurrences:reconcile')
-    ->everyFifteenMinutes()
     ->withoutOverlapping();
 
 Schedule::call(static function (): void {

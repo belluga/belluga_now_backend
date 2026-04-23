@@ -35,6 +35,10 @@ return [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
     ],
+    'packages/belluga/belluga_discovery_filters' => [
+        'integration_mode' => 'shared-kernel',
+        'route_ownership' => 'host-owned-routes',
+    ],
     'packages/belluga/belluga_email' => [
         'integration_mode' => 'host-integrated',
         'route_ownership' => 'host-owned-routes',
