@@ -104,9 +104,9 @@ class EventOccurrenceSyncService
     /**
      * @param  array<string, mixed>  $publication
      */
-    public function mirrorPublicationByEventId(string $eventId, array $publication): int
+    public function mirrorPublicationByEventId(string $eventId, array $publication, ?Carbon $now = null): int
     {
-        $now = Carbon::now();
+        $now ??= Carbon::now();
 
         return EventOccurrence::query()->where('event_id', $eventId)->update([
             'publication' => $publication,

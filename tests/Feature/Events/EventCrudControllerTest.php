@@ -32,6 +32,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Mockery\MockInterface;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use Tests\Helpers\TenantLabels;
@@ -3570,6 +3571,184 @@ class EventCrudControllerTest extends TestCaseTenant
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_event_create_rolls_back_when_occurrence_sync_fails_mid_flight(): void
+    {
+        $payload = $this->makeEventPayload([
+            'title' => 'Create Rollback Guard',
+        ]);
+
+        $this->withExceptionHandling();
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('syncFromEvent')
+                ->once()
+                ->andThrow(new \RuntimeException('forced create occurrence sync failure'));
+        });
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(500);
+        $this->assertFalse(Event::query()->where('title', 'Create Rollback Guard')->exists());
+        $this->assertSame(0, EventOccurrence::query()->count());
+    }
+
+    public function test_event_update_rolls_back_when_occurrence_sync_fails_mid_flight(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Before Update Rollback',
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $this->withExceptionHandling();
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('syncFromEvent')
+                ->once()
+                ->andThrow(new \RuntimeException('forced update occurrence sync failure'));
+        });
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'After Update Rollback',
+        ]);
+
+        $response->assertStatus(500);
+
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertSame('Before Update Rollback', (string) $event->title);
+        $this->assertSame('Before Update Rollback', (string) $occurrence->title);
+    }
+
+    public function test_event_delete_rolls_back_when_occurrence_soft_delete_fails_mid_flight(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Delete Rollback Guard',
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $this->withExceptionHandling();
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('softDeleteByEventId')
+                ->once()
+                ->withArgs(static fn (string $candidate): bool => $candidate !== '')
+                ->andThrow(new \RuntimeException('forced delete occurrence soft-delete failure'));
+        });
+
+        $response = $this->deleteJson("{$this->accountEventsBase}/{$eventId}");
+
+        $response->assertStatus(500);
+
+        $event = Event::withTrashed()->findOrFail($eventId);
+        $occurrence = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertNull($event->deleted_at);
+        $this->assertNull($occurrence->deleted_at);
+    }
+
+    public function test_scheduled_publication_rolls_back_when_occurrence_mirror_fails_mid_flight(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Scheduled Publication Rollback Guard',
+            'publication' => [
+                'status' => 'publish_scheduled',
+                'publish_at' => Carbon::now()->subMinute()->toISOString(),
+            ],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('mirrorPublicationByEventId')
+                ->once()
+                ->withArgs(static fn (string $candidate, array $publication): bool => $candidate !== ''
+                    && ($publication['status'] ?? null) === 'published')
+                ->andThrow(new \RuntimeException('forced publication mirror failure'));
+        });
+
+        try {
+            app()->call([new PublishScheduledEventsJob, 'handle']);
+            $this->fail('Expected scheduled publication to abort when occurrence mirroring fails.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced publication mirror failure', $exception->getMessage());
+        }
+
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $publication = is_array($event->publication) ? $event->publication : (array) $event->publication;
+
+        $this->assertSame('publish_scheduled', $publication['status'] ?? null);
+        $this->assertFalse((bool) ($occurrence->is_event_published ?? false));
+    }
+
+    public function test_manual_occurrence_repair_preserves_occurrence_owned_profiles_and_programming_items(): void
+    {
+        $now = Carbon::now();
+        $occurrences = [
+            [
+                'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
+                'date_time_end' => $now->copy()->addDay()->setHour(22)->setMinute(0)->setSecond(0)->toISOString(),
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2)->setHour(17)->setMinute(0)->setSecond(0)->toISOString(),
+                'date_time_end' => $now->copy()->addDays(2)->setHour(21)->setMinute(0)->setSecond(0)->toISOString(),
+                'event_parties' => [
+                    [
+                        'party_ref_id' => (string) $this->band->_id,
+                    ],
+                ],
+                'programming_items' => [[
+                    'time' => '17:00',
+                    'title' => 'Show com a banda',
+                    'account_profile_ids' => [(string) $this->band->_id],
+                    'place_ref' => [
+                        'type' => 'account_profile',
+                        'id' => (string) $this->venue->_id,
+                    ],
+                ]],
+            ],
+        ];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Repair Guard Source',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $event->title = 'Repair Guard Canonical Title';
+        $event->save();
+
+        app(EventOccurrenceReconciliationService::class)->reconcileEvent($event->fresh());
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $this->assertSame('Repair Guard Canonical Title', (string) $secondOccurrence->title);
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_linked_account_profiles.0.id'));
+        $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Show com a banda', data_get($secondOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.place_ref.id'));
     }
 
     public function test_event_occurrence_reconciliation_syncs_mirrored_fields_from_event(): void

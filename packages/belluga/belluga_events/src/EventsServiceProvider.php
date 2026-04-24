@@ -7,6 +7,7 @@ namespace Belluga\Events;
 use Belluga\Events\Application\Operations\EventDlqAlertService;
 use Belluga\Events\Application\Operations\PackageEventAsyncJobSignatures;
 use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
+use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MapPoiCapabilityHandler;
 use Belluga\Events\Contracts\EventAccountResolverContract;
@@ -41,6 +42,7 @@ class EventsServiceProvider extends ServiceProvider
 
         $this->app->bind(EventAsyncQueueMetricsProviderContract::class, QueueEventAsyncMetricsProvider::class);
         $this->app->singletonIf(EventAsyncJobSignaturesContract::class, PackageEventAsyncJobSignatures::class);
+        $this->app->singleton(EventTransactionRunner::class);
 
         $this->ensureHostBinding(EventTaxonomyValidationContract::class);
         $this->ensureHostBinding(EventTaxonomySnapshotResolverContract::class);

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\DiscoveryFilters\Data\DiscoveryFilterDefinition;
 use Belluga\DiscoveryFilters\Registry\DiscoveryFilterEntityRegistry;
 use Belluga\DiscoveryFilters\Services\DiscoveryFilterCatalogService;
@@ -47,7 +49,7 @@ final class DiscoveryFiltersController extends Controller
         DiscoveryFilterEntityRegistry $registry,
     ): array {
         if ($surface === 'home.events') {
-            $typeOptions = $registry->typesForEntities(['event']);
+            $typeOptions = ['event' => $this->eventTypeOptions()];
 
             return [
                 $this->typeDrivenDefinitions(
@@ -61,7 +63,7 @@ final class DiscoveryFiltersController extends Controller
         }
 
         if ($surface === 'discovery.account_profiles') {
-            $typeOptions = $registry->typesForEntities(['account_profile']);
+            $typeOptions = ['account_profile' => $this->favoritableAccountProfileTypeOptions()];
 
             return [
                 $this->typeDrivenDefinitions(
@@ -165,9 +167,6 @@ final class DiscoveryFiltersController extends Controller
     private function taxonomyOptionsForDefinitions(string $surface, array $definitions, array $typeOptions): array
     {
         $taxonomySlugs = $this->allowedTaxonomySlugs($definitions, $typeOptions);
-        foreach ($this->surfaceContextTaxonomySlugs($surface) as $taxonomySlug) {
-            $this->appendToken($taxonomySlugs, $taxonomySlug);
-        }
         if ($taxonomySlugs === []) {
             return [];
         }
@@ -259,43 +258,6 @@ final class DiscoveryFiltersController extends Controller
     }
 
     /**
-     * @return array<int, string>
-     */
-    private function surfaceContextTaxonomySlugs(string $surface): array
-    {
-        $entity = match ($surface) {
-            'home.events' => 'event',
-            'discovery.account_profiles' => 'account_profile',
-            default => null,
-        };
-        if ($entity === null) {
-            return [];
-        }
-
-        $slugs = [];
-        foreach (Taxonomy::query()->get(['slug', 'applies_to']) as $taxonomy) {
-            $slug = $this->normalizeToken($taxonomy->slug ?? '');
-            if ($slug === '' || ! $this->taxonomyAppliesTo($taxonomy->applies_to ?? null, $entity)) {
-                continue;
-            }
-            $this->appendToken($slugs, $slug);
-        }
-
-        return array_values($slugs);
-    }
-
-    private function taxonomyAppliesTo(mixed $value, string $entity): bool
-    {
-        foreach ($this->normalizeList($value) as $candidate) {
-            if ($this->normalizeToken($candidate) === $entity) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * @param  array<int, string>  $tokens
      */
     private function appendToken(array &$tokens, mixed $value): void
@@ -316,6 +278,58 @@ final class DiscoveryFiltersController extends Controller
         }
 
         return is_array($value) ? array_values($value) : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function eventTypeOptions(): array
+    {
+        return EventType::query()
+            ->orderBy('name')
+            ->get()
+            ->map(fn (EventType $type): array => [
+                'value' => trim((string) ($type->slug ?? '')),
+                'label' => trim((string) ($type->name ?? $type->slug ?? '')),
+                'visual' => $type->poi_visual ?? $type->visual ?? null,
+                'allowed_taxonomies' => $this->normalizeTokenList($type->allowed_taxonomies ?? []),
+            ])
+            ->filter(static fn (array $item): bool => $item['value'] !== '' && $item['label'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function favoritableAccountProfileTypeOptions(): array
+    {
+        return TenantProfileType::query()
+            ->where('capabilities.is_favoritable', true)
+            ->orderBy('label')
+            ->get()
+            ->map(fn (TenantProfileType $type): array => [
+                'value' => trim((string) ($type->type ?? '')),
+                'label' => trim((string) ($type->label ?? $type->type ?? '')),
+                'visual' => $type->poi_visual ?? $type->visual ?? null,
+                'allowed_taxonomies' => $this->normalizeTokenList($type->allowed_taxonomies ?? []),
+            ])
+            ->filter(static fn (array $item): bool => $item['value'] !== '' && $item['label'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeTokenList(mixed $value): array
+    {
+        return collect($this->normalizeList($value))
+            ->map(fn ($token): string => $this->normalizeToken($token))
+            ->filter(static fn (string $token): bool => $token !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function normalizeToken(mixed $value): string

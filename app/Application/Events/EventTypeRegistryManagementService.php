@@ -175,6 +175,7 @@ class EventTypeRegistryManagementService
             'name' => trim((string) ($payload['name'] ?? '')),
             'slug' => trim((string) ($payload['slug'] ?? '')),
             'description' => $this->normalizeNullableString($payload['description'] ?? null),
+            'allowed_taxonomies' => $this->normalizeStringList($payload['allowed_taxonomies'] ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
             'icon' => $legacy['icon'],
@@ -210,6 +211,9 @@ class EventTypeRegistryManagementService
             'description' => array_key_exists('description', $payload)
                 ? $this->normalizeNullableString($payload['description'])
                 : $this->normalizeNullableString($existing->description ?? null),
+            'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
+                ? $this->normalizeStringList($payload['allowed_taxonomies'])
+                : $this->normalizeStringList($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
             'icon' => $legacy['icon'],
@@ -308,6 +312,21 @@ class EventTypeRegistryManagementService
         $normalized = trim((string) $value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+
+        return collect($items)
+            ->map(fn ($item): string => strtolower(trim((string) $item)))
+            ->filter(static fn (string $item): bool => $item !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function toCheckpoint(mixed $value): int

@@ -131,6 +131,26 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.description', null);
     }
 
+    public function test_event_type_create_persists_allowed_taxonomies(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'allowed_taxonomies' => ['music_genre', 'audience'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.allowed_taxonomies.0', 'music_genre');
+        $response->assertJsonPath('data.allowed_taxonomies.1', 'audience');
+
+        $stored = EventType::query()->where('slug', 'festival')->firstOrFail();
+        $this->assertSame(['music_genre', 'audience'], $stored->allowed_taxonomies);
+    }
+
     public function test_event_type_create_accepts_canonical_visual_type_asset_upload(): void
     {
         Storage::fake('public');
@@ -184,6 +204,30 @@ class EventTypesControllerTest extends TestCaseTenant
 
         $stored = EventType::query()->findOrFail($eventType->_id);
         $this->assertNull($stored->description);
+    }
+
+    public function test_event_type_update_replaces_allowed_taxonomies(): void
+    {
+        $eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'allowed_taxonomies' => ['music_genre'],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
+            [
+                'allowed_taxonomies' => ['audience'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.allowed_taxonomies.0', 'audience');
+        $response->assertJsonMissingPath('data.allowed_taxonomies.1');
+
+        $stored = EventType::query()->findOrFail($eventType->_id);
+        $this->assertSame(['audience'], $stored->allowed_taxonomies);
     }
 
     public function test_event_type_update_propagates_snapshot_to_events_and_occurrences(): void

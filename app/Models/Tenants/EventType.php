@@ -17,6 +17,7 @@ class EventType extends Model
         'name',
         'slug',
         'description',
+        'allowed_taxonomies',
         'visual',
         'poi_visual',
         'type_asset_url',

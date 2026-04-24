@@ -18,6 +18,8 @@ class EventTypeStoreRequest extends FormRequest
             'name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'slug' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'description' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'allowed_taxonomies' => ['sometimes', 'array'],
+            'allowed_taxonomies.*' => ['string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'visual' => ['sometimes', 'nullable', 'array'],
             'visual.mode' => ['required_with:visual', 'string', 'in:icon,image'],
             'visual.icon' => ['required_if:visual.mode,icon', 'string', 'max:'.InputConstraints::NAME_MAX],

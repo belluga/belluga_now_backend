@@ -14,15 +14,12 @@ use Belluga\Events\Domain\Events\EventCreated;
 use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
-use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\EventContentHtmlSanitizer;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
-use RuntimeException;
 
 class EventManagementService
 {
@@ -35,7 +32,8 @@ class EventManagementService
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
         private readonly EventCapabilitiesService $eventCapabilities,
-        private readonly EventOccurrenceSyncService $eventOccurrenceSyncService,
+        private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
+        private readonly EventAggregateWriteService $eventAggregateWrites,
         private readonly Dispatcher $events,
     ) {}
 
@@ -47,13 +45,10 @@ class EventManagementService
         $startedAt = microtime(true);
         $normalized = $this->normalizePayloadAndSchedule($payload, null);
 
-        /** @var Event $event */
-        $event = $this->runTenantTransaction(function () use ($normalized): Event {
-            $created = Event::query()->create($normalized['payload']);
-            $this->eventOccurrenceSyncService->syncFromEvent($created, $normalized['schedule']['occurrences']);
-
-            return $created->fresh();
-        });
+        $event = $this->eventAggregateWrites->create(
+            $normalized['payload'],
+            $normalized['schedule']['occurrences'],
+        );
 
         $this->events->dispatch(new EventCreated((string) $event->_id));
         $this->logWriteCompleted('create', $event, count($normalized['schedule']['occurrences']), $startedAt);
@@ -69,16 +64,11 @@ class EventManagementService
         $startedAt = microtime(true);
         $normalized = $this->normalizePayloadAndSchedule($payload, $event);
 
-        /** @var Event $updated */
-        $updated = $this->runTenantTransaction(function () use ($event, $normalized): Event {
-            $event->fill($normalized['payload']);
-            $event->save();
-
-            $fresh = $event->fresh();
-            $this->eventOccurrenceSyncService->syncFromEvent($fresh, $normalized['schedule']['occurrences']);
-
-            return $fresh;
-        });
+        $updated = $this->eventAggregateWrites->update(
+            $event,
+            $normalized['payload'],
+            $normalized['schedule']['occurrences'],
+        );
 
         $this->events->dispatch(new EventUpdated((string) $updated->_id));
         $this->logWriteCompleted('update', $updated, count($normalized['schedule']['occurrences']), $startedAt);
@@ -91,12 +81,7 @@ class EventManagementService
         $startedAt = microtime(true);
         $eventId = (string) $event->_id;
 
-        $this->runTenantTransaction(function () use ($event, $eventId): null {
-            $event->delete();
-            $this->eventOccurrenceSyncService->softDeleteByEventId($eventId);
-
-            return null;
-        });
+        $this->eventAggregateWrites->delete($event);
 
         $this->events->dispatch(new EventDeleted($eventId));
         $this->logDeleteCompleted($event, $eventId, $startedAt);
@@ -219,7 +204,7 @@ class EventManagementService
             ]);
         }
 
-        $existingOccurrences = $this->extractExistingOccurrences($existing);
+        $existingOccurrences = $this->eventOccurrencePayloadSnapshots->requireForUpdate($existing);
         $firstOccurrence = $existingOccurrences[0] ?? null;
 
         return [
@@ -318,59 +303,6 @@ class EventManagementService
         ];
     }
 
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function extractExistingOccurrences(?Event $existing): array
-    {
-        if (! $existing) {
-            return [];
-        }
-
-        $eventId = (string) $existing->_id;
-        $fromCollection = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->orderBy('starts_at')
-            ->get();
-
-        if ($fromCollection->isEmpty()) {
-            throw new RuntimeException(
-                'Event occurrences are required for updates without schedule mutation. '.
-                'Provide occurrences payload to rebuild the schedule.'
-            );
-        }
-
-        $occurrences = [];
-        foreach ($fromCollection as $occurrence) {
-            $start = $this->tryNormalizeDateValue($occurrence->starts_at ?? null);
-            if (! $start) {
-                continue;
-            }
-
-            $end = $this->tryNormalizeDateValue($occurrence->ends_at ?? null);
-            if ($end && $end->lessThan($start)) {
-                continue;
-            }
-
-            $occurrences[] = [
-                'date_time_start' => $start,
-                'date_time_end' => $end,
-                'event_parties' => $this->normalizeArray($occurrence->own_event_parties ?? []),
-                'has_location_override' => false,
-                'location_override' => null,
-                'programming_items' => $this->normalizeArray($occurrence->programming_items ?? []),
-            ];
-        }
-
-        if ($occurrences === []) {
-            throw new RuntimeException(
-                'Event occurrences collection has no valid schedule entries for this event.'
-            );
-        }
-
-        return $occurrences;
-    }
-
     private function assertOccurrenceBounds(Carbon $start, ?Carbon $end, string $endField): void
     {
         if ($end !== null && $end->lessThan($start)) {
@@ -411,35 +343,6 @@ class EventManagementService
         throw ValidationException::withMessages([
             $field => ['Invalid date value.'],
         ]);
-    }
-
-    private function tryNormalizeDateValue(mixed $value): ?Carbon
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        if ($value instanceof Carbon) {
-            return $value;
-        }
-
-        if ($value instanceof UTCDateTime) {
-            return Carbon::instance($value->toDateTime());
-        }
-
-        if ($value instanceof \DateTimeInterface) {
-            return Carbon::instance($value);
-        }
-
-        if (is_string($value)) {
-            try {
-                return Carbon::parse($value);
-            } catch (\Exception) {
-                return null;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -1055,48 +958,6 @@ class EventManagementService
                 'place_ref.id' => ['Physical host must belong to the target account context.'],
             ]);
         }
-    }
-
-    /**
-     * @template T
-     *
-     * @param  callable(): T  $callback
-     * @return T
-     */
-    private function runTenantTransaction(callable $callback): mixed
-    {
-        $connection = DB::connection('tenant');
-
-        if (! method_exists($connection, 'transaction')) {
-            throw new RuntimeException(
-                'Tenant MongoDB transaction support is required for events writes, but the active driver has no transaction API.'
-            );
-        }
-
-        try {
-            return $connection->transaction(static fn () => $callback());
-        } catch (\Throwable $throwable) {
-            if ($this->isTransactionSupportError($throwable)) {
-                throw new RuntimeException(
-                    'Tenant MongoDB transaction support is required for events writes. Configure replica set / transaction-capable runtime.',
-                    0,
-                    $throwable,
-                );
-            }
-
-            throw $throwable;
-        }
-    }
-
-    private function isTransactionSupportError(\Throwable $throwable): bool
-    {
-        $message = strtolower($throwable->getMessage());
-
-        return str_contains($message, 'transaction numbers are only allowed')
-            || str_contains($message, 'transactions are not supported')
-            || str_contains($message, 'replica set')
-            || str_contains($message, 'mongos')
-            || str_contains($message, 'starttransaction');
     }
 
     private function logWriteCompleted(string $operation, Event $event, int $occurrenceCount, float $startedAt): void

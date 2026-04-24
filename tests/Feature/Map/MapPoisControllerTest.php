@@ -1152,28 +1152,66 @@ class MapPoisControllerTest extends TestCaseTenant
 
     public function test_home_events_catalog_derives_type_filters_and_full_taxonomy_options_without_admin_settings(): void
     {
-        $taxonomy = Taxonomy::create([
+        $musicGenre = Taxonomy::create([
             'slug' => 'music_genre_home',
             'name' => 'Gênero musical home',
             'applies_to' => 'event',
         ]);
         TaxonomyTerm::create([
-            'taxonomy_id' => (string) $taxonomy->_id,
+            'taxonomy_id' => (string) $musicGenre->_id,
             'slug' => 'rock',
             'name' => 'Rock',
         ]);
         TaxonomyTerm::create([
-            'taxonomy_id' => (string) $taxonomy->_id,
+            'taxonomy_id' => (string) $musicGenre->_id,
             'slug' => 'samba',
             'name' => 'Samba',
+        ]);
+        $audience = Taxonomy::create([
+            'slug' => 'audience_home',
+            'name' => 'Público',
+            'applies_to' => 'event',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $audience->_id,
+            'slug' => 'families',
+            'name' => 'Famílias',
+        ]);
+        Taxonomy::create([
+            'slug' => 'unused_home',
+            'name' => 'Não utilizada',
+            'applies_to' => 'event',
         ]);
         EventType::create([
             'name' => 'Home Show',
             'slug' => 'home_show',
+            'allowed_taxonomies' => ['music_genre_home'],
             'visual' => [
                 'mode' => 'icon',
                 'icon' => 'music_note',
                 'color' => '#D71920',
+                'icon_color' => '#FFFFFF',
+            ],
+        ]);
+        EventType::create([
+            'name' => 'Home Talk',
+            'slug' => 'home_talk',
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'record_voice_over',
+                'color' => '#225588',
+                'icon_color' => '#FFFFFF',
+            ],
+        ]);
+        EventType::create([
+            'name' => 'Home Workshop',
+            'slug' => 'home_workshop',
+            'allowed_taxonomies' => ['audience_home'],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'build',
+                'color' => '#228833',
                 'icon_color' => '#FFFFFF',
             ],
         ]);
@@ -1209,12 +1247,20 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertSame('home_show', data_get($homeShowFilter, 'query.types_by_entity.event.0'));
         $response->assertJsonPath('taxonomy_options.music_genre_home.label', 'Gênero musical home');
         $this->assertSame(
+            ['families'],
+            collect($response->json('taxonomy_options.audience_home.terms') ?? [])
+                ->pluck('value')
+                ->values()
+                ->all()
+        );
+        $this->assertSame(
             ['rock', 'samba'],
             collect($response->json('taxonomy_options.music_genre_home.terms') ?? [])
                 ->pluck('value')
                 ->values()
                 ->all()
         );
+        $this->assertArrayNotHasKey('unused_home', $response->json('taxonomy_options') ?? []);
         $homeShowType = collect($response->json('type_options.event') ?? [])
             ->firstWhere('value', 'home_show');
         $this->assertNotNull($homeShowType);
@@ -1222,34 +1268,65 @@ class MapPoisControllerTest extends TestCaseTenant
             'music_genre_home',
             collect(data_get($homeShowType, 'allowed_taxonomies') ?? [])->all()
         );
+        $homeTalkType = collect($response->json('type_options.event') ?? [])
+            ->firstWhere('value', 'home_talk');
+        $this->assertNotNull($homeTalkType);
+        $this->assertSame([], collect(data_get($homeTalkType, 'allowed_taxonomies') ?? [])->all());
     }
 
     public function test_discovery_account_profiles_catalog_derives_type_filters_and_full_taxonomy_options_without_admin_settings(): void
     {
-        $taxonomy = Taxonomy::create([
+        $visibleTaxonomy = Taxonomy::create([
             'slug' => 'cuisine',
             'name' => 'Cozinha',
             'applies_to' => 'account_profile',
         ]);
         TaxonomyTerm::create([
-            'taxonomy_id' => (string) $taxonomy->_id,
+            'taxonomy_id' => (string) $visibleTaxonomy->_id,
             'slug' => 'japanese',
             'name' => 'Japonesa',
         ]);
         TaxonomyTerm::create([
-            'taxonomy_id' => (string) $taxonomy->_id,
+            'taxonomy_id' => (string) $visibleTaxonomy->_id,
             'slug' => 'italian',
             'name' => 'Italiana',
+        ]);
+        $hiddenTaxonomy = Taxonomy::create([
+            'slug' => 'internal_only',
+            'name' => 'Interna',
+            'applies_to' => 'account_profile',
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $hiddenTaxonomy->_id,
+            'slug' => 'staff',
+            'name' => 'Equipe',
         ]);
         TenantProfileType::create([
             'type' => 'restaurant',
             'label' => 'Restaurante',
-            'allowed_taxonomies' => [],
+            'allowed_taxonomies' => ['cuisine'],
             'visual' => [
                 'mode' => 'icon',
                 'icon' => 'restaurant',
                 'color' => '#A94A00',
                 'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_favoritable' => true,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'internal_partner',
+            'label' => 'Parceiro interno',
+            'allowed_taxonomies' => ['internal_only'],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'lock',
+                'color' => '#555555',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_favoritable' => false,
             ],
         ]);
         $response = $this->getJson("{$this->base_api_tenant}discovery-filters/discovery.account_profiles");
@@ -1273,10 +1350,18 @@ class MapPoisControllerTest extends TestCaseTenant
                 ->values()
                 ->all()
         );
+        $this->assertArrayNotHasKey('internal_only', $response->json('taxonomy_options') ?? []);
+        $this->assertNull(
+            collect($response->json('filters') ?? [])->firstWhere('key', 'internal_partner')
+        );
         $restaurantType = collect($response->json('type_options.account_profile') ?? [])
             ->firstWhere('value', 'restaurant');
         $this->assertNotNull($restaurantType);
-        $this->assertSame([], collect(data_get($restaurantType, 'allowed_taxonomies') ?? [])->all());
+        $this->assertSame(['cuisine'], collect(data_get($restaurantType, 'allowed_taxonomies') ?? [])->all());
+        $this->assertNull(
+            collect($response->json('type_options.account_profile') ?? [])
+                ->firstWhere('value', 'internal_partner')
+        );
     }
 
     public function test_map_pois_supports_source_and_types_filters(): void
