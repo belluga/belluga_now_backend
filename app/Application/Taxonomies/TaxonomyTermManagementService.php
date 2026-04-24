@@ -28,6 +28,53 @@ class TaxonomyTermManagementService
     }
 
     /**
+     * @param  array<int, mixed>  $taxonomyIds
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    public function listBatch(array $taxonomyIds): array
+    {
+        $ids = collect($taxonomyIds)
+            ->map(fn ($taxonomyId): string => trim((string) $taxonomyId))
+            ->filter(static fn (string $taxonomyId): bool => $taxonomyId !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $existingIds = Taxonomy::query()
+            ->whereIn('_id', $ids)
+            ->get(['_id'])
+            ->map(fn (Taxonomy $taxonomy): string => (string) $taxonomy->_id)
+            ->values()
+            ->all();
+
+        if (count($existingIds) !== count($ids)) {
+            abort(404, 'Taxonomy not found.');
+        }
+
+        $termsByTaxonomy = TaxonomyTerm::query()
+            ->whereIn('taxonomy_id', $ids)
+            ->orderBy('taxonomy_id')
+            ->orderBy('slug')
+            ->get()
+            ->groupBy(static fn (TaxonomyTerm $term): string => (string) ($term->taxonomy_id ?? ''));
+
+        $payload = [];
+        foreach ($ids as $taxonomyId) {
+            $payload[$taxonomyId] = $termsByTaxonomy
+                ->get($taxonomyId, collect())
+                ->map(fn (TaxonomyTerm $term): array => $this->toPayload($term))
+                ->values()
+                ->all();
+        }
+
+        return $payload;
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */

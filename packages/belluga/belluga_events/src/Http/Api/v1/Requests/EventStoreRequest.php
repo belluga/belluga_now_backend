@@ -32,7 +32,7 @@ class EventStoreRequest extends FormRequest
     {
         return [
             'title' => 'required|string|max:'.InputConstraints::NAME_MAX,
-            'content' => 'sometimes|nullable|string|max:'.InputConstraints::DESCRIPTION_MAX,
+            'content' => 'sometimes|nullable|string|max:'.InputConstraints::RICH_TEXT_MAX_BYTES,
             'venue_id' => 'prohibited',
             'location' => 'required|array',
             'location.mode' => [

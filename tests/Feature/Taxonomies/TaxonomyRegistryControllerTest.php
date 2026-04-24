@@ -132,6 +132,74 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
+    public function test_batch_terms_returns_multiple_taxonomies_in_single_request(): void
+    {
+        $music = $this->postJson(
+            "{$this->base_tenant_api_admin}taxonomies",
+            [
+                'slug' => 'batch-music',
+                'name' => 'Batch Music',
+                'applies_to' => ['event'],
+            ],
+            $this->getHeaders()
+        );
+        $music->assertStatus(201);
+        $musicId = (string) $music->json('data.id');
+
+        $cuisine = $this->postJson(
+            "{$this->base_tenant_api_admin}taxonomies",
+            [
+                'slug' => 'batch-cuisine',
+                'name' => 'Batch Cuisine',
+                'applies_to' => ['event'],
+            ],
+            $this->getHeaders()
+        );
+        $cuisine->assertStatus(201);
+        $cuisineId = (string) $cuisine->json('data.id');
+
+        $this->postJson(
+            "{$this->base_tenant_api_admin}taxonomies/{$musicId}/terms",
+            ['slug' => 'rock', 'name' => 'Rock'],
+            $this->getHeaders()
+        )->assertStatus(201);
+        $this->postJson(
+            "{$this->base_tenant_api_admin}taxonomies/{$cuisineId}/terms",
+            ['slug' => 'italian', 'name' => 'Italian'],
+            $this->getHeaders()
+        )->assertStatus(201);
+
+        $query = http_build_query(
+            ['taxonomy_ids' => [$musicId, $cuisineId]],
+            '',
+            '&',
+            PHP_QUERY_RFC3986
+        );
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}taxonomies/terms?{$query}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath("data.{$musicId}.0.slug", 'rock');
+        $response->assertJsonPath("data.{$cuisineId}.0.slug", 'italian');
+        $this->assertSame(
+            [$musicId, $cuisineId],
+            array_keys($response->json('data'))
+        );
+    }
+
+    public function test_batch_terms_validates_taxonomy_ids(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}taxonomies/terms?taxonomy_ids[]=invalid",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);

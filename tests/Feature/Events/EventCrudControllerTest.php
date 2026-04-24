@@ -231,6 +231,32 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertStringContainsString('🎉', $stored->content);
     }
 
+    public function test_event_content_limit_is_100kb_after_sanitization(): void
+    {
+        $exact = $this->htmlParagraphOfSanitizedByteLength(102400);
+        $overLimit = $this->htmlParagraphOfSanitizedByteLength(102401);
+
+        $accepted = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'content' => $exact,
+            ])
+        );
+
+        $accepted->assertStatus(201);
+        $this->assertSame(102400, strlen((string) $accepted->json('data.content')));
+
+        $rejected = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'content' => $overLimit,
+            ])
+        );
+
+        $rejected->assertStatus(422);
+        $rejected->assertJsonValidationErrors(['content']);
+    }
+
     public function test_event_create_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
     {
         $payload = $this->makeEventPayload([
@@ -2624,6 +2650,38 @@ class EventCrudControllerTest extends TestCaseTenant
         $reloaded->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
     }
 
+    public function test_management_show_preserves_single_occurrence_programming_and_occurrence_profiles(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+            'permissions' => ['can_edit' => false],
+        ]];
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $reloaded = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+
+        $reloaded->assertStatus(200);
+        $reloaded->assertJsonPath('data.occurrences.0.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.title', 'Show com a banda');
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.account_profile_ids.0', (string) $this->band->_id);
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.place_ref.id', (string) $this->venue->_id);
+    }
+
     public function test_event_update_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
@@ -3263,6 +3321,67 @@ class EventCrudControllerTest extends TestCaseTenant
         $staleQueryResponse->assertJsonPath('data.occurrences.1.is_selected', false);
     }
 
+    public function test_public_event_detail_related_profiles_aggregate_event_occurrences_and_programming_profiles(): void
+    {
+        $guestArtist = $this->createAccountProfile('artist', 'Convidado Programacao');
+        $guestArtist->slug = 'convidado-programacao-'.Str::lower(Str::random(6));
+        $guestArtist->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[0]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show principal',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '19:00',
+            'title' => 'Show convidado',
+            'account_profile_ids' => [(string) $guestArtist->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Detail profile aggregation',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $selectedOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$selectedOccurrence->_id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.occurrence_id', (string) $selectedOccurrence->_id);
+        $this->assertSame(
+            [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+                (string) $guestArtist->_id,
+            ],
+            collect($response->json('data.linked_account_profiles') ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $response->assertJsonMissingPath('data.programming_items.1');
+        $response->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
+    }
+
     public function test_public_event_detail_repeated_gets_do_not_degrade_programming_or_occurrence_profiles(): void
     {
         $firstOccurrences = $this->makeOccurrences(2);
@@ -3353,6 +3472,100 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Pocket show', data_get($freshSecondSelectedOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
         $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'own_linked_account_profiles.0.id'));
+    }
+
+    public function test_agenda_occurrence_cards_only_include_event_profiles_and_their_own_occurrence_profiles(): void
+    {
+        $guestArtist = $this->createAccountProfile('artist', 'DJ Visitante');
+        $guestArtist->slug = 'dj-visitante-'.Str::lower(Str::random(6));
+        $guestArtist->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[0]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $guestArtist->_id,
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '19:00',
+            'title' => 'Show convidado',
+            'account_profile_ids' => [(string) $guestArtist->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Agenda occurrence scoped profiles',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $this->assertSame(
+            [(string) $this->artist->_id],
+            collect($event->event_parties ?? [])->pluck('party_ref_id')->map(static fn ($id) => (string) $id)->values()->all()
+        );
+
+        $firstOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
+        $agenda->assertStatus(200);
+
+        $itemsByOccurrenceId = collect($agenda->json('items', []))
+            ->keyBy(static fn (array $item): string => (string) ($item['occurrence_id'] ?? ''));
+
+        $firstItem = $itemsByOccurrenceId->get((string) $firstOccurrence->_id);
+        $secondItem = $itemsByOccurrenceId->get((string) $secondOccurrence->_id);
+
+        $this->assertNotNull($firstItem);
+        $this->assertNotNull($secondItem);
+
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            collect($firstItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $guestArtist->_id],
+            collect($secondItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $this->assertFalse(
+            collect($firstItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->contains((string) $guestArtist->_id)
+        );
+        $this->assertFalse(
+            collect($secondItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->contains((string) $this->band->_id)
+        );
     }
 
     public function test_event_create_requires_programming_title_when_more_than_one_profile_is_linked(): void
@@ -4076,6 +4289,14 @@ class EventCrudControllerTest extends TestCaseTenant
                 'publish_at' => $now->copy()->subMinute()->toISOString(),
             ],
         ], $overrides);
+    }
+
+    private function htmlParagraphOfSanitizedByteLength(int $targetBytes): string
+    {
+        $wrapperBytes = strlen('<p></p>');
+        $bodyBytes = max(0, $targetBytes - $wrapperBytes);
+
+        return '<p>'.str_repeat('a', $bodyBytes).'</p>';
     }
 
     private function createEvent(array $overrides = []): Event

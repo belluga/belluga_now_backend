@@ -6,7 +6,6 @@ namespace App\Integration\DiscoveryFilters;
 
 use App\Integration\DiscoveryFilters\Concerns\FormatsDiscoveryFilterTypeOptions;
 use App\Models\Tenants\EventType;
-use App\Models\Tenants\Taxonomy;
 use Belluga\DiscoveryFilters\Contracts\DiscoveryFilterEntityProviderContract;
 
 final class EventDiscoveryFilterEntityProvider implements DiscoveryFilterEntityProviderContract
@@ -20,8 +19,6 @@ final class EventDiscoveryFilterEntityProvider implements DiscoveryFilterEntityP
 
     public function types(): array
     {
-        $allowedTaxonomies = $this->eventTaxonomySlugs();
-
         return EventType::query()
             ->orderBy('name')
             ->get()
@@ -31,7 +28,7 @@ final class EventDiscoveryFilterEntityProvider implements DiscoveryFilterEntityP
                 ...($this->normalizeVisual($type->poi_visual ?? $type->visual ?? null) !== null
                     ? ['visual' => $this->normalizeVisual($type->poi_visual ?? $type->visual ?? null)]
                     : []),
-                'allowed_taxonomies' => $allowedTaxonomies,
+                'allowed_taxonomies' => $this->normalizeStringList($type->allowed_taxonomies ?? []),
             ])
             ->filter(static fn (array $item): bool => trim($item['value']) !== '' && trim($item['label']) !== '')
             ->values()
@@ -40,20 +37,18 @@ final class EventDiscoveryFilterEntityProvider implements DiscoveryFilterEntityP
 
     public function taxonomiesForTypes(array $typeValues): array
     {
-        return $this->taxonomyOptions($this->eventTaxonomySlugs());
-    }
+        $selected = array_flip($this->normalizeStringList($typeValues));
+        $allowed = [];
 
-    /**
-     * @return array<int, string>
-     */
-    private function eventTaxonomySlugs(): array
-    {
-        return Taxonomy::query()
-            ->where('applies_to', 'event')
-            ->pluck('slug')
-            ->map(static fn ($slug): string => strtolower(trim((string) $slug)))
-            ->filter(static fn (string $slug): bool => $slug !== '')
-            ->values()
-            ->all();
+        foreach ($this->types() as $type) {
+            if ($selected !== [] && ! isset($selected[$type['value']])) {
+                continue;
+            }
+            foreach ($type['allowed_taxonomies'] ?? [] as $taxonomy) {
+                $allowed[] = (string) $taxonomy;
+            }
+        }
+
+        return $this->taxonomyOptions($this->normalizeStringList($allowed));
     }
 }

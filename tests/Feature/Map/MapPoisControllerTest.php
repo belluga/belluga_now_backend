@@ -1050,15 +1050,26 @@ class MapPoisControllerTest extends TestCaseTenant
             'name' => 'Gênero musical',
             'applies_to' => ['event', 'account_profile', 'static_asset'],
         ]);
+        Taxonomy::create([
+            'slug' => 'audience',
+            'name' => 'Público',
+            'applies_to' => 'event',
+        ]);
         EventType::create([
             'name' => 'Catalog Show',
             'slug' => 'catalog_show',
+            'allowed_taxonomies' => ['music_genre'],
             'visual' => [
                 'mode' => 'icon',
                 'icon' => 'music_note',
                 'color' => '#D71920',
                 'icon_color' => '#FFFFFF',
             ],
+        ]);
+        EventType::create([
+            'name' => 'Catalog Talk',
+            'slug' => 'catalog_talk',
+            'allowed_taxonomies' => ['audience'],
         ]);
         TenantProfileType::create([
             'type' => 'performer_test',
@@ -1084,6 +1095,16 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertContains('performer_test', collect($types['account_profile'])->pluck('value')->all());
         $this->assertContains('beach_spot_test', collect($types['static_asset'])->pluck('value')->all());
 
+        $eventShowType = collect($types['event'])->firstWhere('value', 'catalog_show');
+        $this->assertSame(['music_genre'], $eventShowType['allowed_taxonomies'] ?? []);
+
+        $eventTaxonomies = $registry
+            ->provider('event')
+            ?->taxonomiesForTypes(['catalog_show']);
+
+        $this->assertSame(['music_genre'], collect($eventTaxonomies)->pluck('slug')->all());
+        $this->assertNotContains('audience', collect($eventTaxonomies)->pluck('slug')->all());
+
         $profileTaxonomies = $registry
             ->provider('account_profile')
             ?->taxonomiesForTypes(['performer_test']);
@@ -1107,6 +1128,7 @@ class MapPoisControllerTest extends TestCaseTenant
         EventType::create([
             'name' => 'Public Catalog Show',
             'slug' => 'public_catalog_show',
+            'allowed_taxonomies' => ['music_genre_public'],
         ]);
         TenantSettings::query()->firstOrFail()->update([
             'discovery_filters' => [
@@ -1144,9 +1166,11 @@ class MapPoisControllerTest extends TestCaseTenant
             'public_catalog_show',
             collect($response->json('type_options.event') ?? [])->pluck('value')->all()
         );
+        $publicCatalogType = collect($response->json('type_options.event') ?? [])
+            ->firstWhere('value', 'public_catalog_show');
         $this->assertContains(
             'music_genre_public',
-            collect($response->json('type_options.event.0.allowed_taxonomies') ?? [])->all()
+            collect(data_get($publicCatalogType, 'allowed_taxonomies') ?? [])->all()
         );
     }
 

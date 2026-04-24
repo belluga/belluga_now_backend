@@ -15,6 +15,7 @@ use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Support\EventContentHtmlSanitizer;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -119,6 +120,11 @@ class EventManagementService
             $normalized['content'] = EventContentHtmlSanitizer::sanitize(
                 $payload['content'] ?? null
             );
+            if (strlen($normalized['content']) > InputConstraints::RICH_TEXT_MAX_BYTES) {
+                throw ValidationException::withMessages([
+                    'content' => ['The content may not be greater than 100 KB after sanitization.'],
+                ]);
+            }
         }
 
         if (array_key_exists('type', $payload)) {
@@ -167,11 +173,7 @@ class EventManagementService
             $normalized['created_by'] = $this->resolveCreatedByPrincipal($payload);
         }
 
-        $eventParties = $this->resolveEventParties($payload, $existing);
-        $normalized['event_parties'] = $this->mergeEventPartiesByKey(
-            $eventParties,
-            $this->resolveProgrammingEventParties($schedule['occurrences'])
-        );
+        $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
 
         return [
             'payload' => $normalized,
@@ -671,70 +673,6 @@ class EventManagementService
         }
 
         return $this->normalizeArray($resolved['venue'] ?? []);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $occurrences
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveProgrammingEventParties(array $occurrences): array
-    {
-        $profileIds = [];
-        foreach ($occurrences as $occurrence) {
-            foreach ($this->normalizeArray($occurrence['programming_items'] ?? []) as $item) {
-                $programmingItem = $this->normalizeArray($item);
-                foreach ($this->normalizeArray($programmingItem['account_profile_ids'] ?? []) as $profileId) {
-                    $normalizedProfileId = trim((string) $profileId);
-                    if ($normalizedProfileId !== '' && ! in_array($normalizedProfileId, $profileIds, true)) {
-                        $profileIds[] = $normalizedProfileId;
-                    }
-                }
-            }
-        }
-
-        if ($profileIds === []) {
-            return [];
-        }
-
-        return $this->resolveEventParties([
-            'event_parties' => array_map(
-                static fn (string $profileId): array => [
-                    'party_ref_id' => $profileId,
-                ],
-                $profileIds
-            ),
-        ], null);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $base
-     * @param  array<int, array<string, mixed>>  $additional
-     * @return array<int, array<string, mixed>>
-     */
-    private function mergeEventPartiesByKey(array $base, array $additional): array
-    {
-        $merged = [];
-        $seen = [];
-
-        foreach ([$base, $additional] as $rows) {
-            foreach ($rows as $row) {
-                $partyType = trim((string) ($row['party_type'] ?? ''));
-                $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
-                if ($partyType === '' || $partyRefId === '') {
-                    continue;
-                }
-
-                $key = $this->eventPartyKey($partyType, $partyRefId);
-                if (isset($seen[$key])) {
-                    continue;
-                }
-
-                $merged[] = $row;
-                $seen[$key] = true;
-            }
-        }
-
-        return $merged;
     }
 
     /**

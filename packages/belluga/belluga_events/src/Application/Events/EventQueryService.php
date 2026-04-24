@@ -411,6 +411,17 @@ class EventQueryService
         $payload['event_id'] = (string) $event->_id;
         $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
         $payload['occurrences'] = $this->resolveEventOccurrences($event, $selectedOccurrenceId);
+        $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
+            $this->resolveLinkedAccountProfiles(
+                $this->normalizeEventParties($event->event_parties ?? [])
+            ),
+            $payload['occurrences']
+        );
+        if (array_key_exists('artists', $payload)) {
+            $payload['artists'] = $this->resolveArtistsReadProjectionFromLinkedProfiles(
+                $payload['linked_account_profiles']
+            );
+        }
 
         return $payload;
     }
@@ -469,7 +480,7 @@ class EventQueryService
         $resolvedOccurrences = $this->resolveEventOccurrences($event);
         $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'));
         $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'));
-        if (count($resolvedOccurrences) > 1) {
+        if (count($resolvedOccurrences) > 0) {
             $occurrences = $resolvedOccurrences;
             $dateTimeStart ??= $resolvedOccurrences[0]['date_time_start'] ?? null;
             $dateTimeEnd ??= $resolvedOccurrences[0]['date_time_end'] ?? null;
@@ -1779,6 +1790,7 @@ class EventQueryService
         return $items;
     }
 
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1853,6 +1865,92 @@ class EventQueryService
         }
 
         return $payload;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventLinkedProfiles
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveDetailLinkedAccountProfiles(array $eventLinkedProfiles, array $occurrences): array
+    {
+        $profiles = [];
+        $seenIds = [];
+
+        $push = function (mixed $profile) use (&$profiles, &$seenIds): void {
+            $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
+            if ($normalized === null) {
+                return;
+            }
+
+            $id = trim((string) ($this->scalarString($normalized['id'] ?? null) ?? ''));
+            $displayName = trim((string) ($this->scalarString($normalized['display_name'] ?? null) ?? ''));
+            $profileType = trim((string) ($this->scalarString($normalized['profile_type'] ?? null) ?? ''));
+            if ($id === '' || $displayName === '' || $profileType === '' || isset($seenIds[$id])) {
+                return;
+            }
+
+            $profiles[] = [
+                'id' => $id,
+                'display_name' => $displayName,
+                'slug' => $this->scalarString($normalized['slug'] ?? null),
+                'profile_type' => $profileType,
+                'party_type' => $this->scalarString($normalized['party_type'] ?? null),
+                'avatar_url' => $this->absoluteUrlString($normalized['avatar_url'] ?? null),
+                'cover_url' => $this->absoluteUrlString($normalized['cover_url'] ?? null),
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($normalized['taxonomy_terms'] ?? []),
+            ];
+            $seenIds[$id] = true;
+        };
+
+        foreach ($this->normalizeLinkedAccountProfileSummaries($eventLinkedProfiles) as $profile) {
+            $push($profile);
+        }
+
+        foreach ($occurrences as $occurrence) {
+            foreach ($this->normalizeLinkedAccountProfileSummaries($occurrence['own_linked_account_profiles'] ?? []) as $profile) {
+                $push($profile);
+            }
+
+            foreach ($this->normalizeProgrammingItems($occurrence['programming_items'] ?? []) as $item) {
+                foreach ($this->normalizeLinkedAccountProfileSummaries($item['linked_account_profiles'] ?? []) as $profile) {
+                    $push($profile);
+                }
+            }
+        }
+
+        return $profiles;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveArtistsReadProjectionFromLinkedProfiles(array $linkedProfiles): array
+    {
+        return array_values(array_map(function (array $profile): array {
+            return [
+                'id' => $this->scalarString($profile['id'] ?? null) ?? '',
+                'display_name' => $this->scalarString($profile['display_name'] ?? null) ?? '',
+                'slug' => $this->scalarString($profile['slug'] ?? null),
+                'profile_type' => $this->scalarString($profile['profile_type'] ?? null) ?? '',
+                'avatar_url' => $this->absoluteUrlString($profile['avatar_url'] ?? null),
+                'cover_url' => $this->absoluteUrlString($profile['cover_url'] ?? null),
+                'highlight' => false,
+                'genres' => [],
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($profile['taxonomy_terms'] ?? []),
+            ];
+        }, array_values(array_filter($this->normalizeLinkedAccountProfileSummaries($linkedProfiles), function (array $profile): bool {
+            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            $displayName = trim((string) ($this->scalarString($profile['display_name'] ?? null) ?? ''));
+            $profileType = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
+            $partyType = trim((string) ($this->scalarString($profile['party_type'] ?? null) ?? ''));
+
+            return $id !== ''
+                && $displayName !== ''
+                && $profileType !== 'venue'
+                && $partyType !== 'venue';
+        }))));
     }
 
     /**

@@ -661,6 +661,53 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $this->assertNotContains($otherId, $containsIds);
     }
 
+    public function test_static_asset_rich_text_limit_is_100kb_and_sanitized_per_field(): void
+    {
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+
+        StaticProfileType::create([
+            'type' => 'content_page',
+            'label' => 'Content Page',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'has_bio' => true,
+                'has_content' => true,
+            ],
+        ]);
+
+        $exact = $this->htmlParagraphOfSanitizedByteLength(102400);
+        $overLimit = $this->htmlParagraphOfSanitizedByteLength(102401);
+
+        $accepted = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'content_page',
+                'display_name' => 'Página longa',
+                'bio' => '<p><strong>Bio</strong> <u>sem underline</u></p>',
+                'content' => $exact,
+            ],
+            $this->getHeaders()
+        );
+
+        $accepted->assertStatus(201);
+        $accepted->assertJsonPath('data.bio', '<p><strong>Bio</strong> sem underline</p>');
+        $this->assertSame(102400, strlen((string) $accepted->json('data.content')));
+
+        $rejected = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'content_page',
+                'display_name' => 'Página longa demais',
+                'content' => $overLimit,
+            ],
+            $this->getHeaders()
+        );
+
+        $rejected->assertStatus(422);
+        $rejected->assertJsonValidationErrors(['content']);
+    }
+
     private function getMultipartHeaders(): array
     {
         $headers = $this->getHeaders();
@@ -685,6 +732,14 @@ class StaticAssetsControllerTest extends TestCaseTenant
         }
 
         $this->fail("Expected {$kind} media file for static asset [{$assetId}] to exist.");
+    }
+
+    private function htmlParagraphOfSanitizedByteLength(int $targetBytes): string
+    {
+        $wrapperBytes = strlen('<p></p>');
+        $bodyBytes = max(0, $targetBytes - $wrapperBytes);
+
+        return '<p>'.str_repeat('a', $bodyBytes).'</p>';
     }
 
     private function initializeSystem(): void

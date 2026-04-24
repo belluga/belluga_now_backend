@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
+use App\Application\AccountProfiles\AccountProfileRichTextSanitizer;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\StaticAsset;
@@ -26,6 +27,7 @@ class StaticAssetManagementService
      */
     public function create(array $payload): StaticAsset
     {
+        $payload = AccountProfileRichTextSanitizer::sanitizePayload($payload);
         $profileType = (string) $payload['profile_type'];
 
         $definition = $this->registryService->typeDefinition($profileType);
@@ -80,6 +82,7 @@ class StaticAssetManagementService
      */
     public function update(StaticAsset $asset, array $attributes): StaticAsset
     {
+        $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
         $profileType = $asset->profile_type;
         if (array_key_exists('profile_type', $attributes)) {
             $profileType = (string) $attributes['profile_type'];

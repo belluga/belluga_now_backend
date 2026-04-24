@@ -30,6 +30,8 @@ final class InputConstraints
 
     public const METADATA_MAX_ITEMS = 20;
 
+    public const TAXONOMY_BATCH_MAX_ITEMS = 100;
+
     public const METADATA_MAX_KB = 8;
 
     public const IMAGE_MAX_KB = 5120;
