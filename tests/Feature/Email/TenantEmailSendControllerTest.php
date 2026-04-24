@@ -68,7 +68,7 @@ class TenantEmailSendControllerTest extends TestCaseTenant
             'resend_email' => [
                 'token' => 're_live_token',
                 'from' => 'Belluga <noreply@belluga.space>',
-                'to' => ['admin@bellugasolutions.com.br'],
+                'to' => ['admin@example.com'],
                 'cc' => ['ops@bellugasolutions.com.br'],
                 'bcc' => [],
                 'reply_to' => ['reply@bellugasolutions.com.br'],
@@ -106,7 +106,7 @@ class TenantEmailSendControllerTest extends TestCaseTenant
 
             return $request->hasHeader('Authorization', 'Bearer re_live_token')
                 && ($request['from'] ?? null) === 'Belluga <noreply@belluga.space>'
-                && ($request['to'][0] ?? null) === 'admin@bellugasolutions.com.br'
+                && ($request['to'][0] ?? null) === 'admin@example.com'
                 && ($request['cc'][0] ?? null) === 'ops@bellugasolutions.com.br'
                 && ($request['reply_to'][0] ?? null) === 'reply@bellugasolutions.com.br'
                 && str_contains((string) ($request['subject'] ?? ''), 'Novo cadastro de beta tester')
@@ -123,7 +123,7 @@ class TenantEmailSendControllerTest extends TestCaseTenant
             'resend_email' => [
                 'token' => 're_live_token',
                 'from' => 'Belluga <noreply@belluga.space>',
-                'to' => ['admin@bellugasolutions.com.br'],
+                'to' => ['admin@example.com'],
                 'cc' => [],
                 'bcc' => [],
                 'reply_to' => [],

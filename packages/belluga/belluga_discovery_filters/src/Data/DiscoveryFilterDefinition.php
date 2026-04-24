@@ -79,7 +79,7 @@ final readonly class DiscoveryFilterDefinition
     {
         $normalized = self::normalizeString($value);
 
-        return $normalized === 'multi' ? 'multi' : 'single';
+        return in_array($normalized, ['multi', 'multiple'], true) ? 'multi' : 'single';
     }
 
     private static function normalizeString(mixed $value): string

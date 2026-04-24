@@ -62,7 +62,11 @@ class TaxonomySnapshotBackfillService
         $query = $modelClass::query();
         $this->applyRootTaxonomyQuery($query, $taxonomyType, $termValue);
 
-        $query->get()->each(function (Model $model) use (&$summary, $taxonomyType, $termValue, $refreshFlatTerms): void {
+        foreach ($query->cursor() as $model) {
+            if (! $model instanceof Model) {
+                continue;
+            }
+
             $summary['scanned']++;
 
             try {
@@ -70,7 +74,7 @@ class TaxonomySnapshotBackfillService
                 if (! $this->termsContainScope($terms, $taxonomyType, $termValue)) {
                     $summary['skipped']++;
 
-                    return;
+                    continue;
                 }
 
                 $resolved = $this->taxonomyTermSummaryResolver->resolve($terms);
@@ -88,7 +92,7 @@ class TaxonomySnapshotBackfillService
             } catch (\Throwable) {
                 $summary['failed']++;
             }
-        });
+        }
 
         return $summary;
     }
@@ -103,7 +107,11 @@ class TaxonomySnapshotBackfillService
         $query = $modelClass::query();
         $this->applyEventLikeTaxonomyQuery($query, $taxonomyType, $termValue);
 
-        $query->get()->each(function (Model $model) use (&$summary, $taxonomyType, $termValue): void {
+        foreach ($query->cursor() as $model) {
+            if (! $model instanceof Model) {
+                continue;
+            }
+
             $summary['scanned']++;
 
             try {
@@ -151,7 +159,7 @@ class TaxonomySnapshotBackfillService
             } catch (\Throwable) {
                 $summary['failed']++;
             }
-        });
+        }
 
         return $summary;
     }

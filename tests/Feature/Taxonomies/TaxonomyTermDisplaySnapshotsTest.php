@@ -195,6 +195,15 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         $slugUpdate->assertStatus(422);
     }
 
+    public function test_taxonomy_snapshot_backfill_uses_cursor_iteration_not_full_collection_materialization(): void
+    {
+        $source = file_get_contents(app_path('Application/Taxonomies/TaxonomySnapshotBackfillService.php'));
+
+        $this->assertIsString($source);
+        $this->assertStringContainsString('->cursor()', $source);
+        $this->assertStringNotContainsString('->get()->each', $source);
+    }
+
     private function createTaxonomyAndTerm(bool $asTuple = false): Taxonomy|array
     {
         $taxonomy = Taxonomy::query()->create([

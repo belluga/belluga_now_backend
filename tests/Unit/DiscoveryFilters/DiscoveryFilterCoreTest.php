@@ -86,6 +86,20 @@ final class DiscoveryFilterCoreTest extends TestCase
         $this->assertSame(['music_genre' => ['rock', 'jazz']], $definition->taxonomyValuesByGroup);
     }
 
+    public function test_definition_accepts_multiple_alias_and_emits_canonical_multi_selection_mode(): void
+    {
+        $definition = DiscoveryFilterDefinition::fromArray([
+            'key' => 'events',
+            'surface' => 'public_map.primary',
+            'target' => 'map_poi',
+            'label' => 'Eventos',
+            'primary_selection_mode' => 'multiple',
+        ]);
+
+        $this->assertSame('multi', $definition->primarySelectionMode);
+        $this->assertSame('multi', $definition->toArray()['primary_selection_mode']);
+    }
+
     public function test_repair_drops_stale_primary_and_taxonomy_selections(): void
     {
         $catalog = [
