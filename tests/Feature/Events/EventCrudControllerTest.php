@@ -116,6 +116,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'description' => 'Tipo de evento: Show',
             'icon' => 'music_note',
             'color' => '#123456',
+            'allowed_taxonomies' => ['event_style'],
         ]);
 
         $this->accountEventsBase = "{$this->base_api_tenant}accounts/{$this->account->slug}/events";
@@ -1433,6 +1434,60 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame('Showcase', data_get($event->taxonomy_terms, '0.name'));
         $this->assertSame('Event Style', data_get($occurrence->taxonomy_terms, '0.taxonomy_name'));
+    }
+
+    public function test_event_create_rejects_taxonomy_not_allowed_by_selected_event_type(): void
+    {
+        $audience = Taxonomy::create([
+            'slug' => 'audience',
+            'name' => 'Audience',
+            'applies_to' => ['event'],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $audience->_id,
+            'slug' => 'kids',
+            'name' => 'Kids',
+        ]);
+
+        $payload = $this->makeEventPayload([
+            'taxonomy_terms' => [
+                ['type' => 'audience', 'value' => 'kids'],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy_terms']);
+    }
+
+    public function test_event_update_rejects_taxonomy_not_allowed_by_existing_event_type(): void
+    {
+        $audience = Taxonomy::create([
+            'slug' => 'audience',
+            'name' => 'Audience',
+            'applies_to' => ['event'],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $audience->_id,
+            'slug' => 'kids',
+            'name' => 'Kids',
+        ]);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+
+        $response = $this->patchJson(
+            "{$this->accountEventsBase}/{$created->json('data.event_id')}",
+            [
+                'taxonomy_terms' => [
+                    ['type' => 'audience', 'value' => 'kids'],
+                ],
+            ],
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy_terms']);
     }
 
     public function test_event_create_rejects_scheduled_without_publish_at(): void

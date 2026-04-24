@@ -135,6 +135,10 @@ class EventManagementService
             $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
             if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
                 $this->taxonomyValidationService->assertTermsAllowedForEvent($taxonomyTerms);
+                $this->assertTaxonomyTermsAllowedByEventType(
+                    $taxonomyTerms,
+                    $normalized['type'] ?? $this->resolveExistingEventTypePayload($existing)
+                );
                 $normalized['taxonomy_terms'] = $this->taxonomySnapshotResolver->resolve($taxonomyTerms);
             } else {
                 $normalized['taxonomy_terms'] = [];
@@ -794,10 +798,88 @@ class EventManagementService
             'visual' => is_array($resolved['visual'] ?? null)
                 ? $resolved['visual']
                 : (is_array($resolved['poi_visual'] ?? null) ? $resolved['poi_visual'] : null),
+            'allowed_taxonomies' => $this->normalizeStringList($resolved['allowed_taxonomies'] ?? []),
             'icon' => $resolved['icon'] ?? null,
             'color' => $resolved['color'] ?? null,
             'icon_color' => $resolved['icon_color'] ?? null,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function resolveExistingEventTypePayload(?Event $existing): ?array
+    {
+        if ($existing === null) {
+            return null;
+        }
+
+        $existingType = $this->normalizeArray($existing->type ?? null);
+        $id = trim((string) ($existingType['id'] ?? ''));
+        if ($id === '') {
+            return $existingType === [] ? null : $existingType;
+        }
+
+        $resolved = $this->eventTypeResolver->resolveById($id);
+
+        return is_array($resolved) && $resolved !== [] ? $resolved : $existingType;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $terms
+     * @param  array<string, mixed>|null  $eventType
+     */
+    private function assertTaxonomyTermsAllowedByEventType(array $terms, ?array $eventType): void
+    {
+        $allowedTaxonomies = $this->normalizeStringList($eventType['allowed_taxonomies'] ?? []);
+        $types = $this->extractTaxonomyTypes($terms);
+
+        $invalid = array_values(array_diff($types, $allowedTaxonomies));
+        if ($invalid === []) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'taxonomy_terms' => ['Some taxonomy types are not allowed for this event type.'],
+        ]);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $terms
+     * @return array<int, string>
+     */
+    private function extractTaxonomyTypes(array $terms): array
+    {
+        $types = [];
+        foreach ($terms as $term) {
+            if (! is_array($term)) {
+                continue;
+            }
+
+            $type = trim((string) ($term['type'] ?? ''));
+            if ($type === '') {
+                continue;
+            }
+
+            $types[] = $type;
+        }
+
+        return array_values(array_unique($types));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            static fn (mixed $item): string => strtolower(trim((string) $item)),
+            $value
+        ))));
     }
 
     /**

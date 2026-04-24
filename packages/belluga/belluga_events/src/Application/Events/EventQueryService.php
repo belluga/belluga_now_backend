@@ -15,6 +15,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Log;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
@@ -75,6 +76,20 @@ class EventQueryService
         ?string $accountContextId = null
     ): LengthAwarePaginator {
         $resolvedPerPage = max(1, min($perPage, self::MAX_MANAGEMENT_PAGE_SIZE));
+        $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
+        $specificDate = $this->extractManagementSpecificDate($queryParams);
+
+        if (! $includeArchived && ($temporalBuckets !== [] || $specificDate !== null)) {
+            return $this->paginateManagementFromOccurrences(
+                $queryParams,
+                $temporalBuckets,
+                $specificDate,
+                $resolvedPerPage,
+                $isAdminContext,
+                $accountContextId
+            );
+        }
+
         $query = Event::query();
 
         if ($includeArchived && $isAdminContext) {
@@ -89,28 +104,12 @@ class EventQueryService
             $query->where('publication.status', $queryParams['status']);
         }
 
-        $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
-        $specificDate = $this->extractManagementSpecificDate($queryParams);
-        if (! $includeArchived && ($temporalBuckets !== [] || $specificDate !== null)) {
-            $matchingOccurrenceEventIds = $this->resolveManagementOccurrenceEventIds(
-                $temporalBuckets,
-                $specificDate,
-                $isAdminContext
-            );
+        if ($temporalBuckets !== []) {
+            $this->applyManagementTemporalFilter($query, $temporalBuckets);
+        }
 
-            if ($matchingOccurrenceEventIds === []) {
-                $query->where('_id', '__no_match__');
-            } else {
-                $query->whereIn('_id', $this->buildEventIdCandidates($matchingOccurrenceEventIds));
-            }
-        } else {
-            if ($temporalBuckets !== []) {
-                $this->applyManagementTemporalFilter($query, $temporalBuckets);
-            }
-
-            if ($specificDate !== null) {
-                $this->applyManagementSpecificDateFilter($query, $specificDate);
-            }
+        if ($specificDate !== null) {
+            $this->applyManagementSpecificDateFilter($query, $specificDate);
         }
 
         $venueProfileId = $this->extractManagementProfileFilterId($queryParams, 'venue_profile_id');
@@ -127,11 +126,25 @@ class EventQueryService
             $this->applyPublicPublicationFilter($query);
         }
 
-        return $query
+        $paginator = $query
             ->orderBy('date_time_start', $isAdminContext ? 'asc' : 'desc')
             ->orderBy('_id', 'desc')
-            ->paginate($resolvedPerPage)
-            ->through(fn (Event $event): array => $this->formatManagementEvent($event));
+            ->paginate($resolvedPerPage);
+
+        $events = $paginator->getCollection();
+        $occurrencesByEventId = $this->loadOccurrencesByEventIds(
+            $events
+                ->map(static fn (Event $event): string => isset($event->_id) ? (string) $event->_id : '')
+                ->filter()
+                ->values()
+                ->all()
+        );
+
+        $paginator->setCollection(
+            $events->map(fn (Event $event): array => $this->formatManagementEvent($event, $occurrencesByEventId))
+        );
+
+        return $paginator;
     }
 
     /**
@@ -250,42 +263,258 @@ class EventQueryService
     }
 
     /**
+     * @param  array<string, mixed>  $queryParams
      * @param  array<int, string>  $temporalBuckets
-     * @return array<int, string>
      */
-    private function resolveManagementOccurrenceEventIds(
+    private function paginateManagementFromOccurrences(
+        array $queryParams,
         array $temporalBuckets,
         ?Carbon $specificDate,
-        bool $isAdminContext
-    ): array {
-        $query = EventOccurrence::query();
+        int $perPage,
+        bool $isAdminContext,
+        ?string $accountContextId
+    ): LengthAwarePaginator {
+        $page = max(1, (int) Arr::get($queryParams, 'page', 1));
+        $skip = ($page - 1) * $perPage;
 
-        if (! $isAdminContext) {
-            $query->where('is_event_published', true);
+        $profileIdsForAccount = null;
+        if ($accountContextId) {
+            $profileIdsForAccount = $this->resolveAccountProfileIds($accountContextId);
+            if ($profileIdsForAccount === []) {
+                return $this->emptyManagementPaginator($perPage, $page);
+            }
         }
 
-        if ($temporalBuckets !== []) {
-            $this->applyManagementOccurrenceTemporalFilter($query, $temporalBuckets);
+        $pipeline = $this->buildManagementOccurrenceEventPipeline(
+            $queryParams,
+            $temporalBuckets,
+            $specificDate,
+            $isAdminContext,
+            $profileIdsForAccount
+        );
+
+        $aggregatePipeline = [
+            ...$pipeline,
+            [
+                '$facet' => [
+                    'metadata' => [
+                        ['$count' => 'total'],
+                    ],
+                    'data' => [
+                        ['$skip' => $skip],
+                        ['$limit' => $perPage],
+                        ['$project' => ['event_id' => '$_id', 'first_starts_at' => 1]],
+                    ],
+                ],
+            ],
+        ];
+
+        $facetRows = $this->runManagementOccurrenceAggregate(
+            $aggregatePipeline,
+            'management_occurrence_page_with_count'
+        );
+        $facet = $facetRows[0] ?? [];
+        $metadata = is_array($facet['metadata'] ?? null) ? $facet['metadata'] : [];
+        $total = (int) ($metadata[0]['total'] ?? 0);
+        if ($total === 0) {
+            return $this->emptyManagementPaginator($perPage, $page);
+        }
+
+        $rows = is_array($facet['data'] ?? null) ? $facet['data'] : [];
+
+        $eventIds = collect($rows)
+            ->map(static fn (mixed $row): string => trim((string) ($row['event_id'] ?? '')))
+            ->filter(static fn (string $eventId): bool => $eventId !== '')
+            ->values()
+            ->all();
+
+        if ($eventIds === []) {
+            return $this->emptyManagementPaginator($perPage, $page, $total);
+        }
+
+        $eventsById = Event::query()
+            ->whereIn('_id', $this->buildEventIdCandidates($eventIds))
+            ->get()
+            ->keyBy(static fn (Event $event): string => isset($event->_id) ? (string) $event->_id : '');
+
+        $occurrencesByEventId = $this->loadOccurrencesByEventIds($eventIds);
+        $items = collect($eventIds)
+            ->map(fn (string $eventId): ?array => $eventsById->has($eventId)
+                ? $this->formatManagementEvent($eventsById->get($eventId), $occurrencesByEventId)
+                : null)
+            ->filter()
+            ->values();
+
+        return new LengthAwarePaginator(
+            $items,
+            $total,
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @param  array<int, string>  $temporalBuckets
+     * @param  array<int, string>|null  $profileIdsForAccount
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildManagementOccurrenceEventPipeline(
+        array $queryParams,
+        array $temporalBuckets,
+        ?Carbon $specificDate,
+        bool $isAdminContext,
+        ?array $profileIdsForAccount
+    ): array {
+        $occurrenceMatch = ['deleted_at' => null];
+        if (! $isAdminContext) {
+            $occurrenceMatch['is_event_published'] = true;
+        }
+
+        $exprClauses = $this->managementOccurrenceTemporalExprClauses($temporalBuckets);
+        if ($exprClauses !== []) {
+            $occurrenceMatch['$expr'] = count($exprClauses) === 1
+                ? $exprClauses[0]
+                : ['$or' => $exprClauses];
         }
 
         if ($specificDate !== null) {
-            $this->applyManagementOccurrenceSpecificDateFilter($query, $specificDate);
+            $occurrenceMatch['starts_at'] = [
+                '$gte' => new UTCDateTime($specificDate->copy()->startOfDay()),
+                '$lt' => new UTCDateTime($specificDate->copy()->addDay()->startOfDay()),
+            ];
         }
 
-        return $query
-            ->orderBy('starts_at')
-            ->pluck('event_id')
-            ->map(static fn (mixed $value): string => trim((string) $value))
-            ->filter(static fn (string $value): bool => $value !== '')
-            ->unique()
-            ->values()
-            ->all();
+        $eventMatch = $this->buildManagementOccurrenceEventMatch($queryParams, $isAdminContext, $profileIdsForAccount);
+
+        return [
+            ['$match' => $occurrenceMatch],
+            [
+                '$group' => [
+                    '_id' => '$event_id',
+                    'first_starts_at' => ['$min' => '$starts_at'],
+                ],
+            ],
+            ['$sort' => ['first_starts_at' => $isAdminContext ? 1 : -1, '_id' => 1]],
+            [
+                '$addFields' => [
+                    'event_object_id' => [
+                        '$convert' => [
+                            'input' => '$_id',
+                            'to' => 'objectId',
+                            'onError' => null,
+                            'onNull' => null,
+                        ],
+                    ],
+                ],
+            ],
+            [
+                '$lookup' => [
+                    'from' => 'events',
+                    'localField' => 'event_object_id',
+                    'foreignField' => '_id',
+                    'as' => 'event',
+                ],
+            ],
+            ['$unwind' => '$event'],
+            ['$match' => $eventMatch],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @param  array<int, string>|null  $profileIdsForAccount
+     * @return array<string, mixed>
+     */
+    private function buildManagementOccurrenceEventMatch(
+        array $queryParams,
+        bool $isAdminContext,
+        ?array $profileIdsForAccount
+    ): array {
+        $match = [
+            'event.deleted_at' => null,
+            '$and' => [],
+        ];
+
+        if (array_key_exists('status', $queryParams) && $queryParams['status'] !== null) {
+            $match['event.publication.status'] = $queryParams['status'];
+        }
+
+        if ($profileIdsForAccount !== null) {
+            $profileCandidates = $this->buildProfileIdCandidatesFromList($profileIdsForAccount);
+            $match['$and'][] = [
+                '$or' => [
+                    ['event.event_parties.party_ref_id' => ['$in' => $profileIdsForAccount]],
+                    ['event.place_ref.id' => ['$in' => $profileCandidates]],
+                    ['event.place_ref._id' => ['$in' => $profileCandidates]],
+                ],
+            ];
+        }
+
+        $venueProfileId = $this->extractManagementProfileFilterId($queryParams, 'venue_profile_id');
+        if ($venueProfileId !== null) {
+            $profileIds = $this->buildProfileIdCandidates($venueProfileId);
+            $match['$and'][] = [
+                '$or' => [
+                    ['event.place_ref.id' => ['$in' => $profileIds]],
+                    ['event.place_ref._id' => ['$in' => $profileIds]],
+                ],
+            ];
+        }
+
+        $relatedAccountProfileId = $this->extractManagementProfileFilterId($queryParams, 'related_account_profile_id');
+        if ($relatedAccountProfileId !== null) {
+            $profileIds = $this->buildProfileIdCandidates($relatedAccountProfileId);
+            $match['$and'][] = [
+                'event.event_parties' => [
+                    '$elemMatch' => [
+                        'party_type' => ['$ne' => 'venue'],
+                        'party_ref_id' => ['$in' => $profileIds],
+                    ],
+                ],
+            ];
+        }
+
+        if (! $isAdminContext) {
+            $now = new UTCDateTime(Carbon::now());
+            $match['$and'][] = [
+                '$or' => [
+                    ['event.publication.status' => 'published'],
+                    ['event.publication.status' => null],
+                ],
+            ];
+            $match['$and'][] = [
+                '$or' => [
+                    ['event.publication.publish_at' => null],
+                    ['event.publication.publish_at' => ['$lte' => $now]],
+                ],
+            ];
+        }
+
+        if ($match['$and'] === []) {
+            unset($match['$and']);
+        }
+
+        return $match;
+    }
+
+    private function emptyManagementPaginator(int $perPage, int $page, int $total = 0): LengthAwarePaginator
+    {
+        return new LengthAwarePaginator(
+            collect(),
+            $total,
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
     }
 
     /**
      * @param  array<int, string>  $temporalBuckets
+     * @return array<int, array<string, mixed>>
      */
-    private function applyManagementOccurrenceTemporalFilter(mixed $query, array $temporalBuckets): void
+    private function managementOccurrenceTemporalExprClauses(array $temporalBuckets): array
     {
         $now = new UTCDateTime(Carbon::now());
         $effectiveEndExpr = [
@@ -313,24 +542,7 @@ class EventQueryService
             $clauses[] = ['$gt' => ['$starts_at', $now]];
         }
 
-        if ($clauses === []) {
-            return;
-        }
-
-        $query->whereRaw([
-            '$expr' => count($clauses) === 1
-                ? $clauses[0]
-                : ['$or' => $clauses],
-        ]);
-    }
-
-    private function applyManagementOccurrenceSpecificDateFilter(mixed $query, Carbon $specificDate): void
-    {
-        $dayStart = new UTCDateTime($specificDate->copy()->startOfDay());
-        $nextDayStart = new UTCDateTime($specificDate->copy()->addDay()->startOfDay());
-
-        $query->where('starts_at', '>=', $dayStart)
-            ->where('starts_at', '<', $nextDayStart);
+        return $clauses;
     }
 
     private function applyManagementVenueFilter(mixed $query, string $venueProfileId): void
@@ -427,10 +639,15 @@ class EventQueryService
     }
 
     /**
+     * @param  array<string, iterable<int, EventOccurrence>>|null  $occurrencesByEventId
      * @return array<string, mixed>
      */
-    public function formatManagementEvent(Event $event): array
+    public function formatManagementEvent(Event $event, ?array $occurrencesByEventId = null): array
     {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        $preloadedOccurrences = $eventId !== '' && $occurrencesByEventId !== null
+            ? ($occurrencesByEventId[$eventId] ?? [])
+            : null;
         $type = $this->normalizeArray($event->type ?? null);
         $location = $this->normalizeArray($event->location ?? []);
         $placeRef = $this->normalizePlaceRefPayload(
@@ -443,7 +660,7 @@ class EventQueryService
         $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
         $effectiveEventParties = $this->mergeEventParties(
             $eventParties,
-            $this->resolveOccurrenceOwnedEventParties($event)
+            $this->resolveOccurrenceOwnedEventParties($event, $preloadedOccurrences)
         );
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($effectiveEventParties);
         $taxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
@@ -477,7 +694,7 @@ class EventQueryService
             $lat = (float) $coordinates[1];
         }
 
-        $resolvedOccurrences = $this->resolveEventOccurrences($event);
+        $resolvedOccurrences = $this->resolveEventOccurrences($event, null, $preloadedOccurrences);
         $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'));
         $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'));
         if (count($resolvedOccurrences) > 0) {
@@ -1419,6 +1636,65 @@ class EventQueryService
     }
 
     /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildProfileIdCandidatesFromList(array $profileIds): array
+    {
+        $candidates = [];
+        foreach ($profileIds as $profileId) {
+            foreach ($this->buildProfileIdCandidates($profileId) as $candidate) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * @param  array<int, string>  $eventIds
+     * @return array<string, iterable<int, EventOccurrence>>
+     */
+    private function loadOccurrencesByEventIds(array $eventIds): array
+    {
+        $normalized = array_values(array_filter(array_unique(array_map(
+            static fn (mixed $eventId): string => trim((string) $eventId),
+            $eventIds
+        ))));
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        EventBus::dispatch('belluga.events.management_occurrence_bulk_load', [
+            $normalized,
+        ]);
+
+        return EventOccurrence::query()
+            ->whereIn('event_id', $normalized)
+            ->orderBy('starts_at')
+            ->get()
+            ->groupBy(static fn (EventOccurrence $occurrence): string => (string) ($occurrence->event_id ?? ''))
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @return array<int, mixed>
+     */
+    private function runManagementOccurrenceAggregate(array $pipeline, string $purpose): array
+    {
+        EventBus::dispatch('belluga.events.management_occurrence_aggregate', [
+            $purpose,
+            $pipeline,
+        ]);
+
+        return EventOccurrence::raw(
+            fn ($collection) => $collection->aggregate($pipeline)
+        )->all();
+    }
+
+    /**
      * @param  array<int, string>  $eventIds
      * @return array<int, string|ObjectId>
      */
@@ -1517,9 +1793,14 @@ class EventQueryService
     }
 
     /**
+     * @param  iterable<int, EventOccurrence>|null  $preloadedOccurrences
      * @return array<int, array<string, mixed>>
      */
-    private function resolveEventOccurrences(mixed $event, ?string $selectedOccurrenceId = null): array
+    private function resolveEventOccurrences(
+        mixed $event,
+        ?string $selectedOccurrenceId = null,
+        ?iterable $preloadedOccurrences = null
+    ): array
     {
         if (isset($event->event_id) && (string) $event->event_id !== '') {
             $start = $this->formatDate($this->extractRawAttribute($event, 'starts_at'));
@@ -1547,10 +1828,12 @@ class EventQueryService
 
         $eventId = isset($event->_id) ? (string) $event->_id : '';
         if ($eventId !== '') {
-            $documents = EventOccurrence::query()
-                ->where('event_id', $eventId)
-                ->orderBy('starts_at')
-                ->get();
+            $documents = $preloadedOccurrences === null
+                ? EventOccurrence::query()
+                    ->where('event_id', $eventId)
+                    ->orderBy('starts_at')
+                    ->get()
+                : collect($preloadedOccurrences);
 
             if ($documents->isNotEmpty()) {
                 return $documents->map(function (EventOccurrence $occurrence) use ($selectedOccurrenceId): array {
@@ -1954,9 +2237,10 @@ class EventQueryService
     }
 
     /**
+     * @param  iterable<int, EventOccurrence>|null  $preloadedOccurrences
      * @return array<int, array<string, mixed>>
      */
-    private function resolveOccurrenceOwnedEventParties(Event $event): array
+    private function resolveOccurrenceOwnedEventParties(Event $event, ?iterable $preloadedOccurrences = null): array
     {
         $eventId = isset($event->_id) ? (string) $event->_id : '';
         if ($eventId === '') {
@@ -1964,10 +2248,12 @@ class EventQueryService
         }
 
         $rows = [];
-        $documents = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->orderBy('starts_at')
-            ->get();
+        $documents = $preloadedOccurrences === null
+            ? EventOccurrence::query()
+                ->where('event_id', $eventId)
+                ->orderBy('starts_at')
+                ->get()
+            : collect($preloadedOccurrences);
 
         foreach ($documents as $document) {
             foreach ($this->normalizeEventParties($document->own_event_parties ?? []) as $party) {
