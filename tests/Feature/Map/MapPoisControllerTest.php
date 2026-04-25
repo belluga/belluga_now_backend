@@ -8,6 +8,7 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\StaticAssets\StaticAssetManagementService;
+use App\Application\Taxonomies\TaxonomyTermManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -18,6 +19,7 @@ use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\TenantSettings;
+use App\Support\Validation\InputConstraints;
 use Belluga\DiscoveryFilters\Registry\DiscoveryFilterEntityRegistry;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
@@ -1174,7 +1176,7 @@ class MapPoisControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_home_events_catalog_derives_type_filters_and_full_taxonomy_options_without_admin_settings(): void
+    public function test_home_events_catalog_derives_type_filters_and_allowed_taxonomy_options_without_admin_settings(): void
     {
         $musicGenre = Taxonomy::create([
             'slug' => 'music_genre_home',
@@ -1298,7 +1300,170 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertSame([], collect(data_get($homeTalkType, 'allowed_taxonomies') ?? [])->all());
     }
 
-    public function test_discovery_account_profiles_catalog_derives_type_filters_and_full_taxonomy_options_without_admin_settings(): void
+    public function test_home_events_catalog_bounds_taxonomy_terms_per_group(): void
+    {
+        $taxonomy = Taxonomy::create([
+            'slug' => 'large_home_catalog',
+            'name' => 'Catálogo grande',
+            'applies_to' => 'event',
+        ]);
+        for ($index = 0; $index < 205; $index++) {
+            TaxonomyTerm::create([
+                'taxonomy_id' => (string) $taxonomy->_id,
+                'slug' => sprintf('term_%03d', $index),
+                'name' => sprintf('Termo %03d', $index),
+            ]);
+        }
+        EventType::create([
+            'name' => 'Large Home Catalog',
+            'slug' => 'large_home_catalog_event',
+            'allowed_taxonomies' => ['large_home_catalog'],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/home.events");
+
+        $response->assertStatus(200);
+        $terms = $response->json('taxonomy_options.large_home_catalog.terms') ?? [];
+        $this->assertCount(200, $terms);
+        $response->assertJsonPath('taxonomy_options.large_home_catalog.terms_truncated', true);
+        $response->assertJsonPath('taxonomy_options.large_home_catalog.terms_limit', 200);
+    }
+
+    public function test_home_events_catalog_bounds_total_taxonomy_term_budget(): void
+    {
+        $allowedTaxonomies = [];
+        for ($taxonomyIndex = 0; $taxonomyIndex < 6; $taxonomyIndex++) {
+            $taxonomy = Taxonomy::create([
+                'slug' => sprintf('large_home_catalog_%02d', $taxonomyIndex),
+                'name' => sprintf('Catálogo grande %02d', $taxonomyIndex),
+                'applies_to' => 'event',
+            ]);
+            $allowedTaxonomies[] = (string) $taxonomy->slug;
+
+            for ($termIndex = 0; $termIndex < 205; $termIndex++) {
+                TaxonomyTerm::create([
+                    'taxonomy_id' => (string) $taxonomy->_id,
+                    'slug' => sprintf('term_%02d_%03d', $taxonomyIndex, $termIndex),
+                    'name' => sprintf('Termo %02d %03d', $taxonomyIndex, $termIndex),
+                ]);
+            }
+        }
+
+        EventType::create([
+            'name' => 'Large Home Catalog',
+            'slug' => 'large_home_catalog_budget_event',
+            'allowed_taxonomies' => $allowedTaxonomies,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/home.events");
+
+        $response->assertStatus(200);
+        $taxonomyOptions = $response->json('taxonomy_options') ?? [];
+        $totalTerms = collect($taxonomyOptions)
+            ->sum(static fn (array $option): int => count($option['terms'] ?? []));
+
+        $this->assertSame(1000, $totalTerms);
+        $response->assertJsonPath('taxonomy_options.large_home_catalog_05.terms_truncated', true);
+        $response->assertJsonPath('taxonomy_options.large_home_catalog_05.terms_limit', 0);
+        $this->assertSame([], $response->json('taxonomy_options.large_home_catalog_05.terms'));
+    }
+
+    public function test_public_discovery_catalog_terms_use_single_batch_loader(): void
+    {
+        Taxonomy::query()->delete();
+        TaxonomyTerm::query()->delete();
+        EventType::query()->delete();
+
+        $musicTaxonomy = Taxonomy::create([
+            'name' => 'Musica',
+            'slug' => 'music',
+            'applies_to' => ['event'],
+        ]);
+        $foodTaxonomy = Taxonomy::create([
+            'name' => 'Gastronomia',
+            'slug' => 'food',
+            'applies_to' => ['event'],
+        ]);
+
+        EventType::create([
+            'name' => 'Festival',
+            'slug' => 'festival',
+            'allowed_taxonomies' => ['music', 'food'],
+        ]);
+
+        $termsByTaxonomyId = [
+            (string) $musicTaxonomy->_id => [
+                ['id' => 'music-rock', 'slug' => 'rock', 'name' => 'Rock'],
+            ],
+            (string) $foodTaxonomy->_id => [
+                ['id' => 'food-pizza', 'slug' => 'pizza', 'name' => 'Pizza'],
+            ],
+        ];
+        $spy = new class($termsByTaxonomyId) extends TaxonomyTermManagementService
+        {
+            public int $listBatchCalls = 0;
+
+            /** @var array<int, array<int, mixed>> */
+            public array $seenTaxonomyIds = [];
+
+            /**
+             * @param  array<string, array<int, array<string, mixed>>>  $termsByTaxonomyId
+             */
+            public function __construct(private readonly array $termsByTaxonomyId) {}
+
+            public function listBatch(array $taxonomyIds, ?int $termLimit = null, ?int $maxTermLimit = null): array
+            {
+                $this->listBatchCalls++;
+                $this->seenTaxonomyIds[] = array_values($taxonomyIds);
+
+                return array_intersect_key(
+                    $this->termsByTaxonomyId,
+                    array_flip(array_map('strval', $taxonomyIds))
+                );
+            }
+        };
+        $this->app->instance(TaxonomyTermManagementService::class, $spy);
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/home.events");
+
+        $response->assertStatus(200);
+        $this->assertSame(1, $spy->listBatchCalls);
+        $this->assertEqualsCanonicalizing(
+            [(string) $musicTaxonomy->_id, (string) $foodTaxonomy->_id],
+            $spy->seenTaxonomyIds[0] ?? []
+        );
+        $response->assertJsonPath('taxonomy_options.music.terms.0.value', 'rock');
+        $response->assertJsonPath('taxonomy_options.music.terms.0.label', 'Rock');
+        $response->assertJsonPath('taxonomy_options.food.terms.0.value', 'pizza');
+        $response->assertJsonPath('taxonomy_options.food.terms.0.label', 'Pizza');
+    }
+
+    public function test_home_events_catalog_bounds_primary_type_options(): void
+    {
+        EventType::query()->delete();
+
+        for ($index = 0; $index < InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX + 5; $index++) {
+            EventType::create([
+                'name' => sprintf('Bounded Event Type %03d', $index),
+                'slug' => sprintf('bounded_event_type_%03d', $index),
+                'allowed_taxonomies' => [],
+            ]);
+        }
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/home.events");
+
+        $response->assertStatus(200);
+        $this->assertCount(
+            InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX,
+            $response->json('type_options.event') ?? []
+        );
+        $this->assertCount(
+            InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX,
+            $response->json('filters') ?? []
+        );
+    }
+
+    public function test_discovery_account_profiles_catalog_derives_type_filters_and_allowed_taxonomy_options_without_admin_settings(): void
     {
         $visibleTaxonomy = Taxonomy::create([
             'slug' => 'cuisine',
@@ -1385,6 +1550,34 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNull(
             collect($response->json('type_options.account_profile') ?? [])
                 ->firstWhere('value', 'internal_partner')
+        );
+    }
+
+    public function test_discovery_account_profiles_catalog_bounds_primary_type_options(): void
+    {
+        TenantProfileType::query()->delete();
+
+        for ($index = 0; $index < InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX + 5; $index++) {
+            TenantProfileType::create([
+                'type' => sprintf('bounded_profile_type_%03d', $index),
+                'label' => sprintf('Bounded Profile Type %03d', $index),
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                ],
+            ]);
+        }
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/discovery.account_profiles");
+
+        $response->assertStatus(200);
+        $this->assertCount(
+            InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX,
+            $response->json('type_options.account_profile') ?? []
+        );
+        $this->assertCount(
+            InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX,
+            $response->json('filters') ?? []
         );
     }
 

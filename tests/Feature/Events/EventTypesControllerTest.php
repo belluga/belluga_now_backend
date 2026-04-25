@@ -10,6 +10,7 @@ use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
+use App\Support\Validation\InputConstraints;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Application\MapPoiProjectionService;
@@ -186,6 +187,29 @@ class EventTypesControllerTest extends TestCaseTenant
                 'name' => 'Festival',
                 'slug' => 'festival',
                 'allowed_taxonomies' => ['cuisine'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['allowed_taxonomies']);
+    }
+
+    public function test_event_type_create_rejects_unbounded_allowed_taxonomies(): void
+    {
+        $taxonomies = [];
+        for ($index = 0; $index <= InputConstraints::DISCOVERY_FILTER_ALLOWED_TAXONOMIES_MAX; $index++) {
+            $slug = sprintf('event_taxonomy_%02d', $index);
+            $this->createEventTaxonomy($slug);
+            $taxonomies[] = $slug;
+        }
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'allowed_taxonomies' => $taxonomies,
             ],
             $this->getHeaders()
         );

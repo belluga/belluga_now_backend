@@ -35,6 +35,10 @@
         },
         {
             "type": "path",
+            "url": "packages/belluga/belluga_rich_text"
+        },
+        {
+            "type": "path",
             "url": "packages/belluga/belluga_events"
         },
         {
@@ -73,6 +77,7 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/",
+            "Belluga\\RichText\\": "packages/belluga/belluga_rich_text/src/",
             "Belluga\\Events\\": "packages/belluga/belluga_events/src/",
             "Belluga\\Settings\\": "packages/belluga/belluga_settings/src/",
             "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",

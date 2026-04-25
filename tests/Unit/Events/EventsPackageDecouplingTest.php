@@ -25,4 +25,35 @@ class EventsPackageDecouplingTest extends TestCase
             );
         }
     }
+
+    public function test_events_package_sources_do_not_reference_host_app_namespace(): void
+    {
+        $root = base_path('packages/belluga/belluga_events/src');
+        $files = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($files as $file) {
+            if (! $file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $contents = file_get_contents($file->getPathname());
+            $this->assertIsString($contents, "Expected readable package file [{$file->getPathname()}].");
+            $this->assertStringNotContainsString(
+                'App\\',
+                $contents,
+                "Events package source cannot reference host namespace [{$file->getPathname()}]."
+            );
+        }
+    }
+
+    public function test_events_package_uses_neutral_rich_text_sanitizer_contract(): void
+    {
+        $contents = file_get_contents(base_path('packages/belluga/belluga_events/src/Support/EventContentHtmlSanitizer.php'));
+
+        $this->assertIsString($contents);
+        $this->assertStringContainsString('Belluga\\RichText\\SafeRichTextHtmlSanitizer', $contents);
+        $this->assertStringNotContainsString('DOMDocument', $contents);
+    }
 }

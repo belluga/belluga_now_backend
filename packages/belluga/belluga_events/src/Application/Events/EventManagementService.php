@@ -14,6 +14,7 @@ use Belluga\Events\Domain\Events\EventCreated;
 use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\EventContentHtmlSanitizer;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -32,6 +33,7 @@ class EventManagementService
         private readonly EventTypeResolverContract $eventTypeResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
+        private readonly EventAccountContextResolver $eventAccountContextResolver,
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
         private readonly EventAggregateWriteService $eventAggregateWrites,
@@ -178,11 +180,40 @@ class EventManagementService
         }
 
         $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
+        $normalized['account_context_ids'] = $this->eventAccountContextResolver->resolveForAggregate(
+            $this->baseAccountContextIdsForPayload($payload, $existing),
+            $this->normalizeArray($normalized['event_parties'] ?? []),
+            $this->normalizeNullableArray($normalized['place_ref'] ?? ($existing?->place_ref ?? null)),
+            $schedule['occurrences']
+        );
 
         return [
             'payload' => $normalized,
             'schedule' => $schedule,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, string>
+     */
+    private function baseAccountContextIdsForPayload(array $payload, ?Event $existing): array
+    {
+        $accountIds = [];
+
+        $routeAccountContextId = $this->accountContextIdFromPayload($payload);
+        if ($routeAccountContextId !== null) {
+            $accountIds[] = $routeAccountContextId;
+        }
+
+        foreach ($this->normalizeArray($existing?->account_context_ids ?? []) as $accountId) {
+            $normalized = trim((string) $accountId);
+            if ($normalized !== '') {
+                $accountIds[] = $normalized;
+            }
+        }
+
+        return array_values(array_unique($accountIds));
     }
 
     /**
@@ -222,10 +253,9 @@ class EventManagementService
     }
 
     /**
-     * @param  array<string, mixed>  $rootPayload
      * @return array<int, array<string, mixed>>
      */
-    private function normalizeOccurrences(mixed $occurrences, array $rootPayload): array
+    private function normalizeOccurrences(mixed $occurrences, array $payload): array
     {
         if (! is_array($occurrences) || $occurrences === []) {
             throw ValidationException::withMessages([
@@ -276,7 +306,8 @@ class EventManagementService
                 'location_override' => null,
                 'programming_items' => $this->resolveProgrammingItems(
                     $occurrence['programming_items'] ?? [],
-                    "occurrences.{$index}.programming_items"
+                    "occurrences.{$index}.programming_items",
+                    $this->accountContextIdFromPayload($payload)
                 ),
             ];
         }
@@ -524,46 +555,9 @@ class EventManagementService
     }
 
     /**
-     * @param  array<string, mixed>  $occurrence
-     * @param  array<string, mixed>  $rootPayload
-     * @return array{
-     *   location: array<string, mixed>,
-     *   place_ref: array<string, mixed>|null,
-     *   geo_location: array<string, mixed>|null,
-     *   venue: array<string, mixed>
-     * }|null
-     */
-    private function resolveOccurrenceLocationOverride(array $occurrence, array $rootPayload): ?array
-    {
-        if (! array_key_exists('location', $occurrence) && ! array_key_exists('place_ref', $occurrence)) {
-            return null;
-        }
-
-        $payload = [];
-        if (array_key_exists('location', $occurrence)) {
-            $payload['location'] = $occurrence['location'];
-        }
-        if (array_key_exists('place_ref', $occurrence)) {
-            $payload['place_ref'] = $occurrence['place_ref'];
-        }
-        if (array_key_exists('_account_context_id', $rootPayload)) {
-            $payload['_account_context_id'] = $rootPayload['_account_context_id'];
-        }
-
-        $resolved = $this->resolveLocationAndPlacePayload($payload, null);
-
-        return [
-            'location' => $resolved['location'],
-            'place_ref' => $resolved['place_ref'],
-            'geo_location' => $resolved['geo_location'],
-            'venue' => $resolved['venue'],
-        ];
-    }
-
-    /**
      * @return array<int, array<string, mixed>>
      */
-    private function resolveProgrammingItems(mixed $items, string $field): array
+    private function resolveProgrammingItems(mixed $items, string $field, ?string $accountContextId): array
     {
         if ($items === null || $items === []) {
             return [];
@@ -575,7 +569,10 @@ class EventManagementService
             ]);
         }
 
-        $normalized = [];
+        $drafts = [];
+        $allProfileIds = [];
+        $placeRefsById = [];
+        $placeRefFieldsById = [];
 
         foreach ($items as $index => $item) {
             if (! is_array($item)) {
@@ -600,12 +597,6 @@ class EventManagementService
                 $item['place_ref'] ?? null,
                 "{$field}.{$index}.place_ref"
             );
-            $locationProfile = $placeRef === null
-                ? null
-                : $this->resolveProgrammingLocationProfile(
-                    $placeRef,
-                    "{$field}.{$index}.place_ref.id"
-                );
 
             if (count($profileIds) > 1 && $title === '') {
                 throw ValidationException::withMessages([
@@ -613,13 +604,45 @@ class EventManagementService
                 ]);
             }
 
-            $normalized[] = [
+            foreach ($profileIds as $profileId) {
+                $allProfileIds[$profileId] = $profileId;
+            }
+            if ($placeRef !== null) {
+                $placeId = (string) $placeRef['id'];
+                $placeRefsById[$placeId] = $placeRef;
+                $placeRefFieldsById[$placeId] = "{$field}.{$index}.place_ref.id";
+            }
+
+            $drafts[] = [
                 'time' => $time,
                 'title' => $title === '' ? null : $title,
                 'account_profile_ids' => $profileIds,
-                'linked_account_profiles' => $this->resolveProgrammingLinkedProfiles($profileIds),
                 'place_ref' => $placeRef,
-                'location_profile' => $locationProfile,
+            ];
+        }
+
+        $linkedProfilesById = $this->resolveProgrammingLinkedProfileMap(array_values($allProfileIds));
+        $locationProfilesById = $this->resolveProgrammingLocationProfileMap(
+            $placeRefsById,
+            $placeRefFieldsById,
+            $accountContextId
+        );
+
+        $normalized = [];
+        foreach ($drafts as $draft) {
+            $placeId = is_array($draft['place_ref'] ?? null)
+                ? (string) $draft['place_ref']['id']
+                : null;
+
+            $normalized[] = [
+                ...$draft,
+                'linked_account_profiles' => $this->linkedProfilesForIds(
+                    $draft['account_profile_ids'],
+                    $linkedProfilesById
+                ),
+                'location_profile' => $placeId === null
+                    ? null
+                    : ($locationProfilesById[$placeId] ?? null),
             ];
         }
 
@@ -668,15 +691,47 @@ class EventManagementService
      */
     private function resolveProgrammingLocationProfile(array $placeRef, string $field): array
     {
+        $profilesById = $this->resolveProgrammingLocationProfileMap(
+            [(string) $placeRef['id'] => $placeRef],
+            [(string) $placeRef['id'] => $field],
+            null,
+        );
+
+        return $profilesById[(string) $placeRef['id']] ?? [];
+    }
+
+    /**
+     * @param  array<string, array{type: string, id: string}>  $placeRefsById
+     * @param  array<string, string>  $fieldsById
+     * @return array<string, array<string, mixed>>
+     */
+    private function resolveProgrammingLocationProfileMap(array $placeRefsById, array $fieldsById, ?string $accountContextId): array
+    {
+        if ($placeRefsById === []) {
+            return [];
+        }
+
         try {
-            $resolved = $this->eventProfileResolver->resolvePhysicalHostByProfileId((string) $placeRef['id']);
+            $resolved = $this->eventProfileResolver->resolvePhysicalHostsByProfileIds(array_keys($placeRefsById));
         } catch (ValidationException $exception) {
+            $firstField = reset($fieldsById) ?: 'programming_items.place_ref.id';
             throw ValidationException::withMessages([
-                $field => $exception->errors()['place_ref.id'] ?? ['Programming location account profile is invalid.'],
+                $firstField => $exception->errors()['place_ref.id'] ?? ['Programming location account profile is invalid.'],
             ]);
         }
 
-        return $this->normalizeArray($resolved['venue'] ?? []);
+        $profilesById = [];
+        foreach ($placeRefsById as $profileId => $_placeRef) {
+            if ($accountContextId !== null && ! $this->eventProfileResolver->accountOwnsProfile($accountContextId, $profileId)) {
+                $field = $fieldsById[$profileId] ?? 'programming_items.place_ref.id';
+                throw ValidationException::withMessages([
+                    $field => ['Programming location physical host must belong to the target account context.'],
+                ]);
+            }
+            $profilesById[$profileId] = $this->normalizeArray($resolved[$profileId]['venue'] ?? []);
+        }
+
+        return $profilesById;
     }
 
     /**
@@ -717,11 +772,23 @@ class EventManagementService
      */
     private function resolveProgrammingLinkedProfiles(array $profileIds): array
     {
+        return $this->linkedProfilesForIds(
+            $profileIds,
+            $this->resolveProgrammingLinkedProfileMap($profileIds)
+        );
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array<string, mixed>>
+     */
+    private function resolveProgrammingLinkedProfileMap(array $profileIds): array
+    {
         if ($profileIds === []) {
             return [];
         }
 
-        $resolved = $this->eventProfileResolver->resolveEventPartyProfilesByIds($profileIds);
+        $resolved = $this->eventProfileResolver->resolveEventPartyProfilesByIds(array_values(array_unique($profileIds)));
         $profilesById = [];
         foreach ($resolved as $profile) {
             if (! is_array($profile)) {
@@ -733,6 +800,16 @@ class EventManagementService
             }
         }
 
+        return $profilesById;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @param  array<string, array<string, mixed>>  $profilesById
+     * @return array<int, array<string, mixed>>
+     */
+    private function linkedProfilesForIds(array $profileIds, array $profilesById): array
+    {
         $profiles = [];
         foreach ($profileIds as $profileId) {
             $profile = $profilesById[$profileId] ?? null;
@@ -964,9 +1041,7 @@ class EventManagementService
      */
     private function assertVenueBelongsToAccountContext(array $payload, array $resolvedVenue): void
     {
-        $accountContextId = isset($payload['_account_context_id'])
-            ? (string) $payload['_account_context_id']
-            : '';
+        $accountContextId = $this->accountContextIdFromPayload($payload) ?? '';
 
         if ($accountContextId === '') {
             return;
@@ -978,6 +1053,18 @@ class EventManagementService
                 'place_ref.id' => ['Physical host must belong to the target account context.'],
             ]);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function accountContextIdFromPayload(array $payload): ?string
+    {
+        $accountContextId = isset($payload['_account_context_id'])
+            ? trim((string) $payload['_account_context_id'])
+            : '';
+
+        return $accountContextId === '' ? null : $accountContextId;
     }
 
     private function logWriteCompleted(string $operation, Event $event, int $occurrenceCount, float $startedAt): void

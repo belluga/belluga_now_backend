@@ -6,13 +6,16 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\RichText\SafeRichTextHtmlSanitizer;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Validator;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -222,15 +225,28 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $this->assertArrayHasKey('content', $contentErrors);
     }
 
-    public function test_raw_payload_larger_than_limit_is_accepted_when_sanitized_under_limit(): void
+    public function test_raw_payload_larger_than_limit_is_rejected_before_sanitization(): void
     {
-        $profile = $this->createProfile();
         $raw = str_repeat(
             '<img src="https://example.com/banner.png" alt="Banner">',
             3000
         ).'<p>Ok 🎉</p>';
 
-        $response = $this->patchJson(
+        $storeValidator = Validator::make(
+            [
+                'account_id' => (string) $this->account->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Raw Oversized Store '.Str::random(6),
+                'bio' => $raw,
+            ],
+            (new AccountProfileStoreRequest())->rules()
+        );
+
+        $this->assertTrue($storeValidator->fails());
+        $this->assertArrayHasKey('bio', $storeValidator->errors()->toArray());
+
+        $profile = $this->createProfile();
+        $updateResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
             [
                 'bio' => $raw,
@@ -239,9 +255,65 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertOk();
-        $this->assertSame('<p>Ok 🎉</p>', $response->json('data.bio'));
-        $this->assertSame('<p>Ok 🎉</p>', $response->json('data.content'));
+        $updateResponse->assertStatus(422);
+        $this->assertArrayHasKey('bio', (array) $updateResponse->json('errors'));
+        $this->assertArrayHasKey('content', (array) $updateResponse->json('errors'));
+
+        $onboardingResponse = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Raw Oversized Onboarding '.Str::random(6),
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'content' => $raw,
+            ],
+            $this->getHeaders()
+        );
+
+        $onboardingResponse->assertStatus(422);
+        $this->assertArrayHasKey('content', (array) $onboardingResponse->json('errors'));
+    }
+
+    public function test_account_profile_rich_text_sanitizer_uses_neutral_shared_support(): void
+    {
+        $source = (string) file_get_contents(app_path('Application/AccountProfiles/AccountProfileRichTextSanitizer.php'));
+        $wrapper = (string) file_get_contents(app_path('Support/RichText/SafeRichTextHtmlSanitizer.php'));
+
+        $this->assertStringContainsString('SafeRichTextHtmlSanitizer', $source);
+        $this->assertStringNotContainsString('Belluga\\Events\\Support\\EventContentHtmlSanitizer', $source);
+        $this->assertStringContainsString('Belluga\\RichText\\SafeRichTextHtmlSanitizer', $wrapper);
+    }
+
+    public function test_shared_rich_text_sanitizer_unwraps_unsupported_containers_and_removes_dangerous_content(): void
+    {
+        $sanitized = SafeRichTextHtmlSanitizer::sanitize(
+            '<div>Antes <iframe>texto interno</iframe> <u>under</u> after</div>'
+            .'<script>alert(1)</script><style>.x{}</style>'
+        );
+
+        $this->assertSame('<p>Antes texto interno under after</p>', $sanitized);
+        $this->assertStringNotContainsString('<iframe', $sanitized);
+        $this->assertStringNotContainsString('<u>', $sanitized);
+        $this->assertStringNotContainsString('alert', $sanitized);
+        $this->assertStringNotContainsString('<style', $sanitized);
+    }
+
+    public function test_shared_rich_text_sanitizer_matches_cross_stack_fixtures(): void
+    {
+        $fixtures = json_decode(
+            (string) file_get_contents(base_path('tests/Fixtures/shared_rich_text/safe_rich_html_fixtures.json')),
+            true,
+            512,
+            JSON_THROW_ON_ERROR
+        );
+
+        foreach ($fixtures as $fixture) {
+            $this->assertSame(
+                $fixture['expected'],
+                SafeRichTextHtmlSanitizer::sanitize($fixture['input']),
+                (string) $fixture['name']
+            );
+        }
     }
 
     /**

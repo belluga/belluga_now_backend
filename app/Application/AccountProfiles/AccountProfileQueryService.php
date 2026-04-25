@@ -10,16 +10,21 @@ use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 
 class AccountProfileQueryService extends AbstractQueryService
 {
+    private const PUBLIC_PAGE_SIZE_DEFAULT = 15;
+    private const PUBLIC_NEAR_PAGE_SIZE_DEFAULT = 10;
+
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountProfileMediaService $mediaService,
@@ -47,6 +52,8 @@ class AccountProfileQueryService extends AbstractQueryService
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
     {
+        $perPage = $this->normalizePublicPageSize($perPage);
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
         $allowedTypes = $this->favoritableProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
 
@@ -72,10 +79,27 @@ class AccountProfileQueryService extends AbstractQueryService
             $baseQuery,
             $query,
             false,
-            $perPage
+            $perPage,
+            $page
         );
 
         return $this->hydrateOwnershipState($paginator);
+    }
+
+    private function normalizePublicPageSize(int $perPage, int $default = self::PUBLIC_PAGE_SIZE_DEFAULT): int
+    {
+        if ($perPage <= 0) {
+            return $default;
+        }
+
+        return min($perPage, InputConstraints::PUBLIC_PAGE_SIZE_MAX);
+    }
+
+    private function normalizePublicPage(mixed $value): int
+    {
+        $page = max(1, (int) $value);
+
+        return min($page, InputConstraints::PUBLIC_PAGE_MAX);
     }
 
     /**
@@ -87,14 +111,11 @@ class AccountProfileQueryService extends AbstractQueryService
         $allowedTypes = $this->nearEligibleProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $taxonomyFilters = $this->resolvePublicTaxonomyFilters($queryParams);
-        $page = max(1, (int) ($queryParams['page'] ?? 1));
-        $pageSize = (int) ($queryParams['page_size'] ?? 10);
-        if ($pageSize <= 0) {
-            $pageSize = 10;
-        }
-        if ($pageSize > 50) {
-            $pageSize = 50;
-        }
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
+        $pageSize = $this->normalizePublicPageSize(
+            (int) ($queryParams['page_size'] ?? self::PUBLIC_NEAR_PAGE_SIZE_DEFAULT),
+            self::PUBLIC_NEAR_PAGE_SIZE_DEFAULT
+        );
 
         if ($effectiveTypes === []) {
             return [
@@ -145,7 +166,10 @@ class AccountProfileQueryService extends AbstractQueryService
         ];
         $maxDistance = $this->toFloat($queryParams['max_distance_meters'] ?? null);
         if ($maxDistance !== null) {
-            $geoNear['maxDistance'] = $maxDistance;
+            $geoNear['maxDistance'] = min(
+                max(0.0, $maxDistance),
+                (float) InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS
+            );
         }
 
         $skip = ($page - 1) * $pageSize;
@@ -552,6 +576,8 @@ class AccountProfileQueryService extends AbstractQueryService
             ]));
         }
 
+        $this->assertPublicTaxonomyFilterBudget($topLevel);
+
         return $topLevel;
     }
 
@@ -584,7 +610,31 @@ class AccountProfileQueryService extends AbstractQueryService
             $normalized[$type] = array_values(array_unique($values));
         }
 
+        $this->assertPublicTaxonomyFilterBudget($normalized);
+
         return $normalized;
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     */
+    private function assertPublicTaxonomyFilterBudget(array $taxonomyFilters): void
+    {
+        $total = 0;
+        foreach ($taxonomyFilters as $values) {
+            $total += count($values);
+        }
+
+        if ($total <= InputConstraints::DISCOVERY_FILTER_PUBLIC_TAXONOMY_FILTERS_MAX) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'taxonomy' => [sprintf(
+                'The public taxonomy filter may not contain more than %d selected terms.',
+                InputConstraints::DISCOVERY_FILTER_PUBLIC_TAXONOMY_FILTERS_MAX
+            )],
+        ]);
     }
 
     /**
@@ -599,23 +649,19 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $and = [];
         foreach ($taxonomyFilters as $type => $values) {
-            $or = [];
+            $flatKeys = [];
             foreach ($values as $value) {
-                $or[] = [
-                    'taxonomy_terms' => [
-                        '$elemMatch' => [
-                            'type' => $type,
-                            'value' => $value,
-                        ],
-                    ],
-                ];
+                $flatKeys[] = "{$type}:{$value}";
             }
 
-            if ($or === []) {
+            $flatKeys = array_values(array_unique($flatKeys));
+            if ($flatKeys === []) {
                 continue;
             }
 
-            $and[] = count($or) === 1 ? $or[0] : ['$or' => $or];
+            $and[] = [
+                'taxonomy_terms_flat' => ['$in' => $flatKeys],
+            ];
         }
 
         if ($and === []) {

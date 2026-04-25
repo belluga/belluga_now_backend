@@ -200,6 +200,18 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
+    public function test_batch_terms_service_uses_single_aggregate_instead_of_per_taxonomy_queries(): void
+    {
+        $source = $this->readSource('app/Application/Taxonomies/TaxonomyTermManagementService.php');
+
+        $this->assertStringContainsString('TaxonomyTerm::raw', $source);
+        $this->assertStringContainsString("'\$group' =>", $source);
+        $this->assertStringContainsString("'\$topN' =>", $source);
+        $this->assertStringNotContainsString("'\$slice' => ['\$terms'", $source);
+        $this->assertStringNotContainsString("'terms' => ['\$push' => '\$\$ROOT']", $source);
+        $this->assertStringNotContainsString("->where('taxonomy_id', \$taxonomyId)", $source);
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);
@@ -220,5 +232,14 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+    }
+
+    private function readSource(string $relativePath): string
+    {
+        $fullPath = base_path($relativePath);
+        $contents = file_get_contents($fullPath);
+        $this->assertNotFalse($contents, sprintf('Failed to read [%s].', $fullPath));
+
+        return (string) $contents;
     }
 }

@@ -7,6 +7,8 @@ namespace App\Application\Taxonomies;
 use App\Jobs\Taxonomies\RepairTaxonomyTermSnapshotsJob;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Support\Validation\InputConstraints;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -31,7 +33,7 @@ class TaxonomyTermManagementService
      * @param  array<int, mixed>  $taxonomyIds
      * @return array<string, array<int, array<string, mixed>>>
      */
-    public function listBatch(array $taxonomyIds): array
+    public function listBatch(array $taxonomyIds, ?int $termLimit = null, ?int $maxTermLimit = null): array
     {
         $ids = collect($taxonomyIds)
             ->map(fn ($taxonomyId): string => trim((string) $taxonomyId))
@@ -55,18 +57,45 @@ class TaxonomyTermManagementService
             abort(404, 'Taxonomy not found.');
         }
 
-        $termsByTaxonomy = TaxonomyTerm::query()
-            ->whereIn('taxonomy_id', $ids)
-            ->orderBy('taxonomy_id')
-            ->orderBy('slug')
-            ->get()
-            ->groupBy(static fn (TaxonomyTerm $term): string => (string) ($term->taxonomy_id ?? ''));
+        $payload = array_fill_keys($ids, []);
+        $effectiveMax = max(1, $maxTermLimit ?? InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX);
+        $effectiveLimit = max(1, min($termLimit ?? $effectiveMax, $effectiveMax));
 
-        $payload = [];
-        foreach ($ids as $taxonomyId) {
-            $payload[$taxonomyId] = $termsByTaxonomy
-                ->get($taxonomyId, collect())
-                ->map(fn (TaxonomyTerm $term): array => $this->toPayload($term))
+        $rows = TaxonomyTerm::raw(
+            static fn ($collection) => $collection->aggregate([
+                [
+                    '$match' => [
+                        'taxonomy_id' => ['$in' => $ids],
+                    ],
+                ],
+                [
+                    '$group' => [
+                        '_id' => '$taxonomy_id',
+                        'terms' => [
+                            '$topN' => [
+                                'n' => $effectiveLimit,
+                                'sortBy' => ['slug' => 1, '_id' => 1],
+                                'output' => '$$ROOT',
+                            ],
+                        ],
+                    ],
+                ],
+            ])
+        );
+
+        foreach ($rows as $row) {
+            $rowPayload = $this->normalizeDocument($row);
+            $taxonomyId = trim((string) ($rowPayload['_id'] ?? $rowPayload['id'] ?? ''));
+            if ($taxonomyId === '' || ! array_key_exists($taxonomyId, $payload)) {
+                continue;
+            }
+            $terms = $rowPayload['terms'] ?? [];
+            if (! is_iterable($terms)) {
+                continue;
+            }
+            $payload[$taxonomyId] = collect($terms)
+                ->map(fn (mixed $term): array => $this->toPayloadFromRaw($term))
+                ->filter(static fn (array $term): bool => ($term['id'] ?? '') !== '')
                 ->values()
                 ->all();
         }
@@ -186,5 +215,52 @@ class TaxonomyTermManagementService
             'slug' => (string) ($term->slug ?? ''),
             'name' => (string) ($term->name ?? ''),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function toPayloadFromRaw(mixed $raw): array
+    {
+        $term = $this->normalizeDocument($raw);
+
+        return [
+            'id' => (string) ($term['_id'] ?? $term['id'] ?? ''),
+            'taxonomy_id' => (string) ($term['taxonomy_id'] ?? ''),
+            'slug' => (string) ($term['slug'] ?? ''),
+            'name' => (string) ($term['name'] ?? ''),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeDocument(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        if ($value instanceof Arrayable) {
+            return $value->toArray();
+        }
+
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if (is_object($value) && method_exists($value, 'getArrayCopy')) {
+            return $value->getArrayCopy();
+        }
+
+        if (is_object($value)) {
+            return get_object_vars($value);
+        }
+
+        return [];
     }
 }

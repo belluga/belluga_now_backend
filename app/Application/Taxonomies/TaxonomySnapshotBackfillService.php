@@ -10,9 +10,17 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class TaxonomySnapshotBackfillService
 {
+    private const FAILURE_SAMPLE_LIMIT = 10;
+
+    /**
+     * @var array<string, array{type: string, value: string, name: string, taxonomy_name: string, label: string}>
+     */
+    private array $termSnapshotCache = [];
+
     public function __construct(
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
@@ -22,11 +30,12 @@ class TaxonomySnapshotBackfillService
      */
     public function repair(?string $taxonomyType = null, ?string $termValue = null): array
     {
+        $this->termSnapshotCache = [];
         $taxonomyType = $this->normalizeOptionalString($taxonomyType);
         $termValue = $this->normalizeOptionalString($termValue);
 
         $collections = [
-            'account_profiles' => $this->repairRootTaxonomyModel(AccountProfile::class, $taxonomyType, $termValue),
+            'account_profiles' => $this->repairRootTaxonomyModel(AccountProfile::class, $taxonomyType, $termValue, true),
             'static_assets' => $this->repairRootTaxonomyModel(StaticAsset::class, $taxonomyType, $termValue),
             'events' => $this->repairEventLikeModel(Event::class, $taxonomyType, $termValue),
             'event_occurrences' => $this->repairEventLikeModel(EventOccurrence::class, $taxonomyType, $termValue),
@@ -50,7 +59,7 @@ class TaxonomySnapshotBackfillService
 
     /**
      * @param  class-string<Model>  $modelClass
-     * @return array{scanned: int, repaired: int, skipped: int, failed: int}
+     * @return array{scanned: int, repaired: int, skipped: int, failed: int, failures: array<int, array<string, mixed>>}
      */
     private function repairRootTaxonomyModel(
         string $modelClass,
@@ -77,20 +86,29 @@ class TaxonomySnapshotBackfillService
                     continue;
                 }
 
-                $resolved = $this->taxonomyTermSummaryResolver->resolve($terms);
+                $resolved = $this->resolveTermsWithCache($terms);
                 $changed = ! $this->samePayload($terms, $resolved);
-                if ($changed) {
+                $flatChanged = false;
+                if ($refreshFlatTerms) {
+                    $expectedFlatTerms = $this->flattenTaxonomyTerms($resolved);
+                    $flatChanged = ! $this->sameFlatTerms(
+                        $model->getAttribute('taxonomy_terms_flat') ?? [],
+                        $expectedFlatTerms
+                    );
+                }
+
+                if ($changed || $flatChanged) {
                     $model->setAttribute('taxonomy_terms', $resolved);
                     if ($refreshFlatTerms) {
-                        $model->setAttribute('taxonomy_terms_flat', $this->flattenTaxonomyTerms($resolved));
+                        $model->setAttribute('taxonomy_terms_flat', $expectedFlatTerms);
                     }
                     $model->save();
                     $summary['repaired']++;
                 } else {
                     $summary['skipped']++;
                 }
-            } catch (\Throwable) {
-                $summary['failed']++;
+            } catch (\Throwable $error) {
+                $this->recordFailure($summary, $model, $error);
             }
         }
 
@@ -99,7 +117,7 @@ class TaxonomySnapshotBackfillService
 
     /**
      * @param  class-string<Model>  $modelClass
-     * @return array{scanned: int, repaired: int, skipped: int, failed: int}
+     * @return array{scanned: int, repaired: int, skipped: int, failed: int, failures: array<int, array<string, mixed>>}
      */
     private function repairEventLikeModel(string $modelClass, ?string $taxonomyType, ?string $termValue): array
     {
@@ -119,7 +137,7 @@ class TaxonomySnapshotBackfillService
 
                 $terms = $this->normalizeList($model->getAttribute('taxonomy_terms') ?? []);
                 if ($this->termsContainScope($terms, $taxonomyType, $termValue)) {
-                    $resolved = $this->taxonomyTermSummaryResolver->resolve($terms);
+                    $resolved = $this->resolveTermsWithCache($terms);
                     if (! $this->samePayload($terms, $resolved)) {
                         $model->setAttribute('taxonomy_terms', $resolved);
                         $changed = true;
@@ -156,8 +174,8 @@ class TaxonomySnapshotBackfillService
                 } else {
                     $summary['skipped']++;
                 }
-            } catch (\Throwable) {
-                $summary['failed']++;
+            } catch (\Throwable $error) {
+                $this->recordFailure($summary, $model, $error);
             }
         }
 
@@ -220,7 +238,7 @@ class TaxonomySnapshotBackfillService
         if (array_key_exists('taxonomy_terms', $payload)) {
             $terms = $this->normalizeList($payload['taxonomy_terms']);
             if ($this->termsContainScope($terms, $taxonomyType, $termValue)) {
-                $resolved = $this->taxonomyTermSummaryResolver->resolve($terms);
+                $resolved = $this->resolveTermsWithCache($terms);
                 if (! $this->samePayload($terms, $resolved)) {
                     $payload['taxonomy_terms'] = $resolved;
                     $changed = true;
@@ -293,6 +311,62 @@ class TaxonomySnapshotBackfillService
 
     /**
      * @param  array<int, mixed>  $terms
+     * @return array<int, array{type: string, value: string, name: string, taxonomy_name: string, label: string}>
+     */
+    private function resolveTermsWithCache(array $terms): array
+    {
+        $normalized = [];
+        $missing = [];
+
+        foreach ($terms as $term) {
+            $term = $this->normalizeDocument($term);
+            $type = trim((string) ($term['type'] ?? ''));
+            $value = trim((string) ($term['value'] ?? ''));
+            if ($type === '' || $value === '') {
+                continue;
+            }
+
+            $cacheKey = $this->termCacheKey($type, $value);
+            $normalized[] = [
+                'cache_key' => $cacheKey,
+                'term' => $term,
+            ];
+            if (! array_key_exists($cacheKey, $this->termSnapshotCache)) {
+                $missing[$cacheKey] = [
+                    'type' => $type,
+                    'value' => $value,
+                    'name' => $term['name'] ?? null,
+                    'label' => $term['label'] ?? null,
+                    'taxonomy_name' => $term['taxonomy_name'] ?? null,
+                ];
+            }
+        }
+
+        if ($missing !== []) {
+            foreach ($this->taxonomyTermSummaryResolver->resolve(array_values($missing)) as $resolved) {
+                $cacheKey = $this->termCacheKey($resolved['type'], $resolved['value']);
+                $this->termSnapshotCache[$cacheKey] = $resolved;
+            }
+        }
+
+        $resolved = [];
+        foreach ($normalized as $entry) {
+            $cached = $this->termSnapshotCache[$entry['cache_key']] ?? null;
+            if ($cached !== null) {
+                $resolved[] = $cached;
+            }
+        }
+
+        return $resolved;
+    }
+
+    private function termCacheKey(string $type, string $value): string
+    {
+        return "{$type}:{$value}";
+    }
+
+    /**
+     * @param  array<int, mixed>  $terms
      * @return array<int, string>
      */
     private function flattenTaxonomyTerms(array $terms): array
@@ -311,7 +385,27 @@ class TaxonomySnapshotBackfillService
     }
 
     /**
-     * @return array{scanned: int, repaired: int, skipped: int, failed: int}
+     * @param  array<int, string>  $expected
+     */
+    private function sameFlatTerms(mixed $current, array $expected): bool
+    {
+        $currentFlat = [];
+        foreach ($this->normalizeList($current) as $term) {
+            if (! is_scalar($term) && $term !== null) {
+                continue;
+            }
+
+            $normalized = trim((string) $term);
+            if ($normalized !== '') {
+                $currentFlat[] = $normalized;
+            }
+        }
+
+        return array_values(array_unique($currentFlat)) === $expected;
+    }
+
+    /**
+     * @return array{scanned: int, repaired: int, skipped: int, failed: int, failures: array<int, array<string, mixed>>}
      */
     private function emptySummary(): array
     {
@@ -320,7 +414,33 @@ class TaxonomySnapshotBackfillService
             'repaired' => 0,
             'skipped' => 0,
             'failed' => 0,
+            'failures' => [],
         ];
+    }
+
+    /**
+     * @param  array{scanned: int, repaired: int, skipped: int, failed: int, failures: array<int, array<string, mixed>>}  $summary
+     */
+    private function recordFailure(array &$summary, Model $model, \Throwable $error): void
+    {
+        $summary['failed']++;
+
+        $failure = [
+            'model' => $model::class,
+            'model_id' => (string) $model->getKey(),
+            'message' => $error->getMessage(),
+        ];
+
+        if (count($summary['failures']) < self::FAILURE_SAMPLE_LIMIT) {
+            $summary['failures'][] = $failure;
+        }
+
+        Log::warning('Taxonomy term snapshot repair failed for a document.', [
+            'model' => $failure['model'],
+            'model_id' => $failure['model_id'],
+            'exception' => $error::class,
+            'message' => $failure['message'],
+        ]);
     }
 
     /**

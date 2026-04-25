@@ -4,23 +4,33 @@ declare(strict_types=1);
 
 namespace App\Application\DiscoveryFilters;
 
+use App\Application\Taxonomies\TaxonomyTermManagementService;
 use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
-use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\Validation\InputConstraints;
 use Belluga\DiscoveryFilters\Data\DiscoveryFilterDefinition;
 use Belluga\DiscoveryFilters\Registry\DiscoveryFilterEntityRegistry;
 use Belluga\DiscoveryFilters\Services\DiscoveryFilterCatalogService;
 
 final class DiscoveryFilterPublicCatalogService
 {
+    private const TAXONOMY_GROUPS_MAX = InputConstraints::DISCOVERY_FILTER_TAXONOMY_GROUPS_MAX;
+
+    private const TAXONOMY_TERMS_PER_GROUP_MAX = InputConstraints::DISCOVERY_FILTER_TAXONOMY_TERMS_PER_GROUP_MAX;
+
+    private const TAXONOMY_TERMS_TOTAL_MAX = InputConstraints::DISCOVERY_FILTER_TAXONOMY_TERMS_TOTAL_MAX;
+
+    private const TYPE_OPTIONS_MAX = InputConstraints::DISCOVERY_FILTER_TYPE_OPTIONS_MAX;
+
     public function __construct(
         private readonly DiscoveryFilterCatalogService $catalog,
         private readonly DiscoveryFilterEntityRegistry $registry,
+        private readonly TaxonomyTermManagementService $taxonomyTerms,
     ) {}
 
     /**
-     * @return array{surface: string, filters: array<int, array<string, mixed>>, type_options: array<string, array<int, array<string, mixed>>>, taxonomy_options: array<string, array{key: string, label: string, terms: array<int, array{value: string, label: string}>}>}
+     * @return array{surface: string, filters: array<int, array<string, mixed>>, type_options: array<string, array<int, array<string, mixed>>>, taxonomy_options: array<string, array{key: string, label: string, terms: array<int, array{value: string, label: string}>, terms_truncated: bool, terms_limit: int}>}
      */
     public function catalogForSurface(string $surface): array
     {
@@ -157,11 +167,15 @@ final class DiscoveryFilterPublicCatalogService
     /**
      * @param  array<int, DiscoveryFilterDefinition>  $definitions
      * @param  array<string, array<int, array<string, mixed>>>  $typeOptions
-     * @return array<string, array{key: string, label: string, terms: array<int, array{value: string, label: string}>}>
+     * @return array<string, array{key: string, label: string, terms: array<int, array{value: string, label: string}>, terms_truncated: bool, terms_limit: int}>
      */
     private function taxonomyOptionsForDefinitions(array $definitions, array $typeOptions): array
     {
-        $taxonomySlugs = $this->allowedTaxonomySlugs($definitions, $typeOptions);
+        $taxonomySlugs = array_slice(
+            $this->allowedTaxonomySlugs($definitions, $typeOptions),
+            0,
+            self::TAXONOMY_GROUPS_MAX
+        );
         if ($taxonomySlugs === []) {
             return [];
         }
@@ -185,11 +199,9 @@ final class DiscoveryFilterPublicCatalogService
             $taxonomyIdsBySlug[$slug] = $taxonomyId;
         }
 
-        $termsByTaxonomyId = TaxonomyTerm::query()
-            ->whereIn('taxonomy_id', array_values($taxonomyIdsBySlug))
-            ->orderBy('name')
-            ->get(['taxonomy_id', 'slug', 'name'])
-            ->groupBy(static fn (TaxonomyTerm $term): string => (string) ($term->taxonomy_id ?? ''));
+        $termsByTaxonomyId = $this->boundedTermsByTaxonomyId(
+            taxonomyIds: array_values($taxonomyIdsBySlug),
+        );
 
         $payload = [];
         foreach ($taxonomies as $taxonomy) {
@@ -201,15 +213,72 @@ final class DiscoveryFilterPublicCatalogService
             $payload[$slug] = [
                 'key' => $slug,
                 'label' => trim((string) ($taxonomy->name ?? $slug)),
-                'terms' => $termsByTaxonomyId
-                    ->get($taxonomyId, collect())
-                    ->map(static fn (TaxonomyTerm $term): array => [
-                        'value' => strtolower(trim((string) ($term->slug ?? ''))),
-                        'label' => trim((string) ($term->name ?? $term->slug ?? '')),
-                    ])
-                    ->filter(static fn (array $term): bool => $term['value'] !== '' && $term['label'] !== '')
-                    ->values()
-                    ->all(),
+                'terms' => $termsByTaxonomyId[$taxonomyId]['terms'] ?? [],
+                'terms_truncated' => $termsByTaxonomyId[$taxonomyId]['truncated'] ?? false,
+                'terms_limit' => $termsByTaxonomyId[$taxonomyId]['limit'] ?? self::TAXONOMY_TERMS_PER_GROUP_MAX,
+            ];
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<int, string>  $taxonomyIds
+     * @return array<string, array{terms: array<int, array{value: string, label: string}>, truncated: bool, limit: int}>
+     */
+    private function boundedTermsByTaxonomyId(array $taxonomyIds): array
+    {
+        $ids = array_values(array_filter(
+            array_unique($taxonomyIds),
+            static fn (string $id): bool => trim($id) !== ''
+        ));
+        if ($ids === []) {
+            return [];
+        }
+
+        $rawTermsByTaxonomyId = $this->taxonomyTerms->listBatch(
+            $ids,
+            self::TAXONOMY_TERMS_PER_GROUP_MAX + 1,
+            self::TAXONOMY_TERMS_PER_GROUP_MAX + 1
+        );
+
+        $payload = [];
+        $remainingTotalBudget = self::TAXONOMY_TERMS_TOTAL_MAX;
+        foreach ($ids as $taxonomyId) {
+            $effectiveLimit = min(
+                self::TAXONOMY_TERMS_PER_GROUP_MAX,
+                max(0, $remainingTotalBudget)
+            );
+            if ($effectiveLimit <= 0) {
+                $payload[$taxonomyId] = [
+                    'terms' => [],
+                    'truncated' => true,
+                    'limit' => 0,
+                ];
+                continue;
+            }
+
+            $rawTerms = $rawTermsByTaxonomyId[$taxonomyId] ?? [];
+            $truncated = count($rawTerms) > $effectiveLimit;
+            $terms = [];
+            foreach (array_slice($rawTerms, 0, $effectiveLimit) as $rawTerm) {
+                $term = $this->normalizeDocument($rawTerm);
+                $value = strtolower(trim((string) ($term['slug'] ?? '')));
+                $label = trim((string) ($term['name'] ?? $term['slug'] ?? ''));
+                if ($value === '' || $label === '') {
+                    continue;
+                }
+                $terms[] = [
+                    'value' => $value,
+                    'label' => $label,
+                ];
+            }
+
+            $remainingTotalBudget -= count($terms);
+            $payload[$taxonomyId] = [
+                'terms' => $terms,
+                'truncated' => $truncated,
+                'limit' => $effectiveLimit,
             ];
         }
 
@@ -272,6 +341,10 @@ final class DiscoveryFilterPublicCatalogService
             return [$value];
         }
 
+        if ($value instanceof \Traversable) {
+            return array_values(iterator_to_array($value));
+        }
+
         return is_array($value) ? array_values($value) : [];
     }
 
@@ -282,6 +355,7 @@ final class DiscoveryFilterPublicCatalogService
     {
         return EventType::query()
             ->orderBy('name')
+            ->limit(self::TYPE_OPTIONS_MAX)
             ->get(['slug', 'name', 'visual', 'poi_visual', 'allowed_taxonomies'])
             ->map(fn (EventType $type): array => [
                 'value' => trim((string) ($type->slug ?? '')),
@@ -302,6 +376,7 @@ final class DiscoveryFilterPublicCatalogService
         return TenantProfileType::query()
             ->where('capabilities.is_favoritable', true)
             ->orderBy('label')
+            ->limit(self::TYPE_OPTIONS_MAX)
             ->get(['type', 'label', 'visual', 'poi_visual', 'allowed_taxonomies'])
             ->map(fn (TenantProfileType $type): array => [
                 'value' => trim((string) ($type->type ?? '')),
@@ -330,5 +405,25 @@ final class DiscoveryFilterPublicCatalogService
     private function normalizeToken(mixed $value): string
     {
         return strtolower(trim((string) $value));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeDocument(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        if (is_object($value)) {
+            return (array) $value;
+        }
+
+        return is_array($value) ? $value : [];
     }
 }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Support\Validation\InputConstraints;
-use Belluga\Events\Support\EventContentHtmlSanitizer;
+use App\Support\RichText\SafeRichTextHtmlSanitizer;
 use Illuminate\Validation\ValidationException;
 
 final class AccountProfileRichTextSanitizer
@@ -44,6 +44,6 @@ final class AccountProfileRichTextSanitizer
 
     public static function sanitize(mixed $value): string
     {
-        return EventContentHtmlSanitizer::sanitize(is_string($value) ? $value : null);
+        return SafeRichTextHtmlSanitizer::sanitize(is_string($value) ? $value : null);
     }
 }

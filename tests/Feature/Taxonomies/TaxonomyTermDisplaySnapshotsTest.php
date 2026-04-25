@@ -7,6 +7,7 @@ namespace Tests\Feature\Taxonomies;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Jobs\Taxonomies\RepairTaxonomyTermSnapshotsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -19,6 +20,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Helpers\TenantLabels;
@@ -143,6 +145,7 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
 
         $this->assertSame(0, $exitCode);
         $this->assertSame('Samba', data_get($profile->fresh()->taxonomy_terms, '0.name'));
+        $this->assertSame('style:samba', data_get($profile->fresh()->taxonomy_terms_flat, '0'));
         $this->assertSame('Style', data_get($staticAsset->fresh()->taxonomy_terms, '0.taxonomy_name'));
         $this->assertSame('Samba', data_get($event->fresh()->taxonomy_terms, '0.label'));
         $this->assertSame('Style', data_get($event->fresh()->venue, 'taxonomy_terms.0.taxonomy_name'));
@@ -157,6 +160,182 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         $this->assertSame(0, (int) data_get($summary, 'totals.failed'));
         $this->assertSame(0, (int) data_get($summary, 'totals.repaired'));
         $this->assertSame((string) $taxonomy->slug, (string) data_get($summary, 'scope.taxonomy_type'));
+    }
+
+    public function test_taxonomy_snapshot_backfill_caches_repeated_term_resolution_across_documents(): void
+    {
+        $this->createTaxonomyAndTerm();
+        $legacyTerms = [['type' => 'style', 'value' => 'samba']];
+
+        for ($index = 0; $index < 6; $index++) {
+            $account = Account::query()->create([
+                'name' => "Snapshot Account {$index}",
+                'document' => "DOC-SNAPSHOT-CACHE-{$index}",
+            ]);
+
+            $profile = AccountProfile::query()->create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => 'artist',
+                'display_name' => "Legacy Artist {$index}",
+                'taxonomy_terms' => $legacyTerms,
+                'is_active' => true,
+            ]);
+
+            $event = Event::query()->create([
+                'title' => "Legacy Event {$index}",
+                'type' => ['slug' => 'show', 'name' => 'Show'],
+                'taxonomy_terms' => $legacyTerms,
+                'event_parties' => [[
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $profile->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => "Legacy Artist {$index}",
+                        'profile_type' => 'artist',
+                        'taxonomy_terms' => $legacyTerms,
+                    ],
+                ]],
+                'publication' => ['status' => 'published'],
+                'date_time_start' => Carbon::now()->addDay(),
+                'date_time_end' => Carbon::now()->addDay()->addHours(2),
+            ]);
+
+            EventOccurrence::query()->create([
+                'event_id' => (string) $event->_id,
+                'occurrence_index' => 0,
+                'slug' => "legacy-event-{$index}",
+                'occurrence_slug' => "legacy-event-{$index}",
+                'title' => "Legacy Event {$index}",
+                'taxonomy_terms' => $legacyTerms,
+                'linked_account_profiles' => [[
+                    'id' => (string) $profile->_id,
+                    'display_name' => "Legacy Artist {$index}",
+                    'profile_type' => 'artist',
+                    'taxonomy_terms' => $legacyTerms,
+                ]],
+                'starts_at' => Carbon::now()->addDay(),
+                'ends_at' => Carbon::now()->addDay()->addHours(2),
+            ]);
+        }
+
+        $resolver = new class extends TaxonomyTermSummaryResolverService
+        {
+            public int $resolveCalls = 0;
+
+            public function resolve(array $terms): array
+            {
+                $this->resolveCalls++;
+
+                return parent::resolve($terms);
+            }
+        };
+
+        $summary = (new TaxonomySnapshotBackfillService($resolver))->repair('style', 'samba');
+
+        $this->assertSame(0, (int) data_get($summary, 'totals.failed'));
+        $this->assertSame(1, $resolver->resolveCalls, 'Repeated taxonomy snapshots must be resolved once per unique term, not once per document or nested payload.');
+        $this->assertSame('Samba', data_get(AccountProfile::query()->first()?->taxonomy_terms, '0.name'));
+    }
+
+    public function test_repair_refreshes_account_profile_flat_projection_even_when_snapshots_are_current(): void
+    {
+        $this->createTaxonomyAndTerm();
+        $account = Account::query()->create([
+            'name' => 'Flat Projection Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $resolvedTerms = [[
+            'type' => 'style',
+            'value' => 'samba',
+            'name' => 'Samba',
+            'taxonomy_name' => 'Style',
+            'label' => 'Samba',
+        ]];
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Flat Projection Artist',
+            'taxonomy_terms' => $resolvedTerms,
+            'taxonomy_terms_flat' => ['stale:value'],
+            'is_active' => true,
+        ]);
+
+        $summary = $this->app->make(TaxonomySnapshotBackfillService::class)->repair('style', 'samba');
+
+        $this->assertSame(0, (int) data_get($summary, 'totals.failed'));
+        $this->assertSame(1, (int) data_get($summary, 'totals.repaired'));
+        $this->assertSame($resolvedTerms, $profile->fresh()->taxonomy_terms);
+        $this->assertSame(['style:samba'], $profile->fresh()->taxonomy_terms_flat);
+    }
+
+    public function test_taxonomy_snapshot_backfill_reports_and_logs_document_failures(): void
+    {
+        Log::spy();
+        $account = Account::query()->create([
+            'name' => 'Fail Visible Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Fail Visible Artist',
+            'taxonomy_terms' => [['type' => 'style', 'value' => 'samba']],
+            'is_active' => true,
+        ]);
+
+        $resolver = new class extends TaxonomyTermSummaryResolverService
+        {
+            public function resolve(array $terms): array
+            {
+                throw new \RuntimeException('Resolver unavailable.');
+            }
+        };
+
+        $summary = (new TaxonomySnapshotBackfillService($resolver))->repair('style', 'samba');
+
+        $this->assertSame(1, (int) data_get($summary, 'totals.failed'));
+        $this->assertSame(AccountProfile::class, data_get($summary, 'collections.account_profiles.failures.0.model'));
+        $this->assertSame('Resolver unavailable.', data_get($summary, 'collections.account_profiles.failures.0.message'));
+        Log::shouldHaveReceived('warning')->once();
+    }
+
+    public function test_taxonomy_snapshot_repair_job_fails_when_backfill_reports_failures(): void
+    {
+        $service = new class extends TaxonomySnapshotBackfillService
+        {
+            public function __construct() {}
+
+            public function repair(?string $taxonomyType = null, ?string $termValue = null): array
+            {
+                return ['totals' => ['failed' => 2]];
+            }
+        };
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Taxonomy term snapshot repair failed for 2 document(s).');
+
+        (new RepairTaxonomyTermSnapshotsJob('style', 'samba'))->handle($service);
+    }
+
+    public function test_taxonomy_snapshot_repair_command_exits_non_zero_when_backfill_reports_failures(): void
+    {
+        $this->app->instance(TaxonomySnapshotBackfillService::class, new class extends TaxonomySnapshotBackfillService
+        {
+            public function __construct() {}
+
+            public function repair(?string $taxonomyType = null, ?string $termValue = null): array
+            {
+                return ['totals' => ['failed' => 1], 'collections' => []];
+            }
+        });
+
+        $exitCode = Artisan::call('taxonomies:term-snapshots:repair', [
+            '--type' => 'style',
+            '--value' => 'samba',
+        ]);
+
+        $this->assertSame(1, $exitCode);
     }
 
     public function test_taxonomy_display_name_updates_dispatch_fanout_and_term_slug_update_is_rejected(): void

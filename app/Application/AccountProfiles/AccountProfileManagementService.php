@@ -70,8 +70,10 @@ class AccountProfileManagementService
                 $taxonomyTerms
             );
             $payload['taxonomy_terms'] = $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
+            $payload['taxonomy_terms_flat'] = $this->flattenTaxonomyTerms($payload['taxonomy_terms']);
         } elseif (array_key_exists('taxonomy_terms', $payload)) {
             $payload['taxonomy_terms'] = [];
+            $payload['taxonomy_terms_flat'] = [];
         }
 
         try {
@@ -136,8 +138,10 @@ class AccountProfileManagementService
                     $taxonomyTerms
                 );
                 $attributes['taxonomy_terms'] = $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
+                $attributes['taxonomy_terms_flat'] = $this->flattenTaxonomyTerms($attributes['taxonomy_terms']);
             } else {
                 $attributes['taxonomy_terms'] = [];
+                $attributes['taxonomy_terms_flat'] = [];
             }
         }
 
@@ -215,5 +219,27 @@ class AccountProfileManagementService
         DB::connection('tenant')->afterCommit(
             static fn () => UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id)
         );
+    }
+
+    /**
+     * @param  array<int, mixed>  $terms
+     * @return array<int, string>
+     */
+    private function flattenTaxonomyTerms(array $terms): array
+    {
+        $flat = [];
+        foreach ($terms as $term) {
+            if (! is_array($term)) {
+                continue;
+            }
+
+            $type = trim((string) ($term['type'] ?? ''));
+            $value = trim((string) ($term['value'] ?? ''));
+            if ($type !== '' && $value !== '') {
+                $flat[] = "{$type}:{$value}";
+            }
+        }
+
+        return array_values(array_unique($flat));
     }
 }

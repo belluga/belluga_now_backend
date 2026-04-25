@@ -32,11 +32,13 @@ class TaxonomyTermsController extends Controller
         $validated = $request->validate([
             'taxonomy_ids' => ['sometimes', 'array', 'max:'.InputConstraints::TAXONOMY_BATCH_MAX_ITEMS],
             'taxonomy_ids.*' => ['string', 'size:'.InputConstraints::OBJECT_ID_LENGTH],
+            'term_limit' => ['sometimes', 'integer', 'min:1', 'max:'.InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX],
         ]);
 
         return response()->json([
             'data' => $this->managementService->listBatch(
-                $validated['taxonomy_ids'] ?? []
+                taxonomyIds: $validated['taxonomy_ids'] ?? [],
+                termLimit: $validated['term_limit'] ?? InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX,
             ),
         ]);
     }

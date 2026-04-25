@@ -26,6 +26,10 @@ class RepairTaxonomyTermSnapshotsJob implements ShouldQueue, TenantAware
 
     public function handle(TaxonomySnapshotBackfillService $backfillService): void
     {
-        $backfillService->repair($this->taxonomyType, $this->termValue);
+        $summary = $backfillService->repair($this->taxonomyType, $this->termValue);
+        $failed = (int) data_get($summary, 'totals.failed', 0);
+        if ($failed > 0) {
+            throw new \RuntimeException("Taxonomy term snapshot repair failed for {$failed} document(s).");
+        }
     }
 }

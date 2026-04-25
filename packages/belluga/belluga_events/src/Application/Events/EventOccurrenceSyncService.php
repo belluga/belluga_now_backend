@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
+use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
@@ -16,6 +17,8 @@ class EventOccurrenceSyncService
 
     public function __construct(
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
+        private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventAccountContextResolver $eventAccountContextResolver,
     ) {}
 
     /**
@@ -38,6 +41,7 @@ class EventOccurrenceSyncService
             $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
             $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
+            $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
 
             $payload = [
                 'event_id' => $eventId,
@@ -64,7 +68,13 @@ class EventOccurrenceSyncService
                 'capabilities' => $this->normalizeArray($event->capabilities ?? []),
                 'created_by' => $this->normalizeArray($event->created_by ?? []),
                 'event_parties' => $effectiveEventParties,
-                'programming_items' => $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []),
+                'programming_items' => $programmingItems,
+                'account_context_ids' => $this->eventAccountContextResolver->resolveForOccurrence(
+                    $this->normalizeArray($event->account_context_ids ?? []),
+                    $effectiveEventParties,
+                    $effectiveLocation['place_ref'],
+                    $programmingItems
+                ),
                 'publication' => $publication,
                 'is_event_published' => $this->isEffectivelyPublished($publication, $now),
                 'is_active' => (bool) ($event->is_active ?? true),

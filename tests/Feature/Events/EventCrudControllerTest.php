@@ -21,7 +21,9 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
@@ -551,6 +553,34 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['page_size']);
     }
 
+    public function test_public_event_index_rejects_page_size_above_public_safe_maximum(): void
+    {
+        $this->createEvent([
+            'title' => 'Public Page Size Guard Event',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events?page=1&page_size=".(InputConstraints::PUBLIC_PAGE_SIZE_MAX + 1)
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page_size']);
+    }
+
+    public function test_public_event_index_rejects_page_above_public_safe_depth(): void
+    {
+        $this->createEvent([
+            'title' => 'Public Page Guard Event',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1)."&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page']);
+    }
+
     public function test_event_index_uses_stable_tie_break_order_for_matching_start_times(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -657,7 +687,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}events?page=1&page_size=100"
+            "{$this->base_api_tenant}events?page=1&page_size=".InputConstraints::PUBLIC_PAGE_SIZE_MAX
         );
 
         $response->assertStatus(200);
@@ -778,8 +808,10 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
+        $venueSearch = (string) $this->venue->slug;
+        $partialVenueSearch = substr($venueSearch, -6, 5);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main&page=1&page_size=20");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}&page=1&page_size=20");
 
         $response->assertStatus(200);
         $response->assertJsonPath('current_page', 1);
@@ -791,17 +823,17 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($matchedVenue);
         $this->assertSame('venue', (string) ($matchedVenue['profile_type'] ?? ''));
 
-        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=mai&page=1&page_size=20");
+        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$partialVenueSearch}&page=1&page_size=20");
         $partialResponse->assertStatus(200);
         $partialVenues = collect($partialResponse->json('data') ?? []);
         $this->assertNotNull($partialVenues->firstWhere('id', (string) $this->venue->_id));
 
         Sanctum::actingAs($landlord, ['events:create']);
-        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main");
+        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}");
         $createResponse->assertStatus(200);
 
         Sanctum::actingAs($landlord, ['events:update']);
-        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main");
+        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}");
         $updateResponse->assertStatus(200);
     }
 
@@ -2923,6 +2955,75 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertEquals(-20.01, (float) data_get($poi->location, 'coordinates.1'));
     }
 
+    public function test_event_create_rejects_unbounded_map_poi_polygon_rings(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => true,
+        ])->assertStatus(200);
+
+        $rings = [];
+        for ($index = 0; $index <= InputConstraints::MAP_POI_POLYGON_RINGS_MAX; $index++) {
+            $rings[] = [
+                [-40.00, -20.00],
+                [-39.90, -20.00],
+                [-39.90, -19.90],
+                [-40.00, -20.00],
+            ];
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                    'discovery_scope' => [
+                        'type' => 'polygon',
+                        'polygon' => [
+                            'type' => 'Polygon',
+                            'coordinates' => $rings,
+                        ],
+                    ],
+                ],
+            ],
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'capabilities.map_poi.discovery_scope.polygon.coordinates',
+        ]);
+    }
+
+    public function test_event_create_rejects_out_of_range_map_poi_polygon_coordinates(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => true,
+        ])->assertStatus(200);
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                    'discovery_scope' => [
+                        'type' => 'polygon',
+                        'polygon' => [
+                            'type' => 'Polygon',
+                            'coordinates' => [[
+                                [-40.00, -20.00],
+                                [-39.90, -20.00],
+                                [181.00, -19.90],
+                                [-40.00, -20.00],
+                            ]],
+                        ],
+                    ],
+                ],
+            ],
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'capabilities.map_poi.discovery_scope.polygon.coordinates.0.2.0',
+        ]);
+    }
+
     public function test_event_map_poi_projection_soft_hides_when_occurrences_become_stale(): void
     {
         $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
@@ -3016,7 +3117,7 @@ class EventCrudControllerTest extends TestCaseTenant
         }
     }
 
-    public function test_refresh_expired_event_map_pois_job_deletes_orphan_event_projections_even_when_inactive(): void
+    public function test_cleanup_orphaned_map_pois_job_deletes_orphan_event_projections_even_when_inactive(): void
     {
         $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
         Carbon::setTestNow($baseline);
@@ -3059,7 +3160,7 @@ class EventCrudControllerTest extends TestCaseTenant
             Event::withTrashed()->where('_id', $activeEventId)->forceDelete();
             Event::withTrashed()->where('_id', $inactiveEventId)->forceDelete();
 
-            app()->call([new RefreshExpiredEventMapPoisJob, 'handle']);
+            app()->call([new CleanupOrphanedMapPoisJob(['event']), 'handle']);
 
             $this->assertFalse(
                 MapPoi::query()
@@ -3260,6 +3361,73 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
         $this->assertNull(data_get($freshSecondOccurrence, 'location_override'));
         $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
+    }
+
+    public function test_account_event_create_rejects_foreign_programming_location_profile(): void
+    {
+        $foreignVenue = $this->createAccountProfile('venue', 'Foreign Programming Venue');
+        $this->assertNotSame((string) $this->account->_id, (string) $foreignVenue->account_id);
+
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Foreign host attempt',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $foreignVenue->_id,
+            ],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.place_ref.id',
+        ]);
+    }
+
+    public function test_account_event_update_rejects_foreign_main_and_programming_location_profiles(): void
+    {
+        $foreignMainVenue = $this->createAccountProfile('venue', 'Foreign Main Venue');
+        $foreignProgrammingVenue = $this->createAccountProfile('venue', 'Foreign Program Venue');
+        $this->assertNotSame((string) $this->account->_id, (string) $foreignMainVenue->account_id);
+        $this->assertNotSame((string) $this->account->_id, (string) $foreignProgrammingVenue->account_id);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $mainLocationResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'location' => ['mode' => 'physical'],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $foreignMainVenue->_id,
+            ],
+        ]);
+
+        $mainLocationResponse->assertStatus(422);
+        $mainLocationResponse->assertJsonValidationErrors(['place_ref.id']);
+
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '18:00',
+            'title' => 'Foreign program host attempt',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $foreignProgrammingVenue->_id,
+            ],
+        ]];
+
+        $programmingResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => $occurrences,
+        ]);
+
+        $programmingResponse->assertStatus(422);
+        $programmingResponse->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.place_ref.id',
+        ]);
     }
 
     public function test_event_create_rejects_occurrence_location_override(): void
@@ -3654,6 +3822,175 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $this->assertCount(3, $response->json('data.occurrences'));
+    }
+
+    public function test_event_create_rejects_unbounded_occurrence_fanout(): void
+    {
+        $payload = $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(InputConstraints::EVENT_OCCURRENCES_MAX + 1),
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function test_event_create_rejects_unbounded_tags_categories_and_taxonomy_terms(): void
+    {
+        $oversizedTags = array_map(
+            static fn (int $index): string => "tag-{$index}",
+            range(1, InputConstraints::EVENT_TAGS_MAX + 1)
+        );
+        $oversizedCategories = array_map(
+            static fn (int $index): string => "category-{$index}",
+            range(1, InputConstraints::EVENT_CATEGORIES_MAX + 1)
+        );
+        $oversizedTaxonomyTerms = array_map(
+            static fn (int $index): array => [
+                'type' => 'event_style',
+                'value' => "term-{$index}",
+            ],
+            range(1, InputConstraints::EVENT_TAXONOMY_TERMS_MAX + 1)
+        );
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'tags' => $oversizedTags,
+            'categories' => $oversizedCategories,
+            'taxonomy_terms' => $oversizedTaxonomyTerms,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'tags',
+            'categories',
+            'taxonomy_terms',
+        ]);
+    }
+
+    public function test_event_create_rejects_unbounded_unique_taxonomy_terms_before_resolver_work(): void
+    {
+        $taxonomyTerms = array_map(
+            static fn (int $index): array => [
+                'type' => 'event_style',
+                'value' => "unique-term-{$index}",
+            ],
+            range(1, InputConstraints::EVENT_TAXONOMY_UNIQUE_TERMS_MAX + 1)
+        );
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'taxonomy_terms' => $taxonomyTerms,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy_terms']);
+    }
+
+    public function test_event_create_rejects_unbounded_programming_items_per_occurrence(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [];
+        for ($index = 0; $index <= InputConstraints::EVENT_PROGRAMMING_ITEMS_MAX; $index++) {
+            $occurrences[0]['programming_items'][] = [
+                'time' => sprintf('%02d:%02d', intdiv($index, 60), $index % 60),
+                'title' => "Programação {$index}",
+            ];
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences.0.programming_items']);
+    }
+
+    public function test_event_create_rejects_unbounded_programming_profile_links(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com muitos perfis',
+            'account_profile_ids' => array_map(
+                static fn (int $index): string => (string) new ObjectId(),
+                range(0, InputConstraints::EVENT_PROGRAMMING_PROFILE_IDS_MAX)
+            ),
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.account_profile_ids',
+        ]);
+    }
+
+    public function test_event_create_rejects_unbounded_total_programming_items(): void
+    {
+        $occurrences = $this->makeOccurrences(3);
+        foreach ($occurrences as $occurrenceIndex => $_) {
+            $occurrences[$occurrenceIndex]['programming_items'] = [];
+            for ($index = 0; $index < InputConstraints::EVENT_PROGRAMMING_ITEMS_MAX; $index++) {
+                $occurrences[$occurrenceIndex]['programming_items'][] = [
+                    'time' => sprintf('%02d:%02d', intdiv($index, 60), $index % 60),
+                    'title' => "Programação {$occurrenceIndex}-{$index}",
+                ];
+            }
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function test_event_create_rejects_unbounded_total_programming_references(): void
+    {
+        $occurrences = $this->makeOccurrences(21);
+        foreach ($occurrences as $occurrenceIndex => $_) {
+            $occurrences[$occurrenceIndex]['programming_items'] = [[
+                'time' => '17:00',
+                'title' => "Programação {$occurrenceIndex}",
+                'account_profile_ids' => array_map(
+                    static fn (int $index): string => (string) new ObjectId(),
+                    range(1, InputConstraints::EVENT_PROGRAMMING_PROFILE_IDS_MAX)
+                ),
+            ]];
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.*.programming_items',
+        ]);
+    }
+
+    public function test_event_create_rejects_unbounded_total_occurrence_parties(): void
+    {
+        $occurrences = $this->makeOccurrences(4);
+        foreach ($occurrences as $occurrenceIndex => $_) {
+            $occurrences[$occurrenceIndex]['event_parties'] = array_map(
+                static fn (int $index): array => [
+                    'party_ref_id' => (string) new ObjectId(),
+                    'permissions' => ['can_edit' => false],
+                ],
+                range(1, InputConstraints::EVENT_OCCURRENCE_PARTIES_MAX)
+            );
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['event_parties']);
     }
 
     public function test_event_update_without_schedule_mutation_keeps_stored_occurrences(): void
@@ -4263,6 +4600,41 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.title', 'Updated By Owner Without Matching Party');
     }
 
+    public function test_event_creator_cannot_update_through_unrelated_account_route(): void
+    {
+        $event = $this->createEvent();
+
+        $otherAccount = Account::create([
+            'name' => 'Unrelated Creator Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $role = $otherAccount->roleTemplates()->create([
+            'name' => 'Unrelated Creator Events Role',
+            'permissions' => ['*'],
+        ]);
+        $otherUser = $this->userService->create($otherAccount, [
+            'name' => 'Unrelated Creator User',
+            'email' => uniqid('unrelated-creator', true).'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
+
+        $event->created_by = [
+            'type' => 'account_user',
+            'id' => (string) $otherUser->_id,
+        ];
+        $event->save();
+
+        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+
+        $response = $this->patchJson(
+            "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}",
+            ['title' => 'Should Not Cross Account Boundary']
+        );
+
+        $response->assertStatus(404);
+        $this->assertSame('Stored Event', (string) $event->fresh()->title);
+    }
+
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
@@ -4358,7 +4730,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $now = Carbon::now();
 
-        $event = Event::create(array_merge([
+        $payload = array_merge([
             'title' => 'Stored Event',
             'content' => 'Event content',
             'location' => [
@@ -4430,7 +4802,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 'publish_at' => $now->copy()->subMinute(),
             ],
             'is_active' => true,
-        ], $overrides));
+        ], $overrides);
+        $payload['account_context_ids'] ??= $this->accountContextIdsForEventPayload($payload);
+
+        $event = Event::create($payload);
 
         $occurrences = [[
             'date_time_start' => Carbon::instance($event->date_time_start),
@@ -4440,6 +4815,47 @@ class EventCrudControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
 
         return $event->fresh();
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, string>
+     */
+    private function accountContextIdsForEventPayload(array $payload): array
+    {
+        $profileIds = [];
+
+        $placeRef = $payload['place_ref'] ?? null;
+        if (is_array($placeRef)) {
+            $placeRefId = trim((string) ($placeRef['id'] ?? ($placeRef['_id'] ?? '')));
+            if ($placeRefId !== '') {
+                $profileIds[] = $placeRefId;
+            }
+        }
+
+        foreach (($payload['event_parties'] ?? []) as $party) {
+            if (! is_array($party)) {
+                continue;
+            }
+
+            $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
+            if ($partyRefId !== '') {
+                $profileIds[] = $partyRefId;
+            }
+        }
+
+        if ($profileIds === []) {
+            return [];
+        }
+
+        return AccountProfile::query()
+            ->whereIn('_id', array_values(array_unique($profileIds)))
+            ->get(['account_id'])
+            ->map(static fn (AccountProfile $profile): string => trim((string) ($profile->account_id ?? '')))
+            ->filter(static fn (string $accountId): bool => $accountId !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

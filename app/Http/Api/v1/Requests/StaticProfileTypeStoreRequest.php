@@ -18,7 +18,7 @@ class StaticProfileTypeStoreRequest extends FormRequest
             'type' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'label' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'map_category' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
-            'allowed_taxonomies' => ['sometimes', 'array'],
+            'allowed_taxonomies' => ['sometimes', 'array', 'max:'.InputConstraints::DISCOVERY_FILTER_ALLOWED_TAXONOMIES_MAX],
             'allowed_taxonomies.*' => ['string', 'max:'.InputConstraints::NAME_MAX],
             'visual' => ['sometimes', 'nullable', 'array'],
             'visual.mode' => ['required_with:visual', 'string', 'in:icon,image'],

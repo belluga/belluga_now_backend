@@ -16,6 +16,7 @@ use Belluga\Events\Http\Api\v1\Requests\EventAccountProfileCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -35,10 +36,11 @@ class EventsController extends Controller
     public function index(EventIndexRequest $request): JsonResponse
     {
         $validated = $request->validated();
-        $perPage = isset($validated['page_size']) ? (int) $validated['page_size'] : 15;
-        $perPage = max(1, min($perPage, 100));
-        $accountContextId = $this->resolveAccountFromRoute($request);
         $isAdmin = $this->isAdminContext($request);
+        $pageSizeMaximum = $isAdmin ? 100 : InputConstraints::PUBLIC_PAGE_SIZE_MAX;
+        $perPage = isset($validated['page_size']) ? (int) $validated['page_size'] : 15;
+        $perPage = max(1, min($perPage, $pageSizeMaximum));
+        $accountContextId = $this->resolveAccountFromRoute($request);
 
         $paginator = $this->eventQueryService->paginateManagement(
             $validated,
@@ -124,6 +126,9 @@ class EventsController extends Controller
 
         $validated = $request->validated();
         unset($validated['cover'], $validated['remove_cover']);
+        if ($accountId) {
+            $validated['_account_context_id'] = $accountId;
+        }
         $updated = $this->eventManagementService->update($event, $validated);
         $this->eventMediaService->applyUploads($request, $updated);
 

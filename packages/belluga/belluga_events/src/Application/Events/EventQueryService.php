@@ -12,6 +12,7 @@ use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -32,13 +33,19 @@ class EventQueryService
     /** @var array<string, mixed>|null */
     private ?array $tenantCapabilitiesCache = null;
 
+    private readonly EventManagementOccurrenceQuery $managementOccurrenceQuery;
+
     public function __construct(
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventRadiusSettingsContract $eventRadiusSettings,
         private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
         private readonly EventAttendanceReadContract $eventAttendanceRead,
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
-    ) {}
+        ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
+    ) {
+        $this->managementOccurrenceQuery = $managementOccurrenceQuery
+            ?? new EventManagementOccurrenceQuery();
+    }
 
     /**
      * @param  array<string, mixed>  $queryParams
@@ -46,9 +53,10 @@ class EventQueryService
      */
     public function fetchAgenda(array $queryParams, ?string $userId): array
     {
-        $page = max(1, (int) ($queryParams['page'] ?? 1));
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
         $pageSize = (int) ($queryParams['page_size'] ?? $queryParams['per_page'] ?? self::DEFAULT_PAGE_SIZE);
         $pageSize = $pageSize > 0 ? $pageSize : self::DEFAULT_PAGE_SIZE;
+        $pageSize = min($pageSize, InputConstraints::PUBLIC_PAGE_SIZE_MAX);
         $skip = ($page - 1) * $pageSize;
         $limit = $pageSize + 1;
 
@@ -76,6 +84,11 @@ class EventQueryService
         ?string $accountContextId = null
     ): LengthAwarePaginator {
         $resolvedPerPage = max(1, min($perPage, self::MAX_MANAGEMENT_PAGE_SIZE));
+        $resolvedPage = max(1, (int) ($queryParams['page'] ?? 1));
+        if (! $isAdminContext) {
+            $resolvedPage = $this->normalizePublicPage($resolvedPage);
+            $queryParams['page'] = $resolvedPage;
+        }
         $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
         $specificDate = $this->extractManagementSpecificDate($queryParams);
 
@@ -129,7 +142,7 @@ class EventQueryService
         $paginator = $query
             ->orderBy('date_time_start', $isAdminContext ? 'asc' : 'desc')
             ->orderBy('_id', 'desc')
-            ->paginate($resolvedPerPage);
+            ->paginate($resolvedPerPage, ['*'], 'page', $resolvedPage);
 
         $events = $paginator->getCollection();
         $occurrencesByEventId = $this->loadOccurrencesByEventIds(
@@ -274,60 +287,18 @@ class EventQueryService
         bool $isAdminContext,
         ?string $accountContextId
     ): LengthAwarePaginator {
-        $page = max(1, (int) Arr::get($queryParams, 'page', 1));
-        $skip = ($page - 1) * $perPage;
-
-        $profileIdsForAccount = null;
-        if ($accountContextId) {
-            $profileIdsForAccount = $this->resolveAccountProfileIds($accountContextId);
-            if ($profileIdsForAccount === []) {
-                return $this->emptyManagementPaginator($perPage, $page);
-            }
-        }
-
-        $pipeline = $this->buildManagementOccurrenceEventPipeline(
+        $pageResult = $this->managementOccurrenceQuery->paginateEventIds(
             $queryParams,
             $temporalBuckets,
             $specificDate,
+            $perPage,
             $isAdminContext,
-            $profileIdsForAccount
+            $accountContextId
         );
 
-        $aggregatePipeline = [
-            ...$pipeline,
-            [
-                '$facet' => [
-                    'metadata' => [
-                        ['$count' => 'total'],
-                    ],
-                    'data' => [
-                        ['$skip' => $skip],
-                        ['$limit' => $perPage],
-                        ['$project' => ['event_id' => '$_id', 'first_starts_at' => 1]],
-                    ],
-                ],
-            ],
-        ];
-
-        $facetRows = $this->runManagementOccurrenceAggregate(
-            $aggregatePipeline,
-            'management_occurrence_page_with_count'
-        );
-        $facet = $facetRows[0] ?? [];
-        $metadata = is_array($facet['metadata'] ?? null) ? $facet['metadata'] : [];
-        $total = (int) ($metadata[0]['total'] ?? 0);
-        if ($total === 0) {
-            return $this->emptyManagementPaginator($perPage, $page);
-        }
-
-        $rows = is_array($facet['data'] ?? null) ? $facet['data'] : [];
-
-        $eventIds = collect($rows)
-            ->map(static fn (mixed $row): string => trim((string) ($row['event_id'] ?? '')))
-            ->filter(static fn (string $eventId): bool => $eventId !== '')
-            ->values()
-            ->all();
-
+        $eventIds = $pageResult['event_ids'];
+        $page = $pageResult['page'];
+        $total = $pageResult['total'];
         if ($eventIds === []) {
             return $this->emptyManagementPaginator($perPage, $page, $total);
         }
@@ -354,151 +325,6 @@ class EventQueryService
         );
     }
 
-    /**
-     * @param  array<string, mixed>  $queryParams
-     * @param  array<int, string>  $temporalBuckets
-     * @param  array<int, string>|null  $profileIdsForAccount
-     * @return array<int, array<string, mixed>>
-     */
-    private function buildManagementOccurrenceEventPipeline(
-        array $queryParams,
-        array $temporalBuckets,
-        ?Carbon $specificDate,
-        bool $isAdminContext,
-        ?array $profileIdsForAccount
-    ): array {
-        $occurrenceMatch = ['deleted_at' => null];
-        if (! $isAdminContext) {
-            $occurrenceMatch['is_event_published'] = true;
-        }
-
-        $exprClauses = $this->managementOccurrenceTemporalExprClauses($temporalBuckets);
-        if ($exprClauses !== []) {
-            $occurrenceMatch['$expr'] = count($exprClauses) === 1
-                ? $exprClauses[0]
-                : ['$or' => $exprClauses];
-        }
-
-        if ($specificDate !== null) {
-            $occurrenceMatch['starts_at'] = [
-                '$gte' => new UTCDateTime($specificDate->copy()->startOfDay()),
-                '$lt' => new UTCDateTime($specificDate->copy()->addDay()->startOfDay()),
-            ];
-        }
-
-        $eventMatch = $this->buildManagementOccurrenceEventMatch($queryParams, $isAdminContext, $profileIdsForAccount);
-
-        return [
-            ['$match' => $occurrenceMatch],
-            [
-                '$group' => [
-                    '_id' => '$event_id',
-                    'first_starts_at' => ['$min' => '$starts_at'],
-                ],
-            ],
-            ['$sort' => ['first_starts_at' => $isAdminContext ? 1 : -1, '_id' => 1]],
-            [
-                '$addFields' => [
-                    'event_object_id' => [
-                        '$convert' => [
-                            'input' => '$_id',
-                            'to' => 'objectId',
-                            'onError' => null,
-                            'onNull' => null,
-                        ],
-                    ],
-                ],
-            ],
-            [
-                '$lookup' => [
-                    'from' => 'events',
-                    'localField' => 'event_object_id',
-                    'foreignField' => '_id',
-                    'as' => 'event',
-                ],
-            ],
-            ['$unwind' => '$event'],
-            ['$match' => $eventMatch],
-        ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $queryParams
-     * @param  array<int, string>|null  $profileIdsForAccount
-     * @return array<string, mixed>
-     */
-    private function buildManagementOccurrenceEventMatch(
-        array $queryParams,
-        bool $isAdminContext,
-        ?array $profileIdsForAccount
-    ): array {
-        $match = [
-            'event.deleted_at' => null,
-            '$and' => [],
-        ];
-
-        if (array_key_exists('status', $queryParams) && $queryParams['status'] !== null) {
-            $match['event.publication.status'] = $queryParams['status'];
-        }
-
-        if ($profileIdsForAccount !== null) {
-            $profileCandidates = $this->buildProfileIdCandidatesFromList($profileIdsForAccount);
-            $match['$and'][] = [
-                '$or' => [
-                    ['event.event_parties.party_ref_id' => ['$in' => $profileIdsForAccount]],
-                    ['event.place_ref.id' => ['$in' => $profileCandidates]],
-                    ['event.place_ref._id' => ['$in' => $profileCandidates]],
-                ],
-            ];
-        }
-
-        $venueProfileId = $this->extractManagementProfileFilterId($queryParams, 'venue_profile_id');
-        if ($venueProfileId !== null) {
-            $profileIds = $this->buildProfileIdCandidates($venueProfileId);
-            $match['$and'][] = [
-                '$or' => [
-                    ['event.place_ref.id' => ['$in' => $profileIds]],
-                    ['event.place_ref._id' => ['$in' => $profileIds]],
-                ],
-            ];
-        }
-
-        $relatedAccountProfileId = $this->extractManagementProfileFilterId($queryParams, 'related_account_profile_id');
-        if ($relatedAccountProfileId !== null) {
-            $profileIds = $this->buildProfileIdCandidates($relatedAccountProfileId);
-            $match['$and'][] = [
-                'event.event_parties' => [
-                    '$elemMatch' => [
-                        'party_type' => ['$ne' => 'venue'],
-                        'party_ref_id' => ['$in' => $profileIds],
-                    ],
-                ],
-            ];
-        }
-
-        if (! $isAdminContext) {
-            $now = new UTCDateTime(Carbon::now());
-            $match['$and'][] = [
-                '$or' => [
-                    ['event.publication.status' => 'published'],
-                    ['event.publication.status' => null],
-                ],
-            ];
-            $match['$and'][] = [
-                '$or' => [
-                    ['event.publication.publish_at' => null],
-                    ['event.publication.publish_at' => ['$lte' => $now]],
-                ],
-            ];
-        }
-
-        if ($match['$and'] === []) {
-            unset($match['$and']);
-        }
-
-        return $match;
-    }
-
     private function emptyManagementPaginator(int $perPage, int $page, int $total = 0): LengthAwarePaginator
     {
         return new LengthAwarePaginator(
@@ -508,41 +334,6 @@ class EventQueryService
             $page,
             ['path' => LengthAwarePaginator::resolveCurrentPath()]
         );
-    }
-
-    /**
-     * @param  array<int, string>  $temporalBuckets
-     * @return array<int, array<string, mixed>>
-     */
-    private function managementOccurrenceTemporalExprClauses(array $temporalBuckets): array
-    {
-        $now = new UTCDateTime(Carbon::now());
-        $effectiveEndExpr = [
-            '$ifNull' => [
-                '$effective_ends_at',
-                [
-                    '$add' => ['$starts_at', self::DEFAULT_EVENT_DURATION_MS],
-                ],
-            ],
-        ];
-
-        $clauses = [];
-        if (in_array('past', $temporalBuckets, true)) {
-            $clauses[] = ['$lte' => [$effectiveEndExpr, $now]];
-        }
-        if (in_array('now', $temporalBuckets, true)) {
-            $clauses[] = [
-                '$and' => [
-                    ['$lte' => ['$starts_at', $now]],
-                    ['$gt' => [$effectiveEndExpr, $now]],
-                ],
-            ];
-        }
-        if (in_array('future', $temporalBuckets, true)) {
-            $clauses[] = ['$gt' => ['$starts_at', $now]];
-        }
-
-        return $clauses;
     }
 
     private function applyManagementVenueFilter(mixed $query, string $venueProfileId): void
@@ -613,7 +404,8 @@ class EventQueryService
      */
     public function formatEventDetail(Event $event, ?string $userId = null, ?string $occurrenceRef = null): array
     {
-        $selectedOccurrence = $this->resolveSelectedOccurrence($event, $occurrenceRef);
+        $preloadedOccurrences = $this->loadEventOccurrenceDocuments($event);
+        $selectedOccurrence = $this->resolveSelectedOccurrence($event, $occurrenceRef, $preloadedOccurrences);
         if (! $selectedOccurrence) {
             return $this->formatEvent($event, $userId);
         }
@@ -622,7 +414,7 @@ class EventQueryService
         $payload = $this->formatEvent($selectedOccurrence, $userId);
         $payload['event_id'] = (string) $event->_id;
         $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
-        $payload['occurrences'] = $this->resolveEventOccurrences($event, $selectedOccurrenceId);
+        $payload['occurrences'] = $this->resolveEventOccurrences($event, $selectedOccurrenceId, $preloadedOccurrences);
         $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
             $this->resolveLinkedAccountProfiles(
                 $this->normalizeEventParties($event->event_parties ?? [])
@@ -782,24 +574,34 @@ class EventQueryService
 
     public function eventEditableByAccount(Event $event, string $accountId, ?string $actorUserId = null): bool
     {
-        if ($actorUserId !== null && $this->isAccountOwner($event, $actorUserId)) {
-            return true;
-        }
-
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             return false;
         }
 
-        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
-            return true;
-        }
+        $referencesAccountPlace = $this->eventReferencesPlaceRefProfile($event, $profileIds);
+        $matchingParties = [];
 
         $parties = $this->normalizeEventParties($event->event_parties ?? []);
         foreach ($parties as $party) {
-            if (! in_array($party['party_ref_id'], $profileIds, true)) {
-                continue;
+            if (in_array($party['party_ref_id'], $profileIds, true)) {
+                $matchingParties[] = $party;
             }
+        }
+
+        if (! $referencesAccountPlace && $matchingParties === []) {
+            return false;
+        }
+
+        if ($actorUserId !== null && $this->isAccountOwner($event, $actorUserId)) {
+            return true;
+        }
+
+        if ($referencesAccountPlace) {
+            return true;
+        }
+
+        foreach ($matchingParties as $party) {
             if ((bool) ($party['permissions']['can_edit'] ?? false)) {
                 return true;
             }
@@ -877,8 +679,8 @@ class EventQueryService
         $originLat = Arr::get($queryParams, 'origin_lat');
         $originLng = Arr::get($queryParams, 'origin_lng');
 
-        $originLat = is_numeric($originLat) ? (float) $originLat : null;
-        $originLng = is_numeric($originLng) ? (float) $originLng : null;
+        $originLat = $this->normalizeLatitude($originLat);
+        $originLng = $this->normalizeLongitude($originLng);
 
         $useGeo = $originLat !== null && $originLng !== null;
 
@@ -895,6 +697,35 @@ class EventQueryService
             'max_distance_meters' => $useGeo ? $this->resolveMaxDistanceMeters($queryParams) : null,
             'use_geo' => $useGeo,
         ];
+    }
+
+    private function normalizeLatitude(mixed $value): ?float
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $coordinate = (float) $value;
+
+        return $coordinate >= -90.0 && $coordinate <= 90.0 ? $coordinate : null;
+    }
+
+    private function normalizePublicPage(mixed $value): int
+    {
+        $page = max(1, (int) $value);
+
+        return min($page, InputConstraints::PUBLIC_PAGE_MAX);
+    }
+
+    private function normalizeLongitude(mixed $value): ?float
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $coordinate = (float) $value;
+
+        return $coordinate >= -180.0 && $coordinate <= 180.0 ? $coordinate : null;
     }
 
     /**
@@ -1088,6 +919,7 @@ class EventQueryService
         $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
+        $pipeline[] = ['$limit' => InputConstraints::PUBLIC_STREAM_DELTA_LIMIT];
 
         return $pipeline;
     }
@@ -1679,22 +1511,6 @@ class EventQueryService
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $pipeline
-     * @return array<int, mixed>
-     */
-    private function runManagementOccurrenceAggregate(array $pipeline, string $purpose): array
-    {
-        EventBus::dispatch('belluga.events.management_occurrence_aggregate', [
-            $purpose,
-            $pipeline,
-        ]);
-
-        return EventOccurrence::raw(
-            fn ($collection) => $collection->aggregate($pipeline)
-        )->all();
-    }
-
-    /**
      * @param  array<int, string>  $eventIds
      * @return array<int, string|ObjectId>
      */
@@ -1715,17 +1531,15 @@ class EventQueryService
         return $candidates;
     }
 
-    private function resolveSelectedOccurrence(Event $event, ?string $occurrenceRef): ?EventOccurrence
+    private function resolveSelectedOccurrence(
+        Event $event,
+        ?string $occurrenceRef,
+        ?iterable $preloadedOccurrences = null
+    ): ?EventOccurrence
     {
-        $eventId = isset($event->_id) ? (string) $event->_id : '';
-        if ($eventId === '') {
-            return null;
-        }
-
-        $documents = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->orderBy('starts_at')
-            ->get();
+        $documents = $preloadedOccurrences === null
+            ? $this->loadEventOccurrenceDocuments($event)
+            : collect($preloadedOccurrences);
 
         if ($documents->isEmpty()) {
             return null;
@@ -1766,6 +1580,21 @@ class EventQueryService
         }
 
         return $documents->first();
+    }
+
+    private function loadEventOccurrenceDocuments(Event $event): mixed
+    {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        if ($eventId === '') {
+            return collect();
+        }
+
+        EventBus::dispatch('belluga.events.detail_occurrences_load', [$eventId]);
+
+        return EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->orderBy('starts_at')
+            ->get();
     }
 
     private function toCarbon(mixed $value): ?Carbon
@@ -1920,18 +1749,7 @@ class EventQueryService
             return;
         }
 
-        $profileIds = $this->resolveAccountProfileIds($accountId);
-        if ($profileIds === []) {
-            $query->where('_id', '__no_match__');
-
-            return;
-        }
-
-        $query->where(function ($builder) use ($profileIds): void {
-            $builder->whereIn('event_parties.party_ref_id', $profileIds)
-                ->orWhereIn('place_ref.id', $profileIds)
-                ->orWhereIn('place_ref._id', $profileIds);
-        });
+        $query->where('account_context_ids', $accountId);
     }
 
     /**
