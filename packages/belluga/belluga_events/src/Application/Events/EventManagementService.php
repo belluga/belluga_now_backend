@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Application\Events\Concerns\EventManagementPartiesAndMetadata;
+use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
@@ -15,7 +16,6 @@ use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
-use Belluga\Events\Support\EventContentHtmlSanitizer;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
@@ -37,6 +37,7 @@ class EventManagementService
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
         private readonly EventAggregateWriteService $eventAggregateWrites,
+        private readonly EventContentSanitizerContract $contentSanitizer,
         private readonly Dispatcher $events,
     ) {}
 
@@ -119,7 +120,7 @@ class EventManagementService
         }
 
         if (array_key_exists('content', $payload)) {
-            $normalized['content'] = EventContentHtmlSanitizer::sanitize(
+            $normalized['content'] = $this->contentSanitizer->sanitize(
                 $payload['content'] ?? null
             );
             if (strlen($normalized['content']) > InputConstraints::RICH_TEXT_MAX_BYTES) {

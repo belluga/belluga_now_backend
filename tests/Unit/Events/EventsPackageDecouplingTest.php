@@ -48,12 +48,13 @@ class EventsPackageDecouplingTest extends TestCase
         }
     }
 
-    public function test_events_package_uses_neutral_rich_text_sanitizer_contract(): void
+    public function test_events_package_uses_host_bound_content_sanitizer_contract(): void
     {
-        $contents = file_get_contents(base_path('packages/belluga/belluga_events/src/Support/EventContentHtmlSanitizer.php'));
+        $contents = file_get_contents(base_path('packages/belluga/belluga_events/src/Application/Events/EventManagementService.php'));
 
         $this->assertIsString($contents);
-        $this->assertStringContainsString('Belluga\\RichText\\SafeRichTextHtmlSanitizer', $contents);
-        $this->assertStringNotContainsString('DOMDocument', $contents);
+        $this->assertStringContainsString('EventContentSanitizerContract', $contents);
+        $this->assertStringContainsString('$this->contentSanitizer->sanitize', $contents);
+        $this->assertStringNotContainsString('Belluga\\RichText\\', $contents);
     }
 }

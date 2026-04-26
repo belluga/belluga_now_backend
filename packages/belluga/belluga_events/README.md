@@ -355,6 +355,7 @@ Geometry compatibility:
    - `EventAccountResolverContract`
    - `EventAttendanceReadContract`
    - `EventCapabilitySettingsContract`
+   - `EventContentSanitizerContract`
    - `EventPartyMapperRegistryContract`
    - `EventTenantContextContract`
    - `EventRadiusSettingsContract`
