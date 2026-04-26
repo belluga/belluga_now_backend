@@ -7,6 +7,7 @@ namespace Tests\Unit\Application\Branding;
 use App\Application\Branding\BrandingManifestService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -77,7 +78,7 @@ class BrandingManifestServiceTest extends TestCase
                 'favicon_uri' => '',
             ],
             'pwa_icon' => [
-                'icon192_uri' => Storage::disk('public')->url($pwaIconPath),
+                'icon192_uri' => 'https://tenant-alpha.test/icon/icon-192x192.png?v=tenant-pwa-icon',
                 'icon512_uri' => '',
                 'source_uri' => '',
                 'icon_maskable512_uri' => '',
@@ -89,7 +90,46 @@ class BrandingManifestServiceTest extends TestCase
         $resolvedAsset = $this->service->resolveFaviconAsset();
         $response = $this->service->assetResponse($resolvedAsset);
 
-        $this->assertSame(Storage::disk('public')->url($pwaIconPath), $resolvedAsset);
+        $this->assertSame('https://tenant-alpha.test/icon/icon-192x192.png?v=tenant-pwa-icon', $resolvedAsset);
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function test_asset_response_resolves_landlord_canonical_favicon_for_tenant_fallback(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->branding_data = [
+            'logo_settings' => [
+                'favicon_uri' => '',
+            ],
+            'pwa_icon' => [
+                'icon192_uri' => '',
+                'icon512_uri' => '',
+                'source_uri' => '',
+                'icon_maskable512_uri' => '',
+            ],
+        ];
+        $tenant->save();
+        $tenant->fresh()?->makeCurrent();
+
+        $landlord = Landlord::singleton();
+        Storage::disk('public')->put('landlord/logos/favicon.ico', 'landlord-favicon');
+
+        $landlord->branding_data = array_replace_recursive(
+            is_array($landlord->branding_data) ? $landlord->branding_data : [],
+            [
+                'logo_settings' => [
+                    'favicon_uri' => 'https://belluga.test/favicon.ico?v=landlord-favicon',
+                ],
+            ],
+        );
+        $landlord->save();
+
+        $resolvedAsset = $this->service->resolveFaviconAsset();
+        $response = $this->service->assetResponse($resolvedAsset);
+
+        $this->assertSame('https://belluga.test/favicon.ico?v=landlord-favicon', $resolvedAsset);
         $this->assertSame(200, $response->getStatusCode());
     }
 

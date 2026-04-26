@@ -46,6 +46,7 @@ Route::middleware('tenant-maybe')->group(function () {
     Route::get('/icon/icon-maskable-512x512.png', [BrandingController::class, 'getMaskableIcon']);
     Route::get('/icon/icon-192x192.png', [BrandingController::class, 'getIcon192']);
     Route::get('/icon/icon-512x512.png', [BrandingController::class, 'getIcon512']);
+    Route::get('/icon/icon-source.png', [BrandingController::class, 'getIconSource']);
     Route::get('/icon-light.png', [BrandingController::class, 'getIconLight']);
     Route::get('/icon-dark.png', [BrandingController::class, 'getIconDark']);
     Route::get('/logo-light.png', [BrandingController::class, 'getLogoLight']);

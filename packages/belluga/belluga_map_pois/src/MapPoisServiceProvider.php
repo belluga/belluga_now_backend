@@ -11,6 +11,7 @@ use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
+use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 
@@ -25,6 +26,7 @@ class MapPoisServiceProvider extends ServiceProvider
         $this->ensureHostBinding(MapPoiRegistryContract::class);
         $this->ensureHostBinding(MapPoiSettingsContract::class);
         $this->ensureHostBinding(MapPoiTenantContextContract::class);
+        $this->ensureHostBinding(MapPoiTaxonomySnapshotResolverContract::class);
     }
 
     public function boot(): void

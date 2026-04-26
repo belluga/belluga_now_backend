@@ -133,8 +133,8 @@ class PublicWebMetadataService
         );
         $metadata['image'] = $this->resolveImageUrl([
             data_get($payload, 'thumb.data.url'),
-            $this->firstProfileImage($payload['artists'] ?? []),
             $this->firstProfileImage($payload['linked_account_profiles'] ?? []),
+            $this->firstProfileImage($payload['artists'] ?? []),
             data_get($payload, 'venue.cover_url'),
             data_get($payload, 'venue.avatar_url'),
             $metadata['image'],

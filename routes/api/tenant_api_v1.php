@@ -233,6 +233,9 @@ Route::patch('/taxonomies/{taxonomy_id}', [TaxonomiesController::class, 'update'
 Route::delete('/taxonomies/{taxonomy_id}', [TaxonomiesController::class, 'destroy'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
 
+Route::get('/taxonomies/terms', [TaxonomyTermsController::class, 'batch'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
 Route::get('/taxonomies/{taxonomy_id}/terms', [TaxonomyTermsController::class, 'index'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 

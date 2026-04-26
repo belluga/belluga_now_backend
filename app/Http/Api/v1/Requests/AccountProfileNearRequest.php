@@ -22,13 +22,8 @@ class AccountProfileNearRequest extends FormRequest
         return [
             'origin_lat' => 'required|numeric|between:-90,90',
             'origin_lng' => 'required|numeric|between:-180,180',
-            'max_distance_meters' => 'sometimes|numeric|min:0',
-            'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'profile_type' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'filter' => 'sometimes|array',
-            'filter.profile_type' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'page' => 'sometimes|integer|min:1',
-            'page_size' => 'sometimes|integer|min:1|max:50',
+            'max_distance_meters' => 'sometimes|numeric|min:0|max:'.InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS,
+            ...AccountProfilePublicFilterRules::commonRules(),
         ];
     }
 }

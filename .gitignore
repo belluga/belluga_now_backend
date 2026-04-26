@@ -29,6 +29,7 @@ yarn-error.log
 
 # AI Local helper
 AGENTS.md
+CLAUDE.md
 delphi-ai
 foundation_documentation
 .agent
@@ -37,6 +38,8 @@ foundation_documentation
 .agents/
 .codex
 .codex/
+.claude
+.claude/
 
 # CLINE
 CLINE.md

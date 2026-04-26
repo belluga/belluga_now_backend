@@ -15,7 +15,8 @@ abstract class AbstractQueryService
         Builder $query,
         array $queryParams,
         bool $includeArchived,
-        int $perPage
+        int $perPage,
+        ?int $page = null
     ): LengthAwarePaginator {
         if ($includeArchived) {
             $this->applyArchivedConstraint($query);
@@ -33,7 +34,7 @@ abstract class AbstractQueryService
             }
         }
 
-        return $query->paginate($perPage);
+        return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
     protected function applyArchivedConstraint(Builder $query): void

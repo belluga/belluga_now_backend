@@ -24,7 +24,7 @@ class TenantBrandingController
     {
         $tenant = Tenant::resolve();
         $validated = $request->validated();
-        $uploadedLogos = $this->processLogoUploads($request);
+        $uploadedLogos = $this->processLogoUploads($request, $tenant);
         if ($request->hasFile('public_web_metadata.default_image')) {
             $validated['public_web_metadata']['default_image'] = $this->brandingPublicWebMediaService->storeDefaultImage(
                 $request->getSchemeAndHttpHost(),
@@ -36,7 +36,9 @@ class TenantBrandingController
         $pwaVariants = [];
         if ($request->hasFile('logo_settings.pwa_icon')) {
             $pwaVariants = $this->generatePwaIconVariants(
-                sourceFile: $request->file('logo_settings.pwa_icon')
+                sourceFile: $request->file('logo_settings.pwa_icon'),
+                brandable: $tenant,
+                baseUrl: $request->getSchemeAndHttpHost(),
             );
         }
 

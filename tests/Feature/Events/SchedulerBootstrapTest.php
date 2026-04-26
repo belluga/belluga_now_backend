@@ -7,6 +7,7 @@ namespace Tests\Feature\Events;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Console\Scheduling\Schedule;
 use Tests\TestCase;
 
@@ -42,11 +43,19 @@ class SchedulerBootstrapTest extends TestCase
 
         $this->assertContains('events:publication:publish_scheduled', $eventSummaries);
         $this->assertContains('events:async:monitor', $eventSummaries);
-        $this->assertContains('events:occurrences:reconcile', $eventSummaries);
         $this->assertContains('map_pois:cleanup_orphaned', $eventSummaries);
         $this->assertContains('events:map_pois:refresh_expired', $eventSummaries);
+        $this->assertContains('api-security:abuse-signals:prune', $eventSummaries);
+        $this->assertNotContains('events:occurrences:reconcile', $eventSummaries);
         $this->assertNotContains('ProcessTicketOutboxJob', $eventSummaries);
         $this->assertNotContains('ExpireIssuedTicketUnitsJob', $eventSummaries);
         $this->assertNotContains(PublishScheduledEventsJob::class, $eventSummaries);
+
+        $commands = $this->app->make(Kernel::class)->all();
+        $this->assertArrayHasKey(
+            'events:occurrences:repair',
+            $commands,
+            'Occurrence reconcile must remain manual-only via explicit repair command.'
+        );
     }
 }

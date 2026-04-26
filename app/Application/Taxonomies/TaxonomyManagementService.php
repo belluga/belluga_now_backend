@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Application\Taxonomies;
 
+use App\Jobs\Taxonomies\RepairTaxonomyTermSnapshotsJob;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class TaxonomyManagementService
@@ -51,8 +53,15 @@ class TaxonomyManagementService
             }
         }
 
+        $previousName = (string) ($taxonomy->name ?? '');
         $taxonomy->fill($this->mergeEntry($taxonomy, $payload, $slug));
         $taxonomy->save();
+
+        if ((string) ($taxonomy->name ?? '') !== $previousName) {
+            DB::connection('tenant')->afterCommit(
+                static fn () => RepairTaxonomyTermSnapshotsJob::dispatch((string) ($taxonomy->slug ?? ''))
+            );
+        }
 
         return $this->toPayload($taxonomy);
     }

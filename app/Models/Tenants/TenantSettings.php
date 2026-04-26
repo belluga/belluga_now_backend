@@ -10,6 +10,7 @@ class TenantSettings extends PackageTenantSettings
 {
     protected $fillable = [
         'map_ui',
+        'discovery_filters',
         'map_ingest',
         'map_security',
         'events',
@@ -17,12 +18,21 @@ class TenantSettings extends PackageTenantSettings
         'telemetry',
         'app_links',
         'resend_email',
+        'tenant_public_auth',
     ];
 
     /**
      * @return array<string, mixed>
      */
     public function getMapUiAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDiscoveryFiltersAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }
@@ -79,6 +89,14 @@ class TenantSettings extends PackageTenantSettings
      * @return array<string, mixed>
      */
     public function getResendEmailAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getTenantPublicAuthAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

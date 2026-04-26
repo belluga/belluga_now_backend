@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Application\Taxonomies\TaxonomyValidationService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
@@ -18,6 +19,7 @@ class AccountProfileManagementService
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     /**
@@ -35,6 +37,8 @@ class AccountProfileManagementService
      */
     public function createWithinCurrentTransaction(array $payload): AccountProfile
     {
+        $payload = AccountProfileRichTextSanitizer::sanitizePayload($payload);
+
         $profileType = (string) $payload['profile_type'];
 
         if (! $this->registryService->typeDefinition($profileType)) {
@@ -65,6 +69,11 @@ class AccountProfileManagementService
                 $profileType,
                 $taxonomyTerms
             );
+            $payload['taxonomy_terms'] = $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
+            $payload['taxonomy_terms_flat'] = $this->flattenTaxonomyTerms($payload['taxonomy_terms']);
+        } elseif (array_key_exists('taxonomy_terms', $payload)) {
+            $payload['taxonomy_terms'] = [];
+            $payload['taxonomy_terms_flat'] = [];
         }
 
         try {
@@ -97,6 +106,8 @@ class AccountProfileManagementService
      */
     public function update(AccountProfile $profile, array $attributes): AccountProfile
     {
+        $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
+
         $profileType = $profile->profile_type;
         if (array_key_exists('profile_type', $attributes)) {
             $profileType = (string) $attributes['profile_type'];
@@ -126,6 +137,11 @@ class AccountProfileManagementService
                     $profileType,
                     $taxonomyTerms
                 );
+                $attributes['taxonomy_terms'] = $this->taxonomyTermSummaryResolver->resolve($taxonomyTerms);
+                $attributes['taxonomy_terms_flat'] = $this->flattenTaxonomyTerms($attributes['taxonomy_terms']);
+            } else {
+                $attributes['taxonomy_terms'] = [];
+                $attributes['taxonomy_terms_flat'] = [];
             }
         }
 
@@ -203,5 +219,27 @@ class AccountProfileManagementService
         DB::connection('tenant')->afterCommit(
             static fn () => UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id)
         );
+    }
+
+    /**
+     * @param  array<int, mixed>  $terms
+     * @return array<int, string>
+     */
+    private function flattenTaxonomyTerms(array $terms): array
+    {
+        $flat = [];
+        foreach ($terms as $term) {
+            if (! is_array($term)) {
+                continue;
+            }
+
+            $type = trim((string) ($term['type'] ?? ''));
+            $value = trim((string) ($term['value'] ?? ''));
+            if ($type !== '' && $value !== '') {
+                $flat[] = "{$type}:{$value}";
+            }
+        }
+
+        return array_values(array_unique($flat));
     }
 }

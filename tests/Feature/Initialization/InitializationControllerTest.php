@@ -30,11 +30,31 @@ class InitializationControllerTest extends TestCase
 
     public function test_system_initializes_successfully(): void
     {
-        $initializeUrl = "http://{$this->host}/api/v1/initialize";
-        $response = $this->postJson($initializeUrl, $this->payload());
+        $response = $this->withServerVariables([
+            'HTTP_HOST' => $this->host,
+            'SERVER_NAME' => $this->host,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ]);
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.user.name', 'Admin Test');
+        $this->assertStringContainsString(
+            '/logo-light.png',
+            (string) $response->json('data.landlord.branding_data.logo_settings.light_logo_uri')
+        );
+        $this->assertStringContainsString(
+            '/favicon.ico',
+            (string) $response->json('data.landlord.branding_data.logo_settings.favicon_uri')
+        );
+        $this->assertStringContainsString(
+            '/icon/icon-source.png',
+            (string) $response->json('data.landlord.branding_data.pwa_icon.source_uri')
+        );
+        $this->assertStringContainsString(
+            '/icon/icon-192x192.png',
+            (string) $response->json('data.landlord.branding_data.pwa_icon.icon192_uri')
+        );
 
         $this->assertSame(1, Landlord::query()->count());
         $this->assertSame(1, Tenant::query()->count());
@@ -42,19 +62,32 @@ class InitializationControllerTest extends TestCase
 
     public function test_subsequent_initialization_is_rejected(): void
     {
-        $initializeUrl = "http://{$this->host}/api/v1/initialize";
-        $this->postJson($initializeUrl, $this->payload())->assertCreated();
+        $this->withServerVariables([
+            'HTTP_HOST' => $this->host,
+            'SERVER_NAME' => $this->host,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ])->assertCreated();
 
-        $response = $this->postJson($initializeUrl, $this->payload());
+        $response = $this->withServerVariables([
+            'HTTP_HOST' => $this->host,
+            'SERVER_NAME' => $this->host,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ]);
         $response->assertStatus(403);
     }
 
     public function test_initialization_route_is_not_available_on_tenant_domain(): void
     {
         $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
 
-        $response = $this->postJson($initializeUrl, $this->payload());
+        $response = $this->withServerVariables([
+            'HTTP_HOST' => $tenantHost,
+            'SERVER_NAME' => $tenantHost,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ]);
         $response->assertStatus(404);
     }
 

@@ -21,14 +21,58 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
     {
-        $profile = AccountProfile::query()->where('_id', $profileId)->first();
+        $resolved = $this->resolvePhysicalHostsByProfileIds([$profileId]);
 
-        if (! $profile) {
+        if (! isset($resolved[$profileId])) {
             throw ValidationException::withMessages([
                 'place_ref.id' => ['Physical host account profile not found.'],
             ]);
         }
 
+        return $resolved[$profileId];
+    }
+
+    public function resolvePhysicalHostsByProfileIds(array $profileIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds
+        ), static fn (string $profileId): bool => $profileId !== '')));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $profiles = AccountProfile::query()
+            ->whereIn('_id', $ids)
+            ->get()
+            ->keyBy(static fn (AccountProfile $profile): string => (string) $profile->_id);
+
+        $missing = array_diff($ids, array_keys($profiles->all()));
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile not found.'],
+            ]);
+        }
+
+        $resolved = [];
+        foreach ($ids as $profileId) {
+            /** @var AccountProfile $profile */
+            $profile = $profiles[$profileId];
+            $resolved[$profileId] = $this->formatPhysicalHostProfile($profile);
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @return array{
+     *   venue: array<string, mixed>,
+     *   location: array<string, mixed>
+     * }
+     */
+    private function formatPhysicalHostProfile(AccountProfile $profile): array
+    {
         $profileType = trim((string) ($profile->profile_type ?? ''));
         if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
             throw ValidationException::withMessages([
@@ -133,6 +177,27 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ->get()
             ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
             ->filter(static fn (string $id): bool => $id !== '')
+            ->values()
+            ->all();
+    }
+
+    public function resolveAccountIdsForProfileIds(array $profileIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds
+        ), static fn (string $profileId): bool => $profileId !== '')));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return AccountProfile::query()
+            ->whereIn('_id', $ids)
+            ->get(['account_id'])
+            ->map(static fn (AccountProfile $profile): string => trim((string) ($profile->account_id ?? '')))
+            ->filter(static fn (string $accountId): bool => $accountId !== '')
+            ->unique()
             ->values()
             ->all();
     }

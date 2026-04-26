@@ -35,6 +35,10 @@
         },
         {
             "type": "path",
+            "url": "packages/belluga/belluga_rich_text"
+        },
+        {
+            "type": "path",
             "url": "packages/belluga/belluga_events"
         },
         {
@@ -48,6 +52,10 @@
         {
             "type": "path",
             "url": "packages/belluga/belluga_map_pois"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_discovery_filters"
         },
         {
             "type": "path",
@@ -69,11 +77,13 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/",
+            "Belluga\\RichText\\": "packages/belluga/belluga_rich_text/src/",
             "Belluga\\Events\\": "packages/belluga/belluga_events/src/",
             "Belluga\\Settings\\": "packages/belluga/belluga_settings/src/",
             "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",
             "Belluga\\Invites\\": "packages/belluga/belluga_invites/src/",
             "Belluga\\MapPois\\": "packages/belluga/belluga_map_pois/src/",
+            "Belluga\\DiscoveryFilters\\": "packages/belluga/belluga_discovery_filters/src/",
             "Belluga\\Favorites\\": "packages/belluga/belluga_favorites/src/",
             "Belluga\\Media\\": "packages/belluga/belluga_media/src/",
             "Belluga\\DeepLinks\\": "packages/belluga/belluga_deep_links/src/",

@@ -32,7 +32,7 @@ class TelemetryEmitter implements TelemetryEmitterContract
         }
 
         $tenant = Tenant::current();
-        if (! $tenant) {
+        if (! $tenant || ! $tenant->isCurrent()) {
             return;
         }
 

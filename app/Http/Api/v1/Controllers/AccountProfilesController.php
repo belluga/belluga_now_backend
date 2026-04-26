@@ -9,6 +9,7 @@ use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
+use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -37,10 +38,12 @@ class AccountProfilesController extends Controller
         return response()->json($paginator->toArray());
     }
 
-    public function publicIndex(Request $request): JsonResponse
+    public function publicIndex(AccountProfilePublicIndexRequest $request): JsonResponse
     {
-        $perPage = (int) $request->get('per_page', $request->get('page_size', 15)) ?: 15;
-        $paginator = $this->profileQueryService->publicPaginate($request->query(), $perPage);
+        $validated = $request->validated();
+
+        $perPage = (int) ($validated['per_page'] ?? $validated['page_size'] ?? 15);
+        $paginator = $this->profileQueryService->publicPaginate($validated, $perPage);
 
         return response()->json($paginator->toArray());
     }

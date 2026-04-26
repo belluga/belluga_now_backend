@@ -18,6 +18,8 @@ class EventTypeUpdateRequest extends FormRequest
             'name' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
             'slug' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'description' => ['sometimes', 'nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
+            'allowed_taxonomies' => ['sometimes', 'array', 'max:'.InputConstraints::DISCOVERY_FILTER_ALLOWED_TAXONOMIES_MAX],
+            'allowed_taxonomies.*' => ['string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
             'visual' => ['sometimes', 'nullable', 'array'],
             'visual.mode' => ['required_with:visual', 'string', 'in:icon,image'],
             'visual.icon' => ['required_if:visual.mode,icon', 'string', 'max:'.InputConstraints::NAME_MAX],

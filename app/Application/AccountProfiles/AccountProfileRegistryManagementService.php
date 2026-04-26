@@ -204,16 +204,7 @@ class AccountProfileRegistryManagementService
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => [
-                'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
-                'is_poi_enabled' => (bool) ($capabilities['is_poi_enabled'] ?? false),
-                'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
-                'has_content' => (bool) ($capabilities['has_content'] ?? false),
-                'has_taxonomies' => (bool) ($capabilities['has_taxonomies'] ?? false),
-                'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
-                'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
-                'has_events' => (bool) ($capabilities['has_events'] ?? false),
-            ],
+            'capabilities' => $this->normalizeCapabilities($capabilities),
         ];
     }
 
@@ -237,32 +228,48 @@ class AccountProfileRegistryManagementService
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => [
-                'is_favoritable' => array_key_exists('is_favoritable', $capabilities)
-                    ? (bool) $capabilities['is_favoritable']
-                    : (bool) ($currentCapabilities['is_favoritable'] ?? false),
-                'is_poi_enabled' => array_key_exists('is_poi_enabled', $capabilities)
-                    ? (bool) $capabilities['is_poi_enabled']
-                    : (bool) ($currentCapabilities['is_poi_enabled'] ?? false),
-                'has_bio' => array_key_exists('has_bio', $capabilities)
-                    ? (bool) $capabilities['has_bio']
-                    : (bool) ($currentCapabilities['has_bio'] ?? false),
-                'has_content' => array_key_exists('has_content', $capabilities)
-                    ? (bool) $capabilities['has_content']
-                    : (bool) ($currentCapabilities['has_content'] ?? false),
-                'has_taxonomies' => array_key_exists('has_taxonomies', $capabilities)
-                    ? (bool) $capabilities['has_taxonomies']
-                    : (bool) ($currentCapabilities['has_taxonomies'] ?? false),
-                'has_avatar' => array_key_exists('has_avatar', $capabilities)
-                    ? (bool) $capabilities['has_avatar']
-                    : (bool) ($currentCapabilities['has_avatar'] ?? false),
-                'has_cover' => array_key_exists('has_cover', $capabilities)
-                    ? (bool) $capabilities['has_cover']
-                    : (bool) ($currentCapabilities['has_cover'] ?? false),
-                'has_events' => array_key_exists('has_events', $capabilities)
-                    ? (bool) $capabilities['has_events']
-                    : (bool) ($currentCapabilities['has_events'] ?? false),
-            ],
+            'capabilities' => $this->normalizeCapabilities($capabilities, is_array($currentCapabilities) ? $currentCapabilities : []),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $capabilities
+     * @param  array<string, mixed>  $currentCapabilities
+     * @return array<string, bool>
+     */
+    private function normalizeCapabilities(array $capabilities, array $currentCapabilities = []): array
+    {
+        $isPoiEnabled = array_key_exists('is_poi_enabled', $capabilities)
+            ? (bool) $capabilities['is_poi_enabled']
+            : (bool) ($currentCapabilities['is_poi_enabled'] ?? false);
+        $isReferenceLocationRequested = array_key_exists('is_reference_location_enabled', $capabilities)
+            ? (bool) $capabilities['is_reference_location_enabled']
+            : (bool) ($currentCapabilities['is_reference_location_enabled'] ?? false);
+
+        return [
+            'is_favoritable' => array_key_exists('is_favoritable', $capabilities)
+                ? (bool) $capabilities['is_favoritable']
+                : (bool) ($currentCapabilities['is_favoritable'] ?? false),
+            'is_poi_enabled' => $isPoiEnabled,
+            'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
+            'has_bio' => array_key_exists('has_bio', $capabilities)
+                ? (bool) $capabilities['has_bio']
+                : (bool) ($currentCapabilities['has_bio'] ?? false),
+            'has_content' => array_key_exists('has_content', $capabilities)
+                ? (bool) $capabilities['has_content']
+                : (bool) ($currentCapabilities['has_content'] ?? false),
+            'has_taxonomies' => array_key_exists('has_taxonomies', $capabilities)
+                ? (bool) $capabilities['has_taxonomies']
+                : (bool) ($currentCapabilities['has_taxonomies'] ?? false),
+            'has_avatar' => array_key_exists('has_avatar', $capabilities)
+                ? (bool) $capabilities['has_avatar']
+                : (bool) ($currentCapabilities['has_avatar'] ?? false),
+            'has_cover' => array_key_exists('has_cover', $capabilities)
+                ? (bool) $capabilities['has_cover']
+                : (bool) ($currentCapabilities['has_cover'] ?? false),
+            'has_events' => array_key_exists('has_events', $capabilities)
+                ? (bool) $capabilities['has_events']
+                : (bool) ($currentCapabilities['has_events'] ?? false),
         ];
     }
 
@@ -308,6 +315,7 @@ class AccountProfileRegistryManagementService
     {
         $visual = $this->resolvePayloadVisual($model, $baseUrl);
         $labels = $this->normalizeLabels([], $model);
+        $capabilities = is_array($model->capabilities ?? null) ? $model->capabilities : [];
 
         return [
             'type' => (string) $model->type,
@@ -321,16 +329,7 @@ class AccountProfileRegistryManagementService
             )),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => [
-                'is_favoritable' => (bool) ($model->capabilities['is_favoritable'] ?? false),
-                'is_poi_enabled' => (bool) ($model->capabilities['is_poi_enabled'] ?? false),
-                'has_bio' => (bool) ($model->capabilities['has_bio'] ?? false),
-                'has_content' => (bool) ($model->capabilities['has_content'] ?? false),
-                'has_taxonomies' => (bool) ($model->capabilities['has_taxonomies'] ?? false),
-                'has_avatar' => (bool) ($model->capabilities['has_avatar'] ?? false),
-                'has_cover' => (bool) ($model->capabilities['has_cover'] ?? false),
-                'has_events' => (bool) ($model->capabilities['has_events'] ?? false),
-            ],
+            'capabilities' => $this->normalizeCapabilities($capabilities, $capabilities),
         ];
     }
 

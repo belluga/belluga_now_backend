@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Capabilities;
 
 use Belluga\Events\Contracts\EventCapabilityHandlerContract;
+use Belluga\Events\Support\Validation\InputConstraints;
 
 class MapPoiCapabilityHandler implements EventCapabilityHandlerContract
 {
@@ -108,9 +109,15 @@ class MapPoiCapabilityHandler implements EventCapabilityHandlerContract
             return null;
         }
 
+        $lng = (float) $coordinates[0];
+        $lat = (float) $coordinates[1];
+        if ($lng < -180.0 || $lng > 180.0 || $lat < -90.0 || $lat > 90.0) {
+            return null;
+        }
+
         return [
             'type' => 'Point',
-            'coordinates' => [(float) $coordinates[0], (float) $coordinates[1]],
+            'coordinates' => [$lng, $lat],
         ];
     }
 
@@ -124,13 +131,45 @@ class MapPoiCapabilityHandler implements EventCapabilityHandlerContract
         }
 
         $coordinates = $polygon['coordinates'] ?? null;
-        if (! is_array($coordinates) || $coordinates === []) {
+        if (
+            ! is_array($coordinates) ||
+            $coordinates === [] ||
+            count($coordinates) > InputConstraints::MAP_POI_POLYGON_RINGS_MAX
+        ) {
             return null;
+        }
+
+        $normalizedRings = [];
+        foreach ($coordinates as $ring) {
+            if (
+                ! is_array($ring) ||
+                count($ring) < 4 ||
+                count($ring) > InputConstraints::MAP_POI_POLYGON_POINTS_PER_RING_MAX
+            ) {
+                return null;
+            }
+
+            $normalizedRing = [];
+            foreach ($ring as $point) {
+                if (! is_array($point) || count($point) !== 2) {
+                    return null;
+                }
+
+                $lng = (float) $point[0];
+                $lat = (float) $point[1];
+                if ($lng < -180.0 || $lng > 180.0 || $lat < -90.0 || $lat > 90.0) {
+                    return null;
+                }
+
+                $normalizedRing[] = [$lng, $lat];
+            }
+
+            $normalizedRings[] = $normalizedRing;
         }
 
         return [
             'type' => 'Polygon',
-            'coordinates' => $coordinates,
+            'coordinates' => $normalizedRings,
         ];
     }
 }

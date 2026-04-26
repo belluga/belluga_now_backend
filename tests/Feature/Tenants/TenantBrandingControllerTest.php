@@ -81,7 +81,55 @@ class TenantBrandingControllerTest extends TestCaseTenant
             ]);
 
         $response->assertOk();
-        $this->assertNotEmpty($response->json('branding_data.logo_settings.light_logo_uri'));
+        $lightLogoUri = (string) $response->json('branding_data.logo_settings.light_logo_uri');
+
+        $this->assertStringContainsString('/logo-light.png', $lightLogoUri);
+        $this->assertStringContainsString('?v=', $lightLogoUri);
+
+        $this->get($lightLogoUri)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_update_stores_uploaded_pwa_variants_on_canonical_branding_routes(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->headers)
+            ->post($this->baseUrl, [
+                'logo_settings' => [
+                    'pwa_icon' => UploadedFile::fake()->image('tenant-pwa.png', 1024, 1024),
+                ],
+            ]);
+
+        $response->assertOk();
+
+        $sourceUri = (string) $response->json('branding_data.pwa_icon.source_uri');
+        $icon192Uri = (string) $response->json('branding_data.pwa_icon.icon192_uri');
+        $icon512Uri = (string) $response->json('branding_data.pwa_icon.icon512_uri');
+        $maskableUri = (string) $response->json('branding_data.pwa_icon.icon_maskable512_uri');
+
+        $this->assertStringContainsString('/icon/icon-source.png', $sourceUri);
+        $this->assertStringContainsString('/icon/icon-192x192.png', $icon192Uri);
+        $this->assertStringContainsString('/icon/icon-512x512.png', $icon512Uri);
+        $this->assertStringContainsString('/icon/icon-maskable-512x512.png', $maskableUri);
+        $this->assertStringContainsString('?v=', $sourceUri);
+        $this->assertStringContainsString('?v=', $icon192Uri);
+        $this->assertStringContainsString('?v=', $icon512Uri);
+        $this->assertStringContainsString('?v=', $maskableUri);
+
+        $this->get($sourceUri)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+        $this->get($icon192Uri)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+        $this->get($icon512Uri)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+        $this->get($maskableUri)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
     }
 
     public function test_update_persists_name_and_reflects_public_branding_metadata(): void

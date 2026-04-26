@@ -101,6 +101,28 @@ class FavoritesIntegrationServiceProvider extends ServiceProvider
             $profileIds[] = trim((string) $venue['id']);
         }
 
+        $linkedAccountProfiles = $occurrence->getAttribute('linked_account_profiles');
+        if ($linkedAccountProfiles instanceof \MongoDB\Model\BSONDocument || $linkedAccountProfiles instanceof \MongoDB\Model\BSONArray) {
+            $linkedAccountProfiles = $linkedAccountProfiles->getArrayCopy();
+        }
+
+        if (is_array($linkedAccountProfiles)) {
+            foreach ($linkedAccountProfiles as $profile) {
+                if ($profile instanceof \MongoDB\Model\BSONDocument || $profile instanceof \MongoDB\Model\BSONArray) {
+                    $profile = $profile->getArrayCopy();
+                }
+
+                if (! is_array($profile)) {
+                    continue;
+                }
+
+                $profileId = isset($profile['id']) ? trim((string) $profile['id']) : '';
+                if ($profileId !== '') {
+                    $profileIds[] = $profileId;
+                }
+            }
+        }
+
         $artists = $occurrence->getAttribute('artists');
         if ($artists instanceof \MongoDB\Model\BSONDocument || $artists instanceof \MongoDB\Model\BSONArray) {
             $artists = $artists->getArrayCopy();

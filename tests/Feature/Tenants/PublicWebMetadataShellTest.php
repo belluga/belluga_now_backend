@@ -9,19 +9,28 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Application\Events\EventQueryService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
+use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
 class PublicWebMetadataShellTest extends TestCaseTenant
 {
+    use RefreshLandlordAndTenantDatabases;
+
     protected TenantLabels $tenant {
         get {
             return $this->landlord->tenant_primary;
         }
     }
+
+    private static bool $bootstrapped = false;
 
     private string $previousShellPath = '';
 
@@ -30,6 +39,13 @@ class PublicWebMetadataShellTest extends TestCaseTenant
     protected function setUp(): void
     {
         parent::setUp();
+
+        if (! self::$bootstrapped) {
+            $this->refreshLandlordAndTenantDatabases();
+            $this->initializeSystem();
+            self::$bootstrapped = true;
+        }
+
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->resolvedSiteName = trim((string) $tenant->name);
         if ($this->resolvedSiteName === '') {
@@ -43,6 +59,36 @@ class PublicWebMetadataShellTest extends TestCaseTenant
     {
         putenv('FLUTTER_WEB_SHELL_PATH='.$this->previousShellPath);
         parent::tearDown();
+    }
+
+    private function initializeSystem(): void
+    {
+        $service = $this->app->make(SystemInitializationService::class);
+
+        $payload = new InitializationPayload(
+            landlord: ['name' => 'Landlord HQ'],
+            tenant: ['name' => 'Tenant Zeta', 'subdomain' => 'tenant-zeta'],
+            role: ['name' => 'Root', 'permissions' => ['*']],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            themeDataSettings: [
+                'brightness_default' => 'light',
+                'primary_seed_color' => '#fff',
+                'secondary_seed_color' => '#000',
+            ],
+            logoSettings: ['light_logo_uri' => '/logos/light.png'],
+            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
+            tenantDomains: ['tenant-zeta.test']
+        );
+
+        $service->initialize($payload);
+
+        $tenant = Tenant::query()->first();
+        if ($tenant) {
+            $this->landlord->tenant_primary->slug = $tenant->slug;
+            $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
+            $this->landlord->tenant_primary->id = (string) $tenant->_id;
+            $this->landlord->tenant_primary->role_admin->id = (string) ($tenant->roleTemplates()->first()?->_id ?? '');
+        }
     }
 
     public function test_account_profile_public_route_injects_profile_metadata(): void
@@ -133,6 +179,58 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<meta property="og:description" content="Show ao pôr do sol em Guarapari.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/ananda-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-na-orla">', false);
+    }
+
+    public function test_event_public_route_prefers_linked_account_profiles_image_over_artists_projection(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $this->applyPublicWebMetadata([
+            'default_title' => 'Fallback tenant title',
+            'default_description' => 'Fallback tenant description.',
+            'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+
+        $event = new Event([
+            'slug' => 'festival-linked',
+        ]);
+
+        $eventQueryService = Mockery::mock(EventQueryService::class);
+        $eventQueryService->shouldReceive('findByIdOrSlug')
+            ->with('festival-linked')
+            ->andReturn($event);
+        $eventQueryService->shouldReceive('assertPublicVisible')
+            ->with($event)
+            ->andReturnNull();
+        $eventQueryService->shouldReceive('formatEvent')
+            ->with($event)
+            ->andReturn([
+                'slug' => 'festival-linked',
+                'title' => 'Festival Linked',
+                'content' => 'Show com priorização de linked profiles.',
+                'thumb' => null,
+                'linked_account_profiles' => [
+                    [
+                        'cover_url' => 'https://tenant.example/media/linked-cover.png',
+                        'avatar_url' => 'https://tenant.example/media/linked-avatar.png',
+                    ],
+                ],
+                'artists' => [
+                    [
+                        'cover_url' => 'https://tenant.example/media/artist-cover.png',
+                        'avatar_url' => 'https://tenant.example/media/artist-avatar.png',
+                    ],
+                ],
+                'venue' => null,
+            ]);
+
+        $this->app->instance(EventQueryService::class, $eventQueryService);
+
+        $response = $this->get("{$this->base_tenant_url}agenda/evento/{$event->slug}");
+
+        $response->assertOk();
+        $response->assertSee('<meta property="og:image" content="https://tenant.example/media/linked-cover.png">', false);
+        $response->assertDontSee('artist-cover.png', false);
+        $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-linked">', false);
     }
 
     public function test_unknown_public_route_uses_default_metadata_fallback(): void

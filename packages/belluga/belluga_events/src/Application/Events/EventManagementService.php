@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Application\Events\Concerns\EventManagementPartiesAndMetadata;
+use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Domain\Events\EventCreated;
@@ -14,13 +16,12 @@ use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
-use RuntimeException;
 
 class EventManagementService
 {
@@ -28,11 +29,15 @@ class EventManagementService
 
     public function __construct(
         private readonly EventTaxonomyValidationContract $taxonomyValidationService,
+        private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventTypeResolverContract $eventTypeResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
+        private readonly EventAccountContextResolver $eventAccountContextResolver,
         private readonly EventCapabilitiesService $eventCapabilities,
-        private readonly EventOccurrenceSyncService $eventOccurrenceSyncService,
+        private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
+        private readonly EventAggregateWriteService $eventAggregateWrites,
+        private readonly EventContentSanitizerContract $contentSanitizer,
         private readonly Dispatcher $events,
     ) {}
 
@@ -44,13 +49,10 @@ class EventManagementService
         $startedAt = microtime(true);
         $normalized = $this->normalizePayloadAndSchedule($payload, null);
 
-        /** @var Event $event */
-        $event = $this->runTenantTransaction(function () use ($normalized): Event {
-            $created = Event::query()->create($normalized['payload']);
-            $this->eventOccurrenceSyncService->syncFromEvent($created, $normalized['schedule']['occurrences']);
-
-            return $created->fresh();
-        });
+        $event = $this->eventAggregateWrites->create(
+            $normalized['payload'],
+            $normalized['schedule']['occurrences'],
+        );
 
         $this->events->dispatch(new EventCreated((string) $event->_id));
         $this->logWriteCompleted('create', $event, count($normalized['schedule']['occurrences']), $startedAt);
@@ -66,16 +68,11 @@ class EventManagementService
         $startedAt = microtime(true);
         $normalized = $this->normalizePayloadAndSchedule($payload, $event);
 
-        /** @var Event $updated */
-        $updated = $this->runTenantTransaction(function () use ($event, $normalized): Event {
-            $event->fill($normalized['payload']);
-            $event->save();
-
-            $fresh = $event->fresh();
-            $this->eventOccurrenceSyncService->syncFromEvent($fresh, $normalized['schedule']['occurrences']);
-
-            return $fresh;
-        });
+        $updated = $this->eventAggregateWrites->update(
+            $event,
+            $normalized['payload'],
+            $normalized['schedule']['occurrences'],
+        );
 
         $this->events->dispatch(new EventUpdated((string) $updated->_id));
         $this->logWriteCompleted('update', $updated, count($normalized['schedule']['occurrences']), $startedAt);
@@ -88,12 +85,7 @@ class EventManagementService
         $startedAt = microtime(true);
         $eventId = (string) $event->_id;
 
-        $this->runTenantTransaction(function () use ($event, $eventId): null {
-            $event->delete();
-            $this->eventOccurrenceSyncService->softDeleteByEventId($eventId);
-
-            return null;
-        });
+        $this->eventAggregateWrites->delete($event);
 
         $this->events->dispatch(new EventDeleted($eventId));
         $this->logDeleteCompleted($event, $eventId, $startedAt);
@@ -105,7 +97,7 @@ class EventManagementService
      *   payload: array<string, mixed>,
      *   schedule: array{
      *     touched: bool,
-     *     occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
+     *     occurrences: array<int, array<string, mixed>>,
      *     date_time_start: Carbon|null,
      *     date_time_end: Carbon|null
      *   }
@@ -117,7 +109,6 @@ class EventManagementService
 
         foreach ([
             'title',
-            'content',
             'thumb',
             'tags',
             'categories',
@@ -125,6 +116,17 @@ class EventManagementService
         ] as $field) {
             if (array_key_exists($field, $payload)) {
                 $normalized[$field] = $payload[$field];
+            }
+        }
+
+        if (array_key_exists('content', $payload)) {
+            $normalized['content'] = $this->contentSanitizer->sanitize(
+                $payload['content'] ?? null
+            );
+            if (strlen($normalized['content']) > InputConstraints::RICH_TEXT_MAX_BYTES) {
+                throw ValidationException::withMessages([
+                    'content' => ['The content may not be greater than 100 KB after sanitization.'],
+                ]);
             }
         }
 
@@ -136,6 +138,13 @@ class EventManagementService
             $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
             if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
                 $this->taxonomyValidationService->assertTermsAllowedForEvent($taxonomyTerms);
+                $this->assertTaxonomyTermsAllowedByEventType(
+                    $taxonomyTerms,
+                    $normalized['type'] ?? $this->resolveExistingEventTypePayload($existing)
+                );
+                $normalized['taxonomy_terms'] = $this->taxonomySnapshotResolver->resolve($taxonomyTerms);
+            } else {
+                $normalized['taxonomy_terms'] = [];
             }
         }
 
@@ -172,6 +181,12 @@ class EventManagementService
         }
 
         $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
+        $normalized['account_context_ids'] = $this->eventAccountContextResolver->resolveForAggregate(
+            $this->baseAccountContextIdsForPayload($payload),
+            $this->normalizeArray($normalized['event_parties'] ?? []),
+            $this->normalizeNullableArray($normalized['place_ref'] ?? ($existing?->place_ref ?? null)),
+            $schedule['occurrences']
+        );
 
         return [
             'payload' => $normalized,
@@ -181,9 +196,20 @@ class EventManagementService
 
     /**
      * @param  array<string, mixed>  $payload
+     * @return array<int, string>
+     */
+    private function baseAccountContextIdsForPayload(array $payload): array
+    {
+        $routeAccountContextId = $this->accountContextIdFromPayload($payload);
+
+        return $routeAccountContextId === null ? [] : [$routeAccountContextId];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
      * @return array{
      *   touched: bool,
-     *   occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
+     *   occurrences: array<int, array<string, mixed>>,
      *   date_time_start: Carbon|null,
      *   date_time_end: Carbon|null
      * }
@@ -193,7 +219,7 @@ class EventManagementService
         $hasOccurrences = array_key_exists('occurrences', $payload);
 
         if ($hasOccurrences) {
-            $occurrences = $this->normalizeOccurrences($payload['occurrences']);
+            $occurrences = $this->normalizeOccurrences($payload['occurrences'], $payload);
 
             return $this->buildScheduleResult(true, $occurrences);
         }
@@ -204,7 +230,7 @@ class EventManagementService
             ]);
         }
 
-        $existingOccurrences = $this->extractExistingOccurrences($existing);
+        $existingOccurrences = $this->eventOccurrencePayloadSnapshots->requireForUpdate($existing);
         $firstOccurrence = $existingOccurrences[0] ?? null;
 
         return [
@@ -216,9 +242,9 @@ class EventManagementService
     }
 
     /**
-     * @return array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>
+     * @return array<int, array<string, mixed>>
      */
-    private function normalizeOccurrences(mixed $occurrences): array
+    private function normalizeOccurrences(mixed $occurrences, array $payload): array
     {
         if (! is_array($occurrences) || $occurrences === []) {
             throw ValidationException::withMessages([
@@ -252,9 +278,26 @@ class EventManagementService
 
             $this->assertOccurrenceBounds($start, $end, "occurrences.{$index}.date_time_end");
 
+            $ownEventParties = array_key_exists('event_parties', $occurrence)
+                ? $this->resolveEventParties(['event_parties' => $occurrence['event_parties']], null)
+                : [];
+            if (array_key_exists('location', $occurrence) || array_key_exists('place_ref', $occurrence)) {
+                throw ValidationException::withMessages([
+                    "occurrences.{$index}.location" => ['Occurrences do not accept location overrides. Use event location or programming item place_ref.'],
+                ]);
+            }
+
             $normalized[] = [
                 'date_time_start' => $start,
                 'date_time_end' => $end,
+                'event_parties' => $ownEventParties,
+                'has_location_override' => false,
+                'location_override' => null,
+                'programming_items' => $this->resolveProgrammingItems(
+                    $occurrence['programming_items'] ?? [],
+                    "occurrences.{$index}.programming_items",
+                    $this->accountContextIdFromPayload($payload)
+                ),
             ];
         }
 
@@ -266,10 +309,10 @@ class EventManagementService
     }
 
     /**
-     * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
+     * @param  array<int, array<string, mixed>>  $occurrences
      * @return array{
      *   touched: bool,
-     *   occurrences: array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>,
+     *   occurrences: array<int, array<string, mixed>>,
      *   date_time_start: Carbon|null,
      *   date_time_end: Carbon|null
      * }
@@ -284,55 +327,6 @@ class EventManagementService
             'date_time_start' => $first['date_time_start'] ?? null,
             'date_time_end' => $first['date_time_end'] ?? null,
         ];
-    }
-
-    /**
-     * @return array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>
-     */
-    private function extractExistingOccurrences(?Event $existing): array
-    {
-        if (! $existing) {
-            return [];
-        }
-
-        $eventId = (string) $existing->_id;
-        $fromCollection = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->orderBy('starts_at')
-            ->get();
-
-        if ($fromCollection->isEmpty()) {
-            throw new RuntimeException(
-                'Event occurrences are required for updates without schedule mutation. '.
-                'Provide occurrences payload to rebuild the schedule.'
-            );
-        }
-
-        $occurrences = [];
-        foreach ($fromCollection as $occurrence) {
-            $start = $this->tryNormalizeDateValue($occurrence->starts_at ?? null);
-            if (! $start) {
-                continue;
-            }
-
-            $end = $this->tryNormalizeDateValue($occurrence->ends_at ?? null);
-            if ($end && $end->lessThan($start)) {
-                continue;
-            }
-
-            $occurrences[] = [
-                'date_time_start' => $start,
-                'date_time_end' => $end,
-            ];
-        }
-
-        if ($occurrences === []) {
-            throw new RuntimeException(
-                'Event occurrences collection has no valid schedule entries for this event.'
-            );
-        }
-
-        return $occurrences;
     }
 
     private function assertOccurrenceBounds(Carbon $start, ?Carbon $end, string $endField): void
@@ -375,35 +369,6 @@ class EventManagementService
         throw ValidationException::withMessages([
             $field => ['Invalid date value.'],
         ]);
-    }
-
-    private function tryNormalizeDateValue(mixed $value): ?Carbon
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        if ($value instanceof Carbon) {
-            return $value;
-        }
-
-        if ($value instanceof UTCDateTime) {
-            return Carbon::instance($value->toDateTime());
-        }
-
-        if ($value instanceof \DateTimeInterface) {
-            return Carbon::instance($value);
-        }
-
-        if (is_string($value)) {
-            try {
-                return Carbon::parse($value);
-            } catch (\Exception) {
-                return null;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -579,6 +544,285 @@ class EventManagementService
     }
 
     /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveProgrammingItems(mixed $items, string $field, ?string $accountContextId): array
+    {
+        if ($items === null || $items === []) {
+            return [];
+        }
+
+        if (! is_array($items)) {
+            throw ValidationException::withMessages([
+                $field => ['programming_items must be an array.'],
+            ]);
+        }
+
+        $drafts = [];
+        $allProfileIds = [];
+        $placeRefsById = [];
+        $placeRefFieldsById = [];
+
+        foreach ($items as $index => $item) {
+            if (! is_array($item)) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}" => ['programming item payload must be an object.'],
+                ]);
+            }
+
+            $time = trim((string) ($item['time'] ?? ''));
+            if (! preg_match('/^\d{2}:\d{2}$/', $time)) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.time" => ['time must use HH:MM format.'],
+                ]);
+            }
+
+            $title = isset($item['title']) ? trim((string) $item['title']) : '';
+            $profileIds = $this->normalizeProgrammingProfileIds(
+                $item['account_profile_ids'] ?? [],
+                "{$field}.{$index}.account_profile_ids"
+            );
+            $placeRef = $this->normalizeProgrammingPlaceRef(
+                $item['place_ref'] ?? null,
+                "{$field}.{$index}.place_ref"
+            );
+
+            if (count($profileIds) > 1 && $title === '') {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.title" => ['title is required when more than one linked Account Profile is selected.'],
+                ]);
+            }
+
+            foreach ($profileIds as $profileId) {
+                $allProfileIds[$profileId] = $profileId;
+            }
+            if ($placeRef !== null) {
+                $placeId = (string) $placeRef['id'];
+                $placeRefsById[$placeId] = $placeRef;
+                $placeRefFieldsById[$placeId] = "{$field}.{$index}.place_ref.id";
+            }
+
+            $drafts[] = [
+                'time' => $time,
+                'title' => $title === '' ? null : $title,
+                'account_profile_ids' => $profileIds,
+                'place_ref' => $placeRef,
+            ];
+        }
+
+        $linkedProfilesById = $this->resolveProgrammingLinkedProfileMap(array_values($allProfileIds));
+        $locationProfilesById = $this->resolveProgrammingLocationProfileMap(
+            $placeRefsById,
+            $placeRefFieldsById,
+            $accountContextId
+        );
+
+        $normalized = [];
+        foreach ($drafts as $draft) {
+            $placeId = is_array($draft['place_ref'] ?? null)
+                ? (string) $draft['place_ref']['id']
+                : null;
+
+            $normalized[] = [
+                ...$draft,
+                'linked_account_profiles' => $this->linkedProfilesForIds(
+                    $draft['account_profile_ids'],
+                    $linkedProfilesById
+                ),
+                'location_profile' => $placeId === null
+                    ? null
+                    : ($locationProfilesById[$placeId] ?? null),
+            ];
+        }
+
+        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
+
+        return $normalized;
+    }
+
+    /**
+     * @return array{type: string, id: string}|null
+     */
+    private function normalizeProgrammingPlaceRef(mixed $value, string $field): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (! is_array($value)) {
+            throw ValidationException::withMessages([
+                $field => ['place_ref payload must be an object.'],
+            ]);
+        }
+
+        $type = trim((string) ($value['type'] ?? ''));
+        $id = trim((string) ($value['id'] ?? ''));
+        if ($type === '' || $id === '') {
+            throw ValidationException::withMessages([
+                $field => ['place_ref.type and place_ref.id are required.'],
+            ]);
+        }
+        if ($type !== 'account_profile') {
+            throw ValidationException::withMessages([
+                "{$field}.type" => ['place_ref.type must be account_profile.'],
+            ]);
+        }
+
+        return [
+            'type' => $type,
+            'id' => $id,
+        ];
+    }
+
+    /**
+     * @param  array{type: string, id: string}  $placeRef
+     * @return array<string, mixed>
+     */
+    private function resolveProgrammingLocationProfile(array $placeRef, string $field): array
+    {
+        $profilesById = $this->resolveProgrammingLocationProfileMap(
+            [(string) $placeRef['id'] => $placeRef],
+            [(string) $placeRef['id'] => $field],
+            null,
+        );
+
+        return $profilesById[(string) $placeRef['id']] ?? [];
+    }
+
+    /**
+     * @param  array<string, array{type: string, id: string}>  $placeRefsById
+     * @param  array<string, string>  $fieldsById
+     * @return array<string, array<string, mixed>>
+     */
+    private function resolveProgrammingLocationProfileMap(array $placeRefsById, array $fieldsById, ?string $accountContextId): array
+    {
+        if ($placeRefsById === []) {
+            return [];
+        }
+
+        try {
+            $resolved = $this->eventProfileResolver->resolvePhysicalHostsByProfileIds(array_keys($placeRefsById));
+        } catch (ValidationException $exception) {
+            $firstField = reset($fieldsById) ?: 'programming_items.place_ref.id';
+            throw ValidationException::withMessages([
+                $firstField => $exception->errors()['place_ref.id'] ?? ['Programming location account profile is invalid.'],
+            ]);
+        }
+
+        $profilesById = [];
+        foreach ($placeRefsById as $profileId => $_placeRef) {
+            if ($accountContextId !== null && ! $this->eventProfileResolver->accountOwnsProfile($accountContextId, $profileId)) {
+                $field = $fieldsById[$profileId] ?? 'programming_items.place_ref.id';
+                throw ValidationException::withMessages([
+                    $field => ['Programming location physical host must belong to the target account context.'],
+                ]);
+            }
+            $profilesById[$profileId] = $this->normalizeArray($resolved[$profileId]['venue'] ?? []);
+        }
+
+        return $profilesById;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeProgrammingProfileIds(mixed $items, string $field): array
+    {
+        if ($items === null || $items === []) {
+            return [];
+        }
+
+        if (! is_array($items)) {
+            throw ValidationException::withMessages([
+                $field => ['account_profile_ids must be an array.'],
+            ]);
+        }
+
+        $ids = [];
+        foreach ($items as $index => $item) {
+            $id = trim((string) $item);
+            if ($id === '') {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}" => ['account_profile_id is required.'],
+                ]);
+            }
+
+            if (! in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveProgrammingLinkedProfiles(array $profileIds): array
+    {
+        return $this->linkedProfilesForIds(
+            $profileIds,
+            $this->resolveProgrammingLinkedProfileMap($profileIds)
+        );
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array<string, mixed>>
+     */
+    private function resolveProgrammingLinkedProfileMap(array $profileIds): array
+    {
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $resolved = $this->eventProfileResolver->resolveEventPartyProfilesByIds(array_values(array_unique($profileIds)));
+        $profilesById = [];
+        foreach ($resolved as $profile) {
+            if (! is_array($profile)) {
+                continue;
+            }
+            $id = trim((string) ($profile['id'] ?? ''));
+            if ($id !== '') {
+                $profilesById[$id] = $profile;
+            }
+        }
+
+        return $profilesById;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @param  array<string, array<string, mixed>>  $profilesById
+     * @return array<int, array<string, mixed>>
+     */
+    private function linkedProfilesForIds(array $profileIds, array $profilesById): array
+    {
+        $profiles = [];
+        foreach ($profileIds as $profileId) {
+            $profile = $profilesById[$profileId] ?? null;
+            if (! is_array($profile)) {
+                continue;
+            }
+
+            $profiles[] = [
+                'id' => $profileId,
+                'display_name' => trim((string) ($profile['display_name'] ?? '')),
+                'slug' => isset($profile['slug']) ? (string) $profile['slug'] : null,
+                'profile_type' => isset($profile['profile_type']) ? (string) $profile['profile_type'] : '',
+                'avatar_url' => $profile['avatar_url'] ?? null,
+                'cover_url' => $profile['cover_url'] ?? null,
+                'taxonomy_terms' => $this->taxonomySnapshotResolver->ensureSnapshots(
+                    is_array($profile['taxonomy_terms'] ?? null) ? $profile['taxonomy_terms'] : []
+                ),
+            ];
+        }
+
+        return $profiles;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function resolveEventTypePayload(mixed $value): array
@@ -620,6 +864,7 @@ class EventManagementService
             'visual' => is_array($resolved['visual'] ?? null)
                 ? $resolved['visual']
                 : (is_array($resolved['poi_visual'] ?? null) ? $resolved['poi_visual'] : null),
+            'allowed_taxonomies' => $this->normalizeStringList($resolved['allowed_taxonomies'] ?? []),
             'icon' => $resolved['icon'] ?? null,
             'color' => $resolved['color'] ?? null,
             'icon_color' => $resolved['icon_color'] ?? null,
@@ -629,17 +874,88 @@ class EventManagementService
     /**
      * @return array<string, mixed>|null
      */
+    private function resolveExistingEventTypePayload(?Event $existing): ?array
+    {
+        if ($existing === null) {
+            return null;
+        }
+
+        $existingType = $this->normalizeArray($existing->type ?? null);
+        $id = trim((string) ($existingType['id'] ?? ''));
+        if ($id === '') {
+            return $existingType === [] ? null : $existingType;
+        }
+
+        $resolved = $this->eventTypeResolver->resolveById($id);
+
+        return is_array($resolved) && $resolved !== [] ? $resolved : $existingType;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $terms
+     * @param  array<string, mixed>|null  $eventType
+     */
+    private function assertTaxonomyTermsAllowedByEventType(array $terms, ?array $eventType): void
+    {
+        $allowedTaxonomies = $this->normalizeStringList($eventType['allowed_taxonomies'] ?? []);
+        $types = $this->extractTaxonomyTypes($terms);
+
+        $invalid = array_values(array_diff($types, $allowedTaxonomies));
+        if ($invalid === []) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'taxonomy_terms' => ['Some taxonomy types are not allowed for this event type.'],
+        ]);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $terms
+     * @return array<int, string>
+     */
+    private function extractTaxonomyTypes(array $terms): array
+    {
+        $types = [];
+        foreach ($terms as $term) {
+            if (! is_array($term)) {
+                continue;
+            }
+
+            $type = trim((string) ($term['type'] ?? ''));
+            if ($type === '') {
+                continue;
+            }
+
+            $types[] = $type;
+        }
+
+        return array_values(array_unique($types));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            static fn (mixed $item): string => strtolower(trim((string) $item)),
+            $value
+        ))));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
     private function normalizeNullableArray(mixed $value): ?array
     {
-        if ($value === null) {
-            return null;
-        }
+        $normalized = $this->normalizeArray($value);
 
-        if (! is_array($value)) {
-            return null;
-        }
-
-        return $value;
+        return $normalized === [] ? null : $normalized;
     }
 
     /**
@@ -714,9 +1030,7 @@ class EventManagementService
      */
     private function assertVenueBelongsToAccountContext(array $payload, array $resolvedVenue): void
     {
-        $accountContextId = isset($payload['_account_context_id'])
-            ? (string) $payload['_account_context_id']
-            : '';
+        $accountContextId = $this->accountContextIdFromPayload($payload) ?? '';
 
         if ($accountContextId === '') {
             return;
@@ -731,45 +1045,15 @@ class EventManagementService
     }
 
     /**
-     * @template T
-     *
-     * @param  callable(): T  $callback
-     * @return T
+     * @param  array<string, mixed>  $payload
      */
-    private function runTenantTransaction(callable $callback): mixed
+    private function accountContextIdFromPayload(array $payload): ?string
     {
-        $connection = DB::connection('tenant');
+        $accountContextId = isset($payload['_account_context_id'])
+            ? trim((string) $payload['_account_context_id'])
+            : '';
 
-        if (! method_exists($connection, 'transaction')) {
-            throw new RuntimeException(
-                'Tenant MongoDB transaction support is required for events writes, but the active driver has no transaction API.'
-            );
-        }
-
-        try {
-            return $connection->transaction(static fn () => $callback());
-        } catch (\Throwable $throwable) {
-            if ($this->isTransactionSupportError($throwable)) {
-                throw new RuntimeException(
-                    'Tenant MongoDB transaction support is required for events writes. Configure replica set / transaction-capable runtime.',
-                    0,
-                    $throwable,
-                );
-            }
-
-            throw $throwable;
-        }
-    }
-
-    private function isTransactionSupportError(\Throwable $throwable): bool
-    {
-        $message = strtolower($throwable->getMessage());
-
-        return str_contains($message, 'transaction numbers are only allowed')
-            || str_contains($message, 'transactions are not supported')
-            || str_contains($message, 'replica set')
-            || str_contains($message, 'mongos')
-            || str_contains($message, 'starttransaction');
+        return $accountContextId === '' ? null : $accountContextId;
     }
 
     private function logWriteCompleted(string $operation, Event $event, int $occurrenceCount, float $startedAt): void
