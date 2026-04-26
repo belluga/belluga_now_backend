@@ -145,11 +145,16 @@ class TenantPublicAuthMethodPatchGuard implements SettingsNamespacePatchGuardCon
     }
 
     /**
-     * @param  array<int, mixed>  $rawMethods
      * @param  array<string, array<int, string>>  $errors
      */
-    private function validateSupportedMethods(array $rawMethods, string $field, array &$errors): void
+    private function validateSupportedMethods(mixed $rawMethods, string $field, array &$errors): void
     {
+        if (! is_array($rawMethods)) {
+            $errors[$field][] = 'The tenant-public auth method list must be an array.';
+
+            return;
+        }
+
         if ($rawMethods === []) {
             return;
         }

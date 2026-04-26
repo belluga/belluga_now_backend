@@ -445,6 +445,64 @@ class SettingsKernelControllerTest extends TestCaseTenant
         }
     }
 
+    public function test_patch_tenant_public_auth_rejects_scalar_method_payloads(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlord = \Belluga\Settings\Models\Landlord\LandlordSettings::current();
+        $tenantSettings = TenantSettings::current();
+        $originalLandlordAuth = $landlord?->getAttribute('tenant_public_auth');
+        $originalTenantAuth = $tenantSettings?->getAttribute('tenant_public_auth');
+
+        try {
+            $this->asLandlordHost();
+            Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['*']);
+            $hostApi = sprintf('http://%s/admin/api/v1/', $this->host);
+
+            $landlordRejected = $this->patchJson($hostApi.'settings/values/tenant_public_auth', [
+                'available_methods' => 'phone_otp',
+            ]);
+
+            $landlordRejected->assertStatus(422);
+            $landlordRejected->assertJsonValidationErrors(['available_methods']);
+
+            $this->asTenantHost();
+            Sanctum::actingAs(LandlordUser::query()->firstOrFail(), $this->accountAbilities());
+
+            if ($landlord === null) {
+                $landlord = new \Belluga\Settings\Models\Landlord\LandlordSettings;
+                $landlord->setAttribute('_id', \Belluga\Settings\Models\SettingsDocument::ROOT_ID);
+            }
+            $landlord->setAttribute('tenant_public_auth', [
+                'available_methods' => ['password', 'phone_otp'],
+                'allow_tenant_customization' => true,
+            ]);
+            $landlord->save();
+
+            $tenantRejected = $this->patchJson("{$this->base_tenant_api_admin}settings/values/tenant_public_auth", [
+                'enabled_methods' => 'phone_otp',
+            ]);
+
+            $tenantRejected->assertStatus(422);
+            $tenantRejected->assertJsonValidationErrors(['enabled_methods']);
+        } finally {
+            if ($landlord === null) {
+                $landlord = new \Belluga\Settings\Models\Landlord\LandlordSettings;
+                $landlord->setAttribute('_id', \Belluga\Settings\Models\SettingsDocument::ROOT_ID);
+            }
+            $landlord->setAttribute('tenant_public_auth', $originalLandlordAuth);
+            $landlord->save();
+
+            if ($tenantSettings === null) {
+                $tenantSettings = new TenantSettings;
+                $tenantSettings->setAttribute('_id', \Belluga\Settings\Models\SettingsDocument::ROOT_ID);
+            }
+            $tenantSettings->setAttribute('tenant_public_auth', $originalTenantAuth);
+            $tenantSettings->save();
+        }
+    }
+
     public function test_patch_tenant_public_auth_rejects_tenant_override_when_landlord_disables_customization(): void
     {
         $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
