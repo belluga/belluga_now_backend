@@ -456,12 +456,19 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $originalTenantAuth = $tenantSettings?->getAttribute('tenant_public_auth');
 
         try {
-            $landlordRejected = $this->patchJson("{$this->base_tenant_api_admin}settings/values/tenant_public_auth", [
+            $this->asLandlordHost();
+            Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['*']);
+            $hostApi = sprintf('http://%s/admin/api/v1/', $this->host);
+
+            $landlordRejected = $this->patchJson($hostApi.'settings/values/tenant_public_auth', [
                 'available_methods' => 'phone_otp',
             ]);
 
             $landlordRejected->assertStatus(422);
             $landlordRejected->assertJsonValidationErrors(['available_methods']);
+
+            $this->asTenantHost();
+            Sanctum::actingAs(LandlordUser::query()->firstOrFail(), $this->accountAbilities());
 
             if ($landlord === null) {
                 $landlord = new \Belluga\Settings\Models\Landlord\LandlordSettings;
