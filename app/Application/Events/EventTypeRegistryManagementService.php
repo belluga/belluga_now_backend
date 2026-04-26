@@ -6,6 +6,7 @@ namespace App\Application\Events;
 
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\EventType;
+use App\Models\Tenants\Taxonomy;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
@@ -175,6 +176,7 @@ class EventTypeRegistryManagementService
             'name' => trim((string) ($payload['name'] ?? '')),
             'slug' => trim((string) ($payload['slug'] ?? '')),
             'description' => $this->normalizeNullableString($payload['description'] ?? null),
+            'allowed_taxonomies' => $this->normalizeAllowedEventTaxonomies($payload['allowed_taxonomies'] ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
             'icon' => $legacy['icon'],
@@ -210,6 +212,9 @@ class EventTypeRegistryManagementService
             'description' => array_key_exists('description', $payload)
                 ? $this->normalizeNullableString($payload['description'])
                 : $this->normalizeNullableString($existing->description ?? null),
+            'allowed_taxonomies' => array_key_exists('allowed_taxonomies', $payload)
+                ? $this->normalizeAllowedEventTaxonomies($payload['allowed_taxonomies'])
+                : $this->normalizeAllowedEventTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
             'icon' => $legacy['icon'],
@@ -308,6 +313,56 @@ class EventTypeRegistryManagementService
         $normalized = trim((string) $value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+
+        return collect($items)
+            ->map(fn ($item): string => strtolower(trim((string) $item)))
+            ->filter(static fn (string $item): bool => $item !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeAllowedEventTaxonomies(mixed $value): array
+    {
+        $slugs = $this->normalizeStringList($value);
+        if ($slugs === []) {
+            return [];
+        }
+
+        $taxonomies = Taxonomy::query()
+            ->whereIn('slug', $slugs)
+            ->get()
+            ->keyBy(fn (Taxonomy $taxonomy): string => (string) $taxonomy->slug);
+
+        $missing = array_values(array_diff($slugs, array_keys($taxonomies->all())));
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                'allowed_taxonomies' => ['Some allowed taxonomies are not registered for this tenant.'],
+            ]);
+        }
+
+        foreach ($slugs as $slug) {
+            $taxonomy = $taxonomies->get($slug);
+            $appliesTo = is_array($taxonomy?->applies_to ?? null) ? $taxonomy->applies_to : [];
+            if (! in_array('event', $appliesTo, true)) {
+                throw ValidationException::withMessages([
+                    'allowed_taxonomies' => ['Some allowed taxonomies are not applicable to events.'],
+                ]);
+            }
+        }
+
+        return $slugs;
     }
 
     private function toCheckpoint(mixed $value): int

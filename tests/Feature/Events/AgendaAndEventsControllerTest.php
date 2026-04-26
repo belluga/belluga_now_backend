@@ -12,9 +12,11 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AttendanceCommitment;
 use App\Models\Tenants\TenantSettings;
+use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -55,8 +57,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
         $tenant->makeCurrent();
 
-        Event::query()->delete();
-        EventOccurrence::query()->delete();
+        Event::withTrashed()->forceDelete();
+        EventOccurrence::withTrashed()->forceDelete();
 
         [$this->account] = $this->seedAccountWithRole([
             'account-users:view',
@@ -442,6 +444,29 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['search']);
     }
 
+    public function test_agenda_rejects_out_of_range_geo_coordinates(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?origin_lat=91&origin_lng=181&max_distance_meters=5000&page=1&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['origin_lat', 'origin_lng']);
+    }
+
+    public function test_event_stream_rejects_out_of_range_geo_coordinates(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events/stream?origin_lat=-91&origin_lng=-181&max_distance_meters=5000",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+            ]
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['origin_lat', 'origin_lng']);
+    }
+
     public function test_agenda_geo_filters_exclude_events_outside_distance(): void
     {
         $this->createEvent([
@@ -785,6 +810,30 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringContainsString((string) $occurrence->_id, $content);
     }
 
+    public function test_event_stream_caps_stale_cursor_delta_replay(): void
+    {
+        foreach (range(1, InputConstraints::PUBLIC_STREAM_DELTA_LIMIT + 1) as $index) {
+            $this->createEvent([
+                'title' => sprintf('Stream Replay Cap Event %03d', $index),
+                'date_time_start' => Carbon::now()->addDays(2)->addMinutes($index),
+                'date_time_end' => Carbon::now()->addDays(2)->addMinutes($index + 30),
+            ]);
+        }
+
+        $response = $this->get(
+            "{$this->base_api_tenant}events/stream",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $response->assertStatus(200);
+        $matched = preg_match_all('/^event:\\s*/m', $response->streamedContent());
+
+        $this->assertSame(InputConstraints::PUBLIC_STREAM_DELTA_LIMIT, $matched);
+    }
+
     public function test_event_stream_reconnect_uses_last_event_id_without_replay(): void
     {
         $this->createEvent(['title' => 'Reconnect Event']);
@@ -889,6 +938,107 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
         $response->assertStatus(401);
+    }
+
+    public function test_agenda_rejects_page_size_above_safe_maximum(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?page=1&page_size=".(InputConstraints::PUBLIC_PAGE_SIZE_MAX + 1)
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page_size']);
+    }
+
+    public function test_agenda_rejects_page_above_safe_public_depth(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1)."&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page']);
+    }
+
+    public function test_agenda_rejects_unbounded_public_filter_lists(): void
+    {
+        $query = http_build_query([
+            'page' => 1,
+            'page_size' => 10,
+            'categories' => array_fill(0, InputConstraints::PUBLIC_FILTER_LIST_VALUES_MAX + 1, 'culture'),
+            'tags' => ['music'],
+            'taxonomy' => [[
+                'type' => 'mood',
+                'value' => 'sunset',
+            ]],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?{$query}");
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['categories']);
+    }
+
+    public function test_agenda_rejects_unbounded_public_taxonomy_filter_work(): void
+    {
+        $taxonomy = array_map(
+            static fn (int $index): array => [
+                'type' => 'mood',
+                'value' => "value-{$index}",
+            ],
+            range(1, InputConstraints::PUBLIC_FILTER_LIST_VALUES_MAX + 1)
+        );
+        $query = http_build_query([
+            'page' => 1,
+            'page_size' => 10,
+            'taxonomy' => $taxonomy,
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?{$query}");
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy']);
+    }
+
+    public function test_agenda_rejects_unbounded_public_geo_radius(): void
+    {
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?origin_lat=-20&origin_lng=-40&max_distance_meters=".(InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS + 1)."&page=1&page_size=10"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['max_distance_meters']);
+    }
+
+    public function test_event_query_service_clamps_public_page_size_when_called_directly(): void
+    {
+        foreach (range(1, InputConstraints::PUBLIC_PAGE_SIZE_MAX + 5) as $index) {
+            $this->createEvent([
+                'title' => sprintf('Bounded Agenda Event %03d', $index),
+                'date_time_start' => Carbon::now()->addDay()->addMinutes($index),
+                'date_time_end' => Carbon::now()->addDay()->addMinutes($index + 30),
+            ]);
+        }
+
+        $payload = app(EventQueryService::class)->fetchAgenda([
+            'page' => 1,
+            'page_size' => InputConstraints::PUBLIC_PAGE_SIZE_MAX + 100,
+        ], (string) $this->user->getAuthIdentifier());
+
+        $this->assertCount(InputConstraints::PUBLIC_PAGE_SIZE_MAX, $payload['items']);
+        $this->assertTrue((bool) $payload['has_more']);
+    }
+
+    public function test_event_query_service_clamps_public_page_depth_when_called_directly(): void
+    {
+        $paginator = app(EventQueryService::class)->paginateManagement(
+            ['page' => InputConstraints::PUBLIC_PAGE_MAX + 100],
+            false,
+            1,
+            false
+        );
+
+        $this->assertSame(InputConstraints::PUBLIC_PAGE_MAX, $paginator->currentPage());
     }
 
     public function test_agenda_validates_origin_pairs(): void

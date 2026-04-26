@@ -7,8 +7,10 @@ namespace Tests\Unit\Application\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Tenants\TenantDomainManagementService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -55,6 +57,15 @@ class TenantDomainManagementServiceTest extends TestCase
         $this->assertDatabaseHas('domains', [
             'path' => 'tenantkappa.com',
         ], 'landlord');
+    }
+
+    public function test_create_dispatches_environment_snapshot_refresh_without_current_tenant_context(): void
+    {
+        Queue::fake();
+
+        $this->service->create($this->tenant, ['path' => 'tenantkappa-refresh.com']);
+
+        Queue::assertPushed(RebuildTenantEnvironmentSnapshotJob::class);
     }
 
     public function test_create_rejects_duplicate_on_same_tenant(): void

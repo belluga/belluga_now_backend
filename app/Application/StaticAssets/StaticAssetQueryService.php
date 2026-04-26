@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\StaticAssets;
 
 use App\Application\Shared\Query\AbstractQueryService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\StaticAsset;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -14,7 +15,8 @@ use MongoDB\BSON\ObjectId;
 class StaticAssetQueryService extends AbstractQueryService
 {
     public function __construct(
-        private readonly StaticAssetMediaService $mediaService
+        private readonly StaticAssetMediaService $mediaService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
@@ -97,7 +99,9 @@ class StaticAssetQueryService extends AbstractQueryService
                 'cover',
                 is_string($asset->cover_url) ? $asset->cover_url : null
             ),
-            'taxonomy_terms' => $asset->taxonomy_terms ?? [],
+            'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
+                is_array($asset->taxonomy_terms ?? null) ? $asset->taxonomy_terms : []
+            ),
             'location' => $this->formatLocation($asset->location),
             'is_active' => (bool) ($asset->is_active ?? false),
             'created_at' => $asset->created_at?->toJSON(),

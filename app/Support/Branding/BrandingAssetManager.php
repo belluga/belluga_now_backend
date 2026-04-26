@@ -16,12 +16,13 @@ class BrandingAssetManager
      */
     public function createBrandingPayload(Request $request): array
     {
-        $logoSettings = $this->processLogoUploads($request);
+        $baseUrl = $request->getSchemeAndHttpHost();
+        $logoSettings = $this->processLogoUploads($request, null);
 
         $pwaIconPayload = [];
         $pwaIconFile = $request->file('branding_data.pwa_icon');
         if ($pwaIconFile) {
-            $pwaIconPayload = $this->generatePwaIconVariants($pwaIconFile);
+            $pwaIconPayload = $this->generatePwaIconVariants($pwaIconFile, null, $baseUrl);
         }
 
         return [

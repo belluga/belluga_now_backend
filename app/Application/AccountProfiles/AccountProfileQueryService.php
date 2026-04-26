@@ -6,22 +6,29 @@ namespace App\Application\AccountProfiles;
 
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\Shared\Query\AbstractQueryService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 
 class AccountProfileQueryService extends AbstractQueryService
 {
+    private const PUBLIC_PAGE_SIZE_DEFAULT = 15;
+    private const PUBLIC_NEAR_PAGE_SIZE_DEFAULT = 10;
+
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountProfileMediaService $mediaService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
@@ -45,10 +52,14 @@ class AccountProfileQueryService extends AbstractQueryService
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
     {
+        $perPage = $this->normalizePublicPageSize($perPage);
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
         $allowedTypes = $this->favoritableProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
 
         $query = $this->withoutPublicProfileTypeFilters($queryParams);
+        $taxonomyFilters = $this->resolvePublicTaxonomyFilters($query);
+        $query = $this->withoutPublicTaxonomyFilters($query);
         $search = trim((string) ($query['search'] ?? ''));
         unset($query['search']);
 
@@ -62,15 +73,33 @@ class AccountProfileQueryService extends AbstractQueryService
             $baseQuery->whereIn('profile_type', $effectiveTypes);
         }
 
+        $this->applyPublicTaxonomyFilter($baseQuery, $taxonomyFilters);
         $this->applyPublicSearchFilter($baseQuery, $search);
         $paginator = $this->buildPaginator(
             $baseQuery,
             $query,
             false,
-            $perPage
+            $perPage,
+            $page
         );
 
         return $this->hydrateOwnershipState($paginator);
+    }
+
+    private function normalizePublicPageSize(int $perPage, int $default = self::PUBLIC_PAGE_SIZE_DEFAULT): int
+    {
+        if ($perPage <= 0) {
+            return $default;
+        }
+
+        return min($perPage, InputConstraints::PUBLIC_PAGE_SIZE_MAX);
+    }
+
+    private function normalizePublicPage(mixed $value): int
+    {
+        $page = max(1, (int) $value);
+
+        return min($page, InputConstraints::PUBLIC_PAGE_MAX);
     }
 
     /**
@@ -81,14 +110,12 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $allowedTypes = $this->nearEligibleProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
-        $page = max(1, (int) ($queryParams['page'] ?? 1));
-        $pageSize = (int) ($queryParams['page_size'] ?? 10);
-        if ($pageSize <= 0) {
-            $pageSize = 10;
-        }
-        if ($pageSize > 50) {
-            $pageSize = 50;
-        }
+        $taxonomyFilters = $this->resolvePublicTaxonomyFilters($queryParams);
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
+        $pageSize = $this->normalizePublicPageSize(
+            (int) ($queryParams['page_size'] ?? self::PUBLIC_NEAR_PAGE_SIZE_DEFAULT),
+            self::PUBLIC_NEAR_PAGE_SIZE_DEFAULT
+        );
 
         if ($effectiveTypes === []) {
             return [
@@ -123,6 +150,10 @@ class AccountProfileQueryService extends AbstractQueryService
         if ($search !== '') {
             $baseMatch['$and'][] = $this->publicSearchExpression($search);
         }
+        $taxonomyExpression = $this->publicTaxonomyExpression($taxonomyFilters);
+        if ($taxonomyExpression !== []) {
+            $baseMatch['$and'][] = $taxonomyExpression;
+        }
 
         $geoNear = [
             'near' => [
@@ -135,7 +166,10 @@ class AccountProfileQueryService extends AbstractQueryService
         ];
         $maxDistance = $this->toFloat($queryParams['max_distance_meters'] ?? null);
         if ($maxDistance !== null) {
-            $geoNear['maxDistance'] = $maxDistance;
+            $geoNear['maxDistance'] = min(
+                max(0.0, $maxDistance),
+                (float) InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS
+            );
         }
 
         $skip = ($page - 1) * $pageSize;
@@ -294,7 +328,9 @@ class AccountProfileQueryService extends AbstractQueryService
             ),
             'bio' => $profile->bio,
             'content' => $profile->content,
-            'taxonomy_terms' => $profile->taxonomy_terms ?? [],
+            'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
+                is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+            ),
             'location' => $this->formatLocation($profile->location),
             'ownership_state' => $resolvedAccount
                 ? $this->ownershipStateService->deriveOwnershipState(
@@ -423,7 +459,20 @@ class AccountProfileQueryService extends AbstractQueryService
                 ->where('display_name', 'like', $pattern)
                 ->orWhere('slug', 'like', $pattern)
                 ->orWhere('taxonomy_terms.value', 'like', $pattern);
-        });
+            });
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     */
+    private function applyPublicTaxonomyFilter(Builder $query, array $taxonomyFilters): void
+    {
+        $expression = $this->publicTaxonomyExpression($taxonomyFilters);
+        if ($expression === []) {
+            return;
+        }
+
+        $query->whereRaw($expression);
     }
 
     private function applyPublicVisibilityConstraint(Builder $query): void
@@ -502,6 +551,127 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
+     * @return array<string, array<int, string>>
+     */
+    private function resolvePublicTaxonomyFilters(array $queryParams): array
+    {
+        $topLevel = $this->normalizeTaxonomyFilterList($queryParams['taxonomy'] ?? null);
+        $filterPayload = $queryParams['filter'] ?? null;
+        $nested = is_array($filterPayload)
+            ? $this->normalizeTaxonomyFilterList($filterPayload['taxonomy'] ?? null)
+            : [];
+
+        if ($topLevel === []) {
+            return $nested;
+        }
+
+        if ($nested === []) {
+            return $topLevel;
+        }
+
+        foreach ($nested as $taxonomyType => $values) {
+            $topLevel[$taxonomyType] = array_values(array_unique([
+                ...($topLevel[$taxonomyType] ?? []),
+                ...$values,
+            ]));
+        }
+
+        $this->assertPublicTaxonomyFilterBudget($topLevel);
+
+        return $topLevel;
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    private function normalizeTaxonomyFilterList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($value as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $type = trim((string) ($entry['type'] ?? ''));
+            $termValue = trim((string) ($entry['value'] ?? ''));
+            if ($type === '' || $termValue === '') {
+                continue;
+            }
+
+            $normalized[$type] ??= [];
+            $normalized[$type][] = $termValue;
+        }
+
+        foreach ($normalized as $type => $values) {
+            $normalized[$type] = array_values(array_unique($values));
+        }
+
+        $this->assertPublicTaxonomyFilterBudget($normalized);
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     */
+    private function assertPublicTaxonomyFilterBudget(array $taxonomyFilters): void
+    {
+        $total = 0;
+        foreach ($taxonomyFilters as $values) {
+            $total += count($values);
+        }
+
+        if ($total <= InputConstraints::DISCOVERY_FILTER_PUBLIC_TAXONOMY_FILTERS_MAX) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'taxonomy' => [sprintf(
+                'The public taxonomy filter may not contain more than %d selected terms.',
+                InputConstraints::DISCOVERY_FILTER_PUBLIC_TAXONOMY_FILTERS_MAX
+            )],
+        ]);
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<string, mixed>
+     */
+    private function publicTaxonomyExpression(array $taxonomyFilters): array
+    {
+        if ($taxonomyFilters === []) {
+            return [];
+        }
+
+        $and = [];
+        foreach ($taxonomyFilters as $type => $values) {
+            $flatKeys = [];
+            foreach ($values as $value) {
+                $flatKeys[] = "{$type}:{$value}";
+            }
+
+            $flatKeys = array_values(array_unique($flatKeys));
+            if ($flatKeys === []) {
+                continue;
+            }
+
+            $and[] = [
+                'taxonomy_terms_flat' => ['$in' => $flatKeys],
+            ];
+        }
+
+        if ($and === []) {
+            return [];
+        }
+
+        return count($and) === 1 ? $and[0] : ['$and' => $and];
+    }
+
+    /**
      * @return array<int, string>
      */
     private function normalizeProfileTypeList(mixed $value): array
@@ -529,6 +699,23 @@ class AccountProfileQueryService extends AbstractQueryService
 
         if (isset($queryParams['filter']) && is_array($queryParams['filter'])) {
             unset($queryParams['filter']['profile_type']);
+            if ($queryParams['filter'] === []) {
+                unset($queryParams['filter']);
+            }
+        }
+
+        return $queryParams;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function withoutPublicTaxonomyFilters(array $queryParams): array
+    {
+        unset($queryParams['taxonomy']);
+
+        if (isset($queryParams['filter']) && is_array($queryParams['filter'])) {
+            unset($queryParams['filter']['taxonomy']);
             if ($queryParams['filter'] === []) {
                 unset($queryParams['filter']);
             }

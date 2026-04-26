@@ -65,6 +65,17 @@ class SettingsKernelControllerTest extends TestCaseTenant
             ->delete();
         $tenant->update(['app_domains' => []]);
 
+        $landlordSettings = LandlordSettings::current();
+        if ($landlordSettings === null) {
+            $landlordSettings = new LandlordSettings;
+            $landlordSettings->setAttribute('_id', 'settings_root');
+        }
+        $landlordSettings->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => true,
+        ]);
+        $landlordSettings->save();
+
         TenantSettings::query()->delete();
         TenantSettings::create([
             'map_ui' => [
@@ -103,6 +114,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
                 'location_freshness_minutes' => 5,
                 'trackers' => [],
             ],
+            'tenant_public_auth' => [
+                'enabled_methods' => [],
+            ],
             'app_links' => [
                 'android' => [
                     'sha256_cert_fingerprints' => [
@@ -127,18 +141,22 @@ class SettingsKernelControllerTest extends TestCaseTenant
         [$this->account] = $this->seedAccountWithRole([
             'account-users:view',
             'events:read',
+            'discovery-filters-settings:update',
             'map-pois-settings:update',
             'push-settings:update',
             'telemetry-settings:update',
+            'tenant-public-auth-settings:update',
         ]);
 
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser([
             'account-users:view',
             'events:read',
+            'discovery-filters-settings:update',
             'map-pois-settings:update',
             'push-settings:update',
             'telemetry-settings:update',
+            'tenant-public-auth-settings:update',
         ]);
 
         $landlordUser = LandlordUser::query()->firstOrFail();
@@ -159,6 +177,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('events', $namespaces);
         $this->assertContains('push', $namespaces);
         $this->assertContains('telemetry', $namespaces);
+        $this->assertContains('tenant_public_auth', $namespaces);
+        $this->assertContains('discovery_filters', $namespaces);
         $this->assertContains('app_links', $namespaces);
         $this->assertContains('resend_email', $namespaces);
     }
@@ -180,6 +200,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
+        $response->assertJsonPath('data.tenant_public_auth.enabled_methods', []);
         $response->assertJsonPath('data.app_links.android.sha256_cert_fingerprints.0', 'AA:BB:CC:DD');
         $response->assertJsonPath('data.app_links.ios.team_id', 'ABCDE12345');
         $response->assertJsonPath('data.app_links.ios.paths.0', '/invite*');
@@ -187,6 +208,110 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.resend_email.from', 'Belluga <noreply@example.org>');
         $response->assertJsonPath('data.resend_email.to.0', 'admin@example.org');
         $response->assertJsonPath('data.resend_email.reply_to.0', 'reply@example.org');
+    }
+
+    public function test_patch_discovery_filters_persists_surface_filter_order_and_delete_semantics(): void
+    {
+        $payload = [
+            'surfaces' => [
+                'public_map.primary' => [
+                    'target' => 'map_poi',
+                    'primary_selection_mode' => 'single',
+                    'filters' => [
+                        [
+                            'key' => 'profiles',
+                            'target' => 'map_poi',
+                            'label' => 'Perfis',
+                            'image_uri' => 'https://tenant-omega.test/map-filters/profiles.png',
+                            'query' => [
+                                'entities' => ['account_profile'],
+                                'types_by_entity' => [
+                                    'account_profile' => ['venue'],
+                                ],
+                            ],
+                        ],
+                        [
+                            'key' => 'events',
+                            'target' => 'map_poi',
+                            'label' => 'Eventos',
+                            'image_uri' => 'https://tenant-omega.test/map-filters/events.png',
+                            'query' => [
+                                'entities' => ['event'],
+                                'types_by_entity' => [
+                                    'event' => ['show'],
+                                ],
+                                'taxonomy' => [
+                                    'music_genre' => ['rock'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}settings/values/discovery_filters",
+            $payload
+        );
+
+        $response->assertStatus(200);
+        $surface = $response->json('data.surfaces')['public_map.primary'] ?? null;
+        $this->assertSame('profiles', data_get($surface, 'filters.0.key'));
+        $this->assertSame(
+            'https://tenant-omega.test/map-filters/profiles.png',
+            data_get($surface, 'filters.0.image_uri')
+        );
+        $this->assertSame('events', data_get($surface, 'filters.1.key'));
+        $this->assertSame('rock', data_get($surface, 'filters.1.query.taxonomy.music_genre.0'));
+
+        $deleteByReplacement = $this->patchJson(
+            "{$this->base_tenant_api_admin}settings/values/discovery_filters",
+            [
+                'surfaces' => [
+                    'public_map.primary' => [
+                        'target' => 'map_poi',
+                        'primary_selection_mode' => 'single',
+                        'filters' => [
+                            $payload['surfaces']['public_map.primary']['filters'][1],
+                        ],
+                    ],
+                ],
+            ]
+        );
+
+        $deleteByReplacement->assertStatus(200);
+        $updatedSurface = $deleteByReplacement->json('data.surfaces')['public_map.primary'] ?? null;
+        $this->assertSame('events', data_get($updatedSurface, 'filters.0.key'));
+        $this->assertCount(
+            1,
+            data_get($updatedSurface, 'filters') ?? []
+        );
+
+        $values = $this->getJson("{$this->base_tenant_api_admin}settings/values");
+        $valuesSurface = $values->json('data.discovery_filters.surfaces')['public_map.primary'] ?? null;
+        $this->assertSame('events', data_get($valuesSurface, 'filters.0.key'));
+        $this->assertSame(
+            'https://tenant-omega.test/map-filters/events.png',
+            data_get($values->json('data.discovery_filters.surfaces')['public_map.primary'] ?? null, 'filters.0.image_uri')
+        );
+    }
+
+    public function test_patch_discovery_filters_requires_discovery_filters_ability(): void
+    {
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), [
+            'account-users:view',
+            'events:read',
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}settings/values/discovery_filters",
+            [
+                'surfaces' => [],
+            ]
+        );
+
+        $response->assertForbidden();
     }
 
     public function test_patch_resend_email_rejects_invalid_sender_format(): void
@@ -283,6 +408,74 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.default_duration_hours', 6);
     }
 
+    public function test_patch_tenant_public_auth_enforces_landlord_subset_governance(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $tenant->makeCurrent();
+
+        $tenantSettings = TenantSettings::current();
+        $originalTenantAuth = $tenantSettings?->getAttribute('tenant_public_auth');
+
+        try {
+            $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/tenant_public_auth", [
+                'enabled_methods' => ['phone_otp'],
+            ]);
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('data.enabled_methods.0', 'phone_otp');
+
+            $values = $this->getJson("{$this->base_tenant_api_admin}settings/values");
+            $values->assertStatus(200);
+            $values->assertJsonPath('data.tenant_public_auth.enabled_methods.0', 'phone_otp');
+
+            $rejected = $this->patchJson("{$this->base_tenant_api_admin}settings/values/tenant_public_auth", [
+                'enabled_methods' => ['phone_otp', 'magic_link'],
+            ]);
+
+            $rejected->assertStatus(422);
+            $rejected->assertJsonValidationErrors(['enabled_methods']);
+        } finally {
+            if ($tenantSettings === null) {
+                $tenantSettings = new TenantSettings;
+                $tenantSettings->setAttribute('_id', \Belluga\Settings\Models\SettingsDocument::ROOT_ID);
+            }
+
+            $tenantSettings->setAttribute('tenant_public_auth', $originalTenantAuth);
+            $tenantSettings->save();
+        }
+    }
+
+    public function test_patch_tenant_public_auth_rejects_tenant_override_when_landlord_disables_customization(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlord = \Belluga\Settings\Models\Landlord\LandlordSettings::current();
+        $original = $landlord?->getAttribute('tenant_public_auth');
+        if ($landlord === null) {
+            $landlord = new \Belluga\Settings\Models\Landlord\LandlordSettings;
+            $landlord->setAttribute('_id', \Belluga\Settings\Models\SettingsDocument::ROOT_ID);
+        }
+
+        $landlord->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => false,
+        ]);
+        $landlord->save();
+
+        try {
+            $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/tenant_public_auth", [
+                'enabled_methods' => ['phone_otp'],
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['enabled_methods']);
+        } finally {
+            $landlord->setAttribute('tenant_public_auth', $original);
+            $landlord->save();
+        }
+    }
+
     public function test_patch_namespace_rejects_envelope_payload_form(): void
     {
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", [
@@ -364,8 +557,14 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
         $eventsFields = $events['fields'] ?? [];
         $stock = collect($eventsFields)->firstWhere('path', 'stock_enabled');
+        $multipleOccurrencesAvailability = collect($eventsFields)
+            ->firstWhere('path', 'capabilities.multiple_occurrences.allow_multiple');
+        $multipleOccurrencesMax = collect($eventsFields)
+            ->firstWhere('path', 'capabilities.multiple_occurrences.max_occurrences');
         $mapPoiAvailability = collect($eventsFields)->firstWhere('path', 'capabilities.map_poi.available');
         $this->assertIsArray($stock);
+        $this->assertNull($multipleOccurrencesAvailability);
+        $this->assertNull($multipleOccurrencesMax);
         $this->assertIsArray($mapPoiAvailability);
         $this->assertSame('settings.events.stock_enabled.label', $stock['label_i18n_key'] ?? null);
         $this->assertSame(
@@ -692,9 +891,11 @@ class SettingsKernelControllerTest extends TestCaseTenant
         return [
             'account-users:view',
             'events:read',
+            'discovery-filters-settings:update',
             'map-pois-settings:update',
             'push-settings:update',
             'telemetry-settings:update',
+            'tenant-public-auth-settings:update',
         ];
     }
 

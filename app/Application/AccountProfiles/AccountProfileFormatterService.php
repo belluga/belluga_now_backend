@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Application\Accounts\AccountOwnershipStateService;
+use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 
@@ -14,6 +15,7 @@ class AccountProfileFormatterService
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
+        private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
     ) {}
 
     /**
@@ -44,7 +46,9 @@ class AccountProfileFormatterService
             ),
             'bio' => $profile->bio,
             'content' => $profile->content,
-            'taxonomy_terms' => $profile->taxonomy_terms ?? [],
+            'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
+                is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+            ),
             'location' => $this->formatLocation($profile->location),
             'ownership_state' => $account
                 ? $this->ownershipStateService->deriveOwnershipState($account)

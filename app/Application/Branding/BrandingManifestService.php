@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Branding;
 
+use App\Application\Media\CanonicalImageMediaService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Storage;
@@ -11,6 +12,11 @@ use Illuminate\Support\Str;
 
 class BrandingManifestService
 {
+    public function __construct(
+        private readonly CanonicalImageMediaService $canonicalImageMediaService,
+        private readonly BrandingAssetDefinitionFactory $brandingAssetDefinitionFactory,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -79,9 +85,28 @@ class BrandingManifestService
             return null;
         }
 
-        $urlPath = parse_url($uri, PHP_URL_PATH);
+        $tenant = Tenant::current();
+        $brandables = $tenant instanceof Tenant
+            ? [$tenant, Landlord::singleton()]
+            : [Landlord::singleton()];
 
-        return $urlPath ? Str::after($urlPath, '/storage/') : null;
+        foreach ($brandables as $brandable) {
+            foreach ($this->brandingAssetDefinitionFactory->definitions($brandable) as $definition) {
+                $resolved = $this->canonicalImageMediaService->resolveStoragePath($definition, $uri);
+                if ($resolved !== null) {
+                    return $resolved;
+                }
+            }
+        }
+
+        $urlPath = parse_url($uri, PHP_URL_PATH);
+        if (! is_string($urlPath) || $urlPath === '') {
+            return null;
+        }
+
+        $storagePath = Str::after($urlPath, '/storage/');
+
+        return $storagePath === $urlPath ? null : $storagePath;
     }
 
     public function assetResponse(?string $path)

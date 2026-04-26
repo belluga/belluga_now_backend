@@ -1,0 +1,12 @@
+[
+  {
+    "name": "plain_text_newlines",
+    "input": "Primeira linha\nSegunda linha\n\nNovo parágrafo",
+    "expected": "<p>Primeira linha<br />Segunda linha</p><p>Novo parágrafo</p>"
+  },
+  {
+    "name": "safe_subset_and_unsupported_container_unwrap",
+    "input": "<h2>Título seguro</h2><p><strong>Forte</strong> <em>ênfase</em> <s>riscado</s> <a href=\"https://example.test\">link texto</a></p><blockquote>Citação</blockquote><ul><li>Item um</li><li>Item dois</li></ul><ol><li>Passo um</li></ol><div>Antes <iframe>texto interno</iframe> <u>under</u> after</div><script>remover script</script><style>.x{}</style>",
+    "expected": "<h2>Título seguro</h2><p><strong>Forte</strong> <em>ênfase</em> <s>riscado</s> link texto</p><blockquote>Citação</blockquote><ul><li>Item um</li><li>Item dois</li></ul><ol><li>Passo um</li></ol>Antes texto interno under after"
+  }
+]

@@ -8,6 +8,7 @@ use App\Application\Taxonomies\TaxonomyTermManagementService;
 use App\Http\Api\v1\Requests\TaxonomyTermStoreRequest;
 use App\Http\Api\v1\Requests\TaxonomyTermUpdateRequest;
 use App\Http\Controllers\Controller;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -23,6 +24,22 @@ class TaxonomyTermsController extends Controller
 
         return response()->json([
             'data' => $this->managementService->list($taxonomyId),
+        ]);
+    }
+
+    public function batch(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'taxonomy_ids' => ['sometimes', 'array', 'max:'.InputConstraints::TAXONOMY_BATCH_MAX_ITEMS],
+            'taxonomy_ids.*' => ['string', 'size:'.InputConstraints::OBJECT_ID_LENGTH],
+            'term_limit' => ['sometimes', 'integer', 'min:1', 'max:'.InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX],
+        ]);
+
+        return response()->json([
+            'data' => $this->managementService->listBatch(
+                taxonomyIds: $validated['taxonomy_ids'] ?? [],
+                termLimit: $validated['term_limit'] ?? InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX,
+            ),
         ]);
     }
 

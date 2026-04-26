@@ -33,8 +33,8 @@ class EventIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'page' => 'sometimes|integer|min:1',
-            'page_size' => 'sometimes|integer|min:1|max:100',
+            'page' => $this->pageRule(),
+            'page_size' => 'sometimes|integer|min:1|max:'.$this->pageSizeMaximum(),
             'archived' => 'sometimes|boolean',
             'date' => 'sometimes|date_format:Y-m-d',
             'search' => 'prohibited',
@@ -51,5 +51,23 @@ class EventIndexRequest extends FormRequest
                 Rule::in(['past', 'now', 'future']),
             ],
         ];
+    }
+
+    private function pageSizeMaximum(): int
+    {
+        if ($this->route('account_slug') || str_starts_with($this->path(), 'admin/api/v1')) {
+            return 100;
+        }
+
+        return InputConstraints::PUBLIC_PAGE_SIZE_MAX;
+    }
+
+    private function pageRule(): string
+    {
+        if ($this->route('account_slug') || str_starts_with($this->path(), 'admin/api/v1')) {
+            return 'sometimes|integer|min:1';
+        }
+
+        return 'sometimes|integer|min:1|max:'.InputConstraints::PUBLIC_PAGE_MAX;
     }
 }

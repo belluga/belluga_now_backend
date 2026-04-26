@@ -8,10 +8,12 @@ use App\Integration\MapPois\MapPoiRegistryAdapter;
 use App\Integration\MapPois\MapPoiSettingsAdapter;
 use App\Integration\MapPois\MapPoiSourceReaderAdapter;
 use App\Integration\MapPois\MapPoiTenantContextAdapter;
+use App\Integration\MapPois\MapPoiTaxonomySnapshotResolverAdapter;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
+use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Support\ServiceProvider;
@@ -38,6 +40,11 @@ class MapPoisIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             MapPoiTenantContextContract::class,
             MapPoiTenantContextAdapter::class
+        );
+
+        $this->app->bind(
+            MapPoiTaxonomySnapshotResolverContract::class,
+            MapPoiTaxonomySnapshotResolverAdapter::class
         );
     }
 

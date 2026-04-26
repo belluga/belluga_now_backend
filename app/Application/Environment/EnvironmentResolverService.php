@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\Auth\TenantPublicAuthMethodResolver;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
 use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\TenantSettings;
-use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Illuminate\Support\Str;
 
@@ -19,10 +18,12 @@ class EnvironmentResolverService
 {
     public function __construct(
         private readonly TelemetrySettingsKernelBridge $telemetrySettings,
+        private readonly TenantPublicAuthMethodResolver $tenantPublicAuthMethodResolver,
         private readonly PushSettingsKernelBridge $pushSettings,
         private readonly TenantAppDomainResolverService $appDomainResolver,
         private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
+        private readonly TenantEnvironmentSnapshotService $tenantSnapshotService,
     ) {}
 
     /**
@@ -66,58 +67,7 @@ class EnvironmentResolverService
      */
     private function tenantEnvironment(Tenant $tenant, ?string $requestRoot, ?string $requestHost): array
     {
-        $landlord = Landlord::singleton();
-        $settings = TenantSettings::current();
-        $telemetry = $this->telemetrySettings->currentTelemetryConfig();
-        $firebase = $this->pushSettings->currentFirebaseConfig();
-        $push = $this->pushSettings->currentPushConfig();
-        $profileTypes = $this->profileRegistryService->registry($requestRoot);
-        $tenantBranding = $this->normalizeBrandingData($tenant->branding_data ?? null);
-        $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
-            mainArray: $this->normalizeBrandingData($landlord->branding_data ?? null),
-            overrideArray: $tenantBranding
-        );
-        $canonicalTenantMainDomain = $tenant->getMainDomain();
-        $explicitDomains = $tenant->explicitDomains();
-        $mainDomain = $this->resolveTenantMainDomain(
-            tenantMainDomain: $canonicalTenantMainDomain,
-            explicitDomains: $explicitDomains,
-            tenantSubdomain: $tenant->subdomain,
-            requestRoot: $requestRoot,
-            requestHost: $requestHost,
-        );
-
-        return [
-            'tenant_id' => (string) $tenant->_id,
-            'name' => $tenant->name,
-            'type' => 'tenant',
-            'subdomain' => $tenant->subdomain,
-            'main_domain' => $mainDomain,
-            'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
-            'domains' => $explicitDomains,
-            'app_domains' => $tenant->resolvedAppDomains(),
-            'theme_data_settings' => $branding['theme_data_settings'] ?? [],
-            'branding_assets' => $this->resolveBrandingAssetState($branding),
-            'public_web_metadata' => $this->resolvePublicWebMetadata(
-                $tenant,
-                $tenantBranding,
-                $requestRoot
-            ),
-            'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
-            'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
-            'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
-            'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => [
-                'location_freshness_minutes' => $telemetry['location_freshness_minutes'],
-                'trackers' => $telemetry['trackers'],
-            ],
-            'firebase' => $firebase,
-            'push' => $push,
-            'profile_types' => $profileTypes,
-            'settings' => [
-                'map_ui' => $settings?->getAttribute('map_ui') ?? [],
-            ],
-        ];
+        return $this->tenantSnapshotService->readResolvedPayload($tenant, $requestRoot, $requestHost);
     }
 
     /**
@@ -150,6 +100,9 @@ class EnvironmentResolverService
             'telemetry' => [
                 'location_freshness_minutes' => $this->defaultTelemetryLocationFreshnessMinutes(),
                 'trackers' => [],
+            ],
+            'settings' => [
+                'tenant_public_auth' => $this->tenantPublicAuthMethodResolver->currentLandlordGovernance(),
             ],
         ];
     }

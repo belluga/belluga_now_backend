@@ -24,6 +24,7 @@ class AccountProfile extends Model
         'slug',
         'visibility',
         'taxonomy_terms',
+        'taxonomy_terms_flat',
         'location',
         'bio',
         'content',

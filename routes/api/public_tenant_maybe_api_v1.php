@@ -10,6 +10,7 @@ use App\Http\Api\v1\Controllers\EventTypeMediaController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
+use App\Http\Api\v1\Controllers\ProfileProximityPreferencesController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Controllers\StaticAssetMediaController;
 use App\Http\Api\v1\Controllers\StaticProfileTypeMediaController;
@@ -69,6 +70,8 @@ Route::middleware('tenant')->group(function () {
     Route::prefix('profile')
         ->middleware(['auth:sanctum', CheckTenantAccess::class])
         ->group(function () {
+            Route::get('/proximity-preferences', [ProfileProximityPreferencesController::class, 'show']);
+            Route::put('/proximity-preferences', [ProfileProximityPreferencesController::class, 'upsert']);
             Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword']);
 
             Route::patch('/', [ProfileControllerTenant::class, 'updateProfile']);

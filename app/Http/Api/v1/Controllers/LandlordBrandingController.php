@@ -23,7 +23,7 @@ class LandlordBrandingController
         $landlord = Landlord::singleton();
         $newData = $request->validated();
 
-        $uploadedLogoUrls = $this->processLogoUploads($request);
+        $uploadedLogoUrls = $this->processLogoUploads($request, $landlord);
         if ($request->hasFile('public_web_metadata.default_image')) {
             $newData['public_web_metadata']['default_image'] = $this->brandingPublicWebMediaService->storeDefaultImage(
                 $request->getSchemeAndHttpHost(),
@@ -36,6 +36,8 @@ class LandlordBrandingController
         if ($request->hasFile('logo_settings.pwa_icon')) {
             $pwaVariants = $this->generatePwaIconVariants(
                 sourceFile: $request->file('logo_settings.pwa_icon'),
+                brandable: $landlord,
+                baseUrl: $request->getSchemeAndHttpHost(),
             );
         }
 

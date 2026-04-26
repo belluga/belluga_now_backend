@@ -77,6 +77,7 @@ class EventTypeRegistryService
             'name' => trim((string) ($model->name ?? '')),
             'slug' => trim((string) ($model->slug ?? '')),
             'description' => $this->normalizeNullableString($model->description ?? null),
+            'allowed_taxonomies' => $this->normalizeStringList($model->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
             'type_asset_url' => $this->normalizeNullableString($model->type_asset_url ?? null),
@@ -161,5 +162,20 @@ class EventTypeRegistryService
         $normalized = trim((string) $value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+
+        return collect($items)
+            ->map(fn ($item): string => strtolower(trim((string) $item)))
+            ->filter(static fn (string $item): bool => $item !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 }

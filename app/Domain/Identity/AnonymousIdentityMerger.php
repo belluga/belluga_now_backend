@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Identity;
 
+use App\Application\ProximityPreferences\ProximityPreferenceOwnershipService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
@@ -19,6 +20,10 @@ use MongoDB\BSON\ObjectId;
 
 class AnonymousIdentityMerger
 {
+    public function __construct(
+        private readonly ProximityPreferenceOwnershipService $proximityPreferenceOwnershipService,
+    ) {}
+
     /**
      * @param  iterable<AccountUser>  $sources
      *
@@ -136,6 +141,13 @@ class AnonymousIdentityMerger
                 $source->tokens()->delete();
                 $source->forceDelete();
             }
+
+            $this->proximityPreferenceOwnershipService->mergeOwnership(
+                targetUserId: (string) $target->_id,
+                sourceUserIds: $sourceCollection->map(
+                    static fn (AccountUser $user): string => (string) $user->_id,
+                )->all(),
+            );
 
             $promotionAudit = $promotionAudit
                 ->sortBy(static function (array $entry) use ($now): int {
