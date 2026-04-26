@@ -44,15 +44,19 @@ final class PublicTenantMediaCors
         }
 
         $tenant = $this->resolveRequestTenant($request);
-        if (! $tenant instanceof Tenant || ! $this->isTenantOrigin($tenant, $origin['host'])) {
-            return $next($request);
-        }
+        $isAllowedTenantOrigin = $tenant instanceof Tenant
+            && $this->isTenantOrigin($tenant, $origin['host']);
 
-        if ($request->isMethod('OPTIONS')) {
+        if ($isAllowedTenantOrigin && $request->isMethod('OPTIONS')) {
             return $this->withCorsHeaders(response('', 204), $origin['value'], preflight: true);
         }
 
-        return $this->withCorsHeaders($next($request), $origin['value'], preflight: false);
+        $response = $next($request);
+        if (! $isAllowedTenantOrigin) {
+            return $this->withoutCorsHeaders($response);
+        }
+
+        return $this->withCorsHeaders($response, $origin['value'], preflight: false);
     }
 
     private function isPublicMediaRequest(Request $request): bool
@@ -187,12 +191,28 @@ final class PublicTenantMediaCors
     {
         $response->headers->set('Access-Control-Allow-Origin', $origin);
         $response->setVary(array_values(array_unique([...$response->getVary(), 'Origin'])));
+        $response->headers->remove('Access-Control-Allow-Credentials');
 
         if ($preflight) {
             $response->headers->set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
             $response->headers->set('Access-Control-Allow-Headers', 'Origin, Accept, Range, Content-Type');
             $response->headers->set('Access-Control-Max-Age', '86400');
         }
+
+        return $response;
+    }
+
+    private function withoutCorsHeaders(Response $response): Response
+    {
+        $response->headers->remove('Access-Control-Allow-Origin');
+        $response->headers->remove('Access-Control-Allow-Credentials');
+        $response->headers->remove('Access-Control-Allow-Methods');
+        $response->headers->remove('Access-Control-Allow-Headers');
+        $response->headers->remove('Access-Control-Max-Age');
+        $response->setVary(array_values(array_filter(
+            $response->getVary(),
+            static fn (string $header): bool => strcasecmp($header, 'Origin') !== 0,
+        )));
 
         return $response;
     }

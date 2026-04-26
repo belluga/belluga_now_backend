@@ -42,7 +42,7 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
         ])->get($this->tenantUrl($tenant, "api/v1/media/account-profiles/{$profile->getKey()}/avatar"));
 
         $response->assertStatus(404);
-        $this->assertCorsResponse($response, "https://{$customDomain}", assertNoCredentials: false);
+        $this->assertCorsResponse($response, "https://{$customDomain}");
     }
 
     public function test_public_media_preflight_is_scoped_to_tenant_domain_set(): void
@@ -65,6 +65,26 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
         $this->assertSame(['86400'], $response->headers->all('Access-Control-Max-Age'));
     }
 
+    public function test_canonical_public_media_preflight_is_scoped_to_tenant_domain_set(): void
+    {
+        $tenant = $this->currentTenant();
+        $customDomain = $this->customDomain();
+        $this->registerTenantWebDomain($tenant, $customDomain);
+        $profile = $this->createProfile();
+
+        $response = $this->withHeaders([
+            'Origin' => "https://{$customDomain}",
+            'Access-Control-Request-Method' => 'GET',
+            'Access-Control-Request-Headers' => 'Range',
+        ])->options($this->tenantUrl($tenant, "api/v1/media/account-profiles/{$profile->getKey()}/avatar"));
+
+        $response->assertStatus(204);
+        $this->assertCorsResponse($response, "https://{$customDomain}");
+        $this->assertSame(['GET, HEAD, OPTIONS'], $response->headers->all('Access-Control-Allow-Methods'));
+        $this->assertSame(['Origin, Accept, Range, Content-Type'], $response->headers->all('Access-Control-Allow-Headers'));
+        $this->assertSame(['86400'], $response->headers->all('Access-Control-Max-Age'));
+    }
+
     public function test_public_media_rejects_origin_outside_tenant_domain_set(): void
     {
         $tenant = $this->currentTenant();
@@ -77,6 +97,36 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
         $response->assertStatus(404);
         $this->assertFalse($response->headers->has('Access-Control-Allow-Origin'));
         $this->assertFalse($response->headers->has('Access-Control-Allow-Credentials'));
+    }
+
+    public function test_canonical_public_media_rejects_origin_outside_tenant_domain_set(): void
+    {
+        $tenant = $this->currentTenant();
+        $profile = $this->createProfile();
+
+        $response = $this->withHeaders([
+            'Origin' => 'https://evil.example.test',
+        ])->get($this->tenantUrl($tenant, "api/v1/media/account-profiles/{$profile->getKey()}/avatar"));
+
+        $response->assertStatus(404);
+        $this->assertFalse($response->headers->has('Access-Control-Allow-Origin'));
+        $this->assertFalse($response->headers->has('Access-Control-Allow-Credentials'));
+    }
+
+    public function test_canonical_public_media_preflight_rejects_origin_outside_tenant_domain_set(): void
+    {
+        $tenant = $this->currentTenant();
+        $profile = $this->createProfile();
+
+        $response = $this->withHeaders([
+            'Origin' => 'https://evil.example.test',
+            'Access-Control-Request-Method' => 'GET',
+            'Access-Control-Request-Headers' => 'Range',
+        ])->options($this->tenantUrl($tenant, "api/v1/media/account-profiles/{$profile->getKey()}/avatar"));
+
+        $this->assertFalse($response->headers->has('Access-Control-Allow-Origin'));
+        $this->assertFalse($response->headers->has('Access-Control-Allow-Credentials'));
+        $this->assertFalse($response->headers->has('Access-Control-Allow-Methods'));
     }
 
     private function registerTenantWebDomain(Tenant $tenant, string $domain): void

@@ -136,8 +136,8 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         // Platform-wide API security baseline (L1/L2/L3 + idempotency + edge/origin controls).
+        $middleware->prepend(\App\Http\Middleware\PublicTenantMediaCors::class);
         $middleware->append(\App\Http\Middleware\ApiSecurityHardening::class);
-        $middleware->append(\App\Http\Middleware\PublicTenantMediaCors::class);
 
         $middleware
             ->group(
