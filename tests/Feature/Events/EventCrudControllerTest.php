@@ -574,7 +574,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}events?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1)."&page_size=10"
+            "{$this->base_api_tenant}events?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1).'&page_size=10'
         );
 
         $response->assertStatus(422);
@@ -2640,6 +2640,61 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertCount(1, $fresh->event_parties ?? []);
     }
 
+    public function test_event_update_recomputes_account_context_ids_when_related_parties_are_removed(): void
+    {
+        $event = $this->createEvent();
+        $eventId = (string) $event->_id;
+        $artistAccountId = (string) $this->artist->account_id;
+        $artistAccount = Account::query()->findOrFail($artistAccountId);
+        $artistRole = $artistAccount->roleTemplates()->create([
+            'name' => 'Artist Events Reader',
+            'permissions' => ['*'],
+        ]);
+        $artistUser = $this->userService->create($artistAccount, [
+            'name' => 'Artist Events Reader',
+            'email' => uniqid('artist-events-reader', true).'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $artistRole->_id);
+
+        $this->assertContains($artistAccountId, $event->account_context_ids ?? []);
+
+        Sanctum::actingAs($artistUser, ['events:read']);
+        $artistScopedListBefore = $this->getJson("{$this->base_api_tenant}accounts/{$artistAccount->slug}/events");
+        $artistScopedListBefore->assertStatus(200);
+        $this->assertContains(
+            $eventId,
+            collect($artistScopedListBefore->json('data') ?? [])
+                ->pluck('event_id')
+                ->map(static fn ($id): string => (string) $id)
+                ->values()
+                ->all()
+        );
+
+        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'event_parties' => [],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(0, 'data.event_parties');
+
+        $fresh = Event::query()->findOrFail($eventId);
+        $this->assertNotContains($artistAccountId, $fresh->account_context_ids ?? []);
+        $this->assertContains((string) $this->account->_id, $fresh->account_context_ids ?? []);
+
+        Sanctum::actingAs($artistUser, ['events:read']);
+        $artistScopedListAfter = $this->getJson("{$this->base_api_tenant}accounts/{$artistAccount->slug}/events");
+        $artistScopedListAfter->assertStatus(200);
+        $this->assertNotContains(
+            $eventId,
+            collect($artistScopedListAfter->json('data') ?? [])
+                ->pluck('event_id')
+                ->map(static fn ($id): string => (string) $id)
+                ->values()
+                ->all()
+        );
+    }
+
     public function test_event_update_remove_cover_multipart_can_clear_related_account_parties_with_json_empty_array(): void
     {
         Storage::fake('public');
@@ -3912,7 +3967,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'time' => '17:00',
             'title' => 'Show com muitos perfis',
             'account_profile_ids' => array_map(
-                static fn (int $index): string => (string) new ObjectId(),
+                static fn (int $index): string => (string) new ObjectId,
                 range(0, InputConstraints::EVENT_PROGRAMMING_PROFILE_IDS_MAX)
             ),
         ]];
@@ -3956,7 +4011,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 'time' => '17:00',
                 'title' => "Programação {$occurrenceIndex}",
                 'account_profile_ids' => array_map(
-                    static fn (int $index): string => (string) new ObjectId(),
+                    static fn (int $index): string => (string) new ObjectId,
                     range(1, InputConstraints::EVENT_PROGRAMMING_PROFILE_IDS_MAX)
                 ),
             ]];
@@ -3978,7 +4033,7 @@ class EventCrudControllerTest extends TestCaseTenant
         foreach ($occurrences as $occurrenceIndex => $_) {
             $occurrences[$occurrenceIndex]['event_parties'] = array_map(
                 static fn (int $index): array => [
-                    'party_ref_id' => (string) new ObjectId(),
+                    'party_ref_id' => (string) new ObjectId,
                     'permissions' => ['can_edit' => false],
                 ],
                 range(1, InputConstraints::EVENT_OCCURRENCE_PARTIES_MAX)

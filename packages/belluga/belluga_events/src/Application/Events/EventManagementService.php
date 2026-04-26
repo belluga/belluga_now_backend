@@ -182,7 +182,7 @@ class EventManagementService
 
         $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
         $normalized['account_context_ids'] = $this->eventAccountContextResolver->resolveForAggregate(
-            $this->baseAccountContextIdsForPayload($payload, $existing),
+            $this->baseAccountContextIdsForPayload($payload),
             $this->normalizeArray($normalized['event_parties'] ?? []),
             $this->normalizeNullableArray($normalized['place_ref'] ?? ($existing?->place_ref ?? null)),
             $schedule['occurrences']
@@ -198,23 +198,11 @@ class EventManagementService
      * @param  array<string, mixed>  $payload
      * @return array<int, string>
      */
-    private function baseAccountContextIdsForPayload(array $payload, ?Event $existing): array
+    private function baseAccountContextIdsForPayload(array $payload): array
     {
-        $accountIds = [];
-
         $routeAccountContextId = $this->accountContextIdFromPayload($payload);
-        if ($routeAccountContextId !== null) {
-            $accountIds[] = $routeAccountContextId;
-        }
 
-        foreach ($this->normalizeArray($existing?->account_context_ids ?? []) as $accountId) {
-            $normalized = trim((string) $accountId);
-            if ($normalized !== '') {
-                $accountIds[] = $normalized;
-            }
-        }
-
-        return array_values(array_unique($accountIds));
+        return $routeAccountContextId === null ? [] : [$routeAccountContextId];
     }
 
     /**
