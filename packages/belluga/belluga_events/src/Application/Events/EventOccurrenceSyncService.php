@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
+use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
@@ -13,22 +15,33 @@ class EventOccurrenceSyncService
 {
     private const DEFAULT_EVENT_DURATION_HOURS = 3;
 
+    public function __construct(
+        private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
+        private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventAccountContextResolver $eventAccountContextResolver,
+    ) {}
+
     /**
-     * @param  array<int, array{date_time_start: Carbon, date_time_end: Carbon|null}>  $occurrences
+     * @param  array<int, array<string, mixed>>  $occurrences
      */
     public function syncFromEvent(Event $event, array $occurrences): void
     {
         $eventId = (string) $event->_id;
         $now = Carbon::now();
         $publication = $this->normalizePublication($event->publication ?? [], $event->created_at);
-        $geoLocation = $this->resolveEventGeoLocation($event);
+        $eventGeoLocation = $this->resolveEventGeoLocation($event);
 
         $activeIndexes = [];
         foreach ($occurrences as $index => $occurrence) {
             $start = $this->toCarbon($occurrence['date_time_start'] ?? null) ?? $now;
             $end = $this->toCarbon($occurrence['date_time_end'] ?? null);
             $effectiveEnd = $this->resolveEffectiveEnd($start, $end);
-            $eventTaxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
+            $eventTaxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
+            $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+            $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
+            $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
+            $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
+            $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
 
             $payload = [
                 'event_id' => $eventId,
@@ -39,18 +52,29 @@ class EventOccurrenceSyncService
                 'content' => (string) ($event->content ?? ''),
                 'type' => $this->normalizeArray($event->type ?? []),
                 'thumb' => $this->normalizeArray($event->thumb ?? null),
-                'location' => $this->normalizeArray($event->location ?? []),
-                'place_ref' => $this->normalizeArray($event->place_ref ?? null),
-                'venue' => $this->normalizeArray($event->venue ?? null),
-                'geo_location' => $geoLocation,
-                'linked_account_profiles' => $this->resolveLinkedAccountProfiles($this->normalizeArray($event->event_parties ?? [])),
-                'artists' => $this->deriveArtistsReadProjection($this->normalizeArray($event->event_parties ?? [])),
+                'location' => $effectiveLocation['location'],
+                'place_ref' => $effectiveLocation['place_ref'],
+                'venue' => $effectiveLocation['venue'],
+                'geo_location' => $effectiveLocation['geo_location'],
+                'has_location_override' => $effectiveLocation['has_location_override'],
+                'location_override' => $effectiveLocation['location_override'],
+                'own_event_parties' => $ownEventParties,
+                'own_linked_account_profiles' => $this->resolveLinkedAccountProfiles($ownEventParties),
+                'linked_account_profiles' => $this->resolveLinkedAccountProfiles($effectiveEventParties),
+                'artists' => $this->deriveArtistsReadProjection($effectiveEventParties),
                 'tags' => $this->normalizeArray($event->tags ?? []),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'taxonomy_terms' => $eventTaxonomyTerms,
                 'capabilities' => $this->normalizeArray($event->capabilities ?? []),
                 'created_by' => $this->normalizeArray($event->created_by ?? []),
-                'event_parties' => $this->normalizeArray($event->event_parties ?? []),
+                'event_parties' => $effectiveEventParties,
+                'programming_items' => $programmingItems,
+                'account_context_ids' => $this->eventAccountContextResolver->resolveForOccurrence(
+                    $this->normalizeArray($event->account_context_ids ?? []),
+                    $effectiveEventParties,
+                    $effectiveLocation['place_ref'],
+                    $programmingItems
+                ),
                 'publication' => $publication,
                 'is_event_published' => $this->isEffectivelyPublished($publication, $now),
                 'is_active' => (bool) ($event->is_active ?? true),
@@ -90,9 +114,9 @@ class EventOccurrenceSyncService
     /**
      * @param  array<string, mixed>  $publication
      */
-    public function mirrorPublicationByEventId(string $eventId, array $publication): int
+    public function mirrorPublicationByEventId(string $eventId, array $publication, ?Carbon $now = null): int
     {
-        $now = Carbon::now();
+        $now ??= Carbon::now();
 
         return EventOccurrence::query()->where('event_id', $eventId)->update([
             'publication' => $publication,
@@ -150,6 +174,40 @@ class EventOccurrenceSyncService
     }
 
     /**
+     * @param  array<string, mixed>  $occurrence
+     * @param  array<string, mixed>  $eventGeoLocation
+     * @return array{
+     *   location: array<string, mixed>,
+     *   place_ref: array<string, mixed>|null,
+     *   venue: array<string, mixed>,
+     *   geo_location: array<string, mixed>|null,
+     *   has_location_override: bool,
+     *   location_override: array<string, mixed>|null
+     * }
+     */
+    private function resolveEffectiveLocationPayload(Event $event, array $occurrence, array $eventGeoLocation): array
+    {
+        return [
+            'location' => $this->normalizeArray($event->location ?? []),
+            'place_ref' => $this->normalizeNullableArray($event->place_ref ?? null),
+            'venue' => $this->normalizeArray($event->venue ?? null),
+            'geo_location' => $eventGeoLocation === [] ? null : $eventGeoLocation,
+            'has_location_override' => false,
+            'location_override' => null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function normalizeNullableArray(mixed $value): ?array
+    {
+        $normalized = $this->normalizeArray($value);
+
+        return $normalized === [] ? null : $normalized;
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $eventParties
      * @return array<int, array<string, mixed>>
      */
@@ -195,11 +253,126 @@ class EventOccurrenceSyncService
                 'avatar_url' => $metadata['avatar_url'] ?? null,
                 'cover_url' => $metadata['cover_url'] ?? null,
                 'genres' => array_values($this->normalizeArray($metadata['genres'] ?? [])),
-                'taxonomy_terms' => $this->normalizeArray($metadata['taxonomy_terms'] ?? []),
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($metadata['taxonomy_terms'] ?? []),
             ];
         }
 
         return $profiles;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @param  array<int, array<string, mixed>>  $ownEventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeEventParties(array $eventParties, array $ownEventParties): array
+    {
+        $merged = [];
+        $seen = [];
+
+        foreach ([$eventParties, $ownEventParties] as $rows) {
+            foreach ($rows as $row) {
+                $party = $this->normalizeArray($row);
+                $partyType = trim((string) ($party['party_type'] ?? ''));
+                $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
+                if ($partyType === '' || $partyRefId === '') {
+                    continue;
+                }
+
+                $key = "{$partyType}:{$partyRefId}";
+                if (isset($seen[$key])) {
+                    continue;
+                }
+
+                $merged[] = $party;
+                $seen[$key] = true;
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeProgrammingItems(mixed $items): array
+    {
+        $rows = $this->normalizeArray($items);
+        if ($rows === []) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($rows as $row) {
+            $item = $this->normalizeArray($row);
+            if ($item === []) {
+                continue;
+            }
+
+            $linkedProfiles = [];
+            foreach ($this->normalizeArray($item['linked_account_profiles'] ?? []) as $profile) {
+                $profilePayload = $this->normalizeArray($profile);
+                if ($profilePayload === []) {
+                    continue;
+                }
+                if (array_key_exists('taxonomy_terms', $profilePayload)) {
+                    $profilePayload['taxonomy_terms'] = $this->ensureTaxonomySnapshots($profilePayload['taxonomy_terms']);
+                }
+                $linkedProfiles[] = $profilePayload;
+            }
+
+            $normalized[] = [
+                'time' => (string) ($item['time'] ?? ''),
+                'title' => $item['title'] ?? null,
+                'account_profile_ids' => array_values($this->normalizeArray($item['account_profile_ids'] ?? [])),
+                'linked_account_profiles' => $linkedProfiles,
+                'place_ref' => $this->normalizeNullableArray($item['place_ref'] ?? null),
+                'location_profile' => $this->normalizeNullableArray($item['location_profile'] ?? null),
+            ];
+        }
+
+        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeEventParties(mixed $eventParties): array
+    {
+        $rows = $this->normalizeArray($eventParties);
+        $normalized = [];
+
+        foreach ($rows as $row) {
+            $party = $this->normalizeArray($row);
+            if ($party === []) {
+                continue;
+            }
+
+            $metadata = $this->normalizeArray($party['metadata'] ?? []);
+            if ($metadata !== [] && array_key_exists('taxonomy_terms', $metadata)) {
+                $metadata['taxonomy_terms'] = $this->ensureTaxonomySnapshots($metadata['taxonomy_terms']);
+                $party['metadata'] = $metadata;
+            }
+
+            $normalized[] = $party;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<int, array<string, string>>
+     */
+    private function ensureTaxonomySnapshots(mixed $terms): array
+    {
+        $items = $this->normalizeArray($terms);
+        if ($items === []) {
+            return [];
+        }
+
+        return $this->taxonomySnapshotResolver->ensureSnapshots($items);
     }
 
     private function resolveEffectiveEnd(Carbon $start, ?Carbon $end): Carbon

@@ -21,7 +21,9 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
@@ -32,6 +34,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Mockery\MockInterface;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use Tests\Helpers\TenantLabels;
@@ -115,6 +118,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'description' => 'Tipo de evento: Show',
             'icon' => 'music_note',
             'color' => '#123456',
+            'allowed_taxonomies' => ['event_style'],
         ]);
 
         $this->accountEventsBase = "{$this->base_api_tenant}accounts/{$this->account->slug}/events";
@@ -228,6 +232,32 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame($expected, $stored->content);
         $this->assertSame($expected, $occurrence->content);
         $this->assertStringContainsString('🎉', $stored->content);
+    }
+
+    public function test_event_content_limit_is_100kb_after_sanitization(): void
+    {
+        $exact = $this->htmlParagraphOfSanitizedByteLength(102400);
+        $overLimit = $this->htmlParagraphOfSanitizedByteLength(102401);
+
+        $accepted = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'content' => $exact,
+            ])
+        );
+
+        $accepted->assertStatus(201);
+        $this->assertSame(102400, strlen((string) $accepted->json('data.content')));
+
+        $rejected = $this->postJson(
+            $this->accountEventsBase,
+            $this->makeEventPayload([
+                'content' => $overLimit,
+            ])
+        );
+
+        $rejected->assertStatus(422);
+        $rejected->assertJsonValidationErrors(['content']);
     }
 
     public function test_event_create_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
@@ -523,6 +553,34 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['page_size']);
     }
 
+    public function test_public_event_index_rejects_page_size_above_public_safe_maximum(): void
+    {
+        $this->createEvent([
+            'title' => 'Public Page Size Guard Event',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events?page=1&page_size=".(InputConstraints::PUBLIC_PAGE_SIZE_MAX + 1)
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page_size']);
+    }
+
+    public function test_public_event_index_rejects_page_above_public_safe_depth(): void
+    {
+        $this->createEvent([
+            'title' => 'Public Page Guard Event',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1).'&page_size=10'
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['page']);
+    }
+
     public function test_event_index_uses_stable_tie_break_order_for_matching_start_times(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -629,7 +687,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}events?page=1&page_size=100"
+            "{$this->base_api_tenant}events?page=1&page_size=".InputConstraints::PUBLIC_PAGE_SIZE_MAX
         );
 
         $response->assertStatus(200);
@@ -750,8 +808,10 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
+        $venueSearch = (string) $this->venue->slug;
+        $partialVenueSearch = substr($venueSearch, -6, 5);
 
-        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main&page=1&page_size=20");
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}&page=1&page_size=20");
 
         $response->assertStatus(200);
         $response->assertJsonPath('current_page', 1);
@@ -763,17 +823,17 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($matchedVenue);
         $this->assertSame('venue', (string) ($matchedVenue['profile_type'] ?? ''));
 
-        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=mai&page=1&page_size=20");
+        $partialResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$partialVenueSearch}&page=1&page_size=20");
         $partialResponse->assertStatus(200);
         $partialVenues = collect($partialResponse->json('data') ?? []);
         $this->assertNotNull($partialVenues->firstWhere('id', (string) $this->venue->_id));
 
         Sanctum::actingAs($landlord, ['events:create']);
-        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main");
+        $createResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}");
         $createResponse->assertStatus(200);
 
         Sanctum::actingAs($landlord, ['events:update']);
-        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=main");
+        $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}");
         $updateResponse->assertStatus(200);
     }
 
@@ -1393,6 +1453,73 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.taxonomy_terms.0.type', 'event_style');
         $response->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
+        $response->assertJsonPath('data.taxonomy_terms.0.name', 'Showcase');
+        $response->assertJsonPath('data.taxonomy_terms.0.taxonomy_name', 'Event Style');
+        $response->assertJsonPath('data.taxonomy_terms.0.label', 'Showcase');
+
+        $eventId = (string) $response->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertSame('Showcase', data_get($event->taxonomy_terms, '0.name'));
+        $this->assertSame('Event Style', data_get($occurrence->taxonomy_terms, '0.taxonomy_name'));
+    }
+
+    public function test_event_create_rejects_taxonomy_not_allowed_by_selected_event_type(): void
+    {
+        $audience = Taxonomy::create([
+            'slug' => 'audience',
+            'name' => 'Audience',
+            'applies_to' => ['event'],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $audience->_id,
+            'slug' => 'kids',
+            'name' => 'Kids',
+        ]);
+
+        $payload = $this->makeEventPayload([
+            'taxonomy_terms' => [
+                ['type' => 'audience', 'value' => 'kids'],
+            ],
+        ]);
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy_terms']);
+    }
+
+    public function test_event_update_rejects_taxonomy_not_allowed_by_existing_event_type(): void
+    {
+        $audience = Taxonomy::create([
+            'slug' => 'audience',
+            'name' => 'Audience',
+            'applies_to' => ['event'],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) $audience->_id,
+            'slug' => 'kids',
+            'name' => 'Kids',
+        ]);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+
+        $response = $this->patchJson(
+            "{$this->accountEventsBase}/{$created->json('data.event_id')}",
+            [
+                'taxonomy_terms' => [
+                    ['type' => 'audience', 'value' => 'kids'],
+                ],
+            ],
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy_terms']);
     }
 
     public function test_event_create_rejects_scheduled_without_publish_at(): void
@@ -1674,6 +1801,42 @@ class EventCrudControllerTest extends TestCaseTenant
             ['Past Event'],
             collect($pastResponse->json('data'))->pluck('title')->values()->all()
         );
+    }
+
+    public function test_event_index_future_filter_keeps_event_visible_when_later_occurrence_is_future(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-05-01T12:00:00Z'));
+
+        $occurrences = [
+            [
+                'date_time_start' => Carbon::now()->subDays(2)->setHour(20)->toISOString(),
+                'date_time_end' => Carbon::now()->subDays(2)->setHour(22)->toISOString(),
+            ],
+            [
+                'date_time_start' => Carbon::now()->addDays(2)->setHour(20)->toISOString(),
+                'date_time_end' => Carbon::now()->addDays(2)->setHour(22)->toISOString(),
+            ],
+        ];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Future Later Occurrence',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}?temporal=future");
+
+        $response->assertStatus(200);
+        $this->assertContains(
+            'Future Later Occurrence',
+            collect($response->json('data'))->pluck('title')->values()->all()
+        );
+        $this->assertCount(2, $response->json('data.0.occurrences'));
+
+        Carbon::setTestNow();
     }
 
     public function test_event_index_temporal_filter_uses_default_duration_when_end_is_missing(): void
@@ -2477,6 +2640,61 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertCount(1, $fresh->event_parties ?? []);
     }
 
+    public function test_event_update_recomputes_account_context_ids_when_related_parties_are_removed(): void
+    {
+        $event = $this->createEvent();
+        $eventId = (string) $event->_id;
+        $artistAccountId = (string) $this->artist->account_id;
+        $artistAccount = Account::query()->findOrFail($artistAccountId);
+        $artistRole = $artistAccount->roleTemplates()->create([
+            'name' => 'Artist Events Reader',
+            'permissions' => ['*'],
+        ]);
+        $artistUser = $this->userService->create($artistAccount, [
+            'name' => 'Artist Events Reader',
+            'email' => uniqid('artist-events-reader', true).'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $artistRole->_id);
+
+        $this->assertContains($artistAccountId, $event->account_context_ids ?? []);
+
+        Sanctum::actingAs($artistUser, ['events:read']);
+        $artistScopedListBefore = $this->getJson("{$this->base_api_tenant}accounts/{$artistAccount->slug}/events");
+        $artistScopedListBefore->assertStatus(200);
+        $this->assertContains(
+            $eventId,
+            collect($artistScopedListBefore->json('data') ?? [])
+                ->pluck('event_id')
+                ->map(static fn ($id): string => (string) $id)
+                ->values()
+                ->all()
+        );
+
+        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'event_parties' => [],
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(0, 'data.event_parties');
+
+        $fresh = Event::query()->findOrFail($eventId);
+        $this->assertNotContains($artistAccountId, $fresh->account_context_ids ?? []);
+        $this->assertContains((string) $this->account->_id, $fresh->account_context_ids ?? []);
+
+        Sanctum::actingAs($artistUser, ['events:read']);
+        $artistScopedListAfter = $this->getJson("{$this->base_api_tenant}accounts/{$artistAccount->slug}/events");
+        $artistScopedListAfter->assertStatus(200);
+        $this->assertNotContains(
+            $eventId,
+            collect($artistScopedListAfter->json('data') ?? [])
+                ->pluck('event_id')
+                ->map(static fn ($id): string => (string) $id)
+                ->values()
+                ->all()
+        );
+    }
+
     public function test_event_update_remove_cover_multipart_can_clear_related_account_parties_with_json_empty_array(): void
     {
         Storage::fake('public');
@@ -2519,6 +2737,93 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame([], $fresh->event_parties ?? []);
     }
 
+    public function test_event_update_multipart_preserves_occurrence_owned_profiles_and_programming(): void
+    {
+        Storage::fake('public');
+
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+            'permissions' => ['can_edit' => false],
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->post("{$this->accountEventsBase}/{$eventId}", [
+            '_method' => 'PATCH',
+            'title' => 'Atualizado com multipart',
+            'occurrences' => $occurrences,
+            'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.title', 'Atualizado com multipart');
+        $response->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
+
+        $freshSecondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Show com a banda', data_get($freshSecondOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->venue->_id, data_get($freshSecondOccurrence, 'programming_items.0.place_ref.id'));
+
+        $reloaded = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $reloaded->assertStatus(200);
+        $reloaded->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $reloaded->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+        $reloaded->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
+    }
+
+    public function test_management_show_preserves_single_occurrence_programming_and_occurrence_profiles(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+            'permissions' => ['can_edit' => false],
+        ]];
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $reloaded = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+
+        $reloaded->assertStatus(200);
+        $reloaded->assertJsonPath('data.occurrences.0.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.title', 'Show com a banda');
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.account_profile_ids.0', (string) $this->band->_id);
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.place_ref.id', (string) $this->venue->_id);
+    }
+
     public function test_event_update_dispatches_map_projection_sync_job_via_lifecycle_event(): void
     {
         Queue::fake();
@@ -2535,21 +2840,20 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
-    public function test_event_create_rejects_multiple_occurrences_when_capability_is_not_effective(): void
+    public function test_event_create_allows_multiple_occurrences_without_tenant_or_event_capability(): void
     {
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences']);
+        $response->assertStatus(201);
+        $this->assertCount(2, $response->json('data.occurrences'));
+        $this->assertArrayNotHasKey(
+            'multiple_occurrences',
+            $response->json('data.capabilities') ?? []
+        );
     }
 
     public function test_event_create_exposes_map_poi_capability_by_default_when_tenant_allows_it(): void
@@ -2706,6 +3010,75 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertEquals(-20.01, (float) data_get($poi->location, 'coordinates.1'));
     }
 
+    public function test_event_create_rejects_unbounded_map_poi_polygon_rings(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => true,
+        ])->assertStatus(200);
+
+        $rings = [];
+        for ($index = 0; $index <= InputConstraints::MAP_POI_POLYGON_RINGS_MAX; $index++) {
+            $rings[] = [
+                [-40.00, -20.00],
+                [-39.90, -20.00],
+                [-39.90, -19.90],
+                [-40.00, -20.00],
+            ];
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                    'discovery_scope' => [
+                        'type' => 'polygon',
+                        'polygon' => [
+                            'type' => 'Polygon',
+                            'coordinates' => $rings,
+                        ],
+                    ],
+                ],
+            ],
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'capabilities.map_poi.discovery_scope.polygon.coordinates',
+        ]);
+    }
+
+    public function test_event_create_rejects_out_of_range_map_poi_polygon_coordinates(): void
+    {
+        $this->patchEventsSettings([
+            'capabilities.map_poi.available' => true,
+        ])->assertStatus(200);
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                    'discovery_scope' => [
+                        'type' => 'polygon',
+                        'polygon' => [
+                            'type' => 'Polygon',
+                            'coordinates' => [[
+                                [-40.00, -20.00],
+                                [-39.90, -20.00],
+                                [181.00, -19.90],
+                                [-40.00, -20.00],
+                            ]],
+                        ],
+                    ],
+                ],
+            ],
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'capabilities.map_poi.discovery_scope.polygon.coordinates.0.2.0',
+        ]);
+    }
+
     public function test_event_map_poi_projection_soft_hides_when_occurrences_become_stale(): void
     {
         $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
@@ -2799,7 +3172,7 @@ class EventCrudControllerTest extends TestCaseTenant
         }
     }
 
-    public function test_refresh_expired_event_map_pois_job_deletes_orphan_event_projections_even_when_inactive(): void
+    public function test_cleanup_orphaned_map_pois_job_deletes_orphan_event_projections_even_when_inactive(): void
     {
         $baseline = Carbon::parse('2026-03-01T10:00:00+00:00');
         Carbon::setTestNow($baseline);
@@ -2842,7 +3215,7 @@ class EventCrudControllerTest extends TestCaseTenant
             Event::withTrashed()->where('_id', $activeEventId)->forceDelete();
             Event::withTrashed()->where('_id', $inactiveEventId)->forceDelete();
 
-            app()->call([new RefreshExpiredEventMapPoisJob, 'handle']);
+            app()->call([new CleanupOrphanedMapPoisJob(['event']), 'handle']);
 
             $this->assertFalse(
                 MapPoi::query()
@@ -2953,27 +3326,16 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Locked POI Name', (string) ($freshPoi->name ?? ''));
     }
 
-    public function test_event_create_allows_multiple_occurrences_when_tenant_settings_enable_it(): void
+    public function test_event_create_allows_multiple_occurrences_by_default(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-            'capabilities.multiple_occurrences.max_occurrences' => 2,
-        ])->assertStatus(200);
-
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(201);
         $this->assertCount(2, $response->json('data.occurrences'));
-        $response->assertJsonPath('data.capabilities.multiple_occurrences.enabled', true);
         $eventId = (string) $response->json('data.event_id');
         $this->assertSame(
             2,
@@ -2981,42 +3343,534 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_event_create_rejects_above_tenant_max_occurrences(): void
+    public function test_event_create_persists_occurrence_owned_profiles_and_programming_location_profile(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-            'capabilities.multiple_occurrences.max_occurrences' => 2,
-        ])->assertStatus(200);
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+            'permissions' => ['can_edit' => false],
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
 
-        $payload = $this->makeEventPayload([
-            'occurrences' => $this->makeOccurrences(3),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.occurrences.1.has_location_override', false);
+        $response->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.location_profile.id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
+
+        $eventId = (string) $response->json('data.event_id');
+        $firstOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $this->assertFalse((bool) ($firstOccurrence->has_location_override ?? false));
+        $this->assertSame((string) $this->venue->_id, data_get($firstOccurrence, 'place_ref.id'));
+        $this->assertSame([], $firstOccurrence->programming_items ?? []);
+
+        $this->assertFalse((bool) ($secondOccurrence->has_location_override ?? false));
+        $this->assertNull(data_get($secondOccurrence, 'location_override'));
+        $this->assertSame('physical', data_get($secondOccurrence, 'location.mode'));
+        $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'place_ref.id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'event_parties.0.party_ref_id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'event_parties.1.party_ref_id'));
+        $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'linked_account_profiles.1.id'));
+        $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Show com a banda', data_get($secondOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.place_ref.id'));
+        $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.location_profile.id'));
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'Renamed without occurrence payload',
+        ]);
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.occurrences.1.has_location_override', false);
+        $updated->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
+        $updated->assertJsonPath('data.occurrences.1.programming_count', 1);
+
+        $freshSecondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+        $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertNull(data_get($freshSecondOccurrence, 'location_override'));
+        $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
+    }
+
+    public function test_account_event_create_rejects_foreign_programming_location_profile(): void
+    {
+        $foreignVenue = $this->createAccountProfile('venue', 'Foreign Programming Venue');
+        $this->assertNotSame((string) $this->account->_id, (string) $foreignVenue->account_id);
+
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Foreign host attempt',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $foreignVenue->_id,
+            ],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.place_ref.id',
+        ]);
+    }
+
+    public function test_account_event_update_rejects_foreign_main_and_programming_location_profiles(): void
+    {
+        $foreignMainVenue = $this->createAccountProfile('venue', 'Foreign Main Venue');
+        $foreignProgrammingVenue = $this->createAccountProfile('venue', 'Foreign Program Venue');
+        $this->assertNotSame((string) $this->account->_id, (string) $foreignMainVenue->account_id);
+        $this->assertNotSame((string) $this->account->_id, (string) $foreignProgrammingVenue->account_id);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+
+        $mainLocationResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'location' => ['mode' => 'physical'],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $foreignMainVenue->_id,
             ],
         ]);
 
-        $response = $this->postJson($this->accountEventsBase, $payload);
+        $mainLocationResponse->assertStatus(422);
+        $mainLocationResponse->assertJsonValidationErrors(['place_ref.id']);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences']);
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '18:00',
+            'title' => 'Foreign program host attempt',
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $foreignProgrammingVenue->_id,
+            ],
+        ]];
+
+        $programmingResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => $occurrences,
+        ]);
+
+        $programmingResponse->assertStatus(422);
+        $programmingResponse->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.place_ref.id',
+        ]);
     }
 
-    public function test_event_create_treats_zero_tenant_max_as_null_limit(): void
+    public function test_event_create_rejects_occurrence_location_override(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-            'capabilities.multiple_occurrences.max_occurrences' => 0,
-        ])->assertStatus(200);
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['location'] = [
+            'mode' => 'online',
+            'online' => [
+                'url' => 'https://example.org/live',
+            ],
+        ];
 
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences.1.location']);
+    }
+
+    public function test_public_event_detail_selects_occurrence_and_returns_all_dates_with_selected_highlight(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$secondOccurrence->_id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.occurrence_id', (string) $secondOccurrence->_id);
+        $response->assertJsonPath('data.occurrences.0.is_selected', false);
+        $response->assertJsonPath('data.occurrences.1.is_selected', true);
+        $response->assertJsonPath('data.location.mode', 'physical');
+        $response->assertJsonPath('data.place_ref.id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.latitude', -20);
+        $response->assertJsonPath('data.longitude', -40);
+        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $this->artist->_id);
+        $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.programming_items.0.place_ref.id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
+
+        $staleResponse = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence=000000000000000000000000");
+        $staleResponse->assertStatus(200);
+        $staleResponse->assertJsonPath('data.occurrences.0.is_selected', true);
+        $staleResponse->assertJsonPath('data.occurrences.1.is_selected', false);
+    }
+
+    public function test_public_event_detail_occurrence_slug_alias_selects_occurrence(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $eventSlug = (string) $created->json('data.slug');
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $aliasResponse = $this->getJson("{$this->base_api_tenant}events/{$secondOccurrence->occurrence_slug}");
+
+        $aliasResponse->assertStatus(200);
+        $aliasResponse->assertJsonPath('data.event_id', $eventId);
+        $aliasResponse->assertJsonPath('data.slug', $eventSlug);
+        $aliasResponse->assertJsonPath('data.occurrence_id', (string) $secondOccurrence->_id);
+        $aliasResponse->assertJsonPath('data.occurrences.0.is_selected', false);
+        $aliasResponse->assertJsonPath('data.occurrences.1.is_selected', true);
+        $aliasResponse->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $aliasResponse->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
+
+        $staleQueryResponse = $this->getJson("{$this->base_api_tenant}events/{$secondOccurrence->occurrence_slug}?occurrence=000000000000000000000000");
+        $staleQueryResponse->assertStatus(200);
+        $staleQueryResponse->assertJsonPath('data.event_id', $eventId);
+        $staleQueryResponse->assertJsonPath('data.occurrences.0.is_selected', true);
+        $staleQueryResponse->assertJsonPath('data.occurrences.1.is_selected', false);
+    }
+
+    public function test_public_event_detail_related_profiles_aggregate_event_occurrences_and_programming_profiles(): void
+    {
+        $guestArtist = $this->createAccountProfile('artist', 'Convidado Programacao');
+        $guestArtist->slug = 'convidado-programacao-'.Str::lower(Str::random(6));
+        $guestArtist->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[0]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show principal',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '19:00',
+            'title' => 'Show convidado',
+            'account_profile_ids' => [(string) $guestArtist->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Detail profile aggregation',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $selectedOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$selectedOccurrence->_id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.occurrence_id', (string) $selectedOccurrence->_id);
+        $this->assertSame(
+            [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+                (string) $guestArtist->_id,
+            ],
+            collect($response->json('data.linked_account_profiles') ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $response->assertJsonMissingPath('data.programming_items.1');
+        $response->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
+    }
+
+    public function test_public_event_detail_repeated_gets_do_not_degrade_programming_or_occurrence_profiles(): void
+    {
+        $firstOccurrences = $this->makeOccurrences(2);
+        $firstOccurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $firstOccurrences[1]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $secondOccurrences = $this->makeOccurrences(2);
+        $secondOccurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->artist->_id,
+        ]];
+        $secondOccurrences[1]['programming_items'] = [[
+            'time' => '19:00',
+            'title' => 'Pocket show',
+            'account_profile_ids' => [(string) $this->artist->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $firstCreated = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'GET Stability A',
+            'occurrences' => $firstOccurrences,
+        ]));
+        $firstCreated->assertStatus(201);
+
+        $secondCreated = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'GET Stability B',
+            'occurrences' => $secondOccurrences,
+        ]));
+        $secondCreated->assertStatus(201);
+
+        $firstEventId = (string) $firstCreated->json('data.event_id');
+        $secondEventId = (string) $secondCreated->json('data.event_id');
+
+        $firstSelectedOccurrence = EventOccurrence::query()
+            ->where('event_id', $firstEventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+        $secondSelectedOccurrence = EventOccurrence::query()
+            ->where('event_id', $secondEventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $firstRead = $this->getJson("{$this->base_api_tenant}events/{$firstEventId}?occurrence={$firstSelectedOccurrence->_id}");
+        $firstRead->assertStatus(200);
+        $firstRead->assertJsonPath('data.occurrence_id', (string) $firstSelectedOccurrence->_id);
+        $firstRead->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
+        $firstRead->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $firstRead->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
+
+        $secondRead = $this->getJson("{$this->base_api_tenant}events/{$secondEventId}?occurrence={$secondSelectedOccurrence->_id}");
+        $secondRead->assertStatus(200);
+        $secondRead->assertJsonPath('data.occurrence_id', (string) $secondSelectedOccurrence->_id);
+        $secondRead->assertJsonPath('data.programming_items.0.title', 'Pocket show');
+        $secondRead->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->artist->_id);
+        $this->assertTrue(
+            collect($secondRead->json('data.linked_account_profiles') ?? [])
+                ->contains(fn (array $profile): bool => ($profile['id'] ?? null) === (string) $this->artist->_id)
+        );
+
+        $firstReadAgain = $this->getJson("{$this->base_api_tenant}events/{$firstEventId}?occurrence={$firstSelectedOccurrence->_id}");
+        $firstReadAgain->assertStatus(200);
+        $firstReadAgain->assertJsonPath('data.occurrence_id', (string) $firstSelectedOccurrence->_id);
+        $firstReadAgain->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
+        $firstReadAgain->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $firstReadAgain->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
+
+        $freshFirstSelectedOccurrence = $firstSelectedOccurrence->fresh();
+        $freshSecondSelectedOccurrence = $secondSelectedOccurrence->fresh();
+
+        $this->assertSame('17:00', data_get($freshFirstSelectedOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Show com a banda', data_get($freshFirstSelectedOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->band->_id, data_get($freshFirstSelectedOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->band->_id, data_get($freshFirstSelectedOccurrence, 'own_linked_account_profiles.0.id'));
+
+        $this->assertSame('19:00', data_get($freshSecondSelectedOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Pocket show', data_get($freshSecondSelectedOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'own_linked_account_profiles.0.id'));
+    }
+
+    public function test_agenda_occurrence_cards_only_include_event_profiles_and_their_own_occurrence_profiles(): void
+    {
+        $guestArtist = $this->createAccountProfile('artist', 'DJ Visitante');
+        $guestArtist->slug = 'dj-visitante-'.Str::lower(Str::random(6));
+        $guestArtist->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[0]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com a banda',
+            'account_profile_ids' => [(string) $this->band->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $guestArtist->_id,
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '19:00',
+            'title' => 'Show convidado',
+            'account_profile_ids' => [(string) $guestArtist->_id],
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $this->venue->_id,
+            ],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Agenda occurrence scoped profiles',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $this->assertSame(
+            [(string) $this->artist->_id],
+            collect($event->event_parties ?? [])->pluck('party_ref_id')->map(static fn ($id) => (string) $id)->values()->all()
+        );
+
+        $firstOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
+        $agenda->assertStatus(200);
+
+        $itemsByOccurrenceId = collect($agenda->json('items', []))
+            ->keyBy(static fn (array $item): string => (string) ($item['occurrence_id'] ?? ''));
+
+        $firstItem = $itemsByOccurrenceId->get((string) $firstOccurrence->_id);
+        $secondItem = $itemsByOccurrenceId->get((string) $secondOccurrence->_id);
+
+        $this->assertNotNull($firstItem);
+        $this->assertNotNull($secondItem);
+
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            collect($firstItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $guestArtist->_id],
+            collect($secondItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $this->assertFalse(
+            collect($firstItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->contains((string) $guestArtist->_id)
+        );
+        $this->assertFalse(
+            collect($secondItem['linked_account_profiles'] ?? [])
+                ->pluck('id')
+                ->contains((string) $this->band->_id)
+        );
+    }
+
+    public function test_event_create_requires_programming_title_when_more_than_one_profile_is_linked(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'account_profile_ids' => [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+            ],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.title',
+        ]);
+    }
+
+    public function test_event_create_allows_three_occurrences_without_tenant_max_guard(): void
+    {
         $payload = $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(3),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
@@ -3025,27 +3879,183 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertCount(3, $response->json('data.occurrences'));
     }
 
-    public function test_event_update_without_schedule_mutation_keeps_stored_occurrences_when_tenant_disables_capability(): void
+    public function test_event_create_rejects_unbounded_occurrence_fanout(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-        ])->assertStatus(200);
+        $payload = $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(InputConstraints::EVENT_OCCURRENCES_MAX + 1),
+        ]);
 
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function test_event_create_rejects_unbounded_tags_categories_and_taxonomy_terms(): void
+    {
+        $oversizedTags = array_map(
+            static fn (int $index): string => "tag-{$index}",
+            range(1, InputConstraints::EVENT_TAGS_MAX + 1)
+        );
+        $oversizedCategories = array_map(
+            static fn (int $index): string => "category-{$index}",
+            range(1, InputConstraints::EVENT_CATEGORIES_MAX + 1)
+        );
+        $oversizedTaxonomyTerms = array_map(
+            static fn (int $index): array => [
+                'type' => 'event_style',
+                'value' => "term-{$index}",
+            ],
+            range(1, InputConstraints::EVENT_TAXONOMY_TERMS_MAX + 1)
+        );
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'tags' => $oversizedTags,
+            'categories' => $oversizedCategories,
+            'taxonomy_terms' => $oversizedTaxonomyTerms,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'tags',
+            'categories',
+            'taxonomy_terms',
+        ]);
+    }
+
+    public function test_event_create_rejects_unbounded_unique_taxonomy_terms_before_resolver_work(): void
+    {
+        $taxonomyTerms = array_map(
+            static fn (int $index): array => [
+                'type' => 'event_style',
+                'value' => "unique-term-{$index}",
+            ],
+            range(1, InputConstraints::EVENT_TAXONOMY_UNIQUE_TERMS_MAX + 1)
+        );
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'taxonomy_terms' => $taxonomyTerms,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['taxonomy_terms']);
+    }
+
+    public function test_event_create_rejects_unbounded_programming_items_per_occurrence(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [];
+        for ($index = 0; $index <= InputConstraints::EVENT_PROGRAMMING_ITEMS_MAX; $index++) {
+            $occurrences[0]['programming_items'][] = [
+                'time' => sprintf('%02d:%02d', intdiv($index, 60), $index % 60),
+                'title' => "Programação {$index}",
+            ];
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences.0.programming_items']);
+    }
+
+    public function test_event_create_rejects_unbounded_programming_profile_links(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => 'Show com muitos perfis',
+            'account_profile_ids' => array_map(
+                static fn (int $index): string => (string) new ObjectId,
+                range(0, InputConstraints::EVENT_PROGRAMMING_PROFILE_IDS_MAX)
+            ),
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.account_profile_ids',
+        ]);
+    }
+
+    public function test_event_create_rejects_unbounded_total_programming_items(): void
+    {
+        $occurrences = $this->makeOccurrences(3);
+        foreach ($occurrences as $occurrenceIndex => $_) {
+            $occurrences[$occurrenceIndex]['programming_items'] = [];
+            for ($index = 0; $index < InputConstraints::EVENT_PROGRAMMING_ITEMS_MAX; $index++) {
+                $occurrences[$occurrenceIndex]['programming_items'][] = [
+                    'time' => sprintf('%02d:%02d', intdiv($index, 60), $index % 60),
+                    'title' => "Programação {$occurrenceIndex}-{$index}",
+                ];
+            }
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function test_event_create_rejects_unbounded_total_programming_references(): void
+    {
+        $occurrences = $this->makeOccurrences(21);
+        foreach ($occurrences as $occurrenceIndex => $_) {
+            $occurrences[$occurrenceIndex]['programming_items'] = [[
+                'time' => '17:00',
+                'title' => "Programação {$occurrenceIndex}",
+                'account_profile_ids' => array_map(
+                    static fn (int $index): string => (string) new ObjectId,
+                    range(1, InputConstraints::EVENT_PROGRAMMING_PROFILE_IDS_MAX)
+                ),
+            ]];
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.*.programming_items',
+        ]);
+    }
+
+    public function test_event_create_rejects_unbounded_total_occurrence_parties(): void
+    {
+        $occurrences = $this->makeOccurrences(4);
+        foreach ($occurrences as $occurrenceIndex => $_) {
+            $occurrences[$occurrenceIndex]['event_parties'] = array_map(
+                static fn (int $index): array => [
+                    'party_ref_id' => (string) new ObjectId,
+                    'permissions' => ['can_edit' => false],
+                ],
+                range(1, InputConstraints::EVENT_OCCURRENCE_PARTIES_MAX)
+            );
+        }
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['event_parties']);
+    }
+
+    public function test_event_update_without_schedule_mutation_keeps_stored_occurrences(): void
+    {
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]));
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => false,
-        ])->assertStatus(200);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Renamed without touching schedule',
@@ -3053,37 +4063,23 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $this->assertCount(2, $response->json('data.occurrences'));
-        $this->assertNull($response->json('data.capabilities.multiple_occurrences'));
     }
 
-    public function test_event_update_with_schedule_mutation_rejects_multiple_occurrences_when_capability_not_effective(): void
+    public function test_event_update_with_schedule_mutation_allows_multiple_occurrences_without_capability(): void
     {
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => true,
-        ])->assertStatus(200);
-
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(2),
-            'capabilities' => [
-                'multiple_occurrences' => [
-                    'enabled' => true,
-                ],
-            ],
         ]));
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
 
-        $this->patchEventsSettings([
-            'capabilities.multiple_occurrences.allow_multiple' => false,
-        ])->assertStatus(200);
-
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => $this->makeOccurrences(2),
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences']);
+        $response->assertStatus(200);
+        $this->assertCount(2, $response->json('data.occurrences'));
     }
 
     public function test_event_update_returns404_when_missing(): void
@@ -3235,6 +4231,184 @@ class EventCrudControllerTest extends TestCaseTenant
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_event_create_rolls_back_when_occurrence_sync_fails_mid_flight(): void
+    {
+        $payload = $this->makeEventPayload([
+            'title' => 'Create Rollback Guard',
+        ]);
+
+        $this->withExceptionHandling();
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('syncFromEvent')
+                ->once()
+                ->andThrow(new \RuntimeException('forced create occurrence sync failure'));
+        });
+
+        $response = $this->postJson($this->accountEventsBase, $payload);
+
+        $response->assertStatus(500);
+        $this->assertFalse(Event::query()->where('title', 'Create Rollback Guard')->exists());
+        $this->assertSame(0, EventOccurrence::query()->count());
+    }
+
+    public function test_event_update_rolls_back_when_occurrence_sync_fails_mid_flight(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Before Update Rollback',
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $this->withExceptionHandling();
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('syncFromEvent')
+                ->once()
+                ->andThrow(new \RuntimeException('forced update occurrence sync failure'));
+        });
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'After Update Rollback',
+        ]);
+
+        $response->assertStatus(500);
+
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertSame('Before Update Rollback', (string) $event->title);
+        $this->assertSame('Before Update Rollback', (string) $occurrence->title);
+    }
+
+    public function test_event_delete_rolls_back_when_occurrence_soft_delete_fails_mid_flight(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Delete Rollback Guard',
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $this->withExceptionHandling();
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('softDeleteByEventId')
+                ->once()
+                ->withArgs(static fn (string $candidate): bool => $candidate !== '')
+                ->andThrow(new \RuntimeException('forced delete occurrence soft-delete failure'));
+        });
+
+        $response = $this->deleteJson("{$this->accountEventsBase}/{$eventId}");
+
+        $response->assertStatus(500);
+
+        $event = Event::withTrashed()->findOrFail($eventId);
+        $occurrence = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $this->assertNull($event->deleted_at);
+        $this->assertNull($occurrence->deleted_at);
+    }
+
+    public function test_scheduled_publication_rolls_back_when_occurrence_mirror_fails_mid_flight(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Scheduled Publication Rollback Guard',
+            'publication' => [
+                'status' => 'publish_scheduled',
+                'publish_at' => Carbon::now()->subMinute()->toISOString(),
+            ],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $this->mock(EventOccurrenceSyncService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('mirrorPublicationByEventId')
+                ->once()
+                ->withArgs(static fn (string $candidate, array $publication): bool => $candidate !== ''
+                    && ($publication['status'] ?? null) === 'published')
+                ->andThrow(new \RuntimeException('forced publication mirror failure'));
+        });
+
+        try {
+            app()->call([new PublishScheduledEventsJob, 'handle']);
+            $this->fail('Expected scheduled publication to abort when occurrence mirroring fails.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced publication mirror failure', $exception->getMessage());
+        }
+
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 0)
+            ->firstOrFail();
+
+        $publication = is_array($event->publication) ? $event->publication : (array) $event->publication;
+
+        $this->assertSame('publish_scheduled', $publication['status'] ?? null);
+        $this->assertFalse((bool) ($occurrence->is_event_published ?? false));
+    }
+
+    public function test_manual_occurrence_repair_preserves_occurrence_owned_profiles_and_programming_items(): void
+    {
+        $now = Carbon::now();
+        $occurrences = [
+            [
+                'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
+                'date_time_end' => $now->copy()->addDay()->setHour(22)->setMinute(0)->setSecond(0)->toISOString(),
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2)->setHour(17)->setMinute(0)->setSecond(0)->toISOString(),
+                'date_time_end' => $now->copy()->addDays(2)->setHour(21)->setMinute(0)->setSecond(0)->toISOString(),
+                'event_parties' => [
+                    [
+                        'party_ref_id' => (string) $this->band->_id,
+                    ],
+                ],
+                'programming_items' => [[
+                    'time' => '17:00',
+                    'title' => 'Show com a banda',
+                    'account_profile_ids' => [(string) $this->band->_id],
+                    'place_ref' => [
+                        'type' => 'account_profile',
+                        'id' => (string) $this->venue->_id,
+                    ],
+                ]],
+            ],
+        ];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Repair Guard Source',
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $event->title = 'Repair Guard Canonical Title';
+        $event->save();
+
+        app(EventOccurrenceReconciliationService::class)->reconcileEvent($event->fresh());
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $secondOccurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', 1)
+            ->firstOrFail();
+
+        $this->assertSame('Repair Guard Canonical Title', (string) $secondOccurrence->title);
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_linked_account_profiles.0.id'));
+        $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
+        $this->assertSame('Show com a banda', data_get($secondOccurrence, 'programming_items.0.title'));
+        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
+        $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.place_ref.id'));
     }
 
     public function test_event_occurrence_reconciliation_syncs_mirrored_fields_from_event(): void
@@ -3481,6 +4655,41 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.title', 'Updated By Owner Without Matching Party');
     }
 
+    public function test_event_creator_cannot_update_through_unrelated_account_route(): void
+    {
+        $event = $this->createEvent();
+
+        $otherAccount = Account::create([
+            'name' => 'Unrelated Creator Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $role = $otherAccount->roleTemplates()->create([
+            'name' => 'Unrelated Creator Events Role',
+            'permissions' => ['*'],
+        ]);
+        $otherUser = $this->userService->create($otherAccount, [
+            'name' => 'Unrelated Creator User',
+            'email' => uniqid('unrelated-creator', true).'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
+
+        $event->created_by = [
+            'type' => 'account_user',
+            'id' => (string) $otherUser->_id,
+        ];
+        $event->save();
+
+        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+
+        $response = $this->patchJson(
+            "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}",
+            ['title' => 'Should Not Cross Account Boundary']
+        );
+
+        $response->assertStatus(404);
+        $this->assertSame('Stored Event', (string) $event->fresh()->title);
+    }
+
     private function createAccountUser(array $permissions): AccountUser
     {
         $role = $this->account->roleTemplates()->create([
@@ -3564,11 +4773,19 @@ class EventCrudControllerTest extends TestCaseTenant
         ], $overrides);
     }
 
+    private function htmlParagraphOfSanitizedByteLength(int $targetBytes): string
+    {
+        $wrapperBytes = strlen('<p></p>');
+        $bodyBytes = max(0, $targetBytes - $wrapperBytes);
+
+        return '<p>'.str_repeat('a', $bodyBytes).'</p>';
+    }
+
     private function createEvent(array $overrides = []): Event
     {
         $now = Carbon::now();
 
-        $event = Event::create(array_merge([
+        $payload = array_merge([
             'title' => 'Stored Event',
             'content' => 'Event content',
             'location' => [
@@ -3640,7 +4857,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 'publish_at' => $now->copy()->subMinute(),
             ],
             'is_active' => true,
-        ], $overrides));
+        ], $overrides);
+        $payload['account_context_ids'] ??= $this->accountContextIdsForEventPayload($payload);
+
+        $event = Event::create($payload);
 
         $occurrences = [[
             'date_time_start' => Carbon::instance($event->date_time_start),
@@ -3650,6 +4870,47 @@ class EventCrudControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
 
         return $event->fresh();
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, string>
+     */
+    private function accountContextIdsForEventPayload(array $payload): array
+    {
+        $profileIds = [];
+
+        $placeRef = $payload['place_ref'] ?? null;
+        if (is_array($placeRef)) {
+            $placeRefId = trim((string) ($placeRef['id'] ?? ($placeRef['_id'] ?? '')));
+            if ($placeRefId !== '') {
+                $profileIds[] = $placeRefId;
+            }
+        }
+
+        foreach (($payload['event_parties'] ?? []) as $party) {
+            if (! is_array($party)) {
+                continue;
+            }
+
+            $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
+            if ($partyRefId !== '') {
+                $profileIds[] = $partyRefId;
+            }
+        }
+
+        if ($profileIds === []) {
+            return [];
+        }
+
+        return AccountProfile::query()
+            ->whereIn('_id', array_values(array_unique($profileIds)))
+            ->get(['account_id'])
+            ->map(static fn (AccountProfile $profile): string => trim((string) ($profile->account_id ?? '')))
+            ->filter(static fn (string $accountId): bool => $accountId !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

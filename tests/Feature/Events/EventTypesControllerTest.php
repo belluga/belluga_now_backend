@@ -9,6 +9,8 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\EventType;
+use App\Models\Tenants\Taxonomy;
+use App\Support\Validation\InputConstraints;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Application\MapPoiProjectionService;
@@ -47,6 +49,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         EventType::query()->delete();
+        Taxonomy::query()->delete();
         Event::query()->delete();
         EventOccurrence::query()->delete();
 
@@ -131,6 +134,90 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.description', null);
     }
 
+    public function test_event_type_create_persists_allowed_taxonomies(): void
+    {
+        $this->createEventTaxonomy('music_genre');
+        $this->createEventTaxonomy('audience');
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'allowed_taxonomies' => ['music_genre', 'audience'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.allowed_taxonomies.0', 'music_genre');
+        $response->assertJsonPath('data.allowed_taxonomies.1', 'audience');
+
+        $stored = EventType::query()->where('slug', 'festival')->firstOrFail();
+        $this->assertSame(['music_genre', 'audience'], $stored->allowed_taxonomies);
+    }
+
+    public function test_event_type_create_rejects_unknown_allowed_taxonomy(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'allowed_taxonomies' => ['missing_taxonomy'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['allowed_taxonomies']);
+    }
+
+    public function test_event_type_create_rejects_taxonomy_not_applicable_to_events(): void
+    {
+        Taxonomy::query()->create([
+            'slug' => 'cuisine',
+            'name' => 'Cuisine',
+            'applies_to' => ['account_profile'],
+        ]);
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'allowed_taxonomies' => ['cuisine'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['allowed_taxonomies']);
+    }
+
+    public function test_event_type_create_rejects_unbounded_allowed_taxonomies(): void
+    {
+        $taxonomies = [];
+        for ($index = 0; $index <= InputConstraints::DISCOVERY_FILTER_ALLOWED_TAXONOMIES_MAX; $index++) {
+            $slug = sprintf('event_taxonomy_%02d', $index);
+            $this->createEventTaxonomy($slug);
+            $taxonomies[] = $slug;
+        }
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}event_types",
+            [
+                'name' => 'Festival',
+                'slug' => 'festival',
+                'allowed_taxonomies' => $taxonomies,
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['allowed_taxonomies']);
+    }
+
     public function test_event_type_create_accepts_canonical_visual_type_asset_upload(): void
     {
         Storage::fake('public');
@@ -184,6 +271,33 @@ class EventTypesControllerTest extends TestCaseTenant
 
         $stored = EventType::query()->findOrFail($eventType->_id);
         $this->assertNull($stored->description);
+    }
+
+    public function test_event_type_update_replaces_allowed_taxonomies(): void
+    {
+        $this->createEventTaxonomy('music_genre');
+        $this->createEventTaxonomy('audience');
+
+        $eventType = EventType::query()->create([
+            'name' => 'Show',
+            'slug' => 'show',
+            'allowed_taxonomies' => ['music_genre'],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
+            [
+                'allowed_taxonomies' => ['audience'],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.allowed_taxonomies.0', 'audience');
+        $response->assertJsonMissingPath('data.allowed_taxonomies.1');
+
+        $stored = EventType::query()->findOrFail($eventType->_id);
+        $this->assertSame(['audience'], $stored->allowed_taxonomies);
     }
 
     public function test_event_type_update_propagates_snapshot_to_events_and_occurrences(): void
@@ -692,6 +806,15 @@ class EventTypesControllerTest extends TestCaseTenant
             ...$this->getHeaders(),
             'Content-Type' => 'multipart/form-data',
         ];
+    }
+
+    private function createEventTaxonomy(string $slug): Taxonomy
+    {
+        return Taxonomy::query()->create([
+            'slug' => $slug,
+            'name' => str_replace('_', ' ', $slug),
+            'applies_to' => ['event'],
+        ]);
     }
 
     private function assertTypeAssetStored(string $typeId, string $directory): string

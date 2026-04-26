@@ -1,0 +1,54 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Integration\DiscoveryFilters;
+
+use App\Integration\DiscoveryFilters\Concerns\FormatsDiscoveryFilterTypeOptions;
+use App\Models\Tenants\EventType;
+use Belluga\DiscoveryFilters\Contracts\DiscoveryFilterEntityProviderContract;
+
+final class EventDiscoveryFilterEntityProvider implements DiscoveryFilterEntityProviderContract
+{
+    use FormatsDiscoveryFilterTypeOptions;
+
+    public function entity(): string
+    {
+        return 'event';
+    }
+
+    public function types(): array
+    {
+        return EventType::query()
+            ->orderBy('name')
+            ->get()
+            ->map(fn (EventType $type): array => [
+                'value' => (string) ($type->slug ?? ''),
+                'label' => (string) ($type->name ?? $type->slug ?? ''),
+                ...($this->normalizeVisual($type->poi_visual ?? $type->visual ?? null) !== null
+                    ? ['visual' => $this->normalizeVisual($type->poi_visual ?? $type->visual ?? null)]
+                    : []),
+                'allowed_taxonomies' => $this->normalizeStringList($type->allowed_taxonomies ?? []),
+            ])
+            ->filter(static fn (array $item): bool => trim($item['value']) !== '' && trim($item['label']) !== '')
+            ->values()
+            ->all();
+    }
+
+    public function taxonomiesForTypes(array $typeValues): array
+    {
+        $selected = array_flip($this->normalizeStringList($typeValues));
+        $allowed = [];
+
+        foreach ($this->types() as $type) {
+            if ($selected !== [] && ! isset($selected[$type['value']])) {
+                continue;
+            }
+            foreach ($type['allowed_taxonomies'] ?? [] as $taxonomy) {
+                $allowed[] = (string) $taxonomy;
+            }
+        }
+
+        return $this->taxonomyOptions($this->normalizeStringList($allowed));
+    }
+}

@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Belluga\Events\Support;
+namespace Belluga\RichText;
 
 use DOMDocument;
 use DOMElement;
 use DOMNode;
 
-final class EventContentHtmlSanitizer
+final class SafeRichTextHtmlSanitizer
 {
     private const ALLOWED_TAGS = [
         'blockquote',
@@ -42,24 +42,35 @@ final class EventContentHtmlSanitizer
         $document = new DOMDocument('1.0', 'UTF-8');
         libxml_use_internal_errors(true);
         $document->loadHTML(
-            mb_convert_encoding($trimmed, 'HTML-ENTITIES', 'UTF-8'),
-            LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
+            mb_convert_encoding(
+                '<!DOCTYPE html><html><body><div data-belluga-sanitizer-root="1">'
+                    .$trimmed
+                    .'</div></body></html>',
+                'HTML-ENTITIES',
+                'UTF-8'
+            ),
+            LIBXML_HTML_NODEFDTD
         );
         libxml_clear_errors();
 
-        self::sanitizeNode($document);
+        $root = self::findSanitizerRoot($document);
+        if ($root === null) {
+            return self::wrapPlainText(self::normalizeTextContent($document->textContent ?? ''));
+        }
 
-        $textContent = self::normalizeTextContent($document->textContent ?? '');
+        self::sanitizeNode($root);
+
+        $textContent = self::normalizeTextContent($root->textContent ?? '');
         if ($textContent === '') {
             return '';
         }
 
-        $sanitized = $document->saveHTML();
-        if ($sanitized === false) {
+        $sanitized = self::innerHtml($root, $document);
+        if ($sanitized === null) {
             return self::wrapPlainText($textContent);
         }
 
-        $sanitized = self::decodeNumericEntities(trim($sanitized));
+        $sanitized = self::normalizeBreakTags(self::decodeNumericEntities(trim($sanitized)));
         if ($sanitized === '') {
             return '';
         }
@@ -118,6 +129,36 @@ final class EventContentHtmlSanitizer
         self::stripAttributes($element, []);
     }
 
+    private static function findSanitizerRoot(DOMDocument $document): ?DOMElement
+    {
+        foreach ($document->getElementsByTagName('div') as $element) {
+            if (! $element instanceof DOMElement) {
+                continue;
+            }
+
+            if ($element->getAttribute('data-belluga-sanitizer-root') === '1') {
+                return $element;
+            }
+        }
+
+        return null;
+    }
+
+    private static function innerHtml(DOMElement $element, DOMDocument $document): ?string
+    {
+        $html = '';
+        foreach ($element->childNodes as $child) {
+            $fragment = $document->saveHTML($child);
+            if ($fragment === false) {
+                return null;
+            }
+
+            $html .= $fragment;
+        }
+
+        return $html;
+    }
+
     /**
      * @param  array<int, string>  $allowed
      */
@@ -168,16 +209,24 @@ final class EventContentHtmlSanitizer
             return '';
         }
 
-        $escapedLines = array_map(
-            static fn (string $line): string => htmlspecialchars(
-                $line,
-                ENT_QUOTES | ENT_SUBSTITUTE,
-                'UTF-8'
-            ),
-            explode("\n", $normalized)
-        );
+        $paragraphs = preg_split('/\n\s*\n+/u', $normalized) ?: [$normalized];
+        $blocks = [];
+        foreach ($paragraphs as $paragraph) {
+            $escapedLines = array_map(
+                static fn (string $line): string => htmlspecialchars(
+                    rtrim($line),
+                    ENT_QUOTES | ENT_SUBSTITUTE,
+                    'UTF-8'
+                ),
+                explode("\n", $paragraph)
+            );
+            $block = '<p>'.implode('<br />', $escapedLines).'</p>';
+            if (self::normalizeTextContent($block) !== '') {
+                $blocks[] = $block;
+            }
+        }
 
-        return '<p>'.implode('<br />', $escapedLines).'</p>';
+        return implode('', $blocks);
     }
 
     private static function normalizePlainText(string $value): string
@@ -223,6 +272,11 @@ final class EventContentHtmlSanitizer
             },
             $value
         ) ?? $value;
+    }
+
+    private static function normalizeBreakTags(string $value): string
+    {
+        return preg_replace('/<br\s*\/?>/i', '<br />', $value) ?? $value;
     }
 
     private static function containsBlockTag(string $value): bool

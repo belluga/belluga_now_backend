@@ -9,6 +9,7 @@ use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
 use Carbon\Carbon;
@@ -61,6 +62,7 @@ class EventQueryServiceTest extends TestCase
             Mockery::mock(EventRadiusSettingsContract::class),
             Mockery::mock(EventCapabilitySettingsContract::class),
             Mockery::mock(EventAttendanceReadContract::class),
+            Mockery::mock(EventTaxonomySnapshotResolverContract::class),
         );
     }
 }

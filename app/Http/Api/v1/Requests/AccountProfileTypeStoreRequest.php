@@ -20,7 +20,7 @@ class AccountProfileTypeStoreRequest extends FormRequest
             'labels' => ['sometimes', 'array'],
             'labels.singular' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
             'labels.plural' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
-            'allowed_taxonomies' => ['sometimes', 'array'],
+            'allowed_taxonomies' => ['sometimes', 'array', 'max:'.InputConstraints::DISCOVERY_FILTER_ALLOWED_TAXONOMIES_MAX],
             'allowed_taxonomies.*' => ['string', 'max:'.InputConstraints::NAME_MAX],
             'visual' => ['sometimes', 'nullable', 'array'],
             'visual.mode' => ['required_with:visual', 'string', 'in:icon,image'],

@@ -1,0 +1,15 @@
+{
+  "name": "belluga/rich-text",
+  "description": "Belluga shared rich-text sanitization primitives.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\RichText\\": "src/"
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}

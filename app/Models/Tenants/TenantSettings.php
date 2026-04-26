@@ -10,6 +10,7 @@ class TenantSettings extends PackageTenantSettings
 {
     protected $fillable = [
         'map_ui',
+        'discovery_filters',
         'map_ingest',
         'map_security',
         'events',
@@ -24,6 +25,14 @@ class TenantSettings extends PackageTenantSettings
      * @return array<string, mixed>
      */
     public function getMapUiAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDiscoveryFiltersAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

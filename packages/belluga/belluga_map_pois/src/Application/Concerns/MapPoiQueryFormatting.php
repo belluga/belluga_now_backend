@@ -315,20 +315,39 @@ trait MapPoiQueryFormatting
         $normalized = [];
 
         foreach ($terms as $term) {
-            if (! is_array($term)) {
-                continue;
-            }
+            $term = $this->normalizeDocument($term);
             $type = trim((string) ($term['type'] ?? ''));
             $value = trim((string) ($term['value'] ?? ''));
             if ($type === '' || $value === '') {
                 continue;
             }
+
+            $name = $this->normalizeOptionalString($term['name'] ?? null)
+                ?? $this->normalizeOptionalString($term['label'] ?? null)
+                ?? $value;
+            $taxonomyName = $this->normalizeOptionalString($term['taxonomy_name'] ?? null)
+                ?? $type;
+
             $normalized[] = [
                 'type' => $type,
                 'value' => $value,
+                'name' => $name,
+                'taxonomy_name' => $taxonomyName,
+                'label' => $name,
             ];
         }
 
         return $normalized;
+    }
+
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        if ($value === null || ! is_scalar($value)) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
     }
 }

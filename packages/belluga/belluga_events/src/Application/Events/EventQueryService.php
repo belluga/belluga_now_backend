@@ -8,12 +8,15 @@ use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Log;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
@@ -30,12 +33,19 @@ class EventQueryService
     /** @var array<string, mixed>|null */
     private ?array $tenantCapabilitiesCache = null;
 
+    private readonly EventManagementOccurrenceQuery $managementOccurrenceQuery;
+
     public function __construct(
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventRadiusSettingsContract $eventRadiusSettings,
         private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
         private readonly EventAttendanceReadContract $eventAttendanceRead,
-    ) {}
+        private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
+        ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
+    ) {
+        $this->managementOccurrenceQuery = $managementOccurrenceQuery
+            ?? new EventManagementOccurrenceQuery();
+    }
 
     /**
      * @param  array<string, mixed>  $queryParams
@@ -43,9 +53,10 @@ class EventQueryService
      */
     public function fetchAgenda(array $queryParams, ?string $userId): array
     {
-        $page = max(1, (int) ($queryParams['page'] ?? 1));
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
         $pageSize = (int) ($queryParams['page_size'] ?? $queryParams['per_page'] ?? self::DEFAULT_PAGE_SIZE);
         $pageSize = $pageSize > 0 ? $pageSize : self::DEFAULT_PAGE_SIZE;
+        $pageSize = min($pageSize, InputConstraints::PUBLIC_PAGE_SIZE_MAX);
         $skip = ($page - 1) * $pageSize;
         $limit = $pageSize + 1;
 
@@ -73,6 +84,25 @@ class EventQueryService
         ?string $accountContextId = null
     ): LengthAwarePaginator {
         $resolvedPerPage = max(1, min($perPage, self::MAX_MANAGEMENT_PAGE_SIZE));
+        $resolvedPage = max(1, (int) ($queryParams['page'] ?? 1));
+        if (! $isAdminContext) {
+            $resolvedPage = $this->normalizePublicPage($resolvedPage);
+            $queryParams['page'] = $resolvedPage;
+        }
+        $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
+        $specificDate = $this->extractManagementSpecificDate($queryParams);
+
+        if (! $includeArchived && ($temporalBuckets !== [] || $specificDate !== null)) {
+            return $this->paginateManagementFromOccurrences(
+                $queryParams,
+                $temporalBuckets,
+                $specificDate,
+                $resolvedPerPage,
+                $isAdminContext,
+                $accountContextId
+            );
+        }
+
         $query = Event::query();
 
         if ($includeArchived && $isAdminContext) {
@@ -87,12 +117,10 @@ class EventQueryService
             $query->where('publication.status', $queryParams['status']);
         }
 
-        $temporalBuckets = $this->extractManagementTemporalBuckets($queryParams);
         if ($temporalBuckets !== []) {
             $this->applyManagementTemporalFilter($query, $temporalBuckets);
         }
 
-        $specificDate = $this->extractManagementSpecificDate($queryParams);
         if ($specificDate !== null) {
             $this->applyManagementSpecificDateFilter($query, $specificDate);
         }
@@ -111,11 +139,25 @@ class EventQueryService
             $this->applyPublicPublicationFilter($query);
         }
 
-        return $query
+        $paginator = $query
             ->orderBy('date_time_start', $isAdminContext ? 'asc' : 'desc')
             ->orderBy('_id', 'desc')
-            ->paginate($resolvedPerPage)
-            ->through(fn (Event $event): array => $this->formatManagementEvent($event));
+            ->paginate($resolvedPerPage, ['*'], 'page', $resolvedPage);
+
+        $events = $paginator->getCollection();
+        $occurrencesByEventId = $this->loadOccurrencesByEventIds(
+            $events
+                ->map(static fn (Event $event): string => isset($event->_id) ? (string) $event->_id : '')
+                ->filter()
+                ->values()
+                ->all()
+        );
+
+        $paginator->setCollection(
+            $events->map(fn (Event $event): array => $this->formatManagementEvent($event, $occurrencesByEventId))
+        );
+
+        return $paginator;
     }
 
     /**
@@ -233,6 +275,67 @@ class EventQueryService
             ->where('date_time_start', '<', $nextDayStart);
     }
 
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @param  array<int, string>  $temporalBuckets
+     */
+    private function paginateManagementFromOccurrences(
+        array $queryParams,
+        array $temporalBuckets,
+        ?Carbon $specificDate,
+        int $perPage,
+        bool $isAdminContext,
+        ?string $accountContextId
+    ): LengthAwarePaginator {
+        $pageResult = $this->managementOccurrenceQuery->paginateEventIds(
+            $queryParams,
+            $temporalBuckets,
+            $specificDate,
+            $perPage,
+            $isAdminContext,
+            $accountContextId
+        );
+
+        $eventIds = $pageResult['event_ids'];
+        $page = $pageResult['page'];
+        $total = $pageResult['total'];
+        if ($eventIds === []) {
+            return $this->emptyManagementPaginator($perPage, $page, $total);
+        }
+
+        $eventsById = Event::query()
+            ->whereIn('_id', $this->buildEventIdCandidates($eventIds))
+            ->get()
+            ->keyBy(static fn (Event $event): string => isset($event->_id) ? (string) $event->_id : '');
+
+        $occurrencesByEventId = $this->loadOccurrencesByEventIds($eventIds);
+        $items = collect($eventIds)
+            ->map(fn (string $eventId): ?array => $eventsById->has($eventId)
+                ? $this->formatManagementEvent($eventsById->get($eventId), $occurrencesByEventId)
+                : null)
+            ->filter()
+            ->values();
+
+        return new LengthAwarePaginator(
+            $items,
+            $total,
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+    }
+
+    private function emptyManagementPaginator(int $perPage, int $page, int $total = 0): LengthAwarePaginator
+    {
+        return new LengthAwarePaginator(
+            collect(),
+            $total,
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+    }
+
     private function applyManagementVenueFilter(mixed $query, string $venueProfileId): void
     {
         $profileIds = $this->buildProfileIdCandidates($venueProfileId);
@@ -269,14 +372,74 @@ class EventQueryService
             }
         }
 
-        return Event::query()->where('slug', $eventId)->first();
+        $bySlug = Event::query()->where('slug', $eventId)->first();
+        if ($bySlug) {
+            return $bySlug;
+        }
+
+        $occurrence = EventOccurrence::query()
+            ->where('occurrence_slug', $eventId)
+            ->first();
+        if (! $occurrence) {
+            return null;
+        }
+
+        $parentEventId = isset($occurrence->event_id) ? (string) $occurrence->event_id : '';
+        if ($parentEventId === '') {
+            return null;
+        }
+
+        if ($this->looksLikeObjectId($parentEventId)) {
+            $parent = Event::query()->where('_id', new ObjectId($parentEventId))->first();
+            if ($parent) {
+                return $parent;
+            }
+        }
+
+        return Event::query()->where('_id', $parentEventId)->first();
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function formatManagementEvent(Event $event): array
+    public function formatEventDetail(Event $event, ?string $userId = null, ?string $occurrenceRef = null): array
     {
+        $preloadedOccurrences = $this->loadEventOccurrenceDocuments($event);
+        $selectedOccurrence = $this->resolveSelectedOccurrence($event, $occurrenceRef, $preloadedOccurrences);
+        if (! $selectedOccurrence) {
+            return $this->formatEvent($event, $userId);
+        }
+
+        $selectedOccurrenceId = (string) $selectedOccurrence->_id;
+        $payload = $this->formatEvent($selectedOccurrence, $userId);
+        $payload['event_id'] = (string) $event->_id;
+        $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
+        $payload['occurrences'] = $this->resolveEventOccurrences($event, $selectedOccurrenceId, $preloadedOccurrences);
+        $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
+            $this->resolveLinkedAccountProfiles(
+                $this->normalizeEventParties($event->event_parties ?? [])
+            ),
+            $payload['occurrences']
+        );
+        if (array_key_exists('artists', $payload)) {
+            $payload['artists'] = $this->resolveArtistsReadProjectionFromLinkedProfiles(
+                $payload['linked_account_profiles']
+            );
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, iterable<int, EventOccurrence>>|null  $occurrencesByEventId
+     * @return array<string, mixed>
+     */
+    public function formatManagementEvent(Event $event, ?array $occurrencesByEventId = null): array
+    {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        $preloadedOccurrences = $eventId !== '' && $occurrencesByEventId !== null
+            ? ($occurrencesByEventId[$eventId] ?? [])
+            : null;
         $type = $this->normalizeArray($event->type ?? null);
         $location = $this->normalizeArray($event->location ?? []);
         $placeRef = $this->normalizePlaceRefPayload(
@@ -287,8 +450,12 @@ class EventQueryService
             $this->normalizeArray($event->thumb ?? null)
         );
         $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
-        $taxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
+        $effectiveEventParties = $this->mergeEventParties(
+            $eventParties,
+            $this->resolveOccurrenceOwnedEventParties($event, $preloadedOccurrences)
+        );
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($effectiveEventParties);
+        $taxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
@@ -308,7 +475,7 @@ class EventQueryService
                 ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
             'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
                 ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => is_array($venue['taxonomy_terms'] ?? null) ? $venue['taxonomy_terms'] : [],
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
         ];
         $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
         $coordinates = $geo['coordinates'] ?? null;
@@ -319,10 +486,10 @@ class EventQueryService
             $lat = (float) $coordinates[1];
         }
 
-        $resolvedOccurrences = $this->resolveEventOccurrences($event);
+        $resolvedOccurrences = $this->resolveEventOccurrences($event, null, $preloadedOccurrences);
         $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'));
         $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'));
-        if (count($resolvedOccurrences) > 1) {
+        if (count($resolvedOccurrences) > 0) {
             $occurrences = $resolvedOccurrences;
             $dateTimeStart ??= $resolvedOccurrences[0]['date_time_start'] ?? null;
             $dateTimeEnd ??= $resolvedOccurrences[0]['date_time_end'] ?? null;
@@ -407,24 +574,34 @@ class EventQueryService
 
     public function eventEditableByAccount(Event $event, string $accountId, ?string $actorUserId = null): bool
     {
-        if ($actorUserId !== null && $this->isAccountOwner($event, $actorUserId)) {
-            return true;
-        }
-
         $profileIds = $this->resolveAccountProfileIds($accountId);
         if ($profileIds === []) {
             return false;
         }
 
-        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
-            return true;
-        }
+        $referencesAccountPlace = $this->eventReferencesPlaceRefProfile($event, $profileIds);
+        $matchingParties = [];
 
         $parties = $this->normalizeEventParties($event->event_parties ?? []);
         foreach ($parties as $party) {
-            if (! in_array($party['party_ref_id'], $profileIds, true)) {
-                continue;
+            if (in_array($party['party_ref_id'], $profileIds, true)) {
+                $matchingParties[] = $party;
             }
+        }
+
+        if (! $referencesAccountPlace && $matchingParties === []) {
+            return false;
+        }
+
+        if ($actorUserId !== null && $this->isAccountOwner($event, $actorUserId)) {
+            return true;
+        }
+
+        if ($referencesAccountPlace) {
+            return true;
+        }
+
+        foreach ($matchingParties as $party) {
             if ((bool) ($party['permissions']['can_edit'] ?? false)) {
                 return true;
             }
@@ -502,8 +679,8 @@ class EventQueryService
         $originLat = Arr::get($queryParams, 'origin_lat');
         $originLng = Arr::get($queryParams, 'origin_lng');
 
-        $originLat = is_numeric($originLat) ? (float) $originLat : null;
-        $originLng = is_numeric($originLng) ? (float) $originLng : null;
+        $originLat = $this->normalizeLatitude($originLat);
+        $originLng = $this->normalizeLongitude($originLng);
 
         $useGeo = $originLat !== null && $originLng !== null;
 
@@ -520,6 +697,35 @@ class EventQueryService
             'max_distance_meters' => $useGeo ? $this->resolveMaxDistanceMeters($queryParams) : null,
             'use_geo' => $useGeo,
         ];
+    }
+
+    private function normalizeLatitude(mixed $value): ?float
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $coordinate = (float) $value;
+
+        return $coordinate >= -90.0 && $coordinate <= 90.0 ? $coordinate : null;
+    }
+
+    private function normalizePublicPage(mixed $value): int
+    {
+        $page = max(1, (int) $value);
+
+        return min($page, InputConstraints::PUBLIC_PAGE_MAX);
+    }
+
+    private function normalizeLongitude(mixed $value): ?float
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $coordinate = (float) $value;
+
+        return $coordinate >= -180.0 && $coordinate <= 180.0 ? $coordinate : null;
     }
 
     /**
@@ -713,6 +919,7 @@ class EventQueryService
         $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
+        $pipeline[] = ['$limit' => InputConstraints::PUBLIC_STREAM_DELTA_LIMIT];
 
         return $pipeline;
     }
@@ -1009,7 +1216,7 @@ class EventQueryService
             ? $this->resolveArtistsReadProjection($eventParties)
             : [];
         $tags = $this->normalizeArray($event->tags ?? []);
-        $taxonomyTerms = $this->normalizeArray($event->taxonomy_terms ?? []);
+        $taxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
 
         $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
             ?? $this->scalarString($venue['name'] ?? null);
@@ -1025,7 +1232,7 @@ class EventQueryService
                 ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
             'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
                 ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => is_array($venue['taxonomy_terms'] ?? null) ? $venue['taxonomy_terms'] : [],
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
         ];
 
         $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
@@ -1087,6 +1294,7 @@ class EventQueryService
             ],
             'event_parties' => $eventParties,
             'linked_account_profiles' => $linkedAccountProfiles,
+            'programming_items' => $this->normalizeProgrammingItems($event->programming_items ?? []),
             'capabilities' => $capabilities,
             'tags' => array_values(array_map('strval', $tags)),
             'taxonomy_terms' => $taxonomyTerms,
@@ -1181,6 +1389,31 @@ class EventQueryService
         return [];
     }
 
+    /**
+     * @return array<int, mixed>|array<string, mixed>|null
+     */
+    private function normalizeNullableArray(mixed $value): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<int, array<string, string>>
+     */
+    private function ensureTaxonomySnapshots(mixed $terms): array
+    {
+        $items = $this->normalizeArray($terms);
+        if ($items === []) {
+            return [];
+        }
+
+        return $this->taxonomySnapshotResolver->ensureSnapshots($items);
+    }
+
     private function formatDate(mixed $value): ?string
     {
         if ($value instanceof UTCDateTime) {
@@ -1235,14 +1468,168 @@ class EventQueryService
     }
 
     /**
-     * @return array<int, array{
-     *   occurrence_id:string|null,
-     *   occurrence_slug:string|null,
-     *   date_time_start: string|null,
-     *   date_time_end: string|null
-     * }>
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string|ObjectId>
      */
-    private function resolveEventOccurrences(mixed $event): array
+    private function buildProfileIdCandidatesFromList(array $profileIds): array
+    {
+        $candidates = [];
+        foreach ($profileIds as $profileId) {
+            foreach ($this->buildProfileIdCandidates($profileId) as $candidate) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * @param  array<int, string>  $eventIds
+     * @return array<string, iterable<int, EventOccurrence>>
+     */
+    private function loadOccurrencesByEventIds(array $eventIds): array
+    {
+        $normalized = array_values(array_filter(array_unique(array_map(
+            static fn (mixed $eventId): string => trim((string) $eventId),
+            $eventIds
+        ))));
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        EventBus::dispatch('belluga.events.management_occurrence_bulk_load', [
+            $normalized,
+        ]);
+
+        return EventOccurrence::query()
+            ->whereIn('event_id', $normalized)
+            ->orderBy('starts_at')
+            ->get()
+            ->groupBy(static fn (EventOccurrence $occurrence): string => (string) ($occurrence->event_id ?? ''))
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string>  $eventIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildEventIdCandidates(array $eventIds): array
+    {
+        $candidates = [];
+        foreach ($eventIds as $eventId) {
+            $normalized = trim($eventId);
+            if ($normalized === '') {
+                continue;
+            }
+            $candidates[] = $normalized;
+            if ($this->looksLikeObjectId($normalized)) {
+                $candidates[] = new ObjectId($normalized);
+            }
+        }
+
+        return $candidates;
+    }
+
+    private function resolveSelectedOccurrence(
+        Event $event,
+        ?string $occurrenceRef,
+        ?iterable $preloadedOccurrences = null
+    ): ?EventOccurrence
+    {
+        $documents = $preloadedOccurrences === null
+            ? $this->loadEventOccurrenceDocuments($event)
+            : collect($preloadedOccurrences);
+
+        if ($documents->isEmpty()) {
+            return null;
+        }
+
+        $normalizedRef = is_string($occurrenceRef) ? trim($occurrenceRef) : '';
+        if ($normalizedRef !== '') {
+            foreach ($documents as $document) {
+                $documentId = isset($document->_id) ? (string) $document->_id : '';
+                $documentSlug = isset($document->occurrence_slug) ? (string) $document->occurrence_slug : '';
+                if ($normalizedRef === $documentId || $normalizedRef === $documentSlug) {
+                    return $document;
+                }
+            }
+        }
+
+        $now = Carbon::now();
+        foreach ($documents as $document) {
+            $start = $this->toCarbon($this->extractRawAttribute($document, 'starts_at'));
+            if (! $start || $start->greaterThan($now)) {
+                continue;
+            }
+
+            $end = $this->toCarbon($this->extractRawAttribute($document, 'effective_ends_at'))
+                ?? $this->toCarbon($this->extractRawAttribute($document, 'ends_at'))
+                ?? $start->copy()->addHours(3);
+
+            if ($end->greaterThan($now)) {
+                return $document;
+            }
+        }
+
+        foreach ($documents as $document) {
+            $start = $this->toCarbon($this->extractRawAttribute($document, 'starts_at'));
+            if ($start && $start->greaterThanOrEqualTo($now)) {
+                return $document;
+            }
+        }
+
+        return $documents->first();
+    }
+
+    private function loadEventOccurrenceDocuments(Event $event): mixed
+    {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        if ($eventId === '') {
+            return collect();
+        }
+
+        EventBus::dispatch('belluga.events.detail_occurrences_load', [$eventId]);
+
+        return EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->orderBy('starts_at')
+            ->get();
+    }
+
+    private function toCarbon(mixed $value): ?Carbon
+    {
+        if ($value instanceof UTCDateTime) {
+            return Carbon::instance($value->toDateTime());
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return Carbon::instance($value);
+        }
+        if (is_int($value) || is_float($value)) {
+            return abs((float) $value) >= 100000000000
+                ? Carbon::createFromTimestampMsUTC((int) round((float) $value))
+                : Carbon::createFromTimestampUTC((int) round((float) $value));
+        }
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return Carbon::parse($value);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>|null  $preloadedOccurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveEventOccurrences(
+        mixed $event,
+        ?string $selectedOccurrenceId = null,
+        ?iterable $preloadedOccurrences = null
+    ): array
     {
         if (isset($event->event_id) && (string) $event->event_id !== '') {
             $start = $this->formatDate($this->extractRawAttribute($event, 'starts_at'));
@@ -1250,28 +1637,50 @@ class EventQueryService
                 return [];
             }
 
+            $occurrenceId = isset($event->_id) ? (string) $event->_id : null;
+            $programmingItems = $this->normalizeProgrammingItems($event->programming_items ?? []);
+
             return [[
-                'occurrence_id' => isset($event->_id) ? (string) $event->_id : null,
+                'occurrence_id' => $occurrenceId,
                 'occurrence_slug' => isset($event->occurrence_slug) ? (string) $event->occurrence_slug : null,
                 'date_time_start' => $start,
                 'date_time_end' => $this->formatDate($this->extractRawAttribute($event, 'ends_at')),
+                'is_selected' => true,
+                'has_location_override' => false,
+                'location_override' => null,
+                'own_event_parties' => $this->normalizeEventParties($event->own_event_parties ?? []),
+                'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($event->own_linked_account_profiles ?? []),
+                'programming_items' => $programmingItems,
+                'programming_count' => count($programmingItems),
             ]];
         }
 
         $eventId = isset($event->_id) ? (string) $event->_id : '';
         if ($eventId !== '') {
-            $documents = EventOccurrence::query()
-                ->where('event_id', $eventId)
-                ->orderBy('starts_at')
-                ->get();
+            $documents = $preloadedOccurrences === null
+                ? EventOccurrence::query()
+                    ->where('event_id', $eventId)
+                    ->orderBy('starts_at')
+                    ->get()
+                : collect($preloadedOccurrences);
 
             if ($documents->isNotEmpty()) {
-                return $documents->map(function (EventOccurrence $occurrence): array {
+                return $documents->map(function (EventOccurrence $occurrence) use ($selectedOccurrenceId): array {
+                    $occurrenceId = isset($occurrence->_id) ? (string) $occurrence->_id : null;
+                    $programmingItems = $this->normalizeProgrammingItems($occurrence->programming_items ?? []);
+
                     return [
-                        'occurrence_id' => isset($occurrence->_id) ? (string) $occurrence->_id : null,
+                        'occurrence_id' => $occurrenceId,
                         'occurrence_slug' => isset($occurrence->occurrence_slug) ? (string) $occurrence->occurrence_slug : null,
                         'date_time_start' => $this->formatDate($this->extractRawAttribute($occurrence, 'starts_at')),
                         'date_time_end' => $this->formatDate($this->extractRawAttribute($occurrence, 'ends_at')),
+                        'is_selected' => $selectedOccurrenceId !== null && $occurrenceId === $selectedOccurrenceId,
+                        'has_location_override' => false,
+                        'location_override' => null,
+                        'own_event_parties' => $this->normalizeEventParties($occurrence->own_event_parties ?? []),
+                        'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($occurrence->own_linked_account_profiles ?? []),
+                        'programming_items' => $programmingItems,
+                        'programming_count' => count($programmingItems),
                     ];
                 })->filter(static fn (array $item): bool => $item['date_time_start'] !== null)->values()->all();
             }
@@ -1286,9 +1695,6 @@ class EventQueryService
     private function resolveEventCapabilities(mixed $event): array
     {
         $raw = $this->normalizeArray($event->capabilities ?? []);
-        $multipleOccurrences = $this->normalizeArray($raw['multiple_occurrences'] ?? []);
-        $multipleEventEnabled = (bool) ($multipleOccurrences['enabled'] ?? false);
-
         $mapPoi = $this->normalizeArray($raw['map_poi'] ?? []);
         $mapPoiEventEnabled = (bool) ($mapPoi['enabled'] ?? true);
         $mapPoiDiscoveryScope = $this->normalizeArray($mapPoi['discovery_scope'] ?? null);
@@ -1297,19 +1703,10 @@ class EventQueryService
         }
 
         $tenantCapabilities = $this->resolveTenantCapabilities();
-        $tenantMultiple = $this->normalizeArray($tenantCapabilities['multiple_occurrences'] ?? []);
-        $tenantMultipleAvailable = (bool) ($tenantMultiple['allow_multiple'] ?? false);
-
         $tenantMapPoi = $this->normalizeArray($tenantCapabilities['map_poi'] ?? []);
         $tenantMapPoiAvailable = (bool) ($tenantMapPoi['available'] ?? true);
 
         $capabilities = [];
-        if ($tenantMultipleAvailable) {
-            $capabilities['multiple_occurrences'] = [
-                'enabled' => $multipleEventEnabled,
-            ];
-        }
-
         if ($tenantMapPoiAvailable) {
             $capabilities['map_poi'] = [
                 'enabled' => $mapPoiEventEnabled,
@@ -1352,18 +1749,7 @@ class EventQueryService
             return;
         }
 
-        $profileIds = $this->resolveAccountProfileIds($accountId);
-        if ($profileIds === []) {
-            $query->where('_id', '__no_match__');
-
-            return;
-        }
-
-        $query->where(function ($builder) use ($profileIds): void {
-            $builder->whereIn('event_parties.party_ref_id', $profileIds)
-                ->orWhereIn('place_ref.id', $profileIds)
-                ->orWhereIn('place_ref._id', $profileIds);
-        });
+        $query->where('account_context_ids', $accountId);
     }
 
     /**
@@ -1396,6 +1782,9 @@ class EventQueryService
             $metadata = isset($row['metadata']) && is_array($row['metadata'])
                 ? $row['metadata']
                 : null;
+            if ($metadata !== null && array_key_exists('taxonomy_terms', $metadata)) {
+                $metadata['taxonomy_terms'] = $this->ensureTaxonomySnapshots($metadata['taxonomy_terms']);
+            }
 
             $item = [
                 'party_type' => $partyType,
@@ -1438,7 +1827,7 @@ class EventQueryService
                 'cover_url' => $this->absoluteUrlString($metadata['cover_url'] ?? null),
                 'highlight' => false,
                 'genres' => array_values($this->normalizeStringArray($metadata['genres'] ?? [])),
-                'taxonomy_terms' => is_array($metadata['taxonomy_terms'] ?? null) ? $metadata['taxonomy_terms'] : [],
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($metadata['taxonomy_terms'] ?? []),
             ];
         }, array_values(array_filter($eventParties, function (array $party): bool {
             $partyType = trim((string) ($party['party_type'] ?? ''));
@@ -1477,7 +1866,7 @@ class EventQueryService
                 'party_type' => $this->scalarString($payload['party_type'] ?? null),
                 'avatar_url' => $this->absoluteUrlString($payload['avatar_url'] ?? null),
                 'cover_url' => $this->absoluteUrlString($payload['cover_url'] ?? null),
-                'taxonomy_terms' => is_array($payload['taxonomy_terms'] ?? null) ? $payload['taxonomy_terms'] : [],
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($payload['taxonomy_terms'] ?? []),
             ];
             $seenIds[$id] = true;
         };
@@ -1500,6 +1889,228 @@ class EventQueryService
         }
 
         return $items;
+    }
+
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeLinkedAccountProfileSummaries(mixed $profiles): array
+    {
+        $rows = $this->normalizeArray($profiles);
+        if ($rows === []) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($rows as $row) {
+            $profile = $this->normalizeArray($row);
+            if ($profile === []) {
+                continue;
+            }
+
+            if (array_key_exists('taxonomy_terms', $profile)) {
+                $profile['taxonomy_terms'] = $this->ensureTaxonomySnapshots($profile['taxonomy_terms']);
+            }
+
+            $normalized[] = $profile;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeProgrammingItems(mixed $items): array
+    {
+        $rows = $this->normalizeArray($items);
+        if ($rows === []) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($rows as $row) {
+            $item = $this->normalizeArray($row);
+            if ($item === []) {
+                continue;
+            }
+
+            $normalized[] = [
+                'time' => $this->scalarString($item['time'] ?? null) ?? '',
+                'title' => $this->scalarString($item['title'] ?? null),
+                'account_profile_ids' => array_values(array_map('strval', $this->normalizeArray($item['account_profile_ids'] ?? []))),
+                'linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($item['linked_account_profiles'] ?? []),
+                'place_ref' => $this->normalizeNullableArray($item['place_ref'] ?? null),
+                'location_profile' => $this->normalizeLinkedAccountProfileSummary($item['location_profile'] ?? null),
+            ];
+        }
+
+        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function normalizeLinkedAccountProfileSummary(mixed $profile): ?array
+    {
+        $payload = $this->normalizeArray($profile);
+        if ($payload === []) {
+            return null;
+        }
+
+        if (array_key_exists('taxonomy_terms', $payload)) {
+            $payload['taxonomy_terms'] = $this->ensureTaxonomySnapshots($payload['taxonomy_terms']);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventLinkedProfiles
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveDetailLinkedAccountProfiles(array $eventLinkedProfiles, array $occurrences): array
+    {
+        $profiles = [];
+        $seenIds = [];
+
+        $push = function (mixed $profile) use (&$profiles, &$seenIds): void {
+            $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
+            if ($normalized === null) {
+                return;
+            }
+
+            $id = trim((string) ($this->scalarString($normalized['id'] ?? null) ?? ''));
+            $displayName = trim((string) ($this->scalarString($normalized['display_name'] ?? null) ?? ''));
+            $profileType = trim((string) ($this->scalarString($normalized['profile_type'] ?? null) ?? ''));
+            if ($id === '' || $displayName === '' || $profileType === '' || isset($seenIds[$id])) {
+                return;
+            }
+
+            $profiles[] = [
+                'id' => $id,
+                'display_name' => $displayName,
+                'slug' => $this->scalarString($normalized['slug'] ?? null),
+                'profile_type' => $profileType,
+                'party_type' => $this->scalarString($normalized['party_type'] ?? null),
+                'avatar_url' => $this->absoluteUrlString($normalized['avatar_url'] ?? null),
+                'cover_url' => $this->absoluteUrlString($normalized['cover_url'] ?? null),
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($normalized['taxonomy_terms'] ?? []),
+            ];
+            $seenIds[$id] = true;
+        };
+
+        foreach ($this->normalizeLinkedAccountProfileSummaries($eventLinkedProfiles) as $profile) {
+            $push($profile);
+        }
+
+        foreach ($occurrences as $occurrence) {
+            foreach ($this->normalizeLinkedAccountProfileSummaries($occurrence['own_linked_account_profiles'] ?? []) as $profile) {
+                $push($profile);
+            }
+
+            foreach ($this->normalizeProgrammingItems($occurrence['programming_items'] ?? []) as $item) {
+                foreach ($this->normalizeLinkedAccountProfileSummaries($item['linked_account_profiles'] ?? []) as $profile) {
+                    $push($profile);
+                }
+            }
+        }
+
+        return $profiles;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveArtistsReadProjectionFromLinkedProfiles(array $linkedProfiles): array
+    {
+        return array_values(array_map(function (array $profile): array {
+            return [
+                'id' => $this->scalarString($profile['id'] ?? null) ?? '',
+                'display_name' => $this->scalarString($profile['display_name'] ?? null) ?? '',
+                'slug' => $this->scalarString($profile['slug'] ?? null),
+                'profile_type' => $this->scalarString($profile['profile_type'] ?? null) ?? '',
+                'avatar_url' => $this->absoluteUrlString($profile['avatar_url'] ?? null),
+                'cover_url' => $this->absoluteUrlString($profile['cover_url'] ?? null),
+                'highlight' => false,
+                'genres' => [],
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($profile['taxonomy_terms'] ?? []),
+            ];
+        }, array_values(array_filter($this->normalizeLinkedAccountProfileSummaries($linkedProfiles), function (array $profile): bool {
+            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            $displayName = trim((string) ($this->scalarString($profile['display_name'] ?? null) ?? ''));
+            $profileType = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
+            $partyType = trim((string) ($this->scalarString($profile['party_type'] ?? null) ?? ''));
+
+            return $id !== ''
+                && $displayName !== ''
+                && $profileType !== 'venue'
+                && $partyType !== 'venue';
+        }))));
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>|null  $preloadedOccurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveOccurrenceOwnedEventParties(Event $event, ?iterable $preloadedOccurrences = null): array
+    {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        if ($eventId === '') {
+            return [];
+        }
+
+        $rows = [];
+        $documents = $preloadedOccurrences === null
+            ? EventOccurrence::query()
+                ->where('event_id', $eventId)
+                ->orderBy('starts_at')
+                ->get()
+            : collect($preloadedOccurrences);
+
+        foreach ($documents as $document) {
+            foreach ($this->normalizeEventParties($document->own_event_parties ?? []) as $party) {
+                $rows[] = $party;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @param  array<int, array<string, mixed>>  $ownEventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeEventParties(array $eventParties, array $ownEventParties): array
+    {
+        $merged = [];
+        $seen = [];
+
+        foreach ([$eventParties, $ownEventParties] as $rows) {
+            foreach ($rows as $row) {
+                $partyType = trim((string) ($row['party_type'] ?? ''));
+                $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
+                if ($partyType === '' || $partyRefId === '') {
+                    continue;
+                }
+
+                $key = "{$partyType}:{$partyRefId}";
+                if (isset($seen[$key])) {
+                    continue;
+                }
+
+                $merged[] = $row;
+                $seen[$key] = true;
+            }
+        }
+
+        return $merged;
     }
 
     /**

@@ -1,0 +1,22 @@
+{
+  "name": "belluga/discovery-filters",
+  "description": "Belluga discovery filter grammar, registry, and catalog selection utilities.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\DiscoveryFilters\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Belluga\\DiscoveryFilters\\DiscoveryFiltersServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": "^8.4",
+    "illuminate/support": "^12.0"
+  }
+}
