@@ -156,6 +156,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
                 'visual' => [
                     'mode' => 'image',
                     'image_source' => 'type_asset',
+                    'color' => '#00897B',
                 ],
                 'type_asset' => UploadedFile::fake()->image('landmark.png', 320, 320),
                 'capabilities' => [
@@ -168,14 +169,17 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.visual.mode', 'image');
         $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.visual.color', '#00897B');
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.color', '#00897B');
         $typeAssetUrl = $response->json('data.visual.image_url');
         $this->assertIsString($typeAssetUrl);
         $this->assertStringContainsString('/api/v1/media/static-profile-types/', $typeAssetUrl);
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
         $model = StaticProfileType::query()->where('type', 'landmark')->firstOrFail();
+        $this->assertSame('#00897B', data_get($model->visual, 'color'));
         $this->assertTypeAssetStored((string) $model->getKey(), 'static_profile_types');
     }
 

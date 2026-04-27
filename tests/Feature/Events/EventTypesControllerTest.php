@@ -231,6 +231,7 @@ class EventTypesControllerTest extends TestCaseTenant
                 'visual' => [
                     'mode' => 'image',
                     'image_source' => 'type_asset',
+                    'color' => '#0F6FAE',
                 ],
                 'type_asset' => UploadedFile::fake()->image('festival.png', 320, 320),
             ],
@@ -239,14 +240,17 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.visual.mode', 'image');
         $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.visual.color', '#0F6FAE');
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.color', '#0F6FAE');
         $typeAssetUrl = $response->json('data.visual.image_url');
         $this->assertIsString($typeAssetUrl);
         $this->assertStringContainsString('/api/v1/media/event-types/', $typeAssetUrl);
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
         $model = EventType::query()->where('slug', 'festival')->firstOrFail();
+        $this->assertSame('#0F6FAE', data_get($model->visual, 'color'));
         $this->assertTypeAssetStored((string) $model->getKey(), 'event_types');
     }
 

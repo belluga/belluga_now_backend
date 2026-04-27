@@ -15,6 +15,8 @@ final class DiscoveryFiltersController extends Controller
         string $surface,
         DiscoveryFilterPublicCatalogService $catalog,
     ): JsonResponse {
-        return response()->json($catalog->catalogForSurface($surface));
+        return response()->json(
+            $catalog->catalogForSurface($surface, request()->getSchemeAndHttpHost())
+        );
     }
 }
