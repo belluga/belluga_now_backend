@@ -188,6 +188,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'visual' => [
                     'mode' => 'image',
                     'image_source' => 'type_asset',
+                    'color' => '#5E35B1',
                 ],
                 'type_asset' => UploadedFile::fake()->image('gallery.png', 320, 320),
                 'capabilities' => [
@@ -200,14 +201,17 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.visual.mode', 'image');
         $response->assertJsonPath('data.visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.visual.color', '#5E35B1');
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'type_asset');
+        $response->assertJsonPath('data.poi_visual.color', '#5E35B1');
         $typeAssetUrl = $response->json('data.visual.image_url');
         $this->assertIsString($typeAssetUrl);
         $this->assertStringContainsString('/api/v1/media/account-profile-types/', $typeAssetUrl);
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
         $model = TenantProfileType::query()->where('type', 'gallery')->firstOrFail();
+        $this->assertSame('#5E35B1', data_get($model->visual, 'color'));
         $this->assertTypeAssetStored((string) $model->getKey(), 'account_profile_types');
     }
 
@@ -627,7 +631,6 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
         $this->assertSame('item_media', data_get($projection->visual, 'source'));
     }
-
 
     public function test_profile_type_update_type_asset_visual_change_rematerializes_projection_visual(): void
     {

@@ -39,10 +39,17 @@ final class PoiVisualNormalizer
                 return null;
             }
 
-            return [
+            $visual = [
                 'mode' => 'image',
                 'image_source' => $imageSource,
             ];
+
+            $color = $this->normalizeHexColor($raw['color'] ?? null);
+            if ($color !== null) {
+                $visual['color'] = $color;
+            }
+
+            return $visual;
         }
 
         return null;

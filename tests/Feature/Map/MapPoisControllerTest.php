@@ -1241,6 +1241,19 @@ class MapPoisControllerTest extends TestCaseTenant
                 'icon_color' => '#FFFFFF',
             ],
         ]);
+        $homeImageType = EventType::create([
+            'name' => 'Home Sports',
+            'slug' => 'home_sports',
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+                'color' => '#0F6FAE',
+            ],
+        ]);
+        $homeImageType->forceFill([
+            'type_asset_url' => "{$this->base_api_tenant}media/event-types/{$homeImageType->_id}/type_asset?v=manual-home-image",
+        ])->save();
         TenantSettings::query()->firstOrFail()->update([
             'discovery_filters' => [
                 'surfaces' => [
@@ -1298,6 +1311,24 @@ class MapPoisControllerTest extends TestCaseTenant
             ->firstWhere('value', 'home_talk');
         $this->assertNotNull($homeTalkType);
         $this->assertSame([], collect(data_get($homeTalkType, 'allowed_taxonomies') ?? [])->all());
+        $homeSportsFilter = collect($response->json('filters') ?? [])
+            ->firstWhere('key', 'home_sports');
+        $this->assertNotNull($homeSportsFilter);
+        $this->assertSame('#0F6FAE', data_get($homeSportsFilter, 'color'));
+        $this->assertStringContainsString(
+            "/api/v1/media/event-types/{$homeImageType->_id}/type_asset",
+            (string) data_get($homeSportsFilter, 'image_uri')
+        );
+        $homeSportsType = collect($response->json('type_options.event') ?? [])
+            ->firstWhere('value', 'home_sports');
+        $this->assertNotNull($homeSportsType);
+        $this->assertSame('image', data_get($homeSportsType, 'visual.mode'));
+        $this->assertSame('type_asset', data_get($homeSportsType, 'visual.image_source'));
+        $this->assertSame('#0F6FAE', data_get($homeSportsType, 'visual.color'));
+        $this->assertStringContainsString(
+            "/api/v1/media/event-types/{$homeImageType->_id}/type_asset",
+            (string) data_get($homeSportsType, 'visual.image_url')
+        );
     }
 
     public function test_home_events_catalog_bounds_taxonomy_terms_per_group(): void
@@ -1518,6 +1549,22 @@ class MapPoisControllerTest extends TestCaseTenant
                 'is_favoritable' => false,
             ],
         ]);
+        $galleryType = TenantProfileType::create([
+            'type' => 'gallery',
+            'label' => 'Galeria',
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+                'color' => '#5E35B1',
+            ],
+            'capabilities' => [
+                'is_favoritable' => true,
+            ],
+        ]);
+        $galleryType->forceFill([
+            'type_asset_url' => "{$this->base_api_tenant}media/account-profile-types/{$galleryType->_id}/type_asset?v=manual-profile-image",
+        ])->save();
         $response = $this->getJson("{$this->base_api_tenant}discovery-filters/discovery.account_profiles");
         $response->assertStatus(200);
 
@@ -1550,6 +1597,24 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertNull(
             collect($response->json('type_options.account_profile') ?? [])
                 ->firstWhere('value', 'internal_partner')
+        );
+        $galleryFilter = collect($response->json('filters') ?? [])
+            ->firstWhere('key', 'gallery');
+        $this->assertNotNull($galleryFilter);
+        $this->assertSame('#5E35B1', data_get($galleryFilter, 'color'));
+        $this->assertStringContainsString(
+            "/api/v1/media/account-profile-types/{$galleryType->_id}/type_asset",
+            (string) data_get($galleryFilter, 'image_uri')
+        );
+        $galleryOption = collect($response->json('type_options.account_profile') ?? [])
+            ->firstWhere('value', 'gallery');
+        $this->assertNotNull($galleryOption);
+        $this->assertSame('image', data_get($galleryOption, 'visual.mode'));
+        $this->assertSame('type_asset', data_get($galleryOption, 'visual.image_source'));
+        $this->assertSame('#5E35B1', data_get($galleryOption, 'visual.color'));
+        $this->assertStringContainsString(
+            "/api/v1/media/account-profile-types/{$galleryType->_id}/type_asset",
+            (string) data_get($galleryOption, 'visual.image_url')
         );
     }
 
