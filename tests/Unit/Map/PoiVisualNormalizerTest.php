@@ -41,4 +41,20 @@ class PoiVisualNormalizerTest extends TestCase
 
         $this->assertNull($normalized);
     }
+
+    public function test_normalize_preserves_image_visual_color(): void
+    {
+        $normalizer = new PoiVisualNormalizer;
+
+        $normalized = $normalizer->normalize(new BSONDocument([
+            'mode' => 'image',
+            'image_source' => 'type_asset',
+            'color' => '#0f6fae',
+        ]));
+
+        $this->assertIsArray($normalized);
+        $this->assertSame('image', $normalized['mode'] ?? null);
+        $this->assertSame('type_asset', $normalized['image_source'] ?? null);
+        $this->assertSame('#0F6FAE', $normalized['color'] ?? null);
+    }
 }

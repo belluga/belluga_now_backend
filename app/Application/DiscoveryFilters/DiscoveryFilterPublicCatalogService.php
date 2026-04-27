@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\DiscoveryFilters;
 
+use App\Application\AccountProfiles\AccountProfileTypeMediaService;
+use App\Application\Events\EventTypeMediaService;
+use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Application\Taxonomies\TaxonomyTermManagementService;
 use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
@@ -27,15 +30,18 @@ final class DiscoveryFilterPublicCatalogService
         private readonly DiscoveryFilterCatalogService $catalog,
         private readonly DiscoveryFilterEntityRegistry $registry,
         private readonly TaxonomyTermManagementService $taxonomyTerms,
+        private readonly PoiVisualNormalizer $poiVisualNormalizer,
+        private readonly EventTypeMediaService $eventTypeMediaService,
+        private readonly AccountProfileTypeMediaService $accountProfileTypeMediaService,
     ) {}
 
     /**
      * @return array{surface: string, filters: array<int, array<string, mixed>>, type_options: array<string, array<int, array<string, mixed>>>, taxonomy_options: array<string, array{key: string, label: string, terms: array<int, array{value: string, label: string}>, terms_truncated: bool, terms_limit: int}>}
      */
-    public function catalogForSurface(string $surface): array
+    public function catalogForSurface(string $surface, ?string $baseUrl = null): array
     {
         $surfaceKey = strtolower(trim($surface));
-        [$definitions, $typeOptions] = $this->definitionsForSurface($surfaceKey);
+        [$definitions, $typeOptions] = $this->definitionsForSurface($surfaceKey, $baseUrl);
 
         return [
             'surface' => $surfaceKey,
@@ -51,10 +57,10 @@ final class DiscoveryFilterPublicCatalogService
     /**
      * @return array{0: array<int, DiscoveryFilterDefinition>, 1: array<string, array<int, array<string, mixed>>>}
      */
-    private function definitionsForSurface(string $surface): array
+    private function definitionsForSurface(string $surface, ?string $baseUrl = null): array
     {
         if ($surface === 'home.events') {
-            $typeOptions = ['event' => $this->eventTypeOptions()];
+            $typeOptions = ['event' => $this->eventTypeOptions($baseUrl)];
 
             return [
                 $this->typeDrivenDefinitions(
@@ -68,7 +74,7 @@ final class DiscoveryFilterPublicCatalogService
         }
 
         if ($surface === 'discovery.account_profiles') {
-            $typeOptions = ['account_profile' => $this->favoritableAccountProfileTypeOptions()];
+            $typeOptions = ['account_profile' => $this->favoritableAccountProfileTypeOptions($baseUrl)];
 
             return [
                 $this->typeDrivenDefinitions(
@@ -119,6 +125,7 @@ final class DiscoveryFilterPublicCatalogService
                 'primary_selection_mode' => 'single',
                 ...($visual['icon'] !== null ? ['icon' => $visual['icon']] : []),
                 ...($visual['color'] !== null ? ['color' => $visual['color']] : []),
+                ...($visual['image_uri'] !== null ? ['image_uri' => $visual['image_uri']] : []),
                 'query' => [
                     'entities' => [$entity],
                     'types_by_entity' => [
@@ -133,17 +140,23 @@ final class DiscoveryFilterPublicCatalogService
     }
 
     /**
-     * @return array{icon: string|null, color: string|null}
+     * @return array{icon: string|null, color: string|null, image_uri: string|null}
      */
     private function normalizeVisual(mixed $value): array
     {
         if (! is_array($value)) {
-            return ['icon' => null, 'color' => null];
+            return ['icon' => null, 'color' => null, 'image_uri' => null];
         }
 
         $mode = $this->normalizeToken($value['mode'] ?? 'icon');
         if ($mode !== '' && $mode !== 'icon') {
-            return ['icon' => null, 'color' => $this->normalizeColor($value['color'] ?? null)];
+            return [
+                'icon' => null,
+                'color' => $this->normalizeColor($value['color'] ?? null),
+                'image_uri' => $this->normalizeNullableString(
+                    $value['image_uri'] ?? ($value['image_url'] ?? null)
+                ),
+            ];
         }
 
         $icon = trim((string) ($value['icon'] ?? ''));
@@ -151,6 +164,7 @@ final class DiscoveryFilterPublicCatalogService
         return [
             'icon' => $icon === '' ? null : $icon,
             'color' => $this->normalizeColor($value['color'] ?? null),
+            'image_uri' => null,
         ];
     }
 
@@ -162,6 +176,17 @@ final class DiscoveryFilterPublicCatalogService
         }
 
         return $color;
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = trim($value);
+
+        return $normalized === '' ? null : $normalized;
     }
 
     /**
@@ -255,6 +280,7 @@ final class DiscoveryFilterPublicCatalogService
                     'truncated' => true,
                     'limit' => 0,
                 ];
+
                 continue;
             }
 
@@ -351,16 +377,27 @@ final class DiscoveryFilterPublicCatalogService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function eventTypeOptions(): array
+    private function eventTypeOptions(?string $baseUrl = null): array
     {
         return EventType::query()
             ->orderBy('name')
             ->limit(self::TYPE_OPTIONS_MAX)
-            ->get(['slug', 'name', 'visual', 'poi_visual', 'allowed_taxonomies'])
+            ->get(['_id', 'slug', 'name', 'visual', 'poi_visual', 'allowed_taxonomies', 'type_asset_url'])
             ->map(fn (EventType $type): array => [
                 'value' => trim((string) ($type->slug ?? '')),
                 'label' => trim((string) ($type->name ?? $type->slug ?? '')),
-                'visual' => $type->poi_visual ?? $type->visual ?? null,
+                'visual' => $this->resolveTypeOptionVisual(
+                    rawVisual: $type->poi_visual ?? $type->visual ?? null,
+                    rawTypeAssetUrl: $type->type_asset_url ?? null,
+                    publicUrlResolver: fn (string $url): ?string => $baseUrl === null
+                        ? $url
+                        : $this->eventTypeMediaService->normalizePublicUrl(
+                            $baseUrl,
+                            $type,
+                            'type_asset',
+                            $url
+                        ),
+                ),
                 'allowed_taxonomies' => $this->normalizeTokenList($type->allowed_taxonomies ?? []),
             ])
             ->filter(static fn (array $item): bool => $item['value'] !== '' && $item['label'] !== '')
@@ -371,22 +408,67 @@ final class DiscoveryFilterPublicCatalogService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function favoritableAccountProfileTypeOptions(): array
+    private function favoritableAccountProfileTypeOptions(?string $baseUrl = null): array
     {
         return TenantProfileType::query()
             ->where('capabilities.is_favoritable', true)
             ->orderBy('label')
             ->limit(self::TYPE_OPTIONS_MAX)
-            ->get(['type', 'label', 'visual', 'poi_visual', 'allowed_taxonomies'])
+            ->get(['_id', 'type', 'label', 'visual', 'poi_visual', 'allowed_taxonomies', 'type_asset_url'])
             ->map(fn (TenantProfileType $type): array => [
                 'value' => trim((string) ($type->type ?? '')),
                 'label' => trim((string) ($type->label ?? $type->type ?? '')),
-                'visual' => $type->poi_visual ?? $type->visual ?? null,
+                'visual' => $this->resolveTypeOptionVisual(
+                    rawVisual: $type->poi_visual ?? $type->visual ?? null,
+                    rawTypeAssetUrl: $type->type_asset_url ?? null,
+                    publicUrlResolver: fn (string $url): ?string => $baseUrl === null
+                        ? $url
+                        : $this->accountProfileTypeMediaService->normalizePublicUrl(
+                            $baseUrl,
+                            $type,
+                            'type_asset',
+                            $url
+                        ),
+                ),
                 'allowed_taxonomies' => $this->normalizeTokenList($type->allowed_taxonomies ?? []),
             ])
             ->filter(static fn (array $item): bool => $item['value'] !== '' && $item['label'] !== '')
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  callable(string): ?string  $publicUrlResolver
+     * @return array<string, mixed>|null
+     */
+    private function resolveTypeOptionVisual(
+        mixed $rawVisual,
+        mixed $rawTypeAssetUrl,
+        callable $publicUrlResolver,
+    ): ?array {
+        $visual = $this->poiVisualNormalizer->normalize($rawVisual);
+        if (! is_array($visual)) {
+            return null;
+        }
+
+        if (($visual['mode'] ?? null) !== 'image' || ($visual['image_source'] ?? null) !== 'type_asset') {
+            return $visual;
+        }
+
+        $rawUrl = $this->normalizeNullableString($rawTypeAssetUrl);
+        if ($rawUrl === null) {
+            return $visual;
+        }
+
+        $imageUrl = $publicUrlResolver($rawUrl);
+        if ($imageUrl === null) {
+            return $visual;
+        }
+
+        $visual['image_url'] = $imageUrl;
+        $visual['image_uri'] = $imageUrl;
+
+        return $visual;
     }
 
     /**
