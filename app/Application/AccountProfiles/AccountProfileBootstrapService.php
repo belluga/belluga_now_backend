@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Application\Accounts\AccountManagementService;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 
 class AccountProfileBootstrapService
@@ -19,7 +20,7 @@ class AccountProfileBootstrapService
 
     public function ensurePersonalAccount(AccountUser $user): void
     {
-        if (! empty($user->account_roles ?? [])) {
+        if ($this->personalProfileExists($user)) {
             return;
         }
 
@@ -55,5 +56,15 @@ class AccountProfileBootstrapService
             'updated_by' => (string) $user->_id,
             'updated_by_type' => 'tenant',
         ]);
+    }
+
+    private function personalProfileExists(AccountUser $user): bool
+    {
+        return AccountProfile::query()
+            ->where('created_by', (string) $user->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', self::PERSONAL_PROFILE_TYPE)
+            ->where('deleted_at', null)
+            ->exists();
     }
 }

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Invites;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Accounts\AccountManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
@@ -107,6 +109,53 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
 
         $blocked->assertOk();
         $this->assertSame([], $blocked->json('matches'));
+    }
+
+    public function test_contact_import_matches_phone_user_that_already_has_non_personal_account_role(): void
+    {
+        $viewer = $this->createReleaseUser('Viewer Existing Role', '+55 27 99999-0101');
+        $target = AccountUser::query()->create([
+            'identity_state' => 'registered',
+            'name' => 'Existing Role Contact',
+            'emails' => ['existing-role-contact-'.Str::random(6).'@example.org'],
+            'phones' => ['+55 27 99886-9802'],
+            'fingerprints' => [],
+            'credentials' => [],
+            'consents' => [],
+        ]);
+
+        $account = Account::query()->create([
+            'name' => 'Existing Role Account '.Str::random(6),
+            'document' => strtoupper(Str::random(14)),
+        ]);
+        $role = $account->roleTemplates()->create([
+            'name' => 'Account Admin',
+            'description' => 'Primary account administrator',
+            'permissions' => ['*'],
+        ]);
+        app(AccountManagementService::class)->attachUser($account, $target, $role);
+        $target = $target->fresh();
+
+        $this->assertNull(AccountProfile::query()
+            ->where('created_by', (string) $target->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', 'personal')
+            ->first());
+
+        app(AccountProfileBootstrapService::class)->ensurePersonalAccount($target);
+        $targetProfile = $this->personalProfileFor($target->fresh());
+
+        Sanctum::actingAs($viewer, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527998869802')],
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('matches.0.user_id', (string) $target->_id);
+        $response->assertJsonPath('matches.0.receiver_account_profile_id', (string) $targetProfile->_id);
+        $response->assertJsonPath('matches.0.inviteable_reasons.0', 'contact_match');
     }
 
     public function test_inviteable_contacts_merge_contact_match_favorites_and_friend_reasons_without_duplicates(): void
