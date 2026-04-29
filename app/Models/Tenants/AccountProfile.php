@@ -23,6 +23,7 @@ class AccountProfile extends Model
         'display_name',
         'slug',
         'visibility',
+        'discoverable_by_contacts',
         'taxonomy_terms',
         'taxonomy_terms_flat',
         'location',
@@ -40,11 +41,13 @@ class AccountProfile extends Model
 
     protected $attributes = [
         'visibility' => 'public',
+        'discoverable_by_contacts' => true,
     ];
 
     protected $casts = [
         'is_active' => 'bool',
         'is_verified' => 'bool',
+        'discoverable_by_contacts' => 'bool',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',

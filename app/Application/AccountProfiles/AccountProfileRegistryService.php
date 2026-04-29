@@ -150,6 +150,7 @@ class AccountProfileRegistryService
 
         return [
             'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
+            'is_inviteable' => (bool) ($capabilities['is_inviteable'] ?? false),
             'is_poi_enabled' => $isPoiEnabled,
             'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
             'has_bio' => (bool) ($capabilities['has_bio'] ?? false),

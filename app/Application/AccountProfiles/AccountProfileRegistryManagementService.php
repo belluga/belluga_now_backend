@@ -11,8 +11,8 @@ use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
 
@@ -250,6 +250,9 @@ class AccountProfileRegistryManagementService
             'is_favoritable' => array_key_exists('is_favoritable', $capabilities)
                 ? (bool) $capabilities['is_favoritable']
                 : (bool) ($currentCapabilities['is_favoritable'] ?? false),
+            'is_inviteable' => array_key_exists('is_inviteable', $capabilities)
+                ? (bool) $capabilities['is_inviteable']
+                : (bool) ($currentCapabilities['is_inviteable'] ?? false),
             'is_poi_enabled' => $isPoiEnabled,
             'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
             'has_bio' => array_key_exists('has_bio', $capabilities)

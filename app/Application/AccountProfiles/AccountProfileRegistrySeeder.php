@@ -20,7 +20,8 @@ class AccountProfileRegistrySeeder
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
                 'capabilities' => [
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
+                    'is_inviteable' => true,
                     'is_poi_enabled' => false,
                     'has_content' => false,
                 ],
@@ -32,6 +33,7 @@ class AccountProfileRegistrySeeder
                 'poi_visual' => null,
                 'capabilities' => [
                     'is_favoritable' => true,
+                    'is_inviteable' => false,
                     'is_poi_enabled' => false,
                     'has_content' => false,
                 ],
@@ -47,6 +49,7 @@ class AccountProfileRegistrySeeder
                 ],
                 'capabilities' => [
                     'is_favoritable' => true,
+                    'is_inviteable' => false,
                     'is_poi_enabled' => true,
                     'has_content' => false,
                 ],

@@ -49,7 +49,49 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
         $this->assertSame('web_cta', $referrer['store_channel'] ?? null);
         $this->assertSame('CODE123', $referrer['code'] ?? null);
+        $this->assertSame('/invite?code=CODE123', $referrer['target_path'] ?? null);
         $this->assertSame("{$tenantOrigin}/invite?code=CODE123", $referrer['link'] ?? null);
+    }
+
+    public function test_open_app_redirect_for_android_public_detail_context_preserves_target_path(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.openapp.detail');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.openapp.detail',
+                ],
+            ],
+        ]);
+
+        $targetPath = '/agenda/evento/forro?occurrence=occ-1';
+        $query = http_build_query([
+            'path' => $targetPath,
+            'store_channel' => 'web_detail',
+        ]);
+        $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+            ->get("{$this->base_tenant_url}open-app?{$query}");
+
+        $response->assertRedirect();
+
+        $location = $response->headers->get('Location');
+        $this->assertNotNull($location);
+
+        $parsed = parse_url((string) $location);
+        parse_str((string) ($parsed['query'] ?? ''), $query);
+        $this->assertArrayHasKey('referrer', $query);
+
+        $referrer = [];
+        parse_str((string) $query['referrer'], $referrer);
+
+        $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
+        $this->assertSame('web_detail', $referrer['store_channel'] ?? null);
+        $this->assertArrayNotHasKey('code', $referrer);
+        $this->assertSame($targetPath, $referrer['target_path'] ?? null);
+        $this->assertSame("{$tenantOrigin}{$targetPath}", $referrer['link'] ?? null);
     }
 
     public function test_open_app_redirect_non_invite_context_falls_back_to_home_without_code_propagation(): void
@@ -141,7 +183,7 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
 
         $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
         $this->assertSame('web_gate', $query['store_channel'] ?? null);
-        $this->assertSame("{$tenantOrigin}/", $query['deep_link'] ?? null);
+        $this->assertSame("{$tenantOrigin}/profile", $query['deep_link'] ?? null);
     }
 
     private function upsertTypedAppDomain(Tenant $tenant, string $type, string $identifier): void
