@@ -658,7 +658,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
         ]);
 
-        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+        $this->createActiveAttendanceCommitment(
+            (string) $confirmed->_id,
+            $this->firstOccurrenceId($confirmed),
+        );
 
         $response = $this->getJson("{$this->base_api_tenant}agenda?confirmed_only=1&page=1&page_size=10");
         $response->assertStatus(200);
@@ -701,7 +704,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ],
         ]);
 
-        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+        $this->createActiveAttendanceCommitment(
+            (string) $confirmed->_id,
+            $this->firstOccurrenceId($confirmed),
+        );
 
         $response = $this->getJson(
             "{$this->base_api_tenant}agenda?confirmed_only=1&origin_lat=0&origin_lng=0&max_distance_meters=1&page=1&page_size=10"
@@ -914,7 +920,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $confirmed = $this->createEvent(['title' => 'Confirmed Stream Event']);
         $other = $this->createEvent(['title' => 'Other Stream Event']);
 
-        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+        $this->createActiveAttendanceCommitment(
+            (string) $confirmed->_id,
+            $this->firstOccurrenceId($confirmed),
+        );
 
         $response = $this->get(
             "{$this->base_api_tenant}events/stream?confirmed_only=1",
@@ -1158,7 +1167,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         return $event->fresh();
     }
 
-    private function createActiveAttendanceCommitment(string $eventId, ?string $occurrenceId = null): void
+    private function createActiveAttendanceCommitment(string $eventId, string $occurrenceId): void
     {
         AttendanceCommitment::create([
             'user_id' => (string) $this->user->getAuthIdentifier(),
@@ -1170,6 +1179,16 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'confirmed_at' => Carbon::now(),
             'canceled_at' => null,
         ]);
+    }
+
+    private function firstOccurrenceId(Event $event): string
+    {
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('occurrence_index')
+            ->firstOrFail();
+
+        return (string) $occurrence->_id;
     }
 
     private function initializeSystem(): void

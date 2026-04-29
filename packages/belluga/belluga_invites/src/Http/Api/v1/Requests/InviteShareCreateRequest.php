@@ -21,7 +21,7 @@ class InviteShareCreateRequest extends FormRequest
         return [
             'target_ref' => ['required', 'array'],
             'target_ref.event_id' => ['required', 'string', 'max:255'],
-            'target_ref.occurrence_id' => ['nullable', 'string', 'max:255'],
+            'target_ref.occurrence_id' => ['required', 'string', 'max:255'],
             'account_profile_id' => ['nullable', 'string', 'max:255'],
         ];
     }

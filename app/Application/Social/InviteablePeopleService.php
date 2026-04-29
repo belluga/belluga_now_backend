@@ -293,19 +293,7 @@ class InviteablePeopleService
         string $hash,
     ): ?array {
         if (! $targetProfile instanceof AccountProfile) {
-            return [
-                'user_id' => (string) $targetUser->_id,
-                'receiver_user_id' => (string) $targetUser->_id,
-                'receiver_account_profile_id' => null,
-                'display_name' => $this->displayName(null, $targetUser),
-                'avatar_url' => null,
-                'profile_exposure_level' => 'aggregate_only',
-                'inviteable_reasons' => ['contact_match'],
-                'source_tags' => ['contact_match'],
-                'is_inviteable' => true,
-                'contact_hash' => $hash,
-                'contact_type' => $type,
-            ];
+            return null;
         }
 
         if (
@@ -352,7 +340,7 @@ class InviteablePeopleService
     }
 
     /**
-     * @return array{user_id:string,receiver_account_profile_id:?string,display_name:?string,avatar_url:?string}|null
+     * @return array{user_id:string,receiver_account_profile_id:string,display_name:?string,avatar_url:?string}|null
      */
     public function recipientForUserId(string $userId): ?array
     {
@@ -361,18 +349,16 @@ class InviteablePeopleService
             return null;
         }
 
-        if ($recipient['receiver_account_profile_id'] !== null) {
-            $profile = AccountProfile::query()->find($recipient['receiver_account_profile_id']);
-            if (! $profile instanceof AccountProfile || ! $this->profileIsInviteable($profile)) {
-                return null;
-            }
+        $profile = AccountProfile::query()->find($recipient['receiver_account_profile_id']);
+        if (! $profile instanceof AccountProfile || ! $this->profileIsInviteable($profile)) {
+            return null;
         }
 
         return $recipient;
     }
 
     /**
-     * @return array{user_id:string,receiver_account_profile_id:?string,display_name:?string,avatar_url:?string}|null
+     * @return array{user_id:string,receiver_account_profile_id:string,display_name:?string,avatar_url:?string}|null
      */
     public function recipientIdentityForUserId(string $userId): ?array
     {
@@ -382,12 +368,15 @@ class InviteablePeopleService
         }
 
         $profile = $this->personalProfileForUserId($userId);
+        if (! $profile instanceof AccountProfile) {
+            return null;
+        }
 
         return [
             'user_id' => (string) $user->_id,
-            'receiver_account_profile_id' => $profile instanceof AccountProfile ? (string) $profile->_id : null,
+            'receiver_account_profile_id' => (string) $profile->_id,
             'display_name' => $this->displayName($profile, $user),
-            'avatar_url' => $profile instanceof AccountProfile ? $this->nullableString($profile->avatar_url) : null,
+            'avatar_url' => $this->nullableString($profile->avatar_url),
         ];
     }
 
@@ -478,7 +467,6 @@ class InviteablePeopleService
 
         return [
             'user_id' => $targetUser instanceof AccountUser ? (string) $targetUser->_id : null,
-            'receiver_user_id' => $targetUser instanceof AccountUser ? (string) $targetUser->_id : null,
             'receiver_account_profile_id' => (string) $targetProfile->_id,
             'display_name' => $this->displayName($targetProfile, $targetUser),
             'avatar_url' => $this->nullableString($targetProfile->avatar_url),

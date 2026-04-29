@@ -97,7 +97,7 @@ class InviteShareService
                 'code' => (string) $share->code,
                 'target_ref' => [
                     'event_id' => (string) $share->event_id,
-                    'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+                    'occurrence_id' => (string) $share->occurrence_id,
                 ],
                 'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
             ],
@@ -133,7 +133,7 @@ class InviteShareService
 
         $target = $this->targetResolver->resolve([
             'event_id' => (string) $share->event_id,
-            'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+            'occurrence_id' => (string) $share->occurrence_id,
         ]);
         $principal = $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []);
         $inviterDisplayName = trim((string) ($share->inviter_display_name ?? ''));
@@ -266,7 +266,7 @@ class InviteShareService
                 'invite_id' => null,
                 'target_ref' => [
                     'event_id' => (string) $share->event_id,
-                    'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+                    'occurrence_id' => (string) $share->occurrence_id,
                 ],
                 'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
                 'status' => 'expired',
@@ -282,7 +282,7 @@ class InviteShareService
             $existing = $this->createMaterializedInviteEdge($userId, $share);
             $this->projectionService->rebuildReceiverTargetProjection($userId, [
                 'event_id' => (string) $existing->event_id,
-                'occurrence_id' => $existing->occurrence_id ? (string) $existing->occurrence_id : null,
+                'occurrence_id' => (string) $existing->occurrence_id,
             ]);
         }
 
@@ -308,7 +308,7 @@ class InviteShareService
             $edge = $this->createMaterializedInviteEdge($userId, $share);
             $this->projectionService->rebuildReceiverTargetProjection($userId, [
                 'event_id' => (string) $edge->event_id,
-                'occurrence_id' => $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+                'occurrence_id' => (string) $edge->occurrence_id,
             ]);
         }
 
@@ -329,7 +329,7 @@ class InviteShareService
             'code' => (string) $share->code,
             'target_ref' => [
                 'event_id' => (string) $share->event_id,
-                'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+                'occurrence_id' => (string) $share->occurrence_id,
             ],
             'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
         ];
@@ -358,7 +358,7 @@ class InviteShareService
     }
 
     /**
-     * @param  array{event_id:string,occurrence_id:?string}  $targetRef
+     * @param  array{event_id:string,occurrence_id:string}  $targetRef
      * @param  array<string,int>  $limits
      * @param  array<string,int>  $cooldowns
      */
@@ -522,16 +522,14 @@ class InviteShareService
     private function findExistingInviteEdge(string $userId, InviteShareCode $share): ?InviteEdge
     {
         $recipient = $this->identityGateway->resolveUserRecipientOwnership($userId);
-        $receiverAccountProfileId = is_array($recipient)
-            ? $this->nullableString($recipient['receiver_account_profile_id'] ?? null)
-            : null;
+        $receiverAccountProfileId = $this->requireReceiverAccountProfileId($recipient);
 
         $query = InviteEdge::query()
             ->where('event_id', (string) $share->event_id)
-            ->where('occurrence_id', $share->occurrence_id ? (string) $share->occurrence_id : null)
+            ->where('occurrence_id', (string) $share->occurrence_id)
             ->where('inviter_principal.kind', data_get($share->inviter_principal, 'kind'))
             ->where('inviter_principal.principal_id', data_get($share->inviter_principal, 'principal_id'));
-        $this->applyReceiverScope($query, $userId, $receiverAccountProfileId);
+        $this->applyReceiverScope($query, $receiverAccountProfileId);
 
         /** @var InviteEdge|null $existing */
         $existing = $query->first();
@@ -543,17 +541,15 @@ class InviteShareService
     {
         $target = $this->targetResolver->resolve([
             'event_id' => (string) $share->event_id,
-            'occurrence_id' => $share->occurrence_id ? (string) $share->occurrence_id : null,
+            'occurrence_id' => (string) $share->occurrence_id,
         ]);
 
         $recipient = $this->identityGateway->resolveUserRecipientOwnership($userId);
-        if ($recipient === null) {
-            throw new InviteDomainException('auth_required', 401);
-        }
+        $receiverAccountProfileId = $this->requireReceiverAccountProfileId($recipient);
 
         [$status, $supersessionReason] = $this->materializedInviteState(
             $recipient['user_id'],
-            $this->nullableString($recipient['receiver_account_profile_id'] ?? null),
+            $receiverAccountProfileId,
             $target['target_ref']['event_id'],
             $target['target_ref']['occurrence_id'],
         );
@@ -563,9 +559,7 @@ class InviteShareService
             'event_id' => $target['target_ref']['event_id'],
             'occurrence_id' => $target['target_ref']['occurrence_id'],
             'receiver_user_id' => $recipient['user_id'],
-            'receiver_account_profile_id' => $this->nullableString(
-                $recipient['receiver_account_profile_id'] ?? null
-            ),
+            'receiver_account_profile_id' => $receiverAccountProfileId,
             'receiver_contact_hash' => null,
             'inviter_principal' => $share->inviter_principal,
             'account_profile_id' => $share->account_profile_id ? (string) $share->account_profile_id : null,
@@ -598,9 +592,9 @@ class InviteShareService
      */
     private function materializedInviteState(
         string $userId,
-        ?string $receiverAccountProfileId,
+        string $receiverAccountProfileId,
         string $eventId,
-        ?string $occurrenceId,
+        string $occurrenceId,
     ): array {
         if ($this->attendanceGateway->hasActiveAttendanceConfirmation($userId, $eventId, $occurrenceId)) {
             return ['superseded', self::SUPERSESSION_REASON_DIRECT_CONFIRMATION];
@@ -610,7 +604,7 @@ class InviteShareService
             ->where('event_id', $eventId)
             ->where('occurrence_id', $occurrenceId)
             ->where('credited_acceptance', true);
-        $this->applyReceiverScope($creditedWinnerQuery, $userId, $receiverAccountProfileId);
+        $this->applyReceiverScope($creditedWinnerQuery, $receiverAccountProfileId);
 
         $creditedWinnerExists = $creditedWinnerQuery->exists();
         if ($creditedWinnerExists) {
@@ -630,7 +624,7 @@ class InviteShareService
             'invite_id' => $this->inviteEdgeId($edge),
             'target_ref' => [
                 'event_id' => (string) $edge->event_id,
-                'occurrence_id' => $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+                'occurrence_id' => (string) $edge->occurrence_id,
             ],
             'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
             'status' => (string) ($edge->status ?? 'pending'),
@@ -657,15 +651,26 @@ class InviteShareService
         return is_string($identityState) && trim($identityState) === 'anonymous';
     }
 
-    private function applyReceiverScope(mixed $query, string $receiverUserId, ?string $receiverAccountProfileId): void
+    private function applyReceiverScope(mixed $query, string $receiverAccountProfileId): void
     {
-        if ($receiverAccountProfileId !== null && $receiverAccountProfileId !== '') {
-            $query->where('receiver_account_profile_id', $receiverAccountProfileId);
+        $query->where('receiver_account_profile_id', $receiverAccountProfileId);
+    }
 
-            return;
+    /**
+     * @param  array{receiver_account_profile_id?:mixed}|null  $recipient
+     */
+    private function requireReceiverAccountProfileId(?array $recipient): string
+    {
+        if ($recipient === null) {
+            throw new InviteDomainException('recipient_profile_required', 422, 'Invite recipient account profile is required.');
         }
 
-        $query->where('receiver_user_id', $receiverUserId);
+        $receiverAccountProfileId = $this->nullableString($recipient['receiver_account_profile_id'] ?? null);
+        if ($receiverAccountProfileId === null) {
+            throw new InviteDomainException('recipient_profile_required', 422, 'Invite recipient account profile is required.');
+        }
+
+        return $receiverAccountProfileId;
     }
 
     private function nullableString(mixed $value): ?string

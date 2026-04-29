@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Invites;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Application\Social\InviteablePeopleService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
@@ -15,6 +16,7 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
 {
     public function __construct(
         private readonly InviteablePeopleService $inviteablePeople,
+        private readonly AccountProfileBootstrapService $profileBootstrapper,
     ) {}
 
     public function resolveInviterPrincipal(mixed $user, ?string $accountProfileId): array
@@ -65,6 +67,11 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
 
     public function resolveUserRecipientOwnership(string $userId): ?array
     {
+        $user = AccountUser::query()->find($userId);
+        if ($user instanceof AccountUser) {
+            $this->profileBootstrapper->ensurePersonalAccount($user);
+        }
+
         return $this->inviteablePeople->recipientIdentityForUserId($userId);
     }
 

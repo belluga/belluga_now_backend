@@ -13,6 +13,7 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteCommandIdempotency;
@@ -286,7 +287,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $this->assertSame('full_profile', $friendItem['profile_exposure_level']);
     }
 
-    public function test_contact_import_suppresses_non_inviteable_profiles_and_preserves_legacy_user_match_without_profile(): void
+    public function test_contact_import_suppresses_non_inviteable_profiles_and_user_matches_without_profile(): void
     {
         $viewer = $this->createReleaseUser('Legacy Match Viewer', '+55 27 99999-2301');
         $nonInviteable = $this->createReleaseUser('Legacy Non Inviteable', '+55 27 99999-2302');
@@ -324,10 +325,10 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ],
         ]);
         $legacy->assertOk();
-        $legacy->assertJsonPath('matches.0.user_id', (string) $legacyUser->_id);
-        $legacy->assertJsonPath('matches.0.receiver_account_profile_id', null);
+        $this->assertSame([], $legacy->json('matches'));
 
         $this->assertNotSame('', (string) $nonInviteableProfile->_id);
+        $this->assertNotSame('', (string) $legacyUser->_id);
     }
 
     public function test_hot_mutation_payloads_have_server_side_size_caps(): void
@@ -347,7 +348,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         ])->assertUnprocessable();
 
         $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => array_fill(0, 101, [
                 'receiver_account_profile_id' => (string) $receiverProfile->_id,
             ]),
@@ -364,9 +365,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         Sanctum::actingAs($sender, ['*']);
 
         $response = $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => [
-                'event_id' => (string) $event->_id,
-            ],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['receiver_account_profile_id' => (string) $receiverProfile->_id],
             ],
@@ -391,7 +390,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
 
         Sanctum::actingAs($firstSender, ['*']);
         $firstInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['receiver_account_profile_id' => (string) $receiverProfile->_id],
             ],
@@ -399,7 +398,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
 
         Sanctum::actingAs($secondSender, ['*']);
         $secondInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['receiver_account_profile_id' => (string) $receiverProfile->_id],
             ],
@@ -439,10 +438,14 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         ]);
         $receiverProfile = $this->personalProfileFor($receiver);
         $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
 
         Sanctum::actingAs($sender, ['*']);
         $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => [
+                'event_id' => (string) $event->_id,
+                'occurrence_id' => $occurrenceId,
+            ],
             'recipients' => [
                 ['receiver_account_profile_id' => (string) $receiverProfile->_id],
             ],
@@ -482,10 +485,14 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $unrelated = $this->createReleaseUser('Direct Confirmation Unrelated', '+55 27 99999-3203');
         $receiverProfile = $this->personalProfileFor($receiver);
         $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
 
         Sanctum::actingAs($sender, ['*']);
         $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => [
+                'event_id' => (string) $event->_id,
+                'occurrence_id' => $occurrenceId,
+            ],
             'recipients' => [
                 ['receiver_account_profile_id' => (string) $receiverProfile->_id],
             ],
@@ -497,7 +504,9 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $invite->save();
 
         Sanctum::actingAs($receiver, ['*']);
-        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [])
+        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ])
             ->assertOk();
 
         $supersededInvite = InviteEdge::query()->find($inviteId);
@@ -518,7 +527,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
 
         Sanctum::actingAs($creditedSender, ['*']);
         $creditedInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['receiver_account_profile_id' => (string) $receiverProfile->_id],
             ],
@@ -536,7 +545,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
 
         Sanctum::actingAs($shareSender, ['*']);
         $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
         ]);
         $shareResponse->assertOk();
         $code = (string) $shareResponse->json('code');
@@ -575,7 +584,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         );
     }
 
-    public function test_legacy_user_and_contact_hash_recipient_paths_respect_profile_inviteability(): void
+    public function test_legacy_user_recipient_is_rejected_and_contact_hash_respects_profile_inviteability(): void
     {
         $sender = $this->createReleaseUser('Legacy Inviteability Sender', '+55 27 99999-3401');
         $receiver = $this->createReleaseUser('Legacy Inviteability Receiver', '+55 27 99999-3402');
@@ -610,18 +619,15 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         Sanctum::actingAs($sender, ['*']);
 
         $directResponse = $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['receiver_user_id' => (string) $receiver->_id],
             ],
         ]);
-        $directResponse->assertOk();
-        $directResponse->assertJsonCount(0, 'created');
-        $directResponse->assertJsonPath('blocked.0.receiver_user_id', (string) $receiver->_id);
-        $directResponse->assertJsonPath('blocked.0.reason', 'suppressed');
+        $directResponse->assertUnprocessable();
 
         $hashResponse = $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['contact_hash' => $contactHash],
             ],
@@ -631,15 +637,12 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $hashResponse->assertJsonPath('blocked.0.reason', 'suppressed');
 
         $legacyFallbackResponse = $this->postJson("{$this->base_api_tenant}invites", [
-            'target_ref' => ['event_id' => (string) $event->_id],
+            'target_ref' => $this->targetRef($event),
             'recipients' => [
                 ['receiver_user_id' => (string) $legacyUser->_id],
             ],
         ]);
-        $legacyFallbackResponse->assertOk();
-        $legacyFallbackResponse->assertJsonCount(1, 'created');
-        $legacyFallbackResponse->assertJsonPath('created.0.receiver_user_id', (string) $legacyUser->_id);
-        $legacyFallbackResponse->assertJsonPath('created.0.receiver_account_profile_id', null);
+        $legacyFallbackResponse->assertUnprocessable();
     }
 
     private function createReleaseUser(string $name, string $phone): AccountUser
@@ -753,6 +756,27 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         ]]);
 
         return $event->fresh();
+    }
+
+    private function firstOccurrenceId(Event $event): string
+    {
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('occurrence_index')
+            ->firstOrFail();
+
+        return (string) $occurrence->_id;
+    }
+
+    /**
+     * @return array{event_id:string,occurrence_id:string}
+     */
+    private function targetRef(Event $event): array
+    {
+        return [
+            'event_id' => (string) $event->_id,
+            'occurrence_id' => $this->firstOccurrenceId($event),
+        ];
     }
 
     private function initializeSystem(): void

@@ -734,12 +734,12 @@ class EventQueryService
      */
     private function runAgendaQuery(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
     {
-        $confirmedEventIds = $this->resolveConfirmedEventIds($filters, $userId);
-        if (is_array($confirmedEventIds) && $confirmedEventIds === []) {
+        $confirmedOccurrenceIds = $this->resolveConfirmedOccurrenceIds($filters, $userId);
+        if (is_array($confirmedOccurrenceIds) && $confirmedOccurrenceIds === []) {
             return [];
         }
 
-        $pipeline = $this->buildAgendaPipeline($filters, $skip, $limit, $useGeo, $confirmedEventIds);
+        $pipeline = $this->buildAgendaPipeline($filters, $skip, $limit, $useGeo, $confirmedOccurrenceIds);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -753,12 +753,12 @@ class EventQueryService
      */
     private function runStreamQuery(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
     {
-        $confirmedEventIds = $this->resolveConfirmedEventIds($filters, $userId);
-        if (is_array($confirmedEventIds) && $confirmedEventIds === []) {
+        $confirmedOccurrenceIds = $this->resolveConfirmedOccurrenceIds($filters, $userId);
+        if (is_array($confirmedOccurrenceIds) && $confirmedOccurrenceIds === []) {
             return [];
         }
 
-        $pipeline = $this->buildStreamPipeline($filters, $since, $useGeo, $confirmedEventIds);
+        $pipeline = $this->buildStreamPipeline($filters, $since, $useGeo, $confirmedOccurrenceIds);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -775,7 +775,7 @@ class EventQueryService
         int $skip,
         int $limit,
         bool $useGeo,
-        ?array $confirmedEventIds = null
+        ?array $confirmedOccurrenceIds = null
     ): array {
         $now = new UTCDateTime(Carbon::now());
         $pipeline = [];
@@ -820,7 +820,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
+        $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
 
         $pipeline[] = [
             '$addFields' => [
@@ -870,7 +870,7 @@ class EventQueryService
         array $filters,
         Carbon $since,
         bool $useGeo,
-        ?array $confirmedEventIds = null
+        ?array $confirmedOccurrenceIds = null
     ): array {
         $sinceUtc = new UTCDateTime($since);
         $pipeline = [];
@@ -916,7 +916,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
+        $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
         $pipeline[] = ['$limit' => InputConstraints::PUBLIC_STREAM_DELTA_LIMIT];
@@ -1023,17 +1023,17 @@ class EventQueryService
 
     /**
      * @param  array<int, array<string, mixed>>  $pipeline
-     * @param  array<int, string>|null  $confirmedEventIds
+     * @param  array<int, string>|null  $confirmedOccurrenceIds
      */
-    private function applyConfirmedEventsFilter(array &$pipeline, ?array $confirmedEventIds): void
+    private function applyConfirmedOccurrencesFilter(array &$pipeline, ?array $confirmedOccurrenceIds): void
     {
-        if ($confirmedEventIds === null) {
+        if ($confirmedOccurrenceIds === null) {
             return;
         }
 
         $pipeline[] = [
             '$match' => [
-                'event_id' => ['$in' => $confirmedEventIds],
+                '_id' => ['$in' => $this->buildDocumentIdCandidates($confirmedOccurrenceIds)],
             ],
         ];
     }
@@ -1164,7 +1164,7 @@ class EventQueryService
      * @param  array<string, mixed>  $filters
      * @return array<int, string>|null
      */
-    private function resolveConfirmedEventIds(array $filters, ?string $userId): ?array
+    private function resolveConfirmedOccurrenceIds(array $filters, ?string $userId): ?array
     {
         if ((bool) ($filters['confirmed_only'] ?? false) !== true) {
             return null;
@@ -1175,7 +1175,7 @@ class EventQueryService
         }
 
         return array_values(array_unique(array_values(array_filter(
-            array_map(static fn (mixed $value): string => trim((string) $value), $this->eventAttendanceRead->listConfirmedEventIdsForUser($userId)),
+            array_map(static fn (mixed $value): string => trim((string) $value), $this->eventAttendanceRead->listConfirmedOccurrenceIdsForUser($userId)),
             static fn (string $value): bool => $value !== ''
         ))));
     }
@@ -1516,9 +1516,18 @@ class EventQueryService
      */
     private function buildEventIdCandidates(array $eventIds): array
     {
+        return $this->buildDocumentIdCandidates($eventIds);
+    }
+
+    /**
+     * @param  array<int, string>  $documentIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildDocumentIdCandidates(array $documentIds): array
+    {
         $candidates = [];
-        foreach ($eventIds as $eventId) {
-            $normalized = trim($eventId);
+        foreach ($documentIds as $documentId) {
+            $normalized = trim($documentId);
             if ($normalized === '') {
                 continue;
             }

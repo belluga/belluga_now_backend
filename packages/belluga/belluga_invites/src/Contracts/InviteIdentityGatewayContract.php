@@ -20,7 +20,7 @@ interface InviteIdentityGatewayContract
     /**
      * @return array{
      *     user_id: string,
-     *     receiver_account_profile_id?: ?string,
+     *     receiver_account_profile_id: string,
      *     display_name: ?string,
      *     avatar_url: ?string
      * }|null
@@ -30,7 +30,7 @@ interface InviteIdentityGatewayContract
     /**
      * @return array{
      *     user_id: string,
-     *     receiver_account_profile_id?: ?string,
+     *     receiver_account_profile_id: string,
      *     display_name: ?string,
      *     avatar_url: ?string
      * }|null
