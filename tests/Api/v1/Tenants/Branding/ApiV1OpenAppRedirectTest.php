@@ -100,6 +100,72 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame('/invite?code=CODE123', $fallbackQuery['redirect'] ?? null);
     }
 
+    public function test_android_public_routes_redirect_through_open_app_intent_on_direct_navigation(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.direct');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.direct',
+                ],
+            ],
+        ]);
+
+        $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
+        $cases = [
+            ['url' => $tenantOrigin.'/', 'expected_target_path' => '/'],
+            ['url' => $tenantOrigin.'/invite', 'expected_target_path' => '/invite'],
+            [
+                'url' => $tenantOrigin.'/invite?code=CODE123',
+                'expected_target_path' => '/invite?code=CODE123',
+            ],
+            [
+                'url' => $tenantOrigin.'/parceiro/profile-slug',
+                'expected_target_path' => '/parceiro/profile-slug',
+            ],
+            [
+                'url' => $tenantOrigin.'/agenda/evento/forro?occurrence=occ-1',
+                'expected_target_path' => '/agenda/evento/forro?occurrence=occ-1',
+            ],
+        ];
+
+        foreach ($cases as $case) {
+            $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+                ->get($case['url']);
+
+            $response->assertRedirect();
+            $openAppLocation = (string) $response->headers->get('Location');
+            $this->assertStringStartsWith($tenantOrigin.'/open-app?', $openAppLocation);
+
+            $intentResponse = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+                ->get($openAppLocation);
+            $intentResponse->assertRedirect();
+
+            $intent = $this->parseAndroidIntentLocation(
+                (string) $intentResponse->headers->get('Location')
+            );
+            $this->assertSame('com.guarappari.direct', $intent['package']);
+
+            $intentData = parse_url($intent['data']);
+            $intentTarget = ($intentData['path'] ?? '/')
+                .(isset($intentData['query']) ? '?'.$intentData['query'] : '');
+            $this->assertSame($case['expected_target_path'], $intentTarget);
+
+            $fallback = parse_url($intent['fallback_url']);
+            parse_str((string) ($fallback['query'] ?? ''), $fallbackQuery);
+            $this->assertSame(
+                parse_url($tenantOrigin, PHP_URL_HOST),
+                $fallback['host'] ?? null
+            );
+            $this->assertSame('/baixe-o-app', $fallback['path'] ?? null);
+            $this->assertSame($case['expected_target_path'], $fallbackQuery['redirect'] ?? null);
+        }
+    }
+
     public function test_open_app_redirect_for_android_public_detail_context_preserves_target_path(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);

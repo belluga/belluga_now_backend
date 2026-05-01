@@ -205,7 +205,7 @@ class WebToAppPromotionService
             return $origin.'/invite?code='.rawurlencode($code);
         }
 
-        if ($targetPath === '/' || $pathOnly === '/invite' || $pathOnly === '/convites') {
+        if ($targetPath === '/') {
             return $origin.'/';
         }
 
