@@ -310,6 +310,10 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('direct_confirmation', (string) $inviteAfterConfirmation->supersession_reason);
         $this->assertFalse((bool) $inviteAfterConfirmation->credited_acceptance);
 
+        $feedResponse = $this->getJson("{$this->base_api_tenant}invites");
+        $feedResponse->assertOk();
+        $this->assertSame([], $feedResponse->json('invites'));
+
         $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
         $acceptResponse->assertOk();
         $acceptResponse->assertJsonPath('status', 'already_accepted');
@@ -320,6 +324,53 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('superseded', (string) $inviteAfterLateAccept->status);
         $this->assertSame('direct_confirmation', (string) $inviteAfterLateAccept->supersession_reason);
         $this->assertFalse((bool) $inviteAfterLateAccept->credited_acceptance);
+    }
+
+    public function test_direct_invite_sent_after_receiver_confirmation_is_created_superseded_and_hidden_from_feed(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $receiverAccountProfileId = $this->accountProfileIdFor($this->receiver);
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $this->postJson("{$this->base_api_tenant}events/{$this->event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ])
+            ->assertOk();
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $sendResponse = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => [
+                'event_id' => (string) $this->event->_id,
+                'occurrence_id' => $occurrenceId,
+            ],
+            'recipients' => [
+                ['receiver_account_profile_id' => $receiverAccountProfileId],
+            ],
+        ]);
+
+        $sendResponse->assertOk();
+        $sendResponse->assertJsonPath('created.0.receiver_account_profile_id', $receiverAccountProfileId);
+        $sendResponse->assertJsonPath('created.0.status', 'superseded');
+        $inviteId = (string) $sendResponse->json('created.0.invite_id');
+        $this->assertNotSame('', $inviteId);
+
+        $edge = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($edge);
+        $this->assertSame('superseded', (string) $edge->status);
+        $this->assertSame('direct_confirmation', (string) $edge->supersession_reason);
+        $this->assertFalse((bool) $edge->credited_acceptance);
+
+        $this->assertFalse(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', (string) $this->receiver->_id)
+                ->where('group_key', (string) $this->event->_id.'::'.$occurrenceId)
+                ->exists(),
+        );
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $feedResponse = $this->getJson("{$this->base_api_tenant}invites");
+        $feedResponse->assertOk();
+        $this->assertSame([], $feedResponse->json('invites'));
     }
 
     public function test_accept_invite_rejects_idempotency_key_reused_for_another_invite(): void
