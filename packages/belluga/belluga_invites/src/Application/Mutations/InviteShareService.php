@@ -232,6 +232,9 @@ class InviteShareService
         if ($userId === null) {
             throw new InviteDomainException('auth_required', 401);
         }
+        if ($this->isAnonymousIdentity($user)) {
+            throw new InviteDomainException('auth_required', 401, 'Authenticated account required for invite share acceptance.');
+        }
 
         $normalizedCode = strtoupper(trim($code));
         if ($normalizedCode === '') {

@@ -20,11 +20,11 @@ class AccountProfileBootstrapService
 
     public function ensurePersonalAccount(AccountUser $user): void
     {
+        $this->registrySeeder->ensureDefaults();
+
         if ($this->personalProfileExists($user)) {
             return;
         }
-
-        $this->registrySeeder->ensureDefaults();
 
         $displayName = $user->name ?: 'Personal';
         $documentNumber = 'PERSONAL-'.(string) $user->_id;

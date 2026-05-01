@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Tests\Feature\Auth;
 
 use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Invites\Application\Contacts\ContactImportService;
+use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Illuminate\Support\Facades\Queue;
+use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 
@@ -203,6 +206,150 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         ]);
 
         $this->assertSame($userId, $matches['matches'][0]['user_id'] ?? null);
+    }
+
+    public function test_phone_otp_verification_rematches_existing_contact_hash_directory_rows(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+        ContactHashDirectory::query()->delete();
+
+        $viewer = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Prior Import Viewer',
+            'phones' => ['+5527999997777'],
+        ]);
+        $targetPhone = '+55 27 99999-0420';
+        $targetPhoneHash = hash('sha256', '5527999990420');
+
+        $initialImport = app(ContactImportService::class)->import($viewer, [
+            'contacts' => [
+                [
+                    'type' => 'phone',
+                    'hash' => $targetPhoneHash,
+                ],
+            ],
+        ]);
+
+        $this->assertSame([], $initialImport['matches']);
+        $directoryRow = ContactHashDirectory::query()
+            ->where('importing_user_id', (string) $viewer->_id)
+            ->where('contact_hash', $targetPhoneHash)
+            ->first();
+        $this->assertNotNull($directoryRow);
+        $this->assertNull($directoryRow->matched_user_id);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $targetPhone,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990420',
+            'code' => $otpCode,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $verify->assertStatus(200);
+
+        $targetUserId = (string) $verify->json('data.user_id');
+        $directoryRow->refresh();
+        $this->assertSame($targetUserId, (string) $directoryRow->matched_user_id);
+
+        Sanctum::actingAs($viewer->fresh(), ['*']);
+        $inviteables = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+        $inviteables->assertOk();
+        $inviteables->assertJsonPath('items.0.user_id', $targetUserId);
+        $inviteables->assertJsonPath('items.0.inviteable_reasons.0', 'contact_match');
+    }
+
+    public function test_phone_otp_verification_migrates_anonymous_contact_imports_to_registered_viewer(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+        ContactHashDirectory::query()->delete();
+
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Existing Device Contact',
+            'phones' => ['+55 27 99999-0431'],
+            'emails' => [],
+            'fingerprints' => [],
+            'credentials' => [],
+            'consents' => [],
+        ]);
+        app(AccountProfileBootstrapService::class)->ensurePersonalAccount($target);
+        $target = $target->fresh();
+        $targetPhoneHash = hash('sha256', '5527999990431');
+
+        $anonymous = $this->issueAnonymousIdentity('phone-otp-contact-import-viewer');
+        $anonymousUser = AccountUser::query()->findOrFail($anonymous['user_id']);
+        $initialImport = app(ContactImportService::class)->import($anonymousUser, [
+            'contacts' => [
+                [
+                    'type' => 'phone',
+                    'hash' => $targetPhoneHash,
+                ],
+            ],
+        ]);
+
+        $this->assertSame((string) $target->_id, $initialImport['matches'][0]['user_id'] ?? null);
+        $this->assertNotNull(ContactHashDirectory::query()
+            ->where('importing_user_id', $anonymous['user_id'])
+            ->where('contact_hash', $targetPhoneHash)
+            ->first());
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0430',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990430',
+            'code' => $otpCode,
+            'device_name' => 'android-release-smoke',
+            'anonymous_user_ids' => [$anonymous['user_id']],
+        ]);
+        $verify->assertStatus(200);
+
+        $viewerId = (string) $verify->json('data.user_id');
+        $this->assertNotSame('', $viewerId);
+        $this->assertNull(ContactHashDirectory::query()
+            ->where('importing_user_id', $anonymous['user_id'])
+            ->where('contact_hash', $targetPhoneHash)
+            ->first());
+
+        $migratedRow = ContactHashDirectory::query()
+            ->where('importing_user_id', $viewerId)
+            ->where('contact_hash', $targetPhoneHash)
+            ->first();
+        $this->assertNotNull($migratedRow);
+        $this->assertSame((string) $target->_id, (string) $migratedRow->matched_user_id);
+
+        Sanctum::actingAs(AccountUser::query()->findOrFail($viewerId), ['*']);
+        $inviteables = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+        $inviteables->assertOk();
+        $inviteables->assertJsonPath('items.0.user_id', (string) $target->_id);
+        $inviteables->assertJsonPath('items.0.inviteable_reasons.0', 'contact_match');
     }
 
     public function test_phone_otp_challenge_can_use_whatsapp_webhook_when_otp_url_is_not_configured(): void

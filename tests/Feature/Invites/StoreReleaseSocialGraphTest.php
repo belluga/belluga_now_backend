@@ -111,6 +111,57 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $this->assertSame([], $blocked->json('matches'));
     }
 
+    public function test_contact_import_recovers_when_legacy_personal_profile_type_was_not_inviteable(): void
+    {
+        $viewer = $this->createReleaseUser('Legacy Capability Viewer', '+55 27 99999-0051');
+        $target = $this->createReleaseUser('Legacy Capability Contact', '+55 27 99886-9803');
+        $targetProfile = $this->personalProfileFor($target);
+
+        $this->makePersonalProfilesNonInviteable();
+
+        Sanctum::actingAs($viewer, ['*']);
+        $phoneHash = hash('sha256', '5527998869803');
+        $blocked = $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => $phoneHash],
+            ],
+        ]);
+
+        $blocked->assertOk();
+        $this->assertSame([], $blocked->json('matches'));
+
+        $migration = require base_path('database/migrations/tenants/2026_05_01_000300_backfill_personal_profile_type_inviteability.php');
+        $migration->up();
+
+        $response = $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => $phoneHash],
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('matches.0.user_id', (string) $target->_id);
+        $response->assertJsonPath('matches.0.receiver_account_profile_id', (string) $targetProfile->_id);
+        $response->assertJsonPath('matches.0.inviteable_reasons.0', 'contact_match');
+        $response->assertJsonPath('matches.0.is_inviteable', true);
+    }
+
+    public function test_personal_account_bootstrap_repairs_existing_legacy_personal_profile_type(): void
+    {
+        $user = $this->createReleaseUser('Legacy Bootstrap User', '+55 27 99999-0061');
+        $this->makePersonalProfilesNonInviteable();
+
+        app(AccountProfileBootstrapService::class)->ensurePersonalAccount($user->fresh());
+
+        $type = TenantProfileType::query()
+            ->where('type', 'personal')
+            ->firstOrFail();
+
+        $this->assertTrue((bool) data_get($type->capabilities, 'is_favoritable'));
+        $this->assertTrue((bool) data_get($type->capabilities, 'is_inviteable'));
+        $this->assertTrue((bool) data_get($type->capabilities, 'has_bio'));
+    }
+
     public function test_contact_import_matches_phone_user_that_already_has_non_personal_account_role(): void
     {
         $viewer = $this->createReleaseUser('Viewer Existing Role', '+55 27 99999-0101');
@@ -185,6 +236,49 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             $response->json('items.0.inviteable_reasons'),
         );
         $response->assertJsonPath('items.0.profile_exposure_level', 'full_profile');
+    }
+
+    public function test_inviteable_contacts_keep_late_contact_matches_visible_after_unmatched_directory_cap(): void
+    {
+        $viewer = $this->createReleaseUser('Large Directory Viewer', '+55 27 99999-1101');
+        $target = $this->createReleaseUser('Large Directory Contact', '+55 27 99999-1102');
+        $targetProfile = $this->personalProfileFor($target);
+
+        for ($index = 0; $index < 500; $index++) {
+            ContactHashDirectory::query()->create([
+                'importing_user_id' => (string) $viewer->_id,
+                'contact_hash' => hash('sha256', 'large-directory-unmatched-'.$index),
+                'matched_user_id' => null,
+                'type' => 'phone',
+                'salt_version' => 'v1',
+                'imported_at' => Carbon::now()->subMinute(),
+                'last_seen_at' => Carbon::now()->subMinute(),
+                'created_at' => Carbon::now()->subMinute(),
+                'updated_at' => Carbon::now()->subMinute(),
+            ]);
+        }
+
+        $matchedHash = hash('sha256', '5527999991102');
+        ContactHashDirectory::query()->create([
+            'importing_user_id' => (string) $viewer->_id,
+            'contact_hash' => $matchedHash,
+            'matched_user_id' => (string) $target->_id,
+            'type' => 'phone',
+            'salt_version' => 'v1',
+            'imported_at' => Carbon::now(),
+            'last_seen_at' => Carbon::now(),
+            'created_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
+        ]);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+
+        $response->assertOk();
+        $this->assertContains(
+            (string) $targetProfile->_id,
+            collect($response->json('items'))->pluck('receiver_account_profile_id')->all(),
+        );
     }
 
     public function test_contact_groups_dedupe_members_and_prune_recipients_that_cease_to_be_inviteable(): void
@@ -746,6 +840,26 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
                     'is_poi_enabled' => false,
                     'is_reference_location_enabled' => false,
                     'has_bio' => false,
+                    'has_content' => false,
+                    'has_taxonomies' => false,
+                    'has_avatar' => false,
+                    'has_cover' => false,
+                    'has_events' => false,
+                ],
+            ]);
+    }
+
+    private function makePersonalProfilesNonInviteable(): void
+    {
+        TenantProfileType::query()
+            ->where('type', 'personal')
+            ->update([
+                'capabilities' => [
+                    'is_favoritable' => false,
+                    'is_inviteable' => false,
+                    'is_poi_enabled' => false,
+                    'is_reference_location_enabled' => false,
+                    'has_bio' => true,
                     'has_content' => false,
                     'has_taxonomies' => false,
                     'has_avatar' => false,

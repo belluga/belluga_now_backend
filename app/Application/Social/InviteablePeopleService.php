@@ -30,6 +30,8 @@ class InviteablePeopleService
 
         $contactDirectories = ContactHashDirectory::query()
             ->where('importing_user_id', $viewerId)
+            ->whereNotNull('matched_user_id')
+            ->where('matched_user_id', '!=', '')
             ->orderBy('_id')
             ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
             ->get();

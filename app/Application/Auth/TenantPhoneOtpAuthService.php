@@ -13,6 +13,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
 use App\Support\Auth\AbilityCatalog;
+use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -156,6 +157,7 @@ class TenantPhoneOtpAuthService
 
         $this->profileBootstrapper->ensurePersonalAccount($user);
         $user->refresh();
+        $this->rematchExistingContactImports($user);
 
         $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
             $user,
@@ -248,6 +250,37 @@ class TenantPhoneOtpAuthService
         ]);
 
         return $user->fresh();
+    }
+
+    private function rematchExistingContactImports(AccountUser $user): void
+    {
+        $userId = (string) ($user->_id ?? $user->getKey() ?? '');
+        if ($userId === '') {
+            return;
+        }
+
+        $phoneHashes = collect((array) ($user->phone_hashes ?? []))
+            ->map(static fn (mixed $hash): string => trim((string) $hash))
+            ->filter(static fn (string $hash): bool => $hash !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($phoneHashes === []) {
+            return;
+        }
+
+        ContactHashDirectory::query()
+            ->where('type', 'phone')
+            ->whereIn('contact_hash', $phoneHashes)
+            ->update([
+                'matched_user_id' => $userId,
+                'match_snapshot' => [
+                    'display_name' => trim((string) ($user->name ?? '')) ?: null,
+                    'avatar_url' => null,
+                ],
+                'updated_at' => Carbon::now(),
+            ]);
     }
 
     /**

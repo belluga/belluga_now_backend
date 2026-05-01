@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\TenantProfileType;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistrySeeder
 {
@@ -59,12 +61,58 @@ class AccountProfileRegistrySeeder
 
     public function ensureDefaults(): void
     {
-        if (TenantProfileType::query()->where('type', 'personal')->exists()) {
+        foreach ($this->defaults() as $entry) {
+            $type = trim((string) ($entry['type'] ?? ''));
+            if ($type === '') {
+                continue;
+            }
+
+            $existing = TenantProfileType::query()
+                ->where('type', $type)
+                ->first();
+
+            if (! $existing instanceof TenantProfileType) {
+                TenantProfileType::create($entry);
+                continue;
+            }
+
+            $this->repairDefaultCapabilities($existing, $entry);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     */
+    private function repairDefaultCapabilities(
+        TenantProfileType $type,
+        array $entry,
+    ): void {
+        $current = $this->arrayFrom($type->capabilities ?? []);
+        $defaults = $this->arrayFrom($entry['capabilities'] ?? []);
+        $next = $current + $defaults;
+
+        if ((string) $type->type === 'personal') {
+            $next['is_favoritable'] = true;
+            $next['is_inviteable'] = true;
+        }
+
+        if ($next === $current) {
             return;
         }
 
-        foreach ($this->defaults() as $entry) {
-            TenantProfileType::create($entry);
+        $type->capabilities = $next;
+        $type->save();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function arrayFrom(mixed $value): array
+    {
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return $value->getArrayCopy();
         }
+
+        return is_array($value) ? $value : [];
     }
 }

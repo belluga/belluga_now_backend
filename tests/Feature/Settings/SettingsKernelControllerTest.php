@@ -132,11 +132,14 @@ class SettingsKernelControllerTest extends TestCaseTenant
             ],
             'app_links' => [
                 'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.tenant.omega',
                     'sha256_cert_fingerprints' => [
                         'AA:BB:CC:DD',
                     ],
                 ],
                 'ios' => [
+                    'enabled' => false,
                     'team_id' => 'ABCDE12345',
                     'paths' => ['/invite*'],
                 ],
@@ -218,7 +221,10 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.outbound_integrations.whatsapp.webhook_url', 'https://integrations.example/whatsapp');
         $response->assertJsonPath('data.outbound_integrations.otp.webhook_url', 'https://integrations.example/otp');
         $response->assertJsonPath('data.outbound_integrations.otp.delivery_channel', 'whatsapp');
+        $response->assertJsonPath('data.app_links.android.enabled', true);
+        $response->assertJsonPath('data.app_links.android.store_url', 'https://play.google.com/store/apps/details?id=com.tenant.omega');
         $response->assertJsonPath('data.app_links.android.sha256_cert_fingerprints.0', 'AA:BB:CC:DD');
+        $response->assertJsonPath('data.app_links.ios.enabled', false);
         $response->assertJsonPath('data.app_links.ios.team_id', 'ABCDE12345');
         $response->assertJsonPath('data.app_links.ios.paths.0', '/invite*');
         $response->assertJsonPath('data.resend_email.token', 're_fixture_token');
@@ -593,6 +599,19 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['ios.team_id']);
     }
 
+    public function test_patch_app_links_requires_store_url_when_publication_is_active(): void
+    {
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/app_links", [
+            'android.enabled' => true,
+            'android.store_url' => null,
+            'ios.enabled' => true,
+            'ios.store_url' => '',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['android.store_url', 'ios.store_url']);
+    }
+
     public function test_patch_app_links_accepts_credentials_when_typed_identifiers_exist(): void
     {
         $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
@@ -605,6 +624,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
             ],
             'ios.team_id' => 'ABCDE12345',
             'ios.paths' => ['/invite*', '/accounts*'],
+            'android.enabled' => true,
+            'android.store_url' => 'https://play.google.com/store/apps/details?id=com.tenant.omega',
         ]);
 
         $response->assertStatus(200);
@@ -614,6 +635,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
         );
         $response->assertJsonPath('data.ios.team_id', 'ABCDE12345');
         $response->assertJsonPath('data.ios.paths.1', '/accounts*');
+        $response->assertJsonPath('data.android.enabled', true);
+        $response->assertJsonPath('data.android.store_url', 'https://play.google.com/store/apps/details?id=com.tenant.omega');
     }
 
     public function test_schema_exposes_navigation_nodes_and_conditional_metadata(): void

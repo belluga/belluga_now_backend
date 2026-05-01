@@ -24,6 +24,7 @@ class WebToAppPromotionService
         ?string $code,
         string $storeChannel,
         array $settings,
+        bool $preferPromotionFallback = false,
     ): string {
         $normalizedOrigin = rtrim($origin, '/');
         $propagatedCode = $this->resolvePropagatedCode(
@@ -42,6 +43,7 @@ class WebToAppPromotionService
                 code: $propagatedCode,
                 storeChannel: $storeChannel,
                 settings: $settings,
+                preferPromotionFallback: $preferPromotionFallback,
             );
         }
 
@@ -114,6 +116,15 @@ class WebToAppPromotionService
         return $safe;
     }
 
+    public function prefersPromotionFallback(mixed $fallback): bool
+    {
+        if (! is_scalar($fallback)) {
+            return false;
+        }
+
+        return strtolower(trim((string) $fallback)) === 'promotion';
+    }
+
     /**
      * @param  array<string, mixed>  $settings
      */
@@ -122,10 +133,14 @@ class WebToAppPromotionService
         ?string $code,
         string $storeChannel,
         array $settings,
+        bool $preferPromotionFallback,
     ): string {
+        $promotionFallbackUrl = $preferPromotionFallback
+            ? $this->buildPromotionFallbackUrl($openTargetUrl)
+            : null;
         $storeUrl = $this->associationService->resolveAndroidStoreUrl($settings);
         if ($storeUrl === null) {
-            return $openTargetUrl;
+            return $promotionFallbackUrl ?? $openTargetUrl;
         }
 
         $referrerParams = [
@@ -137,9 +152,20 @@ class WebToAppPromotionService
             $referrerParams['code'] = $code;
         }
 
-        return $this->appendQuery(
+        $fallbackStoreUrl = $this->appendQuery(
             $storeUrl,
             ['referrer' => http_build_query($referrerParams)],
+        );
+        $browserFallbackUrl = $promotionFallbackUrl ?? $fallbackStoreUrl;
+        $packageName = $this->associationService->resolveAndroidPackageName($settings);
+        if ($packageName === '') {
+            return $browserFallbackUrl;
+        }
+
+        return $this->buildAndroidIntentUrl(
+            openTargetUrl: $openTargetUrl,
+            packageName: $packageName,
+            browserFallbackUrl: $browserFallbackUrl,
         );
     }
 
@@ -318,6 +344,60 @@ class WebToAppPromotionService
             : '';
 
         return $path.$query;
+    }
+
+    private function buildPromotionFallbackUrl(string $openTargetUrl): string
+    {
+        $parts = parse_url($openTargetUrl);
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
+            return $openTargetUrl;
+        }
+
+        $origin = strtolower((string) $parts['scheme']).'://'.$parts['host'];
+        if (isset($parts['port'])) {
+            $origin .= ':'.$parts['port'];
+        }
+
+        return $origin.'/baixe-o-app?'.http_build_query([
+            'redirect' => $this->targetPathFromOpenTargetUrl($openTargetUrl),
+        ]);
+    }
+
+    private function buildAndroidIntentUrl(
+        string $openTargetUrl,
+        string $packageName,
+        string $browserFallbackUrl,
+    ): string {
+        $parts = parse_url($openTargetUrl);
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
+            return $browserFallbackUrl;
+        }
+
+        $scheme = strtolower((string) $parts['scheme']);
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return $browserFallbackUrl;
+        }
+
+        $normalizedPackageName = preg_replace('/[^A-Za-z0-9_.]/', '', $packageName);
+        if (! is_string($normalizedPackageName) || $normalizedPackageName === '') {
+            return $browserFallbackUrl;
+        }
+
+        $authority = (string) $parts['host'];
+        if (isset($parts['port'])) {
+            $authority .= ':'.$parts['port'];
+        }
+
+        $path = (string) ($parts['path'] ?? '/');
+        $query = isset($parts['query']) && is_string($parts['query']) && $parts['query'] !== ''
+            ? '?'.$parts['query']
+            : '';
+
+        return 'intent://'.$authority.$path.$query
+            .'#Intent;scheme='.$scheme
+            .';package='.$normalizedPackageName
+            .';S.browser_fallback_url='.rawurlencode($browserFallbackUrl)
+            .';end';
     }
 
     private function isAuthOwnedContinuationPath(string $path): bool

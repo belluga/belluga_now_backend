@@ -519,7 +519,7 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertNull($edge);
     }
 
-    public function test_share_accept_by_code_allows_anonymous_user_and_uses_canonical_acceptance(): void
+    public function test_share_accept_by_code_rejects_anonymous_user(): void
     {
         $occurrenceId = $this->firstOccurrenceId($this->event);
         Sanctum::actingAs($this->sender, ['*']);
@@ -542,30 +542,25 @@ class InvitesFlowTest extends TestCaseTenant
         Sanctum::actingAs($anonymous, []);
 
         $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
-        $acceptResponse->assertOk();
-        $acceptResponse->assertJsonPath('status', 'accepted');
-        $acceptResponse->assertJsonPath('credited_acceptance', true);
-        $acceptResponse->assertJsonPath('target_ref.event_id', (string) $this->event->_id);
-        $acceptResponse->assertJsonPath('target_ref.occurrence_id', $occurrenceId);
+        $acceptResponse->assertStatus(401);
+        $acceptResponse->assertJsonPath('status', 'rejected');
+        $acceptResponse->assertJsonPath('code', 'auth_required');
 
-        $inviteId = (string) $acceptResponse->json('invite_id');
-        $this->assertNotSame('', $inviteId);
-
-        $edge = InviteEdge::query()->find($inviteId);
-        $this->assertNotNull($edge);
-        $this->assertSame((string) $anonymous->_id, (string) $edge->receiver_user_id);
-        $this->assertSame($this->accountProfileIdFor($anonymous), (string) $edge->receiver_account_profile_id);
-        $this->assertSame($occurrenceId, (string) $edge->occurrence_id);
-        $this->assertSame('share_url', (string) $edge->source);
-        $this->assertSame('accepted', (string) $edge->status);
-        $this->assertTrue((bool) $edge->credited_acceptance);
+        $edge = InviteEdge::query()
+            ->where('receiver_user_id', (string) $anonymous->_id)
+            ->where('occurrence_id', $occurrenceId)
+            ->where('source', 'share_url')
+            ->first();
+        $this->assertNull($edge);
 
         $metric = PrincipalSocialMetric::query()
             ->where('principal_kind', 'user')
             ->where('principal_id', (string) $this->sender->_id)
             ->first();
-        $this->assertNotNull($metric);
-        $this->assertSame(1, (int) $metric->credited_invite_acceptances);
+        $this->assertTrue(
+            $metric === null || (int) $metric->credited_invite_acceptances === 0,
+            'Anonymous share accept rejection must not credit inviter metrics.',
+        );
     }
 
     public function test_share_accept_replays_by_idempotency_key_without_creating_duplicate_edges(): void
@@ -579,15 +574,8 @@ class InvitesFlowTest extends TestCaseTenant
         $code = (string) $shareResponse->json('code');
         $this->assertNotSame('', $code);
 
-        $anonymous = AccountUser::query()->create([
-            'identity_state' => 'anonymous',
-            'emails' => [],
-            'phones' => [],
-            'fingerprints' => [],
-            'credentials' => [],
-            'consents' => [],
-        ]);
-        Sanctum::actingAs($anonymous, []);
+        $receiver = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($receiver, []);
 
         $firstResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", [
             'idempotency_key' => 'share-accept-replay-001',
@@ -601,7 +589,7 @@ class InvitesFlowTest extends TestCaseTenant
         $secondResponse->assertOk();
         $secondResponse->assertJsonPath('status', 'accepted');
         $secondResponse->assertJsonPath('invite_id', $firstResponse->json('invite_id'));
-        $receiverAccountProfileId = $this->accountProfileIdFor($anonymous);
+        $receiverAccountProfileId = $this->accountProfileIdFor($receiver);
 
         $this->assertSame(
             1,
