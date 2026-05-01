@@ -1535,6 +1535,20 @@ class MapPoisControllerTest extends TestCaseTenant
                 'is_favoritable' => true,
             ],
         ]);
+        TenantProfileType::query()
+            ->where('type', 'personal')
+            ->update([
+                'allowed_taxonomies' => ['internal_only'],
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'person',
+                    'color' => '#333333',
+                    'icon_color' => '#FFFFFF',
+                ],
+                'capabilities.is_favoritable' => true,
+                'capabilities.is_inviteable' => true,
+                'capabilities.is_publicly_discoverable' => false,
+            ]);
         TenantProfileType::create([
             'type' => 'internal_partner',
             'label' => 'Parceiro interno',
@@ -1560,6 +1574,7 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
             ],
         ]);
         $galleryType->forceFill([
@@ -1598,6 +1613,10 @@ class MapPoisControllerTest extends TestCaseTenant
             collect($response->json('type_options.account_profile') ?? [])
                 ->firstWhere('value', 'internal_partner')
         );
+        $this->assertNull(
+            collect($response->json('type_options.account_profile') ?? [])
+                ->firstWhere('value', 'personal')
+        );
         $galleryFilter = collect($response->json('filters') ?? [])
             ->firstWhere('key', 'gallery');
         $this->assertNotNull($galleryFilter);
@@ -1629,6 +1648,7 @@ class MapPoisControllerTest extends TestCaseTenant
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_favoritable' => true,
+                    'is_publicly_discoverable' => true,
                 ],
             ]);
         }

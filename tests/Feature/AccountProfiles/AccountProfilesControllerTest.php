@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
-use App\Application\Accounts\AccountUserService;
 use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -23,8 +23,8 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
-use Illuminate\Support\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -82,6 +82,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_favoritable' => false,
+                'is_publicly_discoverable' => false,
                 'is_poi_enabled' => false,
             ],
         ]);
@@ -213,6 +214,130 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('venue', $items->first()['profile_type'] ?? null);
+    }
+
+    public function test_public_account_profile_index_excludes_personal_profiles_even_when_inviteable_and_favoritable(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::query()
+            ->where('type', 'personal')
+            ->update([
+                'capabilities.is_favoritable' => true,
+                'capabilities.is_inviteable' => true,
+                'capabilities.is_publicly_discoverable' => false,
+            ]);
+
+        $personal = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Personal Inviteable Profile',
+            'slug' => 'personal-inviteable-profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        TenantProfileType::create([
+            'type' => 'public_catalog_guard',
+            'label' => 'Public Catalog Guard',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+            ],
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Public Catalog Account',
+            'document' => 'DOC-PUBLIC-CATALOG-GUARD',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'public_catalog_guard',
+            'display_name' => 'Public Catalog Guard',
+            'slug' => 'public-catalog-guard',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $indexResponse = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $indexResponse->assertStatus(200);
+        $this->assertSame(
+            ['Public Catalog Guard'],
+            collect($indexResponse->json('data'))->pluck('display_name')->values()->all()
+        );
+
+        $filteredResponse = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=personal"
+        );
+
+        $filteredResponse->assertStatus(200);
+        $this->assertSame([], $filteredResponse->json('data'));
+
+        $detailResponse = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/{$personal->slug}"
+        );
+
+        $detailResponse->assertStatus(404);
+    }
+
+    public function test_public_account_profile_index_keeps_legacy_public_types_without_discovery_flag(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::query()
+            ->where('type', 'personal')
+            ->firstOrFail()
+            ->forceFill([
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_inviteable' => true,
+                ],
+            ])
+            ->save();
+
+        TenantProfileType::create([
+            'type' => 'public_catalog_fixture',
+            'label' => 'Public Catalog Fixture',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Legacy Personal Profile',
+            'slug' => 'legacy-personal-profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Legacy Public Catalog Account',
+            'document' => 'DOC-LEGACY-PUBLIC-CATALOG',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'public_catalog_fixture',
+            'display_name' => 'Legacy Public Catalog Profile',
+            'slug' => 'legacy-public-catalog-profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            ['Legacy Public Catalog Profile'],
+            collect($response->json('data'))->pluck('display_name')->values()->all()
+        );
     }
 
     public function test_public_account_profile_index_returns_empty_when_filter_requests_non_favoritable_type(): void
@@ -490,6 +615,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
             ],
         ]);
@@ -719,6 +845,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
             ],
         ]);
@@ -851,6 +978,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
             ],
         ]);
@@ -1232,7 +1360,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->createAccountUser([]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}account_profiles?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1)."&page_size=10"
+            "{$this->base_api_tenant}account_profiles?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1).'&page_size=10'
         );
 
         $response->assertStatus(422);
@@ -1244,7 +1372,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->createAccountUser([]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=".(InputConstraints::PUBLIC_PAGE_MAX + 1)."&page_size=10"
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=".(InputConstraints::PUBLIC_PAGE_MAX + 1).'&page_size=10'
         );
 
         $response->assertStatus(422);

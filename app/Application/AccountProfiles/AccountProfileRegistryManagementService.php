@@ -253,6 +253,9 @@ class AccountProfileRegistryManagementService
             'is_inviteable' => array_key_exists('is_inviteable', $capabilities)
                 ? (bool) $capabilities['is_inviteable']
                 : (bool) ($currentCapabilities['is_inviteable'] ?? false),
+            'is_publicly_discoverable' => array_key_exists('is_publicly_discoverable', $capabilities)
+                ? (bool) $capabilities['is_publicly_discoverable']
+                : (bool) ($currentCapabilities['is_publicly_discoverable'] ?? false),
             'is_poi_enabled' => $isPoiEnabled,
             'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
             'has_bio' => array_key_exists('has_bio', $capabilities)
