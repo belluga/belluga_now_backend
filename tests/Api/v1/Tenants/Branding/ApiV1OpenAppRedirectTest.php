@@ -100,6 +100,41 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame('/invite?code=CODE123', $fallbackQuery['redirect'] ?? null);
     }
 
+    public function test_open_app_redirect_for_android_invite_without_code_falls_back_to_home(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.openapp');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.openapp',
+                ],
+            ],
+        ]);
+
+        $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+            ->get("{$this->base_tenant_url}open-app?path=/invite&store_channel=web&fallback=promotion");
+
+        $response->assertRedirect();
+
+        $intent = $this->parseAndroidIntentLocation((string) $response->headers->get('Location'));
+        $intentData = parse_url($intent['data']);
+
+        $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
+        $this->assertSame(parse_url($tenantOrigin, PHP_URL_HOST), $intentData['host'] ?? null);
+        $this->assertSame('/', $intentData['path'] ?? null);
+        $this->assertArrayNotHasKey('query', $intentData);
+
+        $fallback = parse_url($intent['fallback_url']);
+        parse_str((string) ($fallback['query'] ?? ''), $fallbackQuery);
+
+        $this->assertSame('/baixe-o-app', $fallback['path'] ?? null);
+        $this->assertSame('/', $fallbackQuery['redirect'] ?? null);
+    }
+
     public function test_android_public_routes_redirect_through_open_app_intent_on_direct_navigation(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
@@ -118,7 +153,6 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
         $cases = [
             ['url' => $tenantOrigin.'/', 'expected_target_path' => '/'],
-            ['url' => $tenantOrigin.'/invite', 'expected_target_path' => '/invite'],
             [
                 'url' => $tenantOrigin.'/invite?code=CODE123',
                 'expected_target_path' => '/invite?code=CODE123',
