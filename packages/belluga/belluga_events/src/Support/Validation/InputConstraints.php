@@ -36,6 +36,10 @@ final class InputConstraints
 
     public const EVENT_OCCURRENCES_MAX = 120;
 
+    public const EVENT_OCCURRENCE_TAXONOMY_TERMS_TOTAL_MAX = 240;
+
+    public const EVENT_OCCURRENCE_TAXONOMY_UNIQUE_TERMS_MAX = 64;
+
     public const EVENT_OCCURRENCE_PARTIES_MAX = 64;
 
     public const EVENT_OCCURRENCE_PARTIES_TOTAL_MAX = 240;
