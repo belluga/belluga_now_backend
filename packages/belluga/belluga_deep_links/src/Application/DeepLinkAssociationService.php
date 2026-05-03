@@ -74,17 +74,16 @@ class DeepLinkAssociationService
      */
     public function resolveAndroidStoreUrl(array $settings): ?string
     {
+        if (! $this->isPlatformPublicationEnabled($settings, 'android')) {
+            return null;
+        }
+
         $configured = $this->normalizeText(data_get($settings, 'android.store_url'));
         if ($configured !== null) {
             return $configured;
         }
 
-        $packageName = $this->resolveAndroidPackageName($settings);
-        if ($packageName === '') {
-            return null;
-        }
-
-        return 'https://play.google.com/store/apps/details?id='.$packageName;
+        return null;
     }
 
     /**
@@ -92,13 +91,36 @@ class DeepLinkAssociationService
      */
     public function resolveIosStoreUrl(array $settings): ?string
     {
+        if (! $this->isPlatformPublicationEnabled($settings, 'ios')) {
+            return null;
+        }
+
         return $this->normalizeText(data_get($settings, 'ios.store_url'));
     }
 
     /**
      * @param  array<string, mixed>  $settings
      */
-    private function resolveAndroidPackageName(array $settings): string
+    private function isPlatformPublicationEnabled(array $settings, string $platform): bool
+    {
+        $enabled = data_get($settings, "{$platform}.enabled");
+        if (is_bool($enabled)) {
+            return $enabled;
+        }
+        if (is_numeric($enabled)) {
+            return (int) $enabled !== 0;
+        }
+        if (is_string($enabled)) {
+            return in_array(strtolower(trim($enabled)), ['1', 'true', 'yes', 'on'], true);
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     */
+    public function resolveAndroidPackageName(array $settings): string
     {
         $identifier = $this->identifierGateway->identifierForPlatform('android');
         if (is_string($identifier) && trim($identifier) !== '') {

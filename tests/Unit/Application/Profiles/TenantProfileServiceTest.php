@@ -8,8 +8,10 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Profiles\TenantProfileService;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -48,7 +50,11 @@ class TenantProfileServiceTest extends TestCase
 
     public function test_update_profile_updates_attributes(): void
     {
-        $updated = $this->service->updateProfile($this->user, ['name' => 'Updated Name']);
+        $updated = $this->service->updateProfile(
+            $this->user,
+            ['name' => 'Updated Name'],
+            Request::create('/api/v1/profile', 'PATCH'),
+        );
 
         $this->assertSame('Updated Name', $updated->name);
     }
@@ -57,7 +63,38 @@ class TenantProfileServiceTest extends TestCase
     {
         $this->expectException(ValidationException::class);
 
-        $this->service->updateProfile($this->user, []);
+        $this->service->updateProfile(
+            $this->user,
+            [],
+            Request::create('/api/v1/profile', 'PATCH'),
+        );
+    }
+
+    public function test_update_profile_persists_personal_profile_fields(): void
+    {
+        $updated = $this->service->updateProfile(
+            $this->user,
+            [
+                'name' => 'Perfil Persistido',
+                'bio' => 'Bio persistida no personal profile.',
+            ],
+            Request::create('/api/v1/profile', 'PATCH'),
+        );
+
+        $this->assertSame('Perfil Persistido', $updated->name);
+
+        $profile = AccountProfile::query()
+            ->where('created_by', (string) $this->user->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', 'personal')
+            ->first();
+
+        $this->assertInstanceOf(AccountProfile::class, $profile);
+        $this->assertSame('Perfil Persistido', $profile->display_name);
+        $this->assertSame(
+            'Bio persistida no personal profile.',
+            trim(strip_tags((string) $profile->bio)),
+        );
     }
 
     public function test_update_password_hashes_secret(): void

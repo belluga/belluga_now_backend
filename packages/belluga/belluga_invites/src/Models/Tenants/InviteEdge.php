@@ -17,6 +17,7 @@ class InviteEdge extends Model
         'event_id',
         'occurrence_id',
         'receiver_user_id',
+        'receiver_account_profile_id',
         'receiver_contact_hash',
         'inviter_principal',
         'account_profile_id',

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Queue;
 
+use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
 use App\Jobs\Telemetry\DeliverTelemetryEventJob;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Favorites\Jobs\RebuildFavoriteSnapshotJob;
@@ -34,6 +35,7 @@ class TenantAwareQueueJobsTest extends TestCase
     private function tenantAwareJobClasses(): array
     {
         return [
+            DeliverPhoneOtpWebhookJob::class,
             DeliverTelemetryEventJob::class,
             PublishScheduledEventsJob::class,
             RebuildFavoriteSnapshotJob::class,

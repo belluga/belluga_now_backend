@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Integration\Invites;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Social\InviteablePeopleService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
@@ -12,6 +14,11 @@ use Illuminate\Support\Collection;
 
 class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
 {
+    public function __construct(
+        private readonly InviteablePeopleService $inviteablePeople,
+        private readonly AccountProfileBootstrapService $profileBootstrapper,
+    ) {}
+
     public function resolveInviterPrincipal(mixed $user, ?string $accountProfileId): array
     {
         $accountUser = $this->requireAccountUser($user);
@@ -55,22 +62,27 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
 
     public function resolveUserRecipient(string $userId): ?array
     {
-        /** @var AccountUser|null $user */
+        return $this->inviteablePeople->recipientForUserId($userId);
+    }
+
+    public function resolveUserRecipientOwnership(string $userId): ?array
+    {
         $user = AccountUser::query()->find($userId);
-        if (! $user || ! $user->isActive()) {
-            return null;
+        if ($user instanceof AccountUser) {
+            $this->profileBootstrapper->ensurePersonalAccount($user);
         }
 
-        return [
-            'user_id' => (string) $user->getAttribute('_id'),
-            'display_name' => $this->userDisplayName($user),
-            'avatar_url' => null,
-        ];
+        return $this->inviteablePeople->recipientIdentityForUserId($userId);
+    }
+
+    public function resolveAccountProfileRecipient(string $accountProfileId): ?array
+    {
+        return $this->inviteablePeople->recipientForAccountProfileId($accountProfileId);
     }
 
     public function matchImportedContacts(array $contacts, mixed $ownerUser, ?string $saltVersion): array
     {
-        $this->requireAccountUser($ownerUser);
+        $accountUser = $this->requireAccountUser($ownerUser);
 
         /** @var Collection<int, array{type:string,hash:string}> $contactsCollection */
         $contactsCollection = collect($contacts)
@@ -95,7 +107,7 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
             ->unique()
             ->all();
 
-        $matches = [];
+        $candidateMatches = [];
 
         $emailSet = array_fill_keys($emails, true);
         $phoneSet = array_fill_keys($phones, true);
@@ -104,19 +116,17 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
             AccountUser::query()
                 ->whereIn('email_hashes', $emails)
                 ->get()
-                ->each(function (AccountUser $user) use (&$matches, $emailSet): void {
+                ->each(function (AccountUser $user) use (&$candidateMatches, $emailSet): void {
                     foreach ((array) ($user->email_hashes ?? []) as $hash) {
                         $hash = trim((string) $hash);
                         if ($hash === '' || ! isset($emailSet[$hash])) {
                             continue;
                         }
 
-                        $matches[$hash] = [
-                            'contact_hash' => $hash,
+                        $candidateMatches[$hash] = [
+                            'user' => $user,
                             'type' => 'email',
-                            'user_id' => (string) $user->getAttribute('_id'),
-                            'display_name' => $this->userDisplayName($user),
-                            'avatar_url' => null,
+                            'hash' => $hash,
                         ];
                     }
                 });
@@ -126,25 +136,26 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
             AccountUser::query()
                 ->whereIn('phone_hashes', $phones)
                 ->get()
-                ->each(function (AccountUser $user) use (&$matches, $phoneSet): void {
+                ->each(function (AccountUser $user) use (&$candidateMatches, $phoneSet): void {
                     foreach ((array) ($user->phone_hashes ?? []) as $hash) {
                         $hash = trim((string) $hash);
                         if ($hash === '' || ! isset($phoneSet[$hash])) {
                             continue;
                         }
 
-                        $matches[$hash] = [
-                            'contact_hash' => $hash,
+                        $candidateMatches[$hash] = [
+                            'user' => $user,
                             'type' => 'phone',
-                            'user_id' => (string) $user->getAttribute('_id'),
-                            'display_name' => $this->userDisplayName($user),
-                            'avatar_url' => null,
+                            'hash' => $hash,
                         ];
                     }
                 });
         }
 
-        return $matches;
+        return $this->inviteablePeople->contactMatchPayloadsFor(
+            $accountUser,
+            array_values($candidateMatches),
+        );
     }
 
     private function requireAccountUser(mixed $user): AccountUser

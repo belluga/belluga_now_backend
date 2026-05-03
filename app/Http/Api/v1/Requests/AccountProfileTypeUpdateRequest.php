@@ -38,6 +38,7 @@ class AccountProfileTypeUpdateRequest extends FormRequest
             'remove_type_asset' => ['sometimes', 'boolean'],
             'capabilities' => ['sometimes', 'array'],
             'capabilities.is_favoritable' => ['sometimes', 'boolean'],
+            'capabilities.is_publicly_discoverable' => ['sometimes', 'boolean'],
             'capabilities.is_poi_enabled' => ['sometimes', 'boolean'],
             'capabilities.is_reference_location_enabled' => ['sometimes', 'boolean'],
             'capabilities.has_bio' => ['sometimes', 'boolean'],

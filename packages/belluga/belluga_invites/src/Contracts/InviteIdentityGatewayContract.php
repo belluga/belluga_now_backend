@@ -20,6 +20,7 @@ interface InviteIdentityGatewayContract
     /**
      * @return array{
      *     user_id: string,
+     *     receiver_account_profile_id: string,
      *     display_name: ?string,
      *     avatar_url: ?string
      * }|null
@@ -27,13 +28,38 @@ interface InviteIdentityGatewayContract
     public function resolveUserRecipient(string $userId): ?array;
 
     /**
+     * @return array{
+     *     user_id: string,
+     *     receiver_account_profile_id: string,
+     *     display_name: ?string,
+     *     avatar_url: ?string
+     * }|null
+     */
+    public function resolveUserRecipientOwnership(string $userId): ?array;
+
+    /**
+     * @return array{
+     *     user_id: string,
+     *     receiver_account_profile_id: string,
+     *     display_name: ?string,
+     *     avatar_url: ?string
+     * }|null
+     */
+    public function resolveAccountProfileRecipient(string $accountProfileId): ?array;
+
+    /**
      * @param  array<int, array{type:string,hash:string}>  $contacts
      * @return array<string, array{
      *     contact_hash: string,
      *     type: string,
      *     user_id: string,
+     *     receiver_account_profile_id?: string,
      *     display_name: ?string,
-     *     avatar_url: ?string
+     *     avatar_url: ?string,
+     *     profile_exposure_level?: string,
+     *     inviteable_reasons?: array<int, string>,
+     *     source_tags?: array<int, string>,
+     *     is_inviteable?: bool
      * }>
      */
     public function matchImportedContacts(array $contacts, mixed $ownerUser, ?string $saltVersion): array;

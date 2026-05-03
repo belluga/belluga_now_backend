@@ -17,19 +17,29 @@ class InviteProjectionService
     ) {}
 
     /**
-     * @param  array{event_id:string,occurrence_id:?string}  $targetRef
+     * @param  array{event_id:string,occurrence_id:string}  $targetRef
      */
     public function rebuildReceiverTargetProjection(string $receiverUserId, array $targetRef): void
     {
+        $eventId = trim((string) ($targetRef['event_id'] ?? ''));
+        $occurrenceId = trim((string) ($targetRef['occurrence_id'] ?? ''));
+        if ($eventId === '' || $occurrenceId === '') {
+            throw new \InvalidArgumentException('Invite feed projection requires event_id and occurrence_id.');
+        }
+
         $query = InviteEdge::query()
             ->where('receiver_user_id', $receiverUserId)
-            ->where('event_id', $targetRef['event_id'])
-            ->where('occurrence_id', $targetRef['occurrence_id'])
+            ->where('event_id', $eventId)
+            ->where('occurrence_id', $occurrenceId)
             ->whereIn('status', ['pending', 'viewed'])
             ->orderBy('created_at');
 
         $pendingEdges = $query->get();
-        $groupKey = $this->groupKey($targetRef['event_id'], $targetRef['occurrence_id']);
+        $groupKey = $this->groupKey($eventId, $occurrenceId);
+        $resolvedTargetRef = [
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+        ];
 
         if ($pendingEdges->isEmpty()) {
             InviteFeedProjection::query()
@@ -42,7 +52,7 @@ class InviteProjectionService
                 topic: 'invite.deleted',
                 payload: [
                     'type' => 'invite.deleted',
-                    'target_ref' => $targetRef,
+                    'target_ref' => $resolvedTargetRef,
                     'updated_at' => $timestamp,
                 ],
                 receiverUserId: $receiverUserId
@@ -66,7 +76,7 @@ class InviteProjectionService
 
         $projection->fill([
             'event_id' => (string) $primary->event_id,
-            'occurrence_id' => $primary->occurrence_id ? (string) $primary->occurrence_id : null,
+            'occurrence_id' => (string) $primary->occurrence_id,
             'event_name' => (string) ($primary->event_name ?? ''),
             'event_slug' => (string) ($primary->event_slug ?? ''),
             'event_date' => $primary->event_date,
@@ -117,10 +127,16 @@ class InviteProjectionService
      */
     public function toFeedPayload(InviteFeedProjection $projection): array
     {
+        $eventId = trim((string) ($projection->event_id ?? ''));
+        $occurrenceId = trim((string) ($projection->occurrence_id ?? ''));
+        if ($eventId === '' || $occurrenceId === '') {
+            throw new \InvalidArgumentException('Invite feed payload requires event_id and occurrence_id.');
+        }
+
         return [
             'target_ref' => [
-                'event_id' => (string) ($projection->event_id ?? ''),
-                'occurrence_id' => $projection->occurrence_id ? (string) $projection->occurrence_id : null,
+                'event_id' => $eventId,
+                'occurrence_id' => $occurrenceId,
             ],
             'event_name' => (string) ($projection->event_name ?? ''),
             'event_date' => $projection->event_date?->toISOString(),
@@ -142,8 +158,8 @@ class InviteProjectionService
             ->count();
     }
 
-    private function groupKey(string $eventId, ?string $occurrenceId): string
+    private function groupKey(string $eventId, string $occurrenceId): string
     {
-        return $eventId.'::'.($occurrenceId ?? 'event');
+        return $eventId.'::'.$occurrenceId;
     }
 }

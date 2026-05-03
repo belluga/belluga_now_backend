@@ -194,6 +194,9 @@ Route::prefix('account_profiles')
 Route::get('/account_profile_types', [AccountProfileTypesController::class, 'index'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
+Route::get('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'show'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
 Route::post('/account_profile_types', [AccountProfileTypesController::class, 'store'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
 

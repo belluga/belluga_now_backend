@@ -154,7 +154,7 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertSame('account_profile', (string) ($items[0]['registry_key'] ?? ''));
     }
 
-    public function test_favorites_returns_empty_payload_for_anonymous_identity(): void
+    public function test_favorites_returns_edges_for_anonymous_identity(): void
     {
         $profile = $this->createProfile('Profile Anonymous', 'profile-anonymous');
         $this->insertSnapshot((string) $profile->_id, [
@@ -175,7 +175,9 @@ class FavoritesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('has_more', false);
-        $this->assertSame([], $response->json('items'));
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame((string) $profile->_id, (string) ($items[0]['target_id'] ?? ''));
     }
 
     public function test_favorites_exposes_account_profile_visual_preview_and_live_snapshot_fields(): void
@@ -257,7 +259,7 @@ class FavoritesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_favorites_store_forbidden_for_anonymous_identity(): void
+    public function test_favorites_store_creates_edge_for_anonymous_identity(): void
     {
         $profile = $this->createProfile('Profile Anonymous Store', 'profile-anonymous-store');
 
@@ -271,17 +273,21 @@ class FavoritesControllerTest extends TestCaseTenant
             'target_type' => 'account_profile',
         ]);
 
-        $response->assertStatus(403);
+        $response->assertStatus(200);
+        $response->assertJsonPath('is_favorite', true);
+        $response->assertJsonPath('target_id', (string) $profile->_id);
 
-        $this->assertFalse(
+        $this->assertTrue(
             FavoriteEdge::query()
                 ->where('owner_user_id', (string) $this->user->getAuthIdentifier())
+                ->where('registry_key', 'account_profile')
+                ->where('target_type', 'account_profile')
                 ->where('target_id', (string) $profile->_id)
                 ->exists()
         );
     }
 
-    public function test_favorites_destroy_forbidden_for_anonymous_identity(): void
+    public function test_favorites_destroy_removes_edge_for_anonymous_identity(): void
     {
         $profile = $this->createProfile('Profile Anonymous Destroy', 'profile-anonymous-destroy');
         $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
@@ -296,9 +302,11 @@ class FavoritesControllerTest extends TestCaseTenant
             'target_type' => 'account_profile',
         ]);
 
-        $response->assertStatus(403);
+        $response->assertStatus(200);
+        $response->assertJsonPath('is_favorite', false);
+        $response->assertJsonPath('target_id', (string) $profile->_id);
 
-        $this->assertTrue(
+        $this->assertFalse(
             FavoriteEdge::query()
                 ->where('owner_user_id', (string) $this->user->getAuthIdentifier())
                 ->where('registry_key', 'account_profile')

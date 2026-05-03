@@ -54,10 +54,16 @@ class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
         if ($androidStoreUrl !== null && ! $this->isValidAbsoluteHttpUrl($androidStoreUrl)) {
             $errors['android.store_url'][] = 'Android store URL must be an absolute http(s) URL.';
         }
+        if ($this->normalizeBoolean(data_get($current, 'android.enabled')) && $androidStoreUrl === null) {
+            $errors['android.store_url'][] = 'Android store URL is required when Android publication is active.';
+        }
 
         $iosStoreUrl = $this->normalizeText(data_get($current, 'ios.store_url'));
         if ($iosStoreUrl !== null && ! $this->isValidAbsoluteHttpUrl($iosStoreUrl)) {
             $errors['ios.store_url'][] = 'iOS store URL must be an absolute http(s) URL.';
+        }
+        if ($this->normalizeBoolean(data_get($current, 'ios.enabled')) && $iosStoreUrl === null) {
+            $errors['ios.store_url'][] = 'iOS store URL is required when iOS publication is active.';
         }
 
         if ($errors !== []) {
@@ -125,6 +131,21 @@ class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
         $normalized = trim($value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function normalizeBoolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (int) $value !== 0;
+        }
+        if (is_string($value)) {
+            return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
+        }
+
+        return false;
     }
 
     private function isValidAbsoluteHttpUrl(string $value): bool

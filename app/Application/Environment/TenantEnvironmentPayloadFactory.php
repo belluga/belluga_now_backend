@@ -52,6 +52,7 @@ class TenantEnvironmentPayloadFactory
         $firebase = $this->pushSettings->currentFirebaseConfig();
         $push = $this->pushSettings->currentPushConfig();
         $tenantPublicAuth = $this->tenantPublicAuthMethodResolver->currentGovernance();
+        $outboundIntegrations = $settings?->getAttribute('outbound_integrations') ?? [];
         $profileTypes = $this->profileRegistryService->registry();
         $tenantBranding = $this->normalizeSnapshotTenantBranding(
             $tenant,
@@ -81,9 +82,44 @@ class TenantEnvironmentPayloadFactory
             'profile_types' => $profileTypes,
             'settings' => [
                 'map_ui' => $settings?->getAttribute('map_ui') ?? [],
-                'tenant_public_auth' => $tenantPublicAuth,
+                'app_links' => $settings?->getAttribute('app_links') ?? [],
+                'tenant_public_auth' => $this->withPhoneOtpDeliveryFlags(
+                    $tenantPublicAuth,
+                    $outboundIntegrations
+                ),
             ],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $tenantPublicAuth
+     * @return array<string, mixed>
+     */
+    private function withPhoneOtpDeliveryFlags(array $tenantPublicAuth, mixed $outboundIntegrations): array
+    {
+        $phoneOtp = $tenantPublicAuth['phone_otp'] ?? [];
+        $phoneOtp = is_array($phoneOtp) ? $phoneOtp : [];
+        $phoneOtp['primary_channel'] = 'whatsapp';
+        $phoneOtp['sms_fallback_enabled'] = $this->hasSmsFallbackWebhook($outboundIntegrations);
+        $tenantPublicAuth['phone_otp'] = $phoneOtp;
+
+        return $tenantPublicAuth;
+    }
+
+    private function hasSmsFallbackWebhook(mixed $outboundIntegrations): bool
+    {
+        if (! is_array($outboundIntegrations)) {
+            return false;
+        }
+
+        $otp = $outboundIntegrations['otp'] ?? [];
+        if (! is_array($otp)) {
+            return false;
+        }
+
+        $webhookUrl = $otp['webhook_url'] ?? null;
+
+        return is_string($webhookUrl) && trim($webhookUrl) !== '';
     }
 
     /**
@@ -163,6 +199,9 @@ class TenantEnvironmentPayloadFactory
             'settings' => [
                 'map_ui' => $this->normalizeBrandingData(
                     data_get($snapshot, 'settings.map_ui', [])
+                ),
+                'app_links' => $this->normalizeBrandingData(
+                    data_get($snapshot, 'settings.app_links', [])
                 ),
                 'tenant_public_auth' => $this->normalizeBrandingData(
                     data_get($snapshot, 'settings.tenant_public_auth', [])

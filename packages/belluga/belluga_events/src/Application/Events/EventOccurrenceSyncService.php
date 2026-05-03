@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
+use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 
 class EventOccurrenceSyncService
@@ -30,24 +31,36 @@ class EventOccurrenceSyncService
         $now = Carbon::now();
         $publication = $this->normalizePublication($event->publication ?? [], $event->created_at);
         $eventGeoLocation = $this->resolveEventGeoLocation($event);
+        $resolvedDocuments = [];
+        $allowIndexFallback = ! $this->occurrencesContainIdentity($occurrences);
+        foreach ($occurrences as $index => $occurrence) {
+            $resolvedDocuments[$index] = is_array($occurrence)
+                ? $this->resolveExistingOccurrenceDocument($eventId, $occurrence, (int) $index, $allowIndexFallback)
+                : null;
+        }
+        $this->moveResolvedDocumentsToTemporaryIndexes($resolvedDocuments, $now);
+        $claimedOccurrenceSlugs = $this->collectClaimedOccurrenceSlugs($occurrences, $resolvedDocuments);
 
-        $activeIndexes = [];
+        $activeDocumentIds = [];
         foreach ($occurrences as $index => $occurrence) {
             $start = $this->toCarbon($occurrence['date_time_start'] ?? null) ?? $now;
             $end = $this->toCarbon($occurrence['date_time_end'] ?? null);
             $effectiveEnd = $this->resolveEffectiveEnd($start, $end);
             $eventTaxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
+            $ownTaxonomyTerms = $this->ensureTaxonomySnapshots($occurrence['taxonomy_terms'] ?? []);
+            $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
             $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
             $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
             $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
             $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
+            $document = $resolvedDocuments[$index] ?? null;
 
             $payload = [
                 'event_id' => $eventId,
                 'occurrence_index' => $index,
                 'slug' => (string) ($event->slug ?? ''),
-                'occurrence_slug' => $this->buildOccurrenceSlug((string) ($event->slug ?? ''), $eventId, $index),
+                'occurrence_slug' => $this->resolveOccurrenceSlug($occurrence, $document, (string) ($event->slug ?? ''), $eventId, $index, $claimedOccurrenceSlugs),
                 'title' => (string) ($event->title ?? ''),
                 'content' => (string) ($event->content ?? ''),
                 'type' => $this->normalizeArray($event->type ?? []),
@@ -64,7 +77,8 @@ class EventOccurrenceSyncService
                 'artists' => $this->deriveArtistsReadProjection($effectiveEventParties),
                 'tags' => $this->normalizeArray($event->tags ?? []),
                 'categories' => $this->normalizeArray($event->categories ?? []),
-                'taxonomy_terms' => $eventTaxonomyTerms,
+                'own_taxonomy_terms' => $ownTaxonomyTerms,
+                'taxonomy_terms' => $effectiveTaxonomyTerms,
                 'capabilities' => $this->normalizeArray($event->capabilities ?? []),
                 'created_by' => $this->normalizeArray($event->created_by ?? []),
                 'event_parties' => $effectiveEventParties,
@@ -85,30 +99,208 @@ class EventOccurrenceSyncService
                 'deleted_at' => null,
             ];
 
-            $document = EventOccurrence::withTrashed()
-                ->where('event_id', $eventId)
-                ->where('occurrence_index', $index)
-                ->first();
-
             if ($document) {
                 $document->fill($payload);
                 $document->save();
             } else {
-                EventOccurrence::query()->create($payload);
+                $document = EventOccurrence::query()->create($payload);
             }
 
-            $activeIndexes[] = $index;
+            if (isset($document->_id)) {
+                $activeDocumentIds[] = (string) $document->_id;
+            }
         }
 
         $query = EventOccurrence::query()->where('event_id', $eventId);
-        if ($activeIndexes !== []) {
-            $query->whereNotIn('occurrence_index', $activeIndexes);
+        if ($activeDocumentIds !== []) {
+            $query->whereNotIn('_id', $this->buildDocumentIdCandidates($activeDocumentIds));
         }
 
         $query->update([
             'deleted_at' => $now,
             'updated_at' => $now,
         ]);
+    }
+
+    /**
+     * @param  array<int, EventOccurrence|null>  $documents
+     */
+    private function moveResolvedDocumentsToTemporaryIndexes(array $documents, Carbon $now): void
+    {
+        $movedDocumentIds = [];
+        foreach ($documents as $index => $document) {
+            if (! $document || ! isset($document->_id)) {
+                continue;
+            }
+
+            $documentId = (string) $document->_id;
+            if (isset($movedDocumentIds[$documentId])) {
+                continue;
+            }
+
+            $document->occurrence_index = -100000 - (int) $index;
+            $document->updated_at = $now;
+            $document->save();
+            $movedDocumentIds[$documentId] = true;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $occurrence
+     */
+    private function resolveExistingOccurrenceDocument(
+        string $eventId,
+        array $occurrence,
+        int $index,
+        bool $allowIndexFallback
+    ): ?EventOccurrence {
+        foreach (['occurrence_id', 'id'] as $field) {
+            $id = $this->normalizeOptionalString($occurrence[$field] ?? null);
+            if ($id === null) {
+                continue;
+            }
+
+            $document = EventOccurrence::withTrashed()
+                ->where('event_id', $eventId)
+                ->whereIn('_id', $this->buildDocumentIdCandidates([$id]))
+                ->first();
+            if ($document) {
+                return $document;
+            }
+        }
+
+        $slug = $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null);
+        if ($slug !== null) {
+            $document = EventOccurrence::withTrashed()
+                ->where('event_id', $eventId)
+                ->where('occurrence_slug', $slug)
+                ->first();
+            if ($document) {
+                return $document;
+            }
+        }
+
+        if (! $allowIndexFallback) {
+            return null;
+        }
+
+        return EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->where('occurrence_index', $index)
+            ->first();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     */
+    private function occurrencesContainIdentity(array $occurrences): bool
+    {
+        foreach ($occurrences as $occurrence) {
+            if (! is_array($occurrence)) {
+                continue;
+            }
+
+            foreach (['occurrence_id', 'id', 'occurrence_slug'] as $field) {
+                if ($this->normalizeOptionalString($occurrence[$field] ?? null) !== null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @param  array<int, EventOccurrence|null>  $documents
+     * @return array<string, bool>
+     */
+    private function collectClaimedOccurrenceSlugs(array $occurrences, array $documents): array
+    {
+        $claimed = [];
+        foreach ($occurrences as $index => $occurrence) {
+            if (! is_array($occurrence)) {
+                continue;
+            }
+
+            $payloadSlug = $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null);
+            if ($payloadSlug !== null) {
+                $claimed[$payloadSlug] = true;
+            }
+
+            $document = $documents[$index] ?? null;
+            $existingSlug = $this->normalizeOptionalString($document?->occurrence_slug ?? null);
+            if ($existingSlug !== null) {
+                $claimed[$existingSlug] = true;
+            }
+        }
+
+        return $claimed;
+    }
+
+    /**
+     * @param  array<string, mixed>  $occurrence
+     */
+    private function resolveOccurrenceSlug(
+        array $occurrence,
+        ?EventOccurrence $document,
+        string $eventSlug,
+        string $eventId,
+        int $index,
+        array &$claimedOccurrenceSlugs
+    ): string {
+        $payloadSlug = $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null);
+        if ($payloadSlug !== null) {
+            $claimedOccurrenceSlugs[$payloadSlug] = true;
+
+            return $payloadSlug;
+        }
+
+        $existingSlug = $this->normalizeOptionalString($document?->occurrence_slug ?? null);
+        if ($existingSlug !== null) {
+            $claimedOccurrenceSlugs[$existingSlug] = true;
+
+            return $existingSlug;
+        }
+
+        return $this->buildUniqueOccurrenceSlug($eventSlug, $eventId, $index, $claimedOccurrenceSlugs);
+    }
+
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        if (! is_string($value) && ! is_numeric($value)) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @param  array<int, string>  $documentIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildDocumentIdCandidates(array $documentIds): array
+    {
+        $candidates = [];
+        foreach ($documentIds as $documentId) {
+            $normalized = trim($documentId);
+            if ($normalized === '') {
+                continue;
+            }
+            $candidates[] = $normalized;
+            if ($this->looksLikeObjectId($normalized)) {
+                $candidates[] = new ObjectId($normalized);
+            }
+        }
+
+        return $candidates;
+    }
+
+    private function looksLikeObjectId(string $value): bool
+    {
+        return (bool) preg_match('/^[a-f0-9]{24}$/i', $value);
     }
 
     /**
@@ -323,6 +515,9 @@ class EventOccurrenceSyncService
 
             $normalized[] = [
                 'time' => (string) ($item['time'] ?? ''),
+                'end_time' => isset($item['end_time']) && $item['end_time'] !== null
+                    ? (string) $item['end_time']
+                    : null,
                 'title' => $item['title'] ?? null,
                 'account_profile_ids' => array_values($this->normalizeArray($item['account_profile_ids'] ?? [])),
                 'linked_account_profiles' => $linkedProfiles,
@@ -444,5 +639,29 @@ class EventOccurrenceSyncService
         $base = trim($eventSlug) !== '' ? trim($eventSlug) : ('event-'.substr($eventId, 0, 8));
 
         return sprintf('%s-occ-%d', $base, $index + 1);
+    }
+
+    /**
+     * @param  array<string, bool>  $claimedOccurrenceSlugs
+     */
+    private function buildUniqueOccurrenceSlug(
+        string $eventSlug,
+        string $eventId,
+        int $index,
+        array &$claimedOccurrenceSlugs
+    ): string {
+        $candidateIndex = $index;
+
+        do {
+            $candidate = $this->buildOccurrenceSlug($eventSlug, $eventId, $candidateIndex);
+            $candidateIndex++;
+        } while (
+            isset($claimedOccurrenceSlugs[$candidate])
+            || EventOccurrence::withTrashed()->where('occurrence_slug', $candidate)->exists()
+        );
+
+        $claimedOccurrenceSlugs[$candidate] = true;
+
+        return $candidate;
     }
 }

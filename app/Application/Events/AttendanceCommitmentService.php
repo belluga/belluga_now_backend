@@ -7,6 +7,8 @@ namespace App\Application\Events;
 use App\Models\Tenants\AttendanceCommitment;
 use Belluga\Invites\Application\Mutations\InviteMutationService;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use MongoDB\BSON\UTCDateTime;
 
 class AttendanceCommitmentService
 {
@@ -17,41 +19,60 @@ class AttendanceCommitmentService
     /**
      * @return array<int, string>
      */
-    public function confirmedEventIds(string $userId): array
+    public function confirmedOccurrenceIds(string $userId): array
     {
         return AttendanceCommitment::query()
             ->where('user_id', $userId)
             ->where('kind', 'free_confirmation')
             ->where('status', 'active')
-            ->pluck('event_id')
-            ->map(static fn (mixed $eventId): string => (string) $eventId)
-            ->filter(static fn (string $eventId): bool => trim($eventId) !== '')
+            ->pluck('occurrence_id')
+            ->map(static fn (mixed $occurrenceId): string => (string) $occurrenceId)
+            ->filter(static fn (string $occurrenceId): bool => trim($occurrenceId) !== '')
             ->unique()
             ->values()
             ->all();
     }
 
-    public function confirm(string $userId, string $eventId, ?string $occurrenceId = null): AttendanceCommitment
+    public function confirm(string $userId, string $eventId, string $occurrenceId): AttendanceCommitment
     {
-        $commitment = $this->findByScope($userId, $eventId, $occurrenceId);
         $now = Carbon::now();
+        $timestamp = new UTCDateTime((int) $now->getTimestampMs());
 
-        if (! $commitment) {
-            $commitment = new AttendanceCommitment([
+        DB::connection('tenant')
+            ->getMongoDB()
+            ->selectCollection('attendance_commitments')
+            ->updateOne(
+                [
+                    'user_id' => $userId,
+                    'event_id' => $eventId,
+                    'occurrence_id' => $occurrenceId,
+                ],
+                [
+                    '$set' => [
+                        'kind' => 'free_confirmation',
+                        'status' => 'active',
+                        'source' => 'direct',
+                        'confirmed_at' => $timestamp,
+                        'canceled_at' => null,
+                        'updated_at' => $timestamp,
+                    ],
+                    '$setOnInsert' => [
+                        'user_id' => $userId,
+                        'event_id' => $eventId,
+                        'occurrence_id' => $occurrenceId,
+                        'created_at' => $timestamp,
+                    ],
+                ],
+                ['upsert' => true],
+            );
+
+        /** @var AttendanceCommitment $commitment */
+        $commitment = $this->findByScope($userId, $eventId, $occurrenceId)
+            ?? new AttendanceCommitment([
                 'user_id' => $userId,
                 'event_id' => $eventId,
                 'occurrence_id' => $occurrenceId,
             ]);
-        }
-
-        $commitment->fill([
-            'kind' => 'free_confirmation',
-            'status' => 'active',
-            'source' => 'direct',
-            'confirmed_at' => $now,
-            'canceled_at' => null,
-        ]);
-        $commitment->save();
 
         $this->inviteMutationService->supersedePendingInvitesForDirectConfirmation(
             userId: $userId,
@@ -62,7 +83,7 @@ class AttendanceCommitmentService
         return $commitment->fresh();
     }
 
-    public function unconfirm(string $userId, string $eventId, ?string $occurrenceId = null): ?AttendanceCommitment
+    public function unconfirm(string $userId, string $eventId, string $occurrenceId): ?AttendanceCommitment
     {
         $commitment = $this->findByScope($userId, $eventId, $occurrenceId);
         if (! $commitment) {
@@ -82,7 +103,7 @@ class AttendanceCommitmentService
         return $commitment->fresh();
     }
 
-    private function findByScope(string $userId, string $eventId, ?string $occurrenceId): ?AttendanceCommitment
+    private function findByScope(string $userId, string $eventId, string $occurrenceId): ?AttendanceCommitment
     {
         /** @var AttendanceCommitment|null $commitment */
         $commitment = AttendanceCommitment::query()
