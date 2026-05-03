@@ -115,6 +115,22 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('database', $config['default']);
     }
 
+    public function test_worker_entrypoint_consumes_explicit_otp_queue_before_default_queue(): void
+    {
+        $entrypointPath = dirname(__DIR__, 3).'/scripts/run_queue_worker.sh';
+
+        $this->assertFileExists($entrypointPath);
+
+        $entrypoint = (string) file_get_contents($entrypointPath);
+
+        $this->assertStringContainsString('queue:work', $entrypoint);
+        $this->assertStringContainsString(
+            '--queue="${QUEUE_WORKER_QUEUES:-otp,default}"',
+            $entrypoint,
+            'The worker entrypoint must consume the explicit OTP queue; OTP webhook jobs are dispatched with onQueue("otp").'
+        );
+    }
+
     public function test_logging_stack_defaults_to_mongo_and_stderr_with_finite_retention(): void
     {
         $config = $this->loadLoggingConfig();

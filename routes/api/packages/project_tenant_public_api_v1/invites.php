@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Http\Api\v1\Controllers\ContactGroupController;
+use App\Http\Api\v1\Controllers\ContactInviteablesController;
 use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Invites\Http\Api\v1\Controllers\ContactImportController;
 use Belluga\Invites\Http\Api\v1\Controllers\InviteActionController;
@@ -24,4 +26,9 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::post('/invites/share/{code}/accept', [InviteShareController::class, 'accept']);
         Route::post('/invites/share/{code}/materialize', [InviteShareController::class, 'materialize']);
         Route::post('/contacts/import', [ContactImportController::class, 'store']);
+        Route::get('/contacts/inviteables', [ContactInviteablesController::class, 'index']);
+        Route::get('/contact-groups', [ContactGroupController::class, 'index']);
+        Route::post('/contact-groups', [ContactGroupController::class, 'store']);
+        Route::patch('/contact-groups/{group_id}', [ContactGroupController::class, 'update']);
+        Route::delete('/contact-groups/{group_id}', [ContactGroupController::class, 'destroy']);
     });

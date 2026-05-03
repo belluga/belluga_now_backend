@@ -74,7 +74,7 @@ final class DiscoveryFilterPublicCatalogService
         }
 
         if ($surface === 'discovery.account_profiles') {
-            $typeOptions = ['account_profile' => $this->favoritableAccountProfileTypeOptions($baseUrl)];
+            $typeOptions = ['account_profile' => $this->publiclyDiscoverableAccountProfileTypeOptions($baseUrl)];
 
             return [
                 $this->typeDrivenDefinitions(
@@ -408,10 +408,10 @@ final class DiscoveryFilterPublicCatalogService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function favoritableAccountProfileTypeOptions(?string $baseUrl = null): array
+    private function publiclyDiscoverableAccountProfileTypeOptions(?string $baseUrl = null): array
     {
         return TenantProfileType::query()
-            ->where('capabilities.is_favoritable', true)
+            ->publicCatalog()
             ->orderBy('label')
             ->limit(self::TYPE_OPTIONS_MAX)
             ->get(['_id', 'type', 'label', 'visual', 'poi_visual', 'allowed_taxonomies', 'type_asset_url'])

@@ -26,6 +26,7 @@ use MongoDB\Laravel\Eloquent\Collection;
 class EventQueryService
 {
     private const DEFAULT_PAGE_SIZE = 10;
+
     private const MAX_MANAGEMENT_PAGE_SIZE = 100;
 
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
@@ -44,7 +45,7 @@ class EventQueryService
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
-            ?? new EventManagementOccurrenceQuery();
+            ?? new EventManagementOccurrenceQuery;
     }
 
     /**
@@ -688,6 +689,7 @@ class EventQueryService
             'categories' => $this->normalizeStringArray($queryParams['categories'] ?? []),
             'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
+            'occurrence_ids' => $this->normalizeStringArray($queryParams['occurrence_ids'] ?? []),
             'search' => $this->extractSearchQuery($queryParams),
             'past_only' => filter_var($queryParams['past_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'live_now_only' => filter_var($queryParams['live_now_only'] ?? false, FILTER_VALIDATE_BOOLEAN),
@@ -734,12 +736,12 @@ class EventQueryService
      */
     private function runAgendaQuery(array $filters, ?string $userId, int $skip, int $limit, bool $useGeo): array
     {
-        $confirmedEventIds = $this->resolveConfirmedEventIds($filters, $userId);
-        if (is_array($confirmedEventIds) && $confirmedEventIds === []) {
+        $confirmedOccurrenceIds = $this->resolveConfirmedOccurrenceIds($filters, $userId);
+        if (is_array($confirmedOccurrenceIds) && $confirmedOccurrenceIds === []) {
             return [];
         }
 
-        $pipeline = $this->buildAgendaPipeline($filters, $skip, $limit, $useGeo, $confirmedEventIds);
+        $pipeline = $this->buildAgendaPipeline($filters, $skip, $limit, $useGeo, $confirmedOccurrenceIds);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -753,12 +755,12 @@ class EventQueryService
      */
     private function runStreamQuery(array $filters, ?string $userId, Carbon $since, bool $useGeo): array
     {
-        $confirmedEventIds = $this->resolveConfirmedEventIds($filters, $userId);
-        if (is_array($confirmedEventIds) && $confirmedEventIds === []) {
+        $confirmedOccurrenceIds = $this->resolveConfirmedOccurrenceIds($filters, $userId);
+        if (is_array($confirmedOccurrenceIds) && $confirmedOccurrenceIds === []) {
             return [];
         }
 
-        $pipeline = $this->buildStreamPipeline($filters, $since, $useGeo, $confirmedEventIds);
+        $pipeline = $this->buildStreamPipeline($filters, $since, $useGeo, $confirmedOccurrenceIds);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
@@ -775,7 +777,7 @@ class EventQueryService
         int $skip,
         int $limit,
         bool $useGeo,
-        ?array $confirmedEventIds = null
+        ?array $confirmedOccurrenceIds = null
     ): array {
         $now = new UTCDateTime(Carbon::now());
         $pipeline = [];
@@ -785,14 +787,16 @@ class EventQueryService
             'is_event_published' => true,
         ];
         $search = $filters['search'] ?? null;
+        $searchMatch = [];
         if (is_string($search) && $search !== '' && ! $useGeo) {
-            $baseMatch = [
-                '$and' => [
-                    $baseMatch,
-                    $this->buildSearchMatchExpression($search),
-                ],
-            ];
+            $searchMatch = $this->buildSearchMatchExpression($search);
         }
+
+        $baseMatch = $this->combineMatchExpressions(
+            $baseMatch,
+            $searchMatch,
+            $this->buildOccurrenceIdsMatch($filters['occurrence_ids'])
+        );
 
         if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
@@ -802,10 +806,10 @@ class EventQueryService
                 ],
                 'distanceField' => 'distance_meters',
                 'spherical' => true,
-                'query' => [
-                    ...$baseMatch,
-                    'geo_location' => ['$ne' => null],
-                ],
+                'query' => $this->combineMatchExpressions(
+                    $baseMatch,
+                    ['geo_location' => ['$ne' => null]]
+                ),
             ];
 
             if ($filters['max_distance_meters'] !== null) {
@@ -820,7 +824,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
+        $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
 
         $pipeline[] = [
             '$addFields' => [
@@ -870,7 +874,7 @@ class EventQueryService
         array $filters,
         Carbon $since,
         bool $useGeo,
-        ?array $confirmedEventIds = null
+        ?array $confirmedOccurrenceIds = null
     ): array {
         $sinceUtc = new UTCDateTime($since);
         $pipeline = [];
@@ -882,14 +886,16 @@ class EventQueryService
             ],
         ];
         $search = $filters['search'] ?? null;
+        $searchMatch = [];
         if (is_string($search) && $search !== '' && ! $useGeo) {
-            $baseMatch = [
-                '$and' => [
-                    $baseMatch,
-                    $this->buildSearchMatchExpression($search),
-                ],
-            ];
+            $searchMatch = $this->buildSearchMatchExpression($search);
         }
+
+        $baseMatch = $this->combineMatchExpressions(
+            $baseMatch,
+            $searchMatch,
+            $this->buildOccurrenceIdsMatch($filters['occurrence_ids'])
+        );
 
         if ($useGeo && $filters['origin_lat'] !== null && $filters['origin_lng'] !== null) {
             $geoNear = [
@@ -899,9 +905,10 @@ class EventQueryService
                 ],
                 'distanceField' => 'distance_meters',
                 'spherical' => true,
-                'query' => [
-                    'geo_location' => ['$ne' => null],
-                ],
+                'query' => $this->combineMatchExpressions(
+                    $baseMatch,
+                    ['geo_location' => ['$ne' => null]]
+                ),
             ];
 
             if ($filters['max_distance_meters'] !== null) {
@@ -909,14 +916,14 @@ class EventQueryService
             }
 
             $pipeline[] = ['$geoNear' => $geoNear];
+        } else {
+            $pipeline[] = ['$match' => $baseMatch];
         }
-
-        $pipeline[] = ['$match' => $baseMatch];
 
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
-        $this->applyConfirmedEventsFilter($pipeline, $confirmedEventIds);
+        $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
         $pipeline[] = ['$limit' => InputConstraints::PUBLIC_STREAM_DELTA_LIMIT];
@@ -985,28 +992,6 @@ class EventQueryService
 
         foreach ($taxonomy as $term) {
             $termMatches[] = [
-                'venue.taxonomy_terms' => [
-                    '$elemMatch' => [
-                        'type' => $term['type'],
-                        'value' => $term['value'],
-                    ],
-                ],
-            ];
-
-            $termMatches[] = [
-                'event_parties' => [
-                    '$elemMatch' => [
-                        'metadata.taxonomy_terms' => [
-                            '$elemMatch' => [
-                                'type' => $term['type'],
-                                'value' => $term['value'],
-                            ],
-                        ],
-                    ],
-                ],
-            ];
-
-            $termMatches[] = [
                 'taxonomy_terms' => [
                     '$elemMatch' => [
                         'type' => $term['type'],
@@ -1023,19 +1008,56 @@ class EventQueryService
 
     /**
      * @param  array<int, array<string, mixed>>  $pipeline
-     * @param  array<int, string>|null  $confirmedEventIds
+     * @param  array<int, string>|null  $confirmedOccurrenceIds
      */
-    private function applyConfirmedEventsFilter(array &$pipeline, ?array $confirmedEventIds): void
+    private function applyConfirmedOccurrencesFilter(array &$pipeline, ?array $confirmedOccurrenceIds): void
     {
-        if ($confirmedEventIds === null) {
+        if ($confirmedOccurrenceIds === null) {
             return;
         }
 
         $pipeline[] = [
             '$match' => [
-                'event_id' => ['$in' => $confirmedEventIds],
+                '_id' => ['$in' => $this->buildDocumentIdCandidates($confirmedOccurrenceIds)],
             ],
         ];
+    }
+
+    /**
+     * @param  array<int, string>  $occurrenceIds
+     * @return array<string, mixed>
+     */
+    private function buildOccurrenceIdsMatch(array $occurrenceIds): array
+    {
+        if ($occurrenceIds === []) {
+            return [];
+        }
+
+        return [
+            '_id' => ['$in' => $this->buildDocumentIdCandidates($occurrenceIds)],
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $expressions
+     * @return array<string, mixed>
+     */
+    private function combineMatchExpressions(array ...$expressions): array
+    {
+        $filtered = array_values(array_filter(
+            $expressions,
+            static fn (array $expression): bool => $expression !== []
+        ));
+
+        if ($filtered === []) {
+            return [];
+        }
+
+        if (count($filtered) === 1) {
+            return $filtered[0];
+        }
+
+        return ['$and' => $filtered];
     }
 
     /**
@@ -1164,7 +1186,7 @@ class EventQueryService
      * @param  array<string, mixed>  $filters
      * @return array<int, string>|null
      */
-    private function resolveConfirmedEventIds(array $filters, ?string $userId): ?array
+    private function resolveConfirmedOccurrenceIds(array $filters, ?string $userId): ?array
     {
         if ((bool) ($filters['confirmed_only'] ?? false) !== true) {
             return null;
@@ -1175,7 +1197,7 @@ class EventQueryService
         }
 
         return array_values(array_unique(array_values(array_filter(
-            array_map(static fn (mixed $value): string => trim((string) $value), $this->eventAttendanceRead->listConfirmedEventIdsForUser($userId)),
+            array_map(static fn (mixed $value): string => trim((string) $value), $this->eventAttendanceRead->listConfirmedOccurrenceIdsForUser($userId)),
             static fn (string $value): bool => $value !== ''
         ))));
     }
@@ -1200,8 +1222,7 @@ class EventQueryService
         mixed $event,
         ?string $userId = null,
         bool $includeArtists = true
-    ): array
-    {
+    ): array {
         $type = $this->normalizeArray($event->type ?? null);
         $location = $this->normalizeArray($event->location ?? []);
         $placeRef = $this->normalizePlaceRefPayload(
@@ -1516,9 +1537,18 @@ class EventQueryService
      */
     private function buildEventIdCandidates(array $eventIds): array
     {
+        return $this->buildDocumentIdCandidates($eventIds);
+    }
+
+    /**
+     * @param  array<int, string>  $documentIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildDocumentIdCandidates(array $documentIds): array
+    {
         $candidates = [];
-        foreach ($eventIds as $eventId) {
-            $normalized = trim($eventId);
+        foreach ($documentIds as $documentId) {
+            $normalized = trim($documentId);
             if ($normalized === '') {
                 continue;
             }
@@ -1535,8 +1565,7 @@ class EventQueryService
         Event $event,
         ?string $occurrenceRef,
         ?iterable $preloadedOccurrences = null
-    ): ?EventOccurrence
-    {
+    ): ?EventOccurrence {
         $documents = $preloadedOccurrences === null
             ? $this->loadEventOccurrenceDocuments($event)
             : collect($preloadedOccurrences);
@@ -1629,8 +1658,7 @@ class EventQueryService
         mixed $event,
         ?string $selectedOccurrenceId = null,
         ?iterable $preloadedOccurrences = null
-    ): array
-    {
+    ): array {
         if (isset($event->event_id) && (string) $event->event_id !== '') {
             $start = $this->formatDate($this->extractRawAttribute($event, 'starts_at'));
             if ($start === null) {
@@ -1648,6 +1676,8 @@ class EventQueryService
                 'is_selected' => true,
                 'has_location_override' => false,
                 'location_override' => null,
+                'own_taxonomy_terms' => $this->ensureTaxonomySnapshots($event->own_taxonomy_terms ?? []),
+                'taxonomy_terms' => $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []),
                 'own_event_parties' => $this->normalizeEventParties($event->own_event_parties ?? []),
                 'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($event->own_linked_account_profiles ?? []),
                 'programming_items' => $programmingItems,
@@ -1677,6 +1707,8 @@ class EventQueryService
                         'is_selected' => $selectedOccurrenceId !== null && $occurrenceId === $selectedOccurrenceId,
                         'has_location_override' => false,
                         'location_override' => null,
+                        'own_taxonomy_terms' => $this->ensureTaxonomySnapshots($occurrence->own_taxonomy_terms ?? []),
+                        'taxonomy_terms' => $this->ensureTaxonomySnapshots($occurrence->taxonomy_terms ?? []),
                         'own_event_parties' => $this->normalizeEventParties($occurrence->own_event_parties ?? []),
                         'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($occurrence->own_linked_account_profiles ?? []),
                         'programming_items' => $programmingItems,
@@ -1804,7 +1836,6 @@ class EventQueryService
         return $normalized;
     }
 
-
     /**
      * @param  array<int, array<string, mixed>>  $eventParties
      * @return array<int, array<string, mixed>>
@@ -1845,7 +1876,8 @@ class EventQueryService
      * @param  array<int, array<string, mixed>>  $eventParties
      * @return array<int, array<string, mixed>>
      */
-    private function resolveLinkedAccountProfiles(array $eventParties): array {
+    private function resolveLinkedAccountProfiles(array $eventParties): array
+    {
         $items = [];
         $seenIds = [];
 
@@ -1890,7 +1922,6 @@ class EventQueryService
 
         return $items;
     }
-
 
     /**
      * @return array<int, array<string, mixed>>
@@ -1938,6 +1969,7 @@ class EventQueryService
 
             $normalized[] = [
                 'time' => $this->scalarString($item['time'] ?? null) ?? '',
+                'end_time' => $this->scalarString($item['end_time'] ?? null),
                 'title' => $this->scalarString($item['title'] ?? null),
                 'account_profile_ids' => array_values(array_map('strval', $this->normalizeArray($item['account_profile_ids'] ?? []))),
                 'linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($item['linked_account_profiles'] ?? []),

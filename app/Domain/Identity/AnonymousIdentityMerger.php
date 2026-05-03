@@ -10,6 +10,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
 use App\Models\Tenants\MergedAccountSnapshot;
+use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
 use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
@@ -137,6 +138,10 @@ class AnonymousIdentityMerger
                     sourceUserId: $sourceId,
                     targetUserId: (string) $target->_id,
                 );
+                $this->migrateContactImportOwnership(
+                    sourceUserId: $sourceId,
+                    targetUserId: (string) $target->_id,
+                );
 
                 $source->tokens()->delete();
                 $source->forceDelete();
@@ -249,6 +254,131 @@ class AnonymousIdentityMerger
                 ]);
             }
         });
+    }
+
+    private function migrateContactImportOwnership(string $sourceUserId, string $targetUserId): void
+    {
+        ContactHashDirectory::query()
+            ->where('importing_user_id', $sourceUserId)
+            ->get()
+            ->each(function (ContactHashDirectory $sourceDirectory) use ($targetUserId): void {
+                $contactHash = trim((string) ($sourceDirectory->contact_hash ?? ''));
+                if ($contactHash === '') {
+                    $sourceDirectory->importing_user_id = $targetUserId;
+                    $sourceDirectory->save();
+
+                    return;
+                }
+
+                /** @var ContactHashDirectory|null $targetDirectory */
+                $targetDirectory = ContactHashDirectory::query()
+                    ->where('importing_user_id', $targetUserId)
+                    ->where('contact_hash', $contactHash)
+                    ->first();
+
+                if ($targetDirectory === null) {
+                    $sourceDirectory->importing_user_id = $targetUserId;
+                    $sourceDirectory->save();
+
+                    return;
+                }
+
+                $targetDirectory->type = $this->preferNonEmptyString($targetDirectory->type ?? null, $sourceDirectory->type ?? null);
+                $targetDirectory->salt_version = $this->preferNonEmptyString($targetDirectory->salt_version ?? null, $sourceDirectory->salt_version ?? null);
+                $targetMatchedUserId = $this->preferNonEmptyString($targetDirectory->matched_user_id ?? null, $sourceDirectory->matched_user_id ?? null);
+                $targetDirectory->matched_user_id = $targetMatchedUserId;
+                $targetDirectory->match_snapshot = $this->mergedContactMatchSnapshot(
+                    targetDirectory: $targetDirectory,
+                    sourceDirectory: $sourceDirectory,
+                    matchedUserId: $targetMatchedUserId,
+                );
+                $targetDirectory->imported_at = $this->earliestCarbon(
+                    $targetDirectory->imported_at ?? null,
+                    $sourceDirectory->imported_at ?? null,
+                );
+                $targetDirectory->last_seen_at = $this->latestCarbon(
+                    $targetDirectory->last_seen_at ?? null,
+                    $sourceDirectory->last_seen_at ?? null,
+                );
+                $targetDirectory->save();
+
+                $sourceDirectory->delete();
+            });
+    }
+
+    private function preferNonEmptyString(mixed $current, mixed $incoming): ?string
+    {
+        $currentValue = is_string($current) ? trim($current) : '';
+        if ($currentValue !== '') {
+            return $currentValue;
+        }
+
+        $incomingValue = is_string($incoming) ? trim($incoming) : '';
+
+        return $incomingValue === '' ? null : $incomingValue;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function mergedContactMatchSnapshot(
+        ContactHashDirectory $targetDirectory,
+        ContactHashDirectory $sourceDirectory,
+        ?string $matchedUserId,
+    ): ?array {
+        $matchedUserId = trim((string) $matchedUserId);
+        $targetMatchedUserId = trim((string) ($targetDirectory->matched_user_id ?? ''));
+        $sourceMatchedUserId = trim((string) ($sourceDirectory->matched_user_id ?? ''));
+        $targetSnapshot = is_array($targetDirectory->match_snapshot ?? null)
+            ? $targetDirectory->match_snapshot
+            : null;
+        $sourceSnapshot = is_array($sourceDirectory->match_snapshot ?? null)
+            ? $sourceDirectory->match_snapshot
+            : null;
+
+        if ($matchedUserId !== '') {
+            if ($targetMatchedUserId === $matchedUserId && ! empty($targetSnapshot)) {
+                return $targetSnapshot;
+            }
+
+            if ($sourceMatchedUserId === $matchedUserId && ! empty($sourceSnapshot)) {
+                return $sourceSnapshot;
+            }
+        }
+
+        return $targetSnapshot ?? $sourceSnapshot;
+    }
+
+    private function earliestCarbon(mixed $current, mixed $incoming): ?Carbon
+    {
+        $currentAt = $this->toCarbon($current);
+        $incomingAt = $this->toCarbon($incoming);
+
+        if ($currentAt === null) {
+            return $incomingAt;
+        }
+
+        if ($incomingAt === null) {
+            return $currentAt;
+        }
+
+        return $currentAt->lessThanOrEqualTo($incomingAt) ? $currentAt : $incomingAt;
+    }
+
+    private function latestCarbon(mixed $current, mixed $incoming): ?Carbon
+    {
+        $currentAt = $this->toCarbon($current);
+        $incomingAt = $this->toCarbon($incoming);
+
+        if ($currentAt === null) {
+            return $incomingAt;
+        }
+
+        if ($incomingAt === null) {
+            return $currentAt;
+        }
+
+        return $currentAt->greaterThanOrEqualTo($incomingAt) ? $currentAt : $incomingAt;
     }
 
     private function toObjectId(?string $value): ?ObjectId

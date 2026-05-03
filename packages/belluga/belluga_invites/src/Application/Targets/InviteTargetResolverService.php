@@ -20,9 +20,9 @@ class InviteTargetResolverService
     ) {}
 
     /**
-     * @param  array{event_id:string,occurrence_id?:string|null}  $targetRef
+     * @param  array{event_id:string,occurrence_id:string}  $targetRef
      * @return array{
-     *     target_ref: array{event_id:string,occurrence_id:?string},
+     *     target_ref: array{event_id:string,occurrence_id:string},
      *     event_snapshot: array{
      *         event_name:string,
      *         event_slug:string,
@@ -44,26 +44,22 @@ class InviteTargetResolverService
         if ($eventRef === '') {
             throw new InviteDomainException('target_event_required', 422);
         }
+        if ($occurrenceRef === '') {
+            throw new InviteDomainException(
+                errorCode: 'target_occurrence_required',
+                httpStatus: 422,
+                message: 'occurrence_id is required for invite targets.'
+            );
+        }
 
         $event = $this->targetRead->findEventByIdOrSlug($eventRef);
         if (! $event) {
             throw new InviteDomainException('target_not_found', 404);
         }
 
-        $occurrence = $occurrenceRef !== ''
-            ? $this->targetRead->findOccurrenceForEvent((string) $event['id'], $occurrenceRef)
-            : null;
-
-        if ($occurrenceRef !== '' && ! $occurrence) {
+        $occurrence = $this->targetRead->findOccurrenceForEvent((string) $event['id'], $occurrenceRef);
+        if (! $occurrence) {
             throw new InviteDomainException('target_not_found', 404);
-        }
-
-        if ($occurrence === null && $this->targetRead->countOccurrencesForEvent((string) $event['id'], 2) > 1) {
-            throw new InviteDomainException(
-                errorCode: 'target_occurrence_required',
-                httpStatus: 422,
-                message: 'occurrence_id is required for multi-occurrence events.'
-            );
         }
 
         $this->assertPublished($event, $occurrence);
@@ -83,7 +79,7 @@ class InviteTargetResolverService
         return [
             'target_ref' => [
                 'event_id' => (string) $event['id'],
-                'occurrence_id' => $occurrence ? (string) $occurrence['id'] : null,
+                'occurrence_id' => (string) $occurrence['id'],
             ],
             'event_snapshot' => [
                 'event_name' => (string) ($event['title'] ?? ''),

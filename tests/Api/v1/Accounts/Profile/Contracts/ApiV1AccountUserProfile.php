@@ -2,7 +2,6 @@
 
 namespace Tests\Api\v1\Accounts\Profile\Contracts;
 
-use App\Support\Helpers\PhoneNumberParser;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AccountProfileFunctions;
 use Tests\Helpers\UserLabels;
@@ -139,7 +138,7 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
         ]);
     }
 
-    public function testAccountUserAddPhonesFirstUser(): void
+    public function testAccountUserAddPhonesFirstUserIsRejected(): void
     {
 
         $update = $this->profileAddPhones(
@@ -149,11 +148,14 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
             ]
         );
 
-        $update->assertStatus(200);
-        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_1), $update->json()['data']['phones']);
+        $update->assertStatus(422);
+        $update->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
     }
 
-    public function testAccountUserAddPhonesSecondUser(): void
+    public function testAccountUserAddPhonesSecondUserIsRejected(): void
     {
 
         $update = $this->profileAddPhones(
@@ -163,11 +165,14 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
             ]
         );
 
-        $update->assertStatus(200);
-        $this->assertContains(PhoneNumberParser::parse($this->temporary_phone_2), $update->json()['data']['phones']);
+        $update->assertStatus(422);
+        $update->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
     }
 
-    public function testAccountUserAddPhoneRepeated(): void
+    public function testAccountUserAddPhoneRepeatedIsRejected(): void
     {
 
         $this->accountLogin($this->account->user_users_manager);
@@ -181,14 +186,13 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
 
         $update->assertStatus(422);
 
-        $update->assertJsonStructure([
-            'errors' => [
-                'phones',
-            ],
-        ]);
+        $update->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
     }
 
-    public function testAccountUserRemovePhoneFirstUser(): void
+    public function testAccountUserRemovePhoneFirstUserIsRejected(): void
     {
 
         $response = $this->profileRemovePhone(
@@ -196,20 +200,25 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
             $this->temporary_phone_1
         );
 
-        $response->assertStatus(200);
-
-        $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_1), $response->json()['data']['phones']);
+        $response->assertStatus(422);
+        $response->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
     }
 
-    public function testAccountUserRemovePhoneSecondUser(): void
+    public function testAccountUserRemovePhoneSecondUserIsRejected(): void
     {
         $response = $this->profileRemovePhone(
             $this->account->user_users_manager,
             $this->temporary_phone_2
         );
 
-        $response->assertStatus(200);
-        $this->assertNotContains(PhoneNumberParser::parse($this->temporary_phone_2), $response->json()['data']['phones']);
+        $response->assertStatus(422);
+        $response->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
     }
 
     protected function ensureEmailPresent(UserLabels $user, string $email): void

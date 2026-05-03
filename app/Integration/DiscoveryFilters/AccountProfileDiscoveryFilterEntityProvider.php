@@ -20,6 +20,7 @@ final class AccountProfileDiscoveryFilterEntityProvider implements DiscoveryFilt
     public function types(): array
     {
         return TenantProfileType::query()
+            ->publicCatalog()
             ->orderBy('label')
             ->get()
             ->map(fn (TenantProfileType $type): array => [

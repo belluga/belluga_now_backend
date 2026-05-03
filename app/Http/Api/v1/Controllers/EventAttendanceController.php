@@ -28,12 +28,12 @@ class EventAttendanceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $userId = $this->authenticatedUserId($request);
-        $confirmedEventIds = $this->attendanceCommitmentService->confirmedEventIds($userId);
+        $confirmedOccurrenceIds = $this->attendanceCommitmentService->confirmedOccurrenceIds($userId);
 
         return response()->json([
             'tenant_id' => $this->currentTenantId(),
             'data' => [
-                'confirmed_event_ids' => $confirmedEventIds,
+                'confirmed_occurrence_ids' => $confirmedOccurrenceIds,
             ],
         ]);
     }
@@ -121,11 +121,13 @@ class EventAttendanceController extends Controller
         return $event;
     }
 
-    private function resolveOccurrenceIdOrFail(string $eventId, ?string $occurrenceId): ?string
+    private function resolveOccurrenceIdOrFail(string $eventId, ?string $occurrenceId): string
     {
         $normalizedOccurrenceId = is_string($occurrenceId) ? trim($occurrenceId) : null;
         if ($normalizedOccurrenceId === null || $normalizedOccurrenceId === '') {
-            return null;
+            throw ValidationException::withMessages([
+                'occurrence_id' => ['Occurrence is required for attendance confirmation.'],
+            ]);
         }
 
         $query = EventOccurrence::query()->where('event_id', $eventId);
@@ -156,13 +158,12 @@ class EventAttendanceController extends Controller
         }
     }
 
-    private function assertFreeConfirmationAllowed(Event $event, ?string $occurrenceId): void
+    private function assertFreeConfirmationAllowed(Event $event, string $occurrenceId): void
     {
         $eventPolicy = trim((string) ($event->attendance_policy ?? ''));
         $resolvedPolicy = $eventPolicy !== '' ? $eventPolicy : 'free_confirmation_only';
 
         if (
-            $occurrenceId !== null &&
             (bool) ($event->allow_occurrence_policy_override ?? false) === true
         ) {
             $query = EventOccurrence::query()->where('event_id', (string) $event->getAttribute('_id'));

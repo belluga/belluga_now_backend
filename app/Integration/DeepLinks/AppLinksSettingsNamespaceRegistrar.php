@@ -30,6 +30,14 @@ class AppLinksSettingsNamespaceRegistrar
                     'default' => [],
                     'order' => 10,
                 ],
+                'android.enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'label' => 'Android Published',
+                    'label_i18n_key' => 'settings.app_links.android.enabled.label',
+                    'default' => false,
+                    'order' => 14,
+                ],
                 'android.store_url' => [
                     'type' => 'string',
                     'nullable' => true,
@@ -53,6 +61,14 @@ class AppLinksSettingsNamespaceRegistrar
                     'label_i18n_key' => 'settings.app_links.ios.paths.label',
                     'default' => ['/invite*', '/convites*'],
                     'order' => 30,
+                ],
+                'ios.enabled' => [
+                    'type' => 'boolean',
+                    'nullable' => false,
+                    'label' => 'iOS Published',
+                    'label_i18n_key' => 'settings.app_links.ios.enabled.label',
+                    'default' => false,
+                    'order' => 34,
                 ],
                 'ios.store_url' => [
                     'type' => 'string',

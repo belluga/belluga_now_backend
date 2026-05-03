@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\MapPois\Application\Concerns;
 
 use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Carbon;
 use MongoDB\BSON\UTCDateTime;
 
 trait MapPoiQueryFormatting
@@ -59,6 +60,7 @@ trait MapPoiQueryFormatting
         $subtitleRaw = $payloadData['subtitle'] ?? $payloadData['description'] ?? $payloadData['address'] ?? null;
         $subtitle = is_string($subtitleRaw) && trim($subtitleRaw) !== '' ? trim($subtitleRaw) : null;
         $visual = $this->formatVisual($payloadData['visual'] ?? null);
+        $liveState = $this->resolveOccurrenceLiveState($payloadData['occurrence_facets'] ?? []);
 
         $payload = [
             'ref_type' => (string) ($payloadData['ref_type'] ?? ''),
@@ -73,7 +75,9 @@ trait MapPoiQueryFormatting
             'category' => (string) ($payloadData['category'] ?? ''),
             'source_type' => isset($payloadData['source_type']) ? (string) $payloadData['source_type'] : null,
             'location' => $location,
-            'is_happening_now' => (bool) ($payloadData['is_happening_now'] ?? false),
+            'is_happening_now' => $liveState['has_resolved_facets']
+                ? $liveState['is_happening_now']
+                : (bool) ($payloadData['is_happening_now'] ?? false),
             'priority' => (int) ($payloadData['priority'] ?? 0),
             'updated_at' => $this->formatDate($payloadData['updated_at'] ?? null),
             'time_start' => $this->formatDate($payloadData['time_start'] ?? null),
@@ -103,6 +107,7 @@ trait MapPoiQueryFormatting
         $subtitleRaw = $payloadData['subtitle'] ?? $payloadData['description'] ?? $payloadData['address'] ?? null;
         $subtitle = is_string($subtitleRaw) && trim($subtitleRaw) !== '' ? trim($subtitleRaw) : null;
         $visual = $this->formatVisual($payloadData['visual'] ?? null);
+        $liveState = $this->resolveOccurrenceLiveState($payloadData['occurrence_facets'] ?? []);
 
         return [
             'ref_type' => (string) ($payloadData['ref_type'] ?? ''),
@@ -114,7 +119,9 @@ trait MapPoiQueryFormatting
             'category' => (string) ($payloadData['category'] ?? ''),
             'location' => $location,
             'distance_meters' => $distance,
-            'is_happening_now' => (bool) ($payloadData['is_happening_now'] ?? false),
+            'is_happening_now' => $liveState['has_resolved_facets']
+                ? $liveState['is_happening_now']
+                : (bool) ($payloadData['is_happening_now'] ?? false),
             'updated_at' => $this->formatDate($payloadData['updated_at'] ?? null),
             'time_start' => $this->formatDate($payloadData['time_start'] ?? null),
             'time_end' => $this->formatDate($payloadData['time_end'] ?? null),
@@ -124,7 +131,7 @@ trait MapPoiQueryFormatting
             'badge' => $payloadData['badge'] ?? null,
             'tags' => $this->normalizeStringArray($payloadData['tags'] ?? []),
             'taxonomy_terms' => $this->normalizeTaxonomyTerms($payloadData['taxonomy_terms'] ?? []),
-            'occurrence_facets' => $this->formatOccurrenceFacets($payloadData['occurrence_facets'] ?? []),
+            'occurrence_facets' => $this->formatOccurrenceFacets($liveState['facets']),
         ];
     }
 
@@ -134,9 +141,10 @@ trait MapPoiQueryFormatting
      */
     private function formatOccurrenceFacets(array $facets): array
     {
+        $liveState = $this->resolveOccurrenceLiveState($facets);
         $normalized = [];
 
-        foreach ($facets as $facet) {
+        foreach ($liveState['facets'] as $facet) {
             if (! is_array($facet)) {
                 continue;
             }
@@ -152,6 +160,58 @@ trait MapPoiQueryFormatting
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param  array<int, mixed>|mixed  $facets
+     * @return array{
+     *   facets: array<int, array<string, mixed>>,
+     *   has_resolved_facets: bool,
+     *   is_happening_now: bool
+     * }
+     */
+    private function resolveOccurrenceLiveState(mixed $facets): array
+    {
+        if (! is_array($facets)) {
+            return [
+                'facets' => [],
+                'has_resolved_facets' => false,
+                'is_happening_now' => false,
+            ];
+        }
+
+        $now = Carbon::now('UTC');
+        $normalized = [];
+        $hasResolvedFacets = false;
+        $hasNow = false;
+
+        foreach ($facets as $facet) {
+            $facetData = $this->normalizeDocument($facet);
+            if ($facetData === []) {
+                continue;
+            }
+
+            $startsAt = $this->toCarbon($facetData['starts_at'] ?? null);
+            $effectiveEnd = $this->toCarbon($facetData['effective_end'] ?? null)
+                ?? $this->toCarbon($facetData['ends_at'] ?? null);
+            $isHappeningNow = (bool) ($facetData['is_happening_now'] ?? false);
+
+            if ($startsAt !== null && $effectiveEnd !== null) {
+                $hasResolvedFacets = true;
+                $isHappeningNow = $now->greaterThanOrEqualTo($startsAt)
+                    && $now->lessThan($effectiveEnd);
+            }
+
+            $facetData['is_happening_now'] = $isHappeningNow;
+            $hasNow = $hasNow || $isHappeningNow;
+            $normalized[] = $facetData;
+        }
+
+        return [
+            'facets' => $normalized,
+            'has_resolved_facets' => $hasResolvedFacets,
+            'is_happening_now' => $hasNow,
+        ];
     }
 
     /**
@@ -243,6 +303,27 @@ trait MapPoiQueryFormatting
 
         if ($value instanceof \DateTimeInterface) {
             return $value->format(DATE_ATOM);
+        }
+
+        return null;
+    }
+
+    private function toCarbon(mixed $value): ?Carbon
+    {
+        if ($value instanceof UTCDateTime) {
+            return Carbon::instance($value->toDateTime())->utc();
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return Carbon::instance($value)->utc();
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return Carbon::parse($value)->utc();
+            } catch (\Throwable) {
+                return null;
+            }
         }
 
         return null;

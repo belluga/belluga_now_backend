@@ -9,6 +9,7 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AttendanceCommitment;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
@@ -66,13 +67,17 @@ class EventAttendanceControllerTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['*']);
     }
 
-    public function test_confirm_creates_active_commitment_and_lists_confirmed_events(): void
+    public function test_confirm_creates_active_commitment_and_lists_confirmed_occurrences(): void
     {
         $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
 
-        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ]);
         $response->assertOk();
         $response->assertJsonPath('event_id', (string) $event->_id);
+        $response->assertJsonPath('occurrence_id', $occurrenceId);
         $response->assertJsonPath('kind', 'free_confirmation');
         $response->assertJsonPath('status', 'active');
 
@@ -80,19 +85,25 @@ class EventAttendanceControllerTest extends TestCaseTenant
 
         $list = $this->getJson("{$this->base_api_tenant}events/attendance/confirmed");
         $list->assertOk();
-        $list->assertJsonPath('data.confirmed_event_ids.0', (string) $event->_id);
+        $list->assertJsonPath('data.confirmed_occurrence_ids.0', $occurrenceId);
     }
 
     public function test_unconfirm_cancels_commitment_and_removes_from_confirmed_list(): void
     {
         $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
 
-        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [])
+        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ])
             ->assertOk();
 
-        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/unconfirm", []);
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/unconfirm", [
+            'occurrence_id' => $occurrenceId,
+        ]);
         $response->assertOk();
         $response->assertJsonPath('event_id', (string) $event->_id);
+        $response->assertJsonPath('occurrence_id', $occurrenceId);
         $response->assertJsonPath('status', 'canceled');
 
         $commitment = AttendanceCommitment::query()
@@ -104,7 +115,18 @@ class EventAttendanceControllerTest extends TestCaseTenant
 
         $list = $this->getJson("{$this->base_api_tenant}events/attendance/confirmed");
         $list->assertOk();
-        $this->assertSame([], $list->json('data.confirmed_event_ids'));
+        $this->assertSame([], $list->json('data.confirmed_occurrence_ids'));
+    }
+
+    public function test_confirm_requires_occurrence_identity(): void
+    {
+        $event = $this->createEvent();
+
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrence_id']);
+        $this->assertDatabaseCount('attendance_commitments', 0);
     }
 
     public function test_confirm_requires_authentication(): void
@@ -113,8 +135,11 @@ class EventAttendanceControllerTest extends TestCaseTenant
         auth()->forgetGuards();
 
         $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
 
-        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ]);
         $response->assertStatus(401);
         $this->assertDatabaseCount('attendance_commitments', 0);
     }
@@ -122,6 +147,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
     public function test_confirm_supersedes_pending_invites_without_crediting_any_inviter(): void
     {
         $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
         $firstInviter = $this->createAccountUser('First Inviter');
         $secondInviter = $this->createAccountUser('Second Inviter');
 
@@ -129,14 +155,18 @@ class EventAttendanceControllerTest extends TestCaseTenant
             inviter: $firstInviter,
             receiver: $this->user,
             event: $event,
+            occurrenceId: $occurrenceId,
         );
         $secondInvite = $this->createPendingInvite(
             inviter: $secondInviter,
             receiver: $this->user,
             event: $event,
+            occurrenceId: $occurrenceId,
         );
 
-        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", []);
+        $response = $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ]);
         $response->assertOk();
         $response->assertJsonPath('status', 'active');
 
@@ -151,17 +181,55 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $this->assertSame('direct_confirmation', (string) $secondInvite?->supersession_reason);
         $this->assertFalse((bool) $secondInvite?->credited_acceptance);
 
+        $receiverAccountProfileId = $this->personalAccountProfileIdFor($this->user);
         $creditedCount = InviteEdge::query()
-            ->where('receiver_user_id', (string) $this->user->_id)
+            ->where('receiver_account_profile_id', $receiverAccountProfileId)
             ->where('event_id', (string) $event->_id)
+            ->where('occurrence_id', $occurrenceId)
             ->where('credited_acceptance', true)
             ->count();
         $this->assertSame(0, $creditedCount);
     }
 
+    public function test_confirm_supersedes_only_pending_invites_for_same_occurrence(): void
+    {
+        $event = $this->createEventWithOccurrences();
+        $occurrences = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('occurrence_index')
+            ->get();
+        $firstOccurrenceId = (string) $occurrences->get(0)?->_id;
+        $secondOccurrenceId = (string) $occurrences->get(1)?->_id;
+        $this->assertNotSame('', $firstOccurrenceId);
+        $this->assertNotSame('', $secondOccurrenceId);
+
+        $inviter = $this->createAccountUser('Occurrence Inviter');
+        $sameOccurrenceInvite = $this->createPendingInvite(
+            inviter: $inviter,
+            receiver: $this->user,
+            event: $event,
+            occurrenceId: $firstOccurrenceId,
+        );
+        $otherOccurrenceInvite = $this->createPendingInvite(
+            inviter: $inviter,
+            receiver: $this->user,
+            event: $event,
+            occurrenceId: $secondOccurrenceId,
+        );
+
+        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $firstOccurrenceId,
+        ])->assertOk();
+
+        $this->assertSame('superseded', (string) $sameOccurrenceInvite->fresh()?->status);
+        $this->assertSame('pending', (string) $otherOccurrenceInvite->fresh()?->status);
+    }
+
     public function test_confirm_returns_404_for_unknown_event(): void
     {
-        $response = $this->postJson("{$this->base_api_tenant}events/missing-event/attendance/confirm", []);
+        $response = $this->postJson("{$this->base_api_tenant}events/missing-event/attendance/confirm", [
+            'occurrence_id' => (string) new \MongoDB\BSON\ObjectId(),
+        ]);
         $response->assertStatus(404);
     }
 
@@ -196,12 +264,20 @@ class EventAttendanceControllerTest extends TestCaseTenant
         ], (string) $role->_id);
     }
 
-    private function createPendingInvite(AccountUser $inviter, AccountUser $receiver, Event $event): InviteEdge
+    private function createPendingInvite(
+        AccountUser $inviter,
+        AccountUser $receiver,
+        Event $event,
+        string $occurrenceId
+    ): InviteEdge
     {
+        $receiverAccountProfileId = $this->personalAccountProfileIdFor($receiver);
+
         return InviteEdge::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_id' => null,
+            'occurrence_id' => $occurrenceId,
             'receiver_user_id' => (string) $receiver->_id,
+            'receiver_account_profile_id' => $receiverAccountProfileId,
             'receiver_contact_hash' => null,
             'inviter_principal' => [
                 'kind' => 'user',
@@ -227,6 +303,66 @@ class EventAttendanceControllerTest extends TestCaseTenant
             'accepted_at' => null,
             'declined_at' => null,
         ]);
+    }
+
+    private function personalAccountProfileIdFor(AccountUser $user): string
+    {
+        /** @var AccountProfile|null $existing */
+        $existing = AccountProfile::query()
+            ->where('created_by', (string) $user->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', 'personal')
+            ->first();
+
+        if ($existing instanceof AccountProfile) {
+            return (string) $existing->_id;
+        }
+
+        /** @var AccountProfile $profile */
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => (string) ($user->name ?: 'Personal'),
+            'visibility' => 'public',
+            'discoverable_by_contacts' => true,
+            'is_active' => true,
+            'is_verified' => false,
+            'created_by' => (string) $user->_id,
+            'created_by_type' => 'tenant',
+            'updated_by' => (string) $user->_id,
+            'updated_by_type' => 'tenant',
+        ]);
+
+        return (string) $profile->_id;
+    }
+
+    private function firstOccurrenceId(Event $event): string
+    {
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('occurrence_index')
+            ->firstOrFail();
+
+        return (string) $occurrence->_id;
+    }
+
+    private function createEventWithOccurrences(): Event
+    {
+        $event = $this->createEvent();
+        $now = Carbon::now();
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+            [
+                'date_time_start' => $now->copy()->addDay(),
+                'date_time_end' => $now->copy()->addDay()->addHours(2),
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2),
+                'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+            ],
+        ]);
+
+        return $event->fresh();
     }
 
     private function createEvent(array $overrides = []): Event

@@ -9,5 +9,5 @@ interface EventAttendanceReadContract
     /**
      * @return array<int, string>
      */
-    public function listConfirmedEventIdsForUser(string $userId): array;
+    public function listConfirmedOccurrenceIdsForUser(string $userId): array;
 }

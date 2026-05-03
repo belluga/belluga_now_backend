@@ -23,6 +23,7 @@ use MongoDB\BSON\Regex;
 class AccountProfileQueryService extends AbstractQueryService
 {
     private const PUBLIC_PAGE_SIZE_DEFAULT = 15;
+
     private const PUBLIC_NEAR_PAGE_SIZE_DEFAULT = 10;
 
     public function __construct(
@@ -54,7 +55,7 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $allowedTypes = $this->favoritableProfileTypes();
+        $allowedTypes = $this->publicCatalogProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
 
         $query = $this->withoutPublicProfileTypeFilters($queryParams);
@@ -255,7 +256,7 @@ class AccountProfileQueryService extends AbstractQueryService
     public function publicFindBySlugOrFail(string $slug): AccountProfile
     {
         $normalizedSlug = trim($slug);
-        $allowedTypes = $this->favoritableProfileTypes();
+        $allowedTypes = $this->publicCatalogProfileTypes();
 
         if ($normalizedSlug === '' || $allowedTypes === []) {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$slug]);
@@ -459,7 +460,7 @@ class AccountProfileQueryService extends AbstractQueryService
                 ->where('display_name', 'like', $pattern)
                 ->orWhere('slug', 'like', $pattern)
                 ->orWhere('taxonomy_terms.value', 'like', $pattern);
-            });
+        });
     }
 
     /**
@@ -491,10 +492,10 @@ class AccountProfileQueryService extends AbstractQueryService
     /**
      * @return array<int, string>
      */
-    private function favoritableProfileTypes(): array
+    private function publicCatalogProfileTypes(): array
     {
         return TenantProfileType::query()
-            ->where('capabilities.is_favoritable', true)
+            ->publicCatalog()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
@@ -509,8 +510,7 @@ class AccountProfileQueryService extends AbstractQueryService
     private function nearEligibleProfileTypes(): array
     {
         return TenantProfileType::query()
-            ->where('capabilities.is_favoritable', true)
-            ->where('capabilities.is_poi_enabled', true)
+            ->publicPoiCatalog()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
