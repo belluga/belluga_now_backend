@@ -238,6 +238,23 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $response->assertJsonPath('items.0.profile_exposure_level', 'full_profile');
     }
 
+    public function test_inviteable_contacts_exclude_the_authenticated_user(): void
+    {
+        $viewer = $this->createReleaseUser('Self Viewer', '+55 27 99999-1011');
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991011')],
+            ],
+        ])->assertOk();
+
+        $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+
+        $response->assertOk();
+        $this->assertSame([], $response->json('items'));
+    }
+
     public function test_inviteable_contacts_keep_late_contact_matches_visible_after_unmatched_directory_cap(): void
     {
         $viewer = $this->createReleaseUser('Large Directory Viewer', '+55 27 99999-1101');

@@ -267,6 +267,7 @@ class InviteablePeopleService
 
             $targetProfile = $personalProfilesByUserId[$targetUserId] ?? null;
             $payload = $this->contactMatchPayloadFromMaps(
+                viewer: $viewer,
                 viewerProfile: $viewerProfile,
                 targetUser: $targetUser,
                 targetProfile: $targetProfile,
@@ -287,6 +288,7 @@ class InviteablePeopleService
      * @return array<string, mixed>|null
      */
     private function contactMatchPayloadFromMaps(
+        AccountUser $viewer,
         ?AccountProfile $viewerProfile,
         AccountUser $targetUser,
         ?AccountProfile $targetProfile,
@@ -295,6 +297,10 @@ class InviteablePeopleService
         string $hash,
     ): ?array {
         if (! $targetProfile instanceof AccountProfile) {
+            return null;
+        }
+
+        if ($this->isSelfTarget($viewer, $viewerProfile, $targetUser, $targetProfile)) {
             return null;
         }
 
@@ -414,6 +420,10 @@ class InviteablePeopleService
         ?string $contactType = null,
         bool $requireContactDiscoverability = false,
     ): void {
+        if ($this->isSelfTarget($viewer, $viewerProfile, $targetUser, $targetProfile)) {
+            return;
+        }
+
         if (! $this->profileIsInviteable($targetProfile, $capabilitiesByType)) {
             return;
         }
@@ -645,6 +655,29 @@ class InviteablePeopleService
                 return [(string) $type->type => $capabilities];
             })
             ->all();
+    }
+
+    private function isSelfTarget(
+        AccountUser $viewer,
+        ?AccountProfile $viewerProfile,
+        ?AccountUser $targetUser,
+        AccountProfile $targetProfile,
+    ): bool {
+        $viewerId = $this->userId($viewer);
+        $targetUserId = $targetUser instanceof AccountUser ? $this->userId($targetUser) : '';
+        if ($viewerId !== '' && $targetUserId !== '' && $viewerId === $targetUserId) {
+            return true;
+        }
+
+        if (
+            $viewerProfile instanceof AccountProfile
+            && (string) $viewerProfile->_id !== ''
+            && (string) $viewerProfile->_id === (string) $targetProfile->_id
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     private function profileOwner(AccountProfile $profile): ?AccountUser

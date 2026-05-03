@@ -7,10 +7,12 @@ namespace Tests\Feature\Invites;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Jobs\Telemetry\DeliverTelemetryEventJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\TenantSettings;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
@@ -23,6 +25,7 @@ use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -650,6 +653,44 @@ class InvitesFlowTest extends TestCaseTenant
                 ->where('occurrence_id', $this->firstOccurrenceId($this->event))
                 ->where('source', 'share_url')
                 ->count(),
+        );
+    }
+
+    public function test_share_accept_emits_invite_accepted_with_funnel_join_keys(): void
+    {
+        Queue::fake();
+        $this->configureInviteTelemetry();
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => $this->targetRef($this->event),
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+        $this->assertNotSame('', $code);
+
+        $receiver = $this->createVerifiedIdentityUser();
+        Sanctum::actingAs($receiver, []);
+
+        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
+        $acceptResponse->assertOk();
+        $acceptResponse->assertJsonPath('status', 'accepted');
+
+        Queue::assertPushed(
+            DeliverTelemetryEventJob::class,
+            function (DeliverTelemetryEventJob $job) use ($code): bool {
+                $envelope = $this->telemetryEnvelope($job);
+                $metadata = $envelope['metadata'] ?? [];
+
+                return ($envelope['event'] ?? null) === 'invite.accepted'
+                    && ($metadata['code'] ?? null) === $code
+                    && ($metadata['source'] ?? null) === 'invite_flow'
+                    && ($metadata['invite_source'] ?? null) === 'share_url'
+                    && ($metadata['event_id'] ?? null) === (string) $this->event->_id
+                    && ($metadata['occurrence_id'] ?? null) === $this->firstOccurrenceId($this->event)
+                    && ($metadata['status'] ?? null) === 'accepted'
+                    && ($metadata['credited_acceptance'] ?? null) === true;
+            }
         );
     }
 
@@ -1448,6 +1489,36 @@ class InvitesFlowTest extends TestCaseTenant
         ]);
 
         return $event->fresh();
+    }
+
+    private function configureInviteTelemetry(): void
+    {
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'telemetry' => [
+                'trackers' => [
+                    [
+                        'type' => 'webhook',
+                        'url' => 'https://telemetry.example/ingest',
+                        'track_all' => true,
+                    ],
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function telemetryEnvelope(DeliverTelemetryEventJob $job): array
+    {
+        $property = (new \ReflectionClass($job))->getProperty('envelope');
+        $property->setAccessible(true);
+
+        /** @var array<string, mixed> $envelope */
+        $envelope = $property->getValue($job);
+
+        return $envelope;
     }
 
     private function initializeSystem(): void

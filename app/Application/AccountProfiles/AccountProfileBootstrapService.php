@@ -7,6 +7,7 @@ namespace App\Application\AccountProfiles;
 use App\Application\Accounts\AccountManagementService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Support\Facades\DB;
 
 class AccountProfileBootstrapService
 {
@@ -28,8 +29,9 @@ class AccountProfileBootstrapService
 
         $displayName = $user->name ?: 'Personal';
         $documentNumber = 'PERSONAL-'.(string) $user->_id;
+        $insideTransaction = DB::connection('tenant')->transactionLevel() > 0;
 
-        $result = $this->accountService->create([
+        $payload = [
             'name' => $displayName,
             'ownership_state' => 'unmanaged',
             'document' => [
@@ -40,14 +42,22 @@ class AccountProfileBootstrapService
             'created_by_type' => 'tenant',
             'updated_by' => (string) $user->_id,
             'updated_by_type' => 'tenant',
-        ]);
+        ];
+
+        $result = $insideTransaction
+            ? $this->accountService->createWithinCurrentTransaction($payload)
+            : $this->accountService->create($payload);
 
         $account = $result['account'];
         $role = $result['role'];
 
-        $this->accountService->attachUser($account, $user, $role);
+        if ($insideTransaction) {
+            $this->accountService->attachUserWithinCurrentTransaction($account, $user, $role);
+        } else {
+            $this->accountService->attachUser($account, $user, $role);
+        }
 
-        $this->profileService->create([
+        $profilePayload = [
             'account_id' => (string) $account->_id,
             'profile_type' => self::PERSONAL_PROFILE_TYPE,
             'display_name' => $displayName,
@@ -55,7 +65,13 @@ class AccountProfileBootstrapService
             'created_by_type' => 'tenant',
             'updated_by' => (string) $user->_id,
             'updated_by_type' => 'tenant',
-        ]);
+        ];
+
+        if ($insideTransaction) {
+            $this->profileService->createWithinCurrentTransaction($profilePayload);
+        } else {
+            $this->profileService->create($profilePayload);
+        }
     }
 
     private function personalProfileExists(AccountUser $user): bool

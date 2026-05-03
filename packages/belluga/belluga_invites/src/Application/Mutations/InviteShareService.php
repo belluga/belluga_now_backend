@@ -319,6 +319,7 @@ class InviteShareService
             userId: $userId,
             inviteId: $this->inviteEdgeId($edge),
             idempotencyKey: null,
+            shareCode: $normalizedCode,
         );
     }
 

@@ -83,6 +83,12 @@ class TenantPublicShellController extends Controller
             return $redirect;
         }
 
+        if ($this->isInvitePath($requestedUri)) {
+            return $this->renderShell(
+                $this->metadataService->inviteMetadata($request->query('code'))
+            );
+        }
+
         return $this->renderShell(
             $this->metadataService->defaultMetadata($requestedUri)
         );
@@ -156,5 +162,15 @@ class TenantPublicShellController extends Controller
             : $targetPath;
 
         return rtrim($path, '/') === '/baixe-o-app';
+    }
+
+    private function isInvitePath(string $targetPath): bool
+    {
+        $parts = parse_url($targetPath);
+        $path = is_array($parts)
+            ? (string) ($parts['path'] ?? '/')
+            : $targetPath;
+
+        return rtrim($path, '/') === '/invite';
     }
 }

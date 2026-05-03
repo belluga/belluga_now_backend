@@ -208,14 +208,19 @@ class InviteMutationService
     /**
      * @return array<string, mixed>
      */
-    public function acceptForUserId(string $userId, string $inviteId, ?string $idempotencyKey = null): array
+    public function acceptForUserId(
+        string $userId,
+        string $inviteId,
+        ?string $idempotencyKey = null,
+        ?string $shareCode = null,
+    ): array
     {
         return $this->idempotencyService->runWithReplay(
             command: 'invite.accept',
             actorUserId: $userId,
             idempotencyKey: $idempotencyKey,
             fingerprintPayload: ['invite_id' => $inviteId],
-            callback: fn (): array => $this->acceptForUserIdWithoutReplay($userId, $inviteId),
+            callback: fn (): array => $this->acceptForUserIdWithoutReplay($userId, $inviteId, $shareCode),
         );
     }
 
@@ -254,7 +259,7 @@ class InviteMutationService
     /**
      * @return array<string, mixed>
      */
-    private function acceptForUserIdWithoutReplay(string $userId, string $inviteId): array
+    private function acceptForUserIdWithoutReplay(string $userId, string $inviteId, ?string $shareCode = null): array
     {
         /** @var InviteEdge|null $edge */
         $edge = InviteEdge::query()->find($inviteId);
@@ -290,12 +295,13 @@ class InviteMutationService
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => true,
-                    'target_ref' => $this->targetRef($edge),
-                ],
+                properties: $this->buildAcceptedTelemetryProperties(
+                    edge: $edge,
+                    status: 'already_accepted',
+                    creditedAcceptance: true,
+                    supersededIds: [],
+                    shareCode: $shareCode,
+                ),
                 idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_accepted',
                 source: 'invite_api',
                 context: [
@@ -315,12 +321,13 @@ class InviteMutationService
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => false,
-                    'target_ref' => $this->targetRef($edge),
-                ],
+                properties: $this->buildAcceptedTelemetryProperties(
+                    edge: $edge,
+                    status: 'already_accepted',
+                    creditedAcceptance: false,
+                    supersededIds: [],
+                    shareCode: $shareCode,
+                ),
                 idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
                 source: 'invite_api',
                 context: [
@@ -351,12 +358,13 @@ class InviteMutationService
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => false,
-                    'target_ref' => $this->targetRef($edge),
-                ],
+                properties: $this->buildAcceptedTelemetryProperties(
+                    edge: $edge,
+                    status: 'already_accepted',
+                    creditedAcceptance: false,
+                    supersededIds: [],
+                    shareCode: $shareCode,
+                ),
                 idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
                 source: 'invite_api',
                 context: [
@@ -417,14 +425,13 @@ class InviteMutationService
         $this->telemetry->emit(
             event: 'invite.accepted',
             userId: $userId,
-            properties: [
-                'invite_id' => (string) $acceptedEdge->getAttribute('_id'),
-                'status' => 'accepted',
-                'credited_acceptance' => true,
-                'superseded_count' => count($supersededIds),
-                'superseded_invite_ids' => array_values($supersededIds),
-                'target_ref' => $this->targetRef($acceptedEdge),
-            ],
+            properties: $this->buildAcceptedTelemetryProperties(
+                edge: $acceptedEdge,
+                status: 'accepted',
+                creditedAcceptance: true,
+                supersededIds: $supersededIds,
+                shareCode: $shareCode,
+            ),
             idempotencyKey: 'invite.accepted:'.(string) $acceptedEdge->getAttribute('_id').':accepted',
             source: 'invite_api',
             context: [
@@ -435,6 +442,39 @@ class InviteMutationService
         );
 
         return $this->acceptResponse($acceptedEdge, 'accepted', $supersededIds, true);
+    }
+
+    /**
+     * @param  array<int, string>  $supersededIds
+     * @return array<string, mixed>
+     */
+    private function buildAcceptedTelemetryProperties(
+        InviteEdge $edge,
+        string $status,
+        bool $creditedAcceptance,
+        array $supersededIds = [],
+        ?string $shareCode = null,
+    ): array {
+        $properties = [
+            'invite_id' => (string) $edge->getAttribute('_id'),
+            'status' => $status,
+            'credited_acceptance' => $creditedAcceptance,
+            'event_id' => (string) $edge->event_id,
+            'occurrence_id' => (string) $edge->occurrence_id,
+            'source' => 'invite_flow',
+            'invite_source' => (string) ($edge->source ?? 'direct_invite'),
+            'target_ref' => $this->targetRef($edge),
+        ];
+        if ($status === 'accepted') {
+            $properties['superseded_count'] = count($supersededIds);
+            $properties['superseded_invite_ids'] = array_values($supersededIds);
+        }
+        $normalizedShareCode = $shareCode === null ? '' : strtoupper(trim($shareCode));
+        if ($normalizedShareCode !== '') {
+            $properties['code'] = $normalizedShareCode;
+        }
+
+        return $properties;
     }
 
     /**

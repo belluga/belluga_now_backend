@@ -74,6 +74,35 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.type', 'artist');
     }
 
+    public function test_profile_type_show_returns_definition_with_plural_label(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'labels' => [
+                'singular' => 'Artist',
+                'plural' => 'Artists',
+            ],
+            'allowed_taxonomies' => ['music_genre'],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => false,
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profile_types/artist",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.type', 'artist');
+        $response->assertJsonPath('data.label', 'Artist');
+        $response->assertJsonPath('data.labels.singular', 'Artist');
+        $response->assertJsonPath('data.labels.plural', 'Artists');
+    }
+
     public function test_profile_type_create(): void
     {
         $response = $this->postJson(
