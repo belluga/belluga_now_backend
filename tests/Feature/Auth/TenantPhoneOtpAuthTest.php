@@ -453,6 +453,36 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('retry_after'));
     }
 
+    public function test_phone_otp_challenge_allows_reissue_after_pending_challenge_expires_even_if_resend_window_is_future(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+
+        $initial = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+5527999990099',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $initial->assertStatus(202);
+
+        $record = PhoneOtpChallenge::query()->findOrFail($initial->json('data.challenge_id'));
+        $record->expires_at = now()->subSecond();
+        $record->resend_available_at = now()->addMinutes(5);
+        $record->save();
+
+        $reissued = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+5527999990099',
+            'device_name' => 'android-release-smoke',
+        ]);
+
+        $reissued->assertStatus(202);
+        $this->assertNotSame($initial->json('data.challenge_id'), $reissued->json('data.challenge_id'));
+
+        $record->refresh();
+        $this->assertSame(PhoneOtpChallenge::STATUS_EXPIRED, $record->status);
+
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, 2);
+    }
+
     public function test_phone_otp_verify_cannot_consume_same_challenge_twice(): void
     {
         Queue::fake();
