@@ -38,7 +38,9 @@ class TaxonomyTermsController extends Controller
         return response()->json([
             'data' => $this->managementService->listBatch(
                 taxonomyIds: $validated['taxonomy_ids'] ?? [],
-                termLimit: $validated['term_limit'] ?? InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX,
+                termLimit: isset($validated['term_limit'])
+                    ? (int) $validated['term_limit']
+                    : InputConstraints::ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX,
             ),
         ]);
     }
