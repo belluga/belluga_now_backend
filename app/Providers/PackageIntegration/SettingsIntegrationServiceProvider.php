@@ -6,6 +6,7 @@ namespace App\Providers\PackageIntegration;
 
 use App\Integration\Settings\CompositeSettingsPatchGuard;
 use App\Integration\Settings\OutboundIntegrationsSettingsNamespaceRegistrar;
+use App\Integration\Settings\PhoneOtpReviewAccessSettingsNamespaceRegistrar;
 use App\Integration\Settings\TenantPublicAuthMethodSettingsNamespaceRegistrar;
 use App\Integration\Settings\TenantScopeContextAdapter;
 use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
@@ -36,6 +37,7 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
 
         $this->app->make(TenantPublicAuthMethodSettingsNamespaceRegistrar::class)->register($registry);
         $this->app->make(OutboundIntegrationsSettingsNamespaceRegistrar::class)->register($registry);
+        $this->app->make(PhoneOtpReviewAccessSettingsNamespaceRegistrar::class)->register($registry);
 
         $registry->register(new SettingsNamespaceDefinition(
             namespace: 'telemetry',

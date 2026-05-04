@@ -117,6 +117,10 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'tenant_public_auth' => [
                 'enabled_methods' => [],
             ],
+            'phone_otp_review_access' => [
+                'phone_e164' => '+5527999990199',
+                'code_hash' => 'stored-review-hash',
+            ],
             'outbound_integrations' => [
                 'whatsapp' => [
                     'webhook_url' => 'https://integrations.example/whatsapp',
@@ -194,6 +198,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('push', $namespaces);
         $this->assertContains('telemetry', $namespaces);
         $this->assertContains('tenant_public_auth', $namespaces);
+        $this->assertContains('phone_otp_review_access', $namespaces);
         $this->assertContains('outbound_integrations', $namespaces);
         $this->assertContains('discovery_filters', $namespaces);
         $this->assertContains('app_links', $namespaces);
@@ -218,6 +223,8 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);
         $response->assertJsonPath('data.tenant_public_auth.enabled_methods', []);
+        $response->assertJsonPath('data.phone_otp_review_access.phone_e164', '+5527999990199');
+        $response->assertJsonPath('data.phone_otp_review_access.code_hash', 'stored-review-hash');
         $response->assertJsonPath('data.outbound_integrations.whatsapp.webhook_url', 'https://integrations.example/whatsapp');
         $response->assertJsonPath('data.outbound_integrations.otp.webhook_url', 'https://integrations.example/otp');
         $response->assertJsonPath('data.outbound_integrations.otp.delivery_channel', 'whatsapp');
@@ -231,6 +238,23 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.resend_email.from', 'Belluga <noreply@example.org>');
         $response->assertJsonPath('data.resend_email.to.0', 'admin@example.org');
         $response->assertJsonPath('data.resend_email.reply_to.0', 'reply@example.org');
+    }
+
+    public function test_phone_otp_review_access_hash_helper_returns_hash_without_persisting_cleartext(): void
+    {
+        $response = $this->postJson("{$this->base_tenant_api_admin}settings/values/phone_otp_review_access/hash", [
+            'code' => '123456',
+        ]);
+
+        $response->assertStatus(200);
+        $hash = (string) $response->json('data.code_hash');
+        $this->assertNotSame('', $hash);
+        $this->assertNotSame('123456', $hash);
+
+        $values = $this->getJson("{$this->base_tenant_api_admin}settings/values");
+        $values->assertStatus(200);
+        $values->assertJsonPath('data.phone_otp_review_access.code_hash', 'stored-review-hash');
+        $this->assertStringNotContainsString('123456', (string) $values->getContent());
     }
 
     public function test_patch_discovery_filters_persists_surface_filter_order_and_delete_semantics(): void

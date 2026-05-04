@@ -594,6 +594,30 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $this->assertStringNotContainsString('https://integrations.example/whatsapp', (string) $response->getContent());
     }
 
+    public function test_environment_api_does_not_expose_phone_otp_review_access_settings(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'tenant_public_auth' => [
+                'enabled_methods' => ['phone_otp'],
+            ],
+            'phone_otp_review_access' => [
+                'phone_e164' => '+5527999990555',
+                'code_hash' => 'review-hash-secret',
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $this->assertArrayNotHasKey('phone_otp_review_access', $response->json('settings') ?? []);
+        $this->assertStringNotContainsString('+5527999990555', (string) $response->getContent());
+        $this->assertStringNotContainsString('review-hash-secret', (string) $response->getContent());
+    }
+
     public function test_environment_api_exposes_map_ui_default_origin_from_settings(): void
     {
         $tenant = $this->currentTenant();

@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Auth;
 
-use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Auth\PhoneOtpReviewAccessCodeHasher;
+use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
@@ -452,6 +453,184 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('retry_after'));
     }
 
+    public function test_phone_otp_verify_cannot_consume_same_challenge_twice(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+5527999990011',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $payload = [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990011',
+            'code' => $otpCode,
+            'device_name' => 'android-release-smoke',
+        ];
+
+        $first = $this->postJson("{$this->base_api_tenant}auth/otp/verify", $payload);
+        $first->assertStatus(200);
+
+        $second = $this->postJson("{$this->base_api_tenant}auth/otp/verify", $payload);
+        $second->assertStatus(422);
+        $second->assertJsonPath('errors.code.0', 'The OTP challenge is no longer active.');
+    }
+
+    public function test_phone_otp_verify_locks_challenge_after_max_invalid_attempts(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+5527999990012',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $payload = [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990012',
+            'code' => '000000',
+            'device_name' => 'android-release-smoke',
+        ];
+
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            $response = $this->postJson("{$this->base_api_tenant}auth/otp/verify", $payload);
+            $response->assertStatus(422);
+            $response->assertJsonPath('errors.code.0', 'The OTP code is invalid.');
+        }
+
+        $record = PhoneOtpChallenge::query()->findOrFail($challenge->json('data.challenge_id'));
+        $this->assertSame(5, (int) $record->attempts);
+        $this->assertSame(PhoneOtpChallenge::STATUS_LOCKED, $record->status);
+
+        $validAfterLock = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990012',
+            'code' => $otpCode,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $validAfterLock->assertStatus(422);
+        $validAfterLock->assertJsonPath('errors.code.0', 'The OTP challenge is no longer active.');
+    }
+
+    public function test_phone_otp_review_access_verifies_allowlisted_phone_without_webhook_delivery(): void
+    {
+        Queue::fake();
+        $this->configureReviewAccess('+5527999990013', '123456');
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0013',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+        Queue::assertNotPushed(DeliverPhoneOtpWebhookJob::class);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990013',
+            'code' => '123456',
+            'device_name' => 'android-release-smoke',
+        ]);
+
+        $verify->assertStatus(200);
+        $verify->assertJsonPath('data.identity_state', 'registered');
+        $this->assertNotEmpty($verify->json('data.token'));
+    }
+
+    public function test_phone_otp_review_access_rejects_non_allowlisted_phone(): void
+    {
+        Queue::fake();
+        TenantSettings::create([
+            'tenant_public_auth' => [
+                'enabled_methods' => ['phone_otp'],
+            ],
+            'phone_otp_review_access' => [
+                'phone_e164' => '+5527999990014',
+                'code_hash' => app(PhoneOtpReviewAccessCodeHasher::class)->make('123456'),
+            ],
+            'outbound_integrations' => [
+                'whatsapp' => [
+                    'webhook_url' => 'https://integrations.example/whatsapp',
+                ],
+                'otp' => [
+                    'webhook_url' => 'https://integrations.example/otp',
+                    'use_whatsapp_webhook' => true,
+                    'delivery_channel' => 'whatsapp',
+                    'ttl_minutes' => 10,
+                    'resend_cooldown_seconds' => 60,
+                    'max_attempts' => 5,
+                ],
+            ],
+        ]);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0015',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990015',
+            'code' => '123456',
+            'device_name' => 'android-release-smoke',
+        ]);
+
+        $verify->assertStatus(422);
+        $verify->assertJsonPath('errors.code.0', 'The OTP code is invalid.');
+    }
+
+    public function test_phone_otp_review_access_rejects_disabled_review_user(): void
+    {
+        Queue::fake();
+        $this->configureReviewAccess('+5527999990016', '123456');
+
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Disabled Reviewer',
+            'phones' => ['+5527999990016'],
+            'credentials' => [],
+        ]);
+        $user->delete();
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0016',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+        Queue::assertNotPushed(DeliverPhoneOtpWebhookJob::class);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990016',
+            'code' => '123456',
+            'device_name' => 'android-release-smoke',
+        ]);
+
+        $verify->assertStatus(422);
+        $verify->assertJsonPath('errors.phone.0', 'This phone number cannot be used to authenticate.');
+    }
+
     public function test_phone_otp_verify_rejects_expired_challenge(): void
     {
         Queue::fake();
@@ -528,6 +707,19 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
                     'resend_cooldown_seconds' => 60,
                     'max_attempts' => 5,
                 ],
+            ],
+        ]);
+    }
+
+    private function configureReviewAccess(string $phone, string $code): void
+    {
+        TenantSettings::create([
+            'tenant_public_auth' => [
+                'enabled_methods' => ['phone_otp'],
+            ],
+            'phone_otp_review_access' => [
+                'phone_e164' => $phone,
+                'code_hash' => app(PhoneOtpReviewAccessCodeHasher::class)->make($code),
             ],
         ]);
     }
