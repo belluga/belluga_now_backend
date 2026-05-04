@@ -190,6 +190,51 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_batch_terms_accepts_explicit_term_limit_query_parameter(): void
+    {
+        $music = $this->postJson(
+            "{$this->base_tenant_api_admin}taxonomies",
+            [
+                'slug' => 'batch-limit-music',
+                'name' => 'Batch Limit Music',
+                'applies_to' => ['event'],
+            ],
+            $this->getHeaders()
+        );
+        $music->assertStatus(201);
+        $musicId = (string) $music->json('data.id');
+
+        foreach ([
+            ['slug' => 'rock', 'name' => 'Rock'],
+            ['slug' => 'samba', 'name' => 'Samba'],
+        ] as $term) {
+            $this->postJson(
+                "{$this->base_tenant_api_admin}taxonomies/{$musicId}/terms",
+                $term,
+                $this->getHeaders()
+            )->assertStatus(201);
+        }
+
+        $query = http_build_query(
+            [
+                'taxonomy_ids' => [$musicId],
+                'term_limit' => 1,
+            ],
+            '',
+            '&',
+            PHP_QUERY_RFC3986
+        );
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}taxonomies/terms?{$query}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, "data.{$musicId}");
+        $response->assertJsonPath("data.{$musicId}.0.slug", 'rock');
+    }
+
     public function test_batch_terms_validates_taxonomy_ids(): void
     {
         $response = $this->getJson(
