@@ -84,6 +84,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_favoritable' => false,
                 'is_publicly_discoverable' => false,
                 'is_poi_enabled' => false,
+                'has_events' => false,
             ],
         ]);
         TenantProfileType::create([
@@ -93,6 +94,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'capabilities' => [
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
+                'has_events' => true,
             ],
         ]);
 
@@ -617,6 +619,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
+                'has_events' => true,
             ],
         ]);
 
@@ -639,7 +642,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             title: 'Future Artist Event',
             startsAt: Carbon::now()->addHours(5),
             endsAt: Carbon::now()->addHours(7),
-            asArtistHost: true,
+            viaLinkedParticipation: true,
         );
 
         $response = $this->getJson(
@@ -651,6 +654,104 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertCount(1, $occurrences);
         $this->assertSame((string) $futureEvent->_id, $occurrences[0]['event_id'] ?? null);
         $this->assertSame('Future Artist Event', $occurrences[0]['title'] ?? null);
+    }
+
+    public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_capability_enabled_poi_profile_via_linked_event_parties(): void
+    {
+        Queue::fake();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        TenantProfileType::create([
+            'type' => 'community_hub',
+            'label' => 'Community Hub',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+                'has_events' => true,
+            ],
+        ]);
+
+        $profileAccount = Account::create([
+            'name' => 'Community Hub Account',
+            'document' => 'DOC-COMMUNITY-HUB-AGENDA',
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $profileAccount->_id,
+            'profile_type' => 'community_hub',
+            'display_name' => 'Community Hub Agenda',
+            'slug' => 'community-hub-agenda',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $futureEvent = $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Community Hub Linked Event',
+            startsAt: Carbon::now()->addHours(8),
+            endsAt: Carbon::now()->addHours(11),
+            viaLinkedParticipation: true,
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/community-hub-agenda"
+        );
+
+        $response->assertStatus(200);
+        $occurrences = $response->json('data.agenda_occurrences', []);
+        $this->assertCount(1, $occurrences);
+        $this->assertSame((string) $futureEvent->_id, $occurrences[0]['event_id'] ?? null);
+        $this->assertSame('Community Hub Linked Event', $occurrences[0]['title'] ?? null);
+    }
+
+    public function test_public_account_profile_show_by_slug_excludes_agenda_occurrences_for_profile_without_events_capability(): void
+    {
+        Queue::fake();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        TenantProfileType::create([
+            'type' => 'poi_without_events',
+            'label' => 'POI Without Events',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+                'has_events' => false,
+            ],
+        ]);
+
+        $profileAccount = Account::create([
+            'name' => 'POI Without Events Account',
+            'document' => 'DOC-POI-WITHOUT-EVENTS',
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $profileAccount->_id,
+            'profile_type' => 'poi_without_events',
+            'display_name' => 'POI Without Events',
+            'slug' => 'poi-without-events',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Profile Without Agenda Capability Event',
+            startsAt: Carbon::now()->addHours(4),
+            endsAt: Carbon::now()->addHours(6),
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/poi-without-events"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('data.agenda_occurrences', []));
     }
 
     public function test_public_account_profile_show_by_slug_uses_materialized_effective_end_for_open_occurrences(): void
@@ -729,9 +830,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         string $title,
         Carbon $startsAt,
         ?Carbon $endsAt = null,
-        bool $asArtistHost = false,
+        bool $viaLinkedParticipation = false,
     ): Event {
-        $eventParties = $asArtistHost
+        $eventParties = $viaLinkedParticipation
             ? [[
                 'party_type' => $profile->profile_type,
                 'party_ref_id' => (string) $profile->_id,
@@ -775,7 +876,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     'coordinates' => [-40.0, -20.0],
                 ],
             ],
-            'place_ref' => $asArtistHost
+            'place_ref' => $viaLinkedParticipation
                 ? null
                 : [
                     'type' => 'account_profile',
@@ -792,7 +893,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'icon' => null,
                 'color' => null,
             ],
-            'venue' => $asArtistHost
+            'venue' => $viaLinkedParticipation
                 ? null
                 : [
                     'id' => (string) $profile->_id,
