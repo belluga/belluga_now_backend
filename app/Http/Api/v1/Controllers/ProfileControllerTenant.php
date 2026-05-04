@@ -14,10 +14,11 @@ use App\Http\Api\v1\Requests\PhoneRemoveRequest;
 use App\Http\Api\v1\Requests\PhonesAddRequest;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
 use App\Http\Api\v1\Requests\UpdatePasswordRequest;
-use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
+use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 
 class ProfileControllerTenant extends Controller
@@ -28,13 +29,17 @@ class ProfileControllerTenant extends Controller
         private readonly TelemetryEmitter $telemetry
     ) {}
 
-    public function updateProfile(UpdateProfileRequestContract $request): JsonResponse
+    public function updateProfile(UpdateProfileRequestTenant $request): JsonResponse
     {
         /** @var AccountUser $user */
         $user = $request->user();
 
         $validated = $request->validated();
-        $updated = $this->profileService->updateProfile($user, $validated);
+        $updated = $this->profileService->updateProfile(
+            $user,
+            $validated,
+            $request,
+        );
 
         $this->telemetry->emit(
             event: 'profile_updated',
@@ -153,45 +158,25 @@ class ProfileControllerTenant extends Controller
 
     public function addPhones(PhonesAddRequest $request): JsonResponse
     {
-        /** @var AccountUser $user */
-        $user = $request->user();
-
-        $updated = $this->profileService->addPhones($user, $request->validated()['phones']);
-
-        $this->telemetry->emit(
-            event: 'profile_phone_added',
-            userId: (string) $user->_id,
-            properties: [
-                'phones_count' => count($updated->phones ?? []),
-            ],
-            idempotencyKey: $request->header('X-Request-Id')
-        );
-
-        return response()->json([
-            'message' => 'Usuário atualizado com sucesso',
-            'data' => $updated,
-        ]);
+        $this->rejectPhoneMutation();
     }
 
     public function removePhone(PhoneRemoveRequest $request): JsonResponse
     {
-        /** @var AccountUser $user */
-        $user = $request->user();
+        $this->rejectPhoneMutation();
+    }
 
-        $updated = $this->profileService->removePhone($user, $request->validated()['phone']);
-
-        $this->telemetry->emit(
-            event: 'profile_phone_removed',
-            userId: (string) $user->_id,
-            properties: [
-                'phones_count' => count($updated->phones ?? []),
-            ],
-            idempotencyKey: $request->header('X-Request-Id')
+    private function rejectPhoneMutation(): never
+    {
+        throw new HttpResponseException(
+            response()->json([
+                'message' => 'Telefone verificado não pode ser alterado por este endpoint.',
+                'errors' => [
+                    'phone' => [
+                        'Telefone verificado não pode ser alterado por este endpoint.',
+                    ],
+                ],
+            ], 422)
         );
-
-        return response()->json([
-            'message' => 'Telefone removido com sucesso',
-            'data' => $updated,
-        ]);
     }
 }

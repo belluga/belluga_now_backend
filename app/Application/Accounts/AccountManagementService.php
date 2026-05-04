@@ -225,12 +225,17 @@ class AccountManagementService
 
     public function attachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void
     {
-        DB::connection('tenant')->transaction(static function () use ($account, $user, $role): void {
-            $user->accountRoles()->create([
-                ...$role->attributesToArray(),
-                'account_id' => $account->id,
-            ]);
+        DB::connection('tenant')->transaction(function () use ($account, $user, $role): void {
+            $this->attachUserWithinCurrentTransaction($account, $user, $role);
         });
+    }
+
+    public function attachUserWithinCurrentTransaction(Account $account, AccountUser $user, AccountRoleTemplate $role): void
+    {
+        $user->accountRoles()->create([
+            ...$role->attributesToArray(),
+            'account_id' => $account->id,
+        ]);
     }
 
     public function detachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void

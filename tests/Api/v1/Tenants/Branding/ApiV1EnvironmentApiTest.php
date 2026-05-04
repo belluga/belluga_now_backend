@@ -2,20 +2,20 @@
 
 namespace Tests\Api\v1\Tenants\Branding;
 
+use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Auth\TenantPublicAuthMethodResolver;
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Environment\TenantEnvironmentPayloadFactory;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
-use App\Application\Branding\BrandingPublicWebMediaService;
-use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantEnvironmentSnapshot;
-use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use App\Models\Tenants\TenantProfileType;
-use Belluga\Settings\Models\Tenants\TenantSettings;
-use Belluga\Settings\Models\Landlord\LandlordSettings;
+use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Queue;
 use Tests\Helpers\TenantLabels;
@@ -169,13 +169,8 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         app()->instance(
             TenantEnvironmentPayloadFactory::class,
-            new class(
-                app(TelemetrySettingsKernelBridge::class),
-                app(TenantPublicAuthMethodResolver::class),
-                app(PushSettingsKernelBridge::class),
-                app(AccountProfileRegistryService::class),
-                app(BrandingPublicWebMediaService::class),
-            ) extends TenantEnvironmentPayloadFactory {
+            new class(app(TelemetrySettingsKernelBridge::class), app(TenantPublicAuthMethodResolver::class), app(PushSettingsKernelBridge::class), app(AccountProfileRegistryService::class), app(BrandingPublicWebMediaService::class)) extends TenantEnvironmentPayloadFactory
+            {
                 public function buildSnapshotSource(Tenant $tenant): array
                 {
                     throw new \RuntimeException('forced snapshot rebuild failure');
@@ -526,14 +521,14 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $landlord = LandlordSettings::current();
         $originalLandlordAuth = $landlord?->getAttribute('tenant_public_auth');
         if ($landlord === null) {
-            $landlord = new LandlordSettings();
+            $landlord = new LandlordSettings;
             $landlord->setAttribute('_id', 'settings_root');
         }
 
         $tenantSettings = TenantSettings::current();
         $originalTenantAuth = $tenantSettings?->getAttribute('tenant_public_auth');
         if ($tenantSettings === null) {
-            $tenantSettings = new TenantSettings();
+            $tenantSettings = new TenantSettings;
             $tenantSettings->setAttribute('_id', 'settings_root');
         }
 
@@ -562,6 +557,41 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             $tenantSettings->setAttribute('tenant_public_auth', $originalTenantAuth);
             $tenantSettings->save();
         }
+    }
+
+    public function test_environment_api_exposes_phone_otp_sms_fallback_flag_without_webhook_url(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'tenant_public_auth' => [
+                'enabled_methods' => ['phone_otp'],
+            ],
+            'outbound_integrations' => [
+                'whatsapp' => [
+                    'webhook_url' => 'https://integrations.example/whatsapp',
+                ],
+                'otp' => [
+                    'webhook_url' => 'https://integrations.example/sms',
+                    'use_whatsapp_webhook' => true,
+                    'delivery_channel' => 'whatsapp',
+                    'ttl_minutes' => 10,
+                    'resend_cooldown_seconds' => 60,
+                    'max_attempts' => 5,
+                ],
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('settings.tenant_public_auth.phone_otp.primary_channel', 'whatsapp');
+        $response->assertJsonPath('settings.tenant_public_auth.phone_otp.sms_fallback_enabled', true);
+        $this->assertArrayNotHasKey('outbound_integrations', $response->json('settings') ?? []);
+        $this->assertStringNotContainsString('https://integrations.example/sms', (string) $response->getContent());
+        $this->assertStringNotContainsString('https://integrations.example/whatsapp', (string) $response->getContent());
     }
 
     public function test_environment_api_exposes_map_ui_default_origin_from_settings(): void
@@ -604,6 +634,34 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             'settings.map_ui.filters.0.image_uri',
             'https://tenant-alpha.test/storage/map-filters/event.png'
         );
+    }
+
+    public function test_environment_api_exposes_publication_app_links_from_settings(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        AppTenantSettings::query()->delete();
+        AppTenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.tenant.alpha',
+                ],
+                'ios' => [
+                    'enabled' => false,
+                    'store_url' => 'https://apps.apple.com/br/app/id123456789',
+                ],
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('settings.app_links.android.enabled', true);
+        $response->assertJsonPath('settings.app_links.android.store_url', 'https://play.google.com/store/apps/details?id=com.tenant.alpha');
+        $response->assertJsonPath('settings.app_links.ios.enabled', false);
+        $response->assertJsonPath('settings.app_links.ios.store_url', 'https://apps.apple.com/br/app/id123456789');
     }
 
     private function currentTenant(): Tenant

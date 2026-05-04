@@ -10,12 +10,14 @@ use App\Http\Api\v1\Controllers\EventTypeMediaController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
-use App\Http\Api\v1\Controllers\ProfileProximityPreferencesController;
+use App\Http\Api\v1\Controllers\PhoneOtpAuthController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Controllers\ProfileProximityPreferencesController;
 use App\Http\Api\v1\Controllers\StaticAssetMediaController;
 use App\Http\Api\v1\Controllers\StaticProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
+use App\Http\Middleware\EnsureTenantPublicAuthMethod;
 use Belluga\Events\Http\Api\v1\Controllers\EventMediaController;
 use Illuminate\Support\Facades\Route;
 
@@ -72,7 +74,8 @@ Route::middleware('tenant')->group(function () {
         ->group(function () {
             Route::get('/proximity-preferences', [ProfileProximityPreferencesController::class, 'show']);
             Route::put('/proximity-preferences', [ProfileProximityPreferencesController::class, 'upsert']);
-            Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword']);
+            Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
             Route::patch('/', [ProfileControllerTenant::class, 'updateProfile']);
 
@@ -87,13 +90,21 @@ Route::middleware('tenant')->group(function () {
 
     Route::prefix('auth')
         ->group(function () {
-            Route::post('/login', [AuthControllerAccount::class, 'login']);
+            Route::post('/otp/challenge', [PhoneOtpAuthController::class, 'challenge']);
 
-            Route::post('/register/password', PasswordRegistrationController::class);
+            Route::post('/otp/verify', [PhoneOtpAuthController::class, 'verify']);
 
-            Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken']);
+            Route::post('/login', [AuthControllerAccount::class, 'login'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
-            Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword']);
+            Route::post('/register/password', PasswordRegistrationController::class)
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
+
+            Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
+
+            Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
             Route::middleware(['auth:sanctum', CheckTenantAccess::class])
                 ->group(function () {

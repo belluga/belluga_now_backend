@@ -19,7 +19,7 @@ class EventAttendanceConfirmRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'occurrence_id' => 'sometimes|string|max:64',
+            'occurrence_id' => 'required|string|max:64',
         ];
     }
 }

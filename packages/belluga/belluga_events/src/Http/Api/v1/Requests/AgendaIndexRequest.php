@@ -34,6 +34,8 @@ class AgendaIndexRequest extends FormRequest
             'taxonomy' => 'sometimes|array|max:'.InputConstraints::PUBLIC_FILTER_LIST_VALUES_MAX,
             'taxonomy.*.type' => 'required_with:taxonomy|string|max:'.InputConstraints::NAME_MAX,
             'taxonomy.*.value' => 'required_with:taxonomy|string|max:'.InputConstraints::NAME_MAX,
+            'occurrence_ids' => 'sometimes|array|max:'.InputConstraints::PUBLIC_FILTER_LIST_VALUES_MAX,
+            'occurrence_ids.*' => 'string|max:'.InputConstraints::OBJECT_ID_LENGTH,
             'origin_lat' => 'nullable|numeric|between:-90,90|required_with:origin_lng|prohibits:search',
             'origin_lng' => 'nullable|numeric|between:-180,180|required_with:origin_lat|prohibits:search',
             'max_distance_meters' => 'sometimes|numeric|min:0|max:'.InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS.'|prohibits:search',

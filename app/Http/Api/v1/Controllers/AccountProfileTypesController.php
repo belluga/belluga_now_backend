@@ -26,6 +26,21 @@ class AccountProfileTypesController extends Controller
         ]);
     }
 
+    public function show(Request $request): JsonResponse
+    {
+        $profileType = (string) $request->route('profile_type', '');
+        $entry = $this->registryService->typeDefinition(
+            $profileType,
+            $request->getSchemeAndHttpHost(),
+        );
+
+        if ($entry === null) {
+            abort(404, 'Account profile type not found.');
+        }
+
+        return response()->json(['data' => $entry]);
+    }
+
     public function store(AccountProfileTypeStoreRequest $request): JsonResponse
     {
         $entry = $this->managementService->create($request, $request->validated());

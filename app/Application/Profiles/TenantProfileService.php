@@ -4,25 +4,71 @@ declare(strict_types=1);
 
 namespace App\Application\Profiles;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class TenantProfileService
 {
-    public function updateProfile(AccountUser $user, array $attributes): AccountUser
+    public function __construct(
+        private readonly AccountProfileBootstrapService $profileBootstrapper,
+        private readonly AccountProfileManagementService $profileManagementService,
+        private readonly AccountProfileMediaService $profileMediaService,
+    ) {}
+
+    public function updateProfile(AccountUser $user, array $attributes, Request $request): AccountUser
     {
-        if ($attributes === []) {
+        $hasAvatarMutation = $request->hasFile('avatar')
+            || $request->boolean('remove_avatar')
+            || array_key_exists('avatar_url', $attributes);
+
+        if ($attributes === [] && ! $hasAvatarMutation) {
             throw ValidationException::withMessages([
                 'empty' => 'Nenhum dado recebido para atualizar.',
             ]);
         }
 
-        $user->fill($attributes);
-        $user->save();
+        $userAttributes = [];
+        if (array_key_exists('name', $attributes)) {
+            $userAttributes['name'] = $attributes['name'];
+        }
+        if (array_key_exists('timezone', $attributes)) {
+            $userAttributes['timezone'] = $attributes['timezone'];
+        }
+
+        if ($userAttributes !== []) {
+            $user->fill($userAttributes);
+            $user->save();
+        }
+
+        $profileAttributes = [];
+        if (array_key_exists('name', $attributes)) {
+            $profileAttributes['display_name'] = $attributes['name'];
+        }
+        if (array_key_exists('bio', $attributes)) {
+            $profileAttributes['bio'] = $attributes['bio'];
+        }
+        if (array_key_exists('avatar_url', $attributes)) {
+            $profileAttributes['avatar_url'] = $attributes['avatar_url'];
+        }
+
+        if ($profileAttributes !== [] || $hasAvatarMutation) {
+            $profile = $this->ensurePersonalProfile($user);
+            if ($profileAttributes !== []) {
+                $profileAttributes['updated_by'] = (string) $user->_id;
+                $profileAttributes['updated_by_type'] = 'tenant';
+                $profile = $this->profileManagementService->update($profile, $profileAttributes);
+            }
+            $this->profileMediaService->applyUploads($request, $profile);
+        }
 
         return $user->fresh();
     }
@@ -234,5 +280,27 @@ class TenantProfileService
             'message' => $message,
             'errors' => $errors,
         ], 422));
+    }
+
+    private function ensurePersonalProfile(AccountUser $user): AccountProfile
+    {
+        $this->profileBootstrapper->ensurePersonalAccount($user);
+
+        /** @var AccountProfile|null $profile */
+        $profile = AccountProfile::query()
+            ->where('created_by', (string) $user->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', 'personal')
+            ->where('deleted_at', null)
+            ->orderBy('_id')
+            ->first();
+
+        if (! $profile instanceof AccountProfile) {
+            throw ValidationException::withMessages([
+                'profile' => ['Perfil pessoal não encontrado para o usuário autenticado.'],
+            ]);
+        }
+
+        return $profile;
     }
 }

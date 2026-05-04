@@ -17,14 +17,14 @@ return new class extends Migration
                 [
                     'event_id' => 1,
                     'occurrence_id' => 1,
-                    'receiver_user_id' => 1,
+                    'receiver_account_profile_id' => 1,
                     'inviter_principal.kind' => 1,
                     'inviter_principal.principal_id' => 1,
                 ],
                 options: [
                     'name' => 'uq_invite_edges_target_receiver_principal',
                     'partialFilterExpression' => [
-                        'receiver_user_id' => ['$exists' => true],
+                        'receiver_account_profile_id' => ['$exists' => true],
                     ],
                 ]
             );

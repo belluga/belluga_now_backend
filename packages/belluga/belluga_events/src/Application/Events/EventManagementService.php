@@ -148,8 +148,9 @@ class EventManagementService
             }
         }
 
+        $eventTypeForTaxonomy = $normalized['type'] ?? $this->resolveExistingEventTypePayload($existing);
         $resolvedCapabilities = $this->eventCapabilities->resolveEventCapabilities($payload, $existing);
-        $schedule = $this->resolveSchedulePayload($payload, $existing);
+        $schedule = $this->resolveSchedulePayload($payload, $existing, $eventTypeForTaxonomy);
         if ($schedule['touched']) {
             $this->eventCapabilities->assertScheduleConstraints($resolvedCapabilities, $schedule['occurrences']);
         }
@@ -214,12 +215,20 @@ class EventManagementService
      *   date_time_end: Carbon|null
      * }
      */
-    private function resolveSchedulePayload(array $payload, ?Event $existing): array
+    private function resolveSchedulePayload(array $payload, ?Event $existing, ?array $eventType): array
     {
         $hasOccurrences = array_key_exists('occurrences', $payload);
 
         if ($hasOccurrences) {
-            $occurrences = $this->normalizeOccurrences($payload['occurrences'], $payload);
+            $existingOccurrences = $existing === null
+                ? []
+                : $this->eventOccurrencePayloadSnapshots->requireForUpdate($existing);
+            $occurrences = $this->normalizeOccurrences(
+                $payload['occurrences'],
+                $payload,
+                $eventType,
+                $existingOccurrences
+            );
 
             return $this->buildScheduleResult(true, $occurrences);
         }
@@ -244,8 +253,12 @@ class EventManagementService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function normalizeOccurrences(mixed $occurrences, array $payload): array
-    {
+    private function normalizeOccurrences(
+        mixed $occurrences,
+        array $payload,
+        ?array $eventType,
+        array $existingOccurrences = []
+    ): array {
         if (! is_array($occurrences) || $occurrences === []) {
             throw ValidationException::withMessages([
                 'occurrences' => ['At least one occurrence is required.'],
@@ -253,6 +266,8 @@ class EventManagementService
         }
 
         $normalized = [];
+        $this->assertOccurrenceIdentityConsistency($occurrences, $existingOccurrences);
+        $allowIndexFallback = ! $this->occurrencesContainIdentity($occurrences);
 
         foreach ($occurrences as $index => $occurrence) {
             if (! is_array($occurrence)) {
@@ -278,9 +293,30 @@ class EventManagementService
 
             $this->assertOccurrenceBounds($start, $end, "occurrences.{$index}.date_time_end");
 
+            $existingOccurrence = $this->resolveExistingOccurrencePayload(
+                $occurrence,
+                $existingOccurrences,
+                (int) $index,
+                $allowIndexFallback
+            );
+
             $ownEventParties = array_key_exists('event_parties', $occurrence)
                 ? $this->resolveEventParties(['event_parties' => $occurrence['event_parties']], null)
-                : [];
+                : $this->normalizeArray($existingOccurrence['event_parties'] ?? []);
+            $taxonomyTerms = array_key_exists('taxonomy_terms', $occurrence)
+                ? $this->resolveOccurrenceTaxonomyTerms(
+                    $occurrence['taxonomy_terms'],
+                    "occurrences.{$index}.taxonomy_terms",
+                    $eventType
+                )
+                : $this->normalizeArray($existingOccurrence['taxonomy_terms'] ?? []);
+            $programmingItems = array_key_exists('programming_items', $occurrence)
+                ? $this->resolveProgrammingItems(
+                    $occurrence['programming_items'],
+                    "occurrences.{$index}.programming_items",
+                    $this->accountContextIdFromPayload($payload)
+                )
+                : $this->normalizeArray($existingOccurrence['programming_items'] ?? []);
             if (array_key_exists('location', $occurrence) || array_key_exists('place_ref', $occurrence)) {
                 throw ValidationException::withMessages([
                     "occurrences.{$index}.location" => ['Occurrences do not accept location overrides. Use event location or programming item place_ref.'],
@@ -288,16 +324,15 @@ class EventManagementService
             }
 
             $normalized[] = [
+                'occurrence_id' => $this->normalizeOptionalString($occurrence['occurrence_id'] ?? $occurrence['id'] ?? null),
+                'occurrence_slug' => $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null),
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $ownEventParties,
                 'has_location_override' => false,
                 'location_override' => null,
-                'programming_items' => $this->resolveProgrammingItems(
-                    $occurrence['programming_items'] ?? [],
-                    "occurrences.{$index}.programming_items",
-                    $this->accountContextIdFromPayload($payload)
-                ),
+                'taxonomy_terms' => $taxonomyTerms,
+                'programming_items' => $programmingItems,
             ];
         }
 
@@ -306,6 +341,197 @@ class EventManagementService
         });
 
         return $normalized;
+    }
+
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        if (! is_string($value) && ! is_numeric($value)) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @param  array<int, mixed>  $occurrences
+     * @param  array<int, array<string, mixed>>  $existingOccurrences
+     */
+    private function assertOccurrenceIdentityConsistency(array $occurrences, array $existingOccurrences): void
+    {
+        $errors = [];
+        $seenIds = [];
+        $seenSlugs = [];
+        $seenCanonicalIds = [];
+        $existingById = [];
+        $existingBySlug = [];
+
+        foreach ($existingOccurrences as $existingOccurrence) {
+            $existingId = $this->normalizeOptionalString($existingOccurrence['occurrence_id'] ?? null);
+            if ($existingId !== null) {
+                $existingById[$existingId] = $existingOccurrence;
+            }
+
+            $existingSlug = $this->normalizeOptionalString($existingOccurrence['occurrence_slug'] ?? null);
+            if ($existingSlug !== null) {
+                $existingBySlug[$existingSlug] = $existingOccurrence;
+            }
+        }
+
+        foreach ($occurrences as $index => $occurrence) {
+            if (! is_array($occurrence)) {
+                continue;
+            }
+
+            $id = $this->normalizeOptionalString($occurrence['occurrence_id'] ?? $occurrence['id'] ?? null);
+            $slug = $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null);
+
+            if ($id !== null) {
+                if (isset($seenIds[$id])) {
+                    $errors["occurrences.{$index}.occurrence_id"][] = 'occurrence_id must be unique within occurrences.';
+                }
+                $seenIds[$id] = true;
+
+                if ($existingOccurrences !== [] && ! isset($existingById[$id])) {
+                    $errors["occurrences.{$index}.occurrence_id"][] = 'occurrence_id must match an existing occurrence.';
+                }
+            }
+
+            if ($slug !== null) {
+                if (isset($seenSlugs[$slug])) {
+                    $errors["occurrences.{$index}.occurrence_slug"][] = 'occurrence_slug must be unique within occurrences.';
+                }
+                $seenSlugs[$slug] = true;
+
+                if ($existingOccurrences !== [] && ! isset($existingBySlug[$slug])) {
+                    $errors["occurrences.{$index}.occurrence_slug"][] = 'occurrence_slug must match an existing occurrence.';
+                }
+            }
+
+            if ($id === null || $slug === null || $existingOccurrences === []) {
+                $canonicalId = $this->canonicalOccurrenceIdForIdentity($id, $slug, $existingById, $existingBySlug);
+                if ($canonicalId !== null) {
+                    if (isset($seenCanonicalIds[$canonicalId])) {
+                        $errors["occurrences.{$index}.occurrence_id"][] = 'occurrence identity must reference a unique existing occurrence.';
+                    }
+                    $seenCanonicalIds[$canonicalId] = true;
+                }
+
+                continue;
+            }
+
+            $occurrenceById = $existingById[$id] ?? null;
+            $occurrenceBySlug = $existingBySlug[$slug] ?? null;
+            if ($occurrenceById === null || $occurrenceBySlug === null) {
+                continue;
+            }
+
+            $idSlug = $this->normalizeOptionalString($occurrenceById['occurrence_slug'] ?? null);
+            $slugId = $this->normalizeOptionalString($occurrenceBySlug['occurrence_id'] ?? null);
+            if ($idSlug !== $slug || $slugId !== $id) {
+                $errors["occurrences.{$index}.occurrence_slug"][] = 'occurrence_id and occurrence_slug must reference the same existing occurrence.';
+            }
+
+            $canonicalId = $this->canonicalOccurrenceIdForIdentity($id, $slug, $existingById, $existingBySlug);
+            if ($canonicalId !== null) {
+                if (isset($seenCanonicalIds[$canonicalId])) {
+                    $errors["occurrences.{$index}.occurrence_id"][] = 'occurrence identity must reference a unique existing occurrence.';
+                }
+                $seenCanonicalIds[$canonicalId] = true;
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $existingById
+     * @param  array<string, array<string, mixed>>  $existingBySlug
+     */
+    private function canonicalOccurrenceIdForIdentity(
+        ?string $id,
+        ?string $slug,
+        array $existingById,
+        array $existingBySlug
+    ): ?string {
+        if ($id !== null && isset($existingById[$id])) {
+            return $this->normalizeOptionalString($existingById[$id]['occurrence_id'] ?? null);
+        }
+
+        if ($slug !== null && isset($existingBySlug[$slug])) {
+            return $this->normalizeOptionalString($existingBySlug[$slug]['occurrence_id'] ?? null);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $occurrence
+     * @param  array<int, array<string, mixed>>  $existingOccurrences
+     * @return array<string, mixed>
+     */
+    private function resolveExistingOccurrencePayload(
+        array $occurrence,
+        array $existingOccurrences,
+        int $index,
+        bool $allowIndexFallback
+    ): array {
+        if ($existingOccurrences === []) {
+            return [];
+        }
+
+        foreach (['occurrence_id', 'id'] as $field) {
+            $id = trim((string) ($occurrence[$field] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            foreach ($existingOccurrences as $existingOccurrence) {
+                if ($id === trim((string) ($existingOccurrence['occurrence_id'] ?? ''))) {
+                    return $existingOccurrence;
+                }
+            }
+        }
+
+        $slug = trim((string) ($occurrence['occurrence_slug'] ?? ''));
+        if ($slug !== '') {
+            foreach ($existingOccurrences as $existingOccurrence) {
+                if ($slug === trim((string) ($existingOccurrence['occurrence_slug'] ?? ''))) {
+                    return $existingOccurrence;
+                }
+            }
+        }
+
+        if (! $allowIndexFallback) {
+            return [];
+        }
+
+        foreach ($existingOccurrences as $existingOccurrence) {
+            if ((int) ($existingOccurrence['occurrence_index'] ?? -1) === $index) {
+                return $existingOccurrence;
+            }
+        }
+
+        return $existingOccurrences[$index] ?? [];
+    }
+
+    private function occurrencesContainIdentity(array $occurrences): bool
+    {
+        foreach ($occurrences as $occurrence) {
+            if (! is_array($occurrence)) {
+                continue;
+            }
+
+            foreach (['occurrence_id', 'id', 'occurrence_slug'] as $field) {
+                if ($this->normalizeOptionalString($occurrence[$field] ?? null) !== null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -336,6 +562,48 @@ class EventManagementService
                 $endField => ['date_time_end must be greater than or equal to date_time_start.'],
             ]);
         }
+    }
+
+    /**
+     * @return array<int, array<string, string>>
+     */
+    private function resolveOccurrenceTaxonomyTerms(mixed $terms, string $field, ?array $eventType): array
+    {
+        if ($terms === null || $terms === []) {
+            return [];
+        }
+
+        if (! is_array($terms)) {
+            throw ValidationException::withMessages([
+                $field => ['taxonomy_terms must be an array.'],
+            ]);
+        }
+
+        try {
+            $this->taxonomyValidationService->assertTermsAllowedForEvent($terms);
+            $this->assertTaxonomyTermsAllowedByEventType($terms, $eventType);
+
+            return $this->taxonomySnapshotResolver->resolve($terms);
+        } catch (ValidationException $exception) {
+            throw ValidationException::withMessages([
+                $field => $this->firstValidationMessages($exception),
+            ]);
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function firstValidationMessages(ValidationException $exception): array
+    {
+        $messages = [];
+        foreach ($exception->errors() as $fieldMessages) {
+            foreach ((array) $fieldMessages as $message) {
+                $messages[] = (string) $message;
+            }
+        }
+
+        return $messages === [] ? ['Invalid taxonomy terms.'] : $messages;
     }
 
     private function normalizeDateValue(mixed $value, string $field): ?Carbon
@@ -576,6 +844,20 @@ class EventManagementService
                     "{$field}.{$index}.time" => ['time must use HH:MM format.'],
                 ]);
             }
+            $endTime = null;
+            if (array_key_exists('end_time', $item) && $item['end_time'] !== null && $item['end_time'] !== '') {
+                $endTime = trim((string) $item['end_time']);
+                if (! preg_match('/^\d{2}:\d{2}$/', $endTime)) {
+                    throw ValidationException::withMessages([
+                        "{$field}.{$index}.end_time" => ['end_time must use HH:MM format.'],
+                    ]);
+                }
+                if ($endTime <= $time) {
+                    throw ValidationException::withMessages([
+                        "{$field}.{$index}.end_time" => ['end_time must be later than time on the same day.'],
+                    ]);
+                }
+            }
 
             $title = isset($item['title']) ? trim((string) $item['title']) : '';
             $profileIds = $this->normalizeProgrammingProfileIds(
@@ -604,6 +886,7 @@ class EventManagementService
 
             $drafts[] = [
                 'time' => $time,
+                'end_time' => $endTime,
                 'title' => $title === '' ? null : $title,
                 'account_profile_ids' => $profileIds,
                 'place_ref' => $placeRef,

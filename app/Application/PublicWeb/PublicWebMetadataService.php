@@ -14,6 +14,8 @@ use App\Models\Landlord\Tenant;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
+use Belluga\Invites\Application\Mutations\InviteShareService;
+use Belluga\Invites\Support\InviteDomainException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Str;
 
@@ -26,6 +28,7 @@ class PublicWebMetadataService
         private readonly EventQueryService $eventQueryService,
         private readonly StaticAssetQueryService $staticAssetQueryService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
+        private readonly InviteShareService $inviteShareService,
     ) {}
 
     /**
@@ -179,6 +182,55 @@ class PublicWebMetadataService
         return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
     }
 
+    /**
+     * @return array<string, string>
+     */
+    public function inviteMetadata(?string $shareCode): array
+    {
+        $normalizedCode = strtoupper(trim((string) $shareCode));
+        $path = '/invite';
+        if ($normalizedCode !== '') {
+            $path .= '?code='.rawurlencode($normalizedCode);
+        }
+        $metadata = $this->defaultMetadata($path);
+
+        if ($normalizedCode === '') {
+            return $metadata;
+        }
+
+        try {
+            $preview = $this->inviteShareService->preview($normalizedCode);
+        } catch (InviteDomainException) {
+            return $metadata;
+        }
+
+        $invite = is_array($preview['invite'] ?? null)
+            ? $preview['invite']
+            : [];
+        $eventName = trim((string) ($invite['event_name'] ?? ''));
+        if ($eventName !== '') {
+            $metadata['title'] = "{$eventName} | {$metadata['site_name']}";
+        }
+
+        $inviterDisplayName = trim((string) data_get($invite, 'inviter_candidates.0.display_name', ''));
+        $location = trim((string) ($invite['location'] ?? ''));
+        $metadata['description'] = $this->excerpt(
+            $this->inviteFallbackDescription(
+                inviterDisplayName: $inviterDisplayName,
+                eventName: $eventName,
+                location: $location,
+            ) ?: $metadata['description']
+        );
+        $metadata['image'] = $this->resolveImageUrl([
+            $invite['event_image_url'] ?? null,
+            $metadata['image'],
+        ]);
+        $metadata['canonical_url'] = $this->canonicalUrlForPath($path);
+        $metadata['type'] = 'article';
+
+        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
+    }
+
     private function canonicalUrlForPath(?string $path = null): string
     {
         $base = request()->getSchemeAndHttpHost();
@@ -224,6 +276,26 @@ class PublicWebMetadataService
         }
 
         return request()->getSchemeAndHttpHost().'/logo-dark.png';
+    }
+
+    private function inviteFallbackDescription(
+        string $inviterDisplayName,
+        string $eventName,
+        string $location,
+    ): ?string {
+        if ($inviterDisplayName !== '' && $eventName !== '' && $location !== '') {
+            return "{$inviterDisplayName} convidou você para {$eventName} em {$location}.";
+        }
+
+        if ($eventName !== '' && $location !== '') {
+            return "Convite para {$eventName} em {$location}.";
+        }
+
+        if ($eventName !== '') {
+            return "Convite para {$eventName}.";
+        }
+
+        return null;
     }
 
     /**

@@ -49,6 +49,8 @@ final class EventPayloadFanoutGuard
         }
 
         $occurrencePartyCount = count(self::list($payload['event_parties'] ?? []));
+        $occurrenceTaxonomyTermCount = 0;
+        $occurrenceTaxonomyTerms = [];
         $programmingItemCount = 0;
         $programmingReferenceCount = 0;
 
@@ -58,6 +60,11 @@ final class EventPayloadFanoutGuard
             }
 
             $occurrencePartyCount += count(self::list($occurrence['event_parties'] ?? []));
+            $taxonomyTerms = self::list($occurrence['taxonomy_terms'] ?? []);
+            $occurrenceTaxonomyTermCount += count($taxonomyTerms);
+            foreach ($taxonomyTerms as $term) {
+                $occurrenceTaxonomyTerms[] = $term;
+            }
 
             foreach (self::list($occurrence['programming_items'] ?? []) as $item) {
                 if (! is_array($item)) {
@@ -78,6 +85,23 @@ final class EventPayloadFanoutGuard
             $errors['event_parties'] = sprintf(
                 'The event may not reference more than %d related profiles across the event and all occurrences.',
                 InputConstraints::EVENT_OCCURRENCE_PARTIES_TOTAL_MAX
+            );
+        }
+
+        if ($occurrenceTaxonomyTermCount > InputConstraints::EVENT_OCCURRENCE_TAXONOMY_TERMS_TOTAL_MAX) {
+            $errors['occurrences.*.taxonomy_terms'] = sprintf(
+                'The event may not contain more than %d occurrence taxonomy terms across all occurrences.',
+                InputConstraints::EVENT_OCCURRENCE_TAXONOMY_TERMS_TOTAL_MAX
+            );
+        }
+
+        if (
+            count(self::uniqueTaxonomyTerms($occurrenceTaxonomyTerms))
+            > InputConstraints::EVENT_OCCURRENCE_TAXONOMY_UNIQUE_TERMS_MAX
+        ) {
+            $errors['occurrences.*.taxonomy_terms'] = sprintf(
+                'The event may not contain more than %d unique occurrence taxonomy terms.',
+                InputConstraints::EVENT_OCCURRENCE_TAXONOMY_UNIQUE_TERMS_MAX
             );
         }
 

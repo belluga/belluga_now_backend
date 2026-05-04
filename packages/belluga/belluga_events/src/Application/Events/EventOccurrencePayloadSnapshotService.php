@@ -55,6 +55,7 @@ class EventOccurrencePayloadSnapshotService
             'event_parties' => [],
             'has_location_override' => false,
             'location_override' => null,
+            'taxonomy_terms' => [],
             'programming_items' => [],
         ]];
     }
@@ -87,11 +88,15 @@ class EventOccurrencePayloadSnapshotService
             }
 
             $occurrences[] = [
+                'occurrence_id' => (string) $occurrence->_id,
+                'occurrence_slug' => (string) ($occurrence->occurrence_slug ?? ''),
+                'occurrence_index' => (int) ($occurrence->occurrence_index ?? count($occurrences)),
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $this->normalizeArray($occurrence->own_event_parties ?? []),
                 'has_location_override' => false,
                 'location_override' => null,
+                'taxonomy_terms' => $this->normalizeArray($occurrence->own_taxonomy_terms ?? []),
                 'programming_items' => $this->normalizeArray($occurrence->programming_items ?? []),
             ];
         }

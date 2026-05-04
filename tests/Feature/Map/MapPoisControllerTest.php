@@ -523,6 +523,60 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($item, 'occurrence_facets.0.is_happening_now', false));
     }
 
+    public function test_map_reads_recompute_now_flag_from_active_occurrence_facets(): void
+    {
+        $now = Carbon::parse('2026-05-01 19:30:00', 'America/Sao_Paulo');
+        Carbon::setTestNow($now);
+
+        try {
+            $location = $this->point(-40.0, -20.0);
+
+            MapPoi::create([
+                'ref_type' => 'event',
+                'ref_id' => 'event-stale-now',
+                'projection_key' => 'event:event-stale-now',
+                'source_checkpoint' => 12346,
+                'ref_slug' => 'event-stale-now',
+                'ref_path' => '/agenda/evento/event-stale-now',
+                'name' => 'Event Stale Now',
+                'category' => 'event',
+                'source_type' => 'show',
+                'location' => $location,
+                'priority' => 80,
+                'is_active' => true,
+                'is_happening_now' => false,
+                'active_window_start_at' => $now->copy()->subMinutes(30)->utc(),
+                'active_window_end_at' => $now->copy()->addHours(2)->utc(),
+                'time_start' => $now->copy()->subMinutes(30)->utc(),
+                'time_end' => $now->copy()->addHours(2)->utc(),
+                'occurrence_facets' => [[
+                    'occurrence_id' => 'occ-stale-now',
+                    'occurrence_slug' => 'occ-stale-now',
+                    'starts_at' => $now->copy()->subMinutes(30)->utc()->toISOString(),
+                    'ends_at' => $now->copy()->addHours(2)->utc()->toISOString(),
+                    'effective_end' => $now->copy()->addHours(2)->utc()->toISOString(),
+                    'is_happening_now' => false,
+                ]],
+                'exact_key' => $this->exactKey($location),
+            ]);
+
+            $stacksResponse = $this->getJson(
+                "{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0&source=event"
+            );
+            $stacksResponse->assertStatus(200);
+            $this->assertTrue((bool) data_get($stacksResponse->json(), 'stacks.0.top_poi.is_happening_now'));
+
+            $nearResponse = $this->getJson(
+                "{$this->base_api_tenant}map/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+            );
+            $nearResponse->assertStatus(200);
+            $this->assertTrue((bool) data_get($nearResponse->json(), 'items.0.is_happening_now'));
+            $this->assertTrue((bool) data_get($nearResponse->json(), 'items.0.occurrence_facets.0.is_happening_now'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_map_pois_today_window_includes_today_and_excludes_tomorrow_events(): void
     {
         $timezone = 'America/Sao_Paulo';
@@ -1077,6 +1131,10 @@ class MapPoisControllerTest extends TestCaseTenant
             'type' => 'performer_test',
             'label' => 'Performer Test',
             'allowed_taxonomies' => ['music_genre'],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+            ],
         ]);
         StaticProfileType::create([
             'type' => 'beach_spot_test',
@@ -1535,6 +1593,20 @@ class MapPoisControllerTest extends TestCaseTenant
                 'is_favoritable' => true,
             ],
         ]);
+        TenantProfileType::query()
+            ->where('type', 'personal')
+            ->update([
+                'allowed_taxonomies' => ['internal_only'],
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'person',
+                    'color' => '#333333',
+                    'icon_color' => '#FFFFFF',
+                ],
+                'capabilities.is_favoritable' => true,
+                'capabilities.is_inviteable' => true,
+                'capabilities.is_publicly_discoverable' => false,
+            ]);
         TenantProfileType::create([
             'type' => 'internal_partner',
             'label' => 'Parceiro interno',
@@ -1560,6 +1632,7 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
             ],
         ]);
         $galleryType->forceFill([
@@ -1598,6 +1671,10 @@ class MapPoisControllerTest extends TestCaseTenant
             collect($response->json('type_options.account_profile') ?? [])
                 ->firstWhere('value', 'internal_partner')
         );
+        $this->assertNull(
+            collect($response->json('type_options.account_profile') ?? [])
+                ->firstWhere('value', 'personal')
+        );
         $galleryFilter = collect($response->json('filters') ?? [])
             ->firstWhere('key', 'gallery');
         $this->assertNotNull($galleryFilter);
@@ -1629,6 +1706,7 @@ class MapPoisControllerTest extends TestCaseTenant
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_favoritable' => true,
+                    'is_publicly_discoverable' => true,
                 ],
             ]);
         }

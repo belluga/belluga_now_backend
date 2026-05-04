@@ -17,6 +17,7 @@ use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Support\InviteDomainException;
 use Illuminate\Support\Carbon;
+use Throwable;
 
 class InviteMutationService
 {
@@ -71,7 +72,7 @@ class InviteMutationService
             $resolvedRecipient = $this->resolveRecipient($senderUserId, $recipientPayload);
             if ($resolvedRecipient === null) {
                 $result['blocked'][] = [
-                    'receiver_user_id' => $recipientPayload['receiver_user_id'] ?? null,
+                    'receiver_account_profile_id' => $recipientPayload['receiver_account_profile_id'] ?? null,
                     'reason' => 'suppressed',
                 ];
 
@@ -80,7 +81,7 @@ class InviteMutationService
 
             if ($resolvedRecipient['user_id'] === $senderUserId) {
                 $result['blocked'][] = [
-                    'receiver_user_id' => $resolvedRecipient['user_id'],
+                    'receiver_account_profile_id' => $resolvedRecipient['receiver_account_profile_id'] ?? null,
                     'reason' => 'suppressed',
                 ];
 
@@ -88,22 +89,30 @@ class InviteMutationService
             }
 
             $receiverUserId = $resolvedRecipient['user_id'];
+            $receiverAccountProfileId = (string) $resolvedRecipient['receiver_account_profile_id'];
 
             $existing = $this->existingInvite(
                 receiverUserId: $receiverUserId,
+                receiverAccountProfileId: $receiverAccountProfileId,
                 targetRef: $target['target_ref'],
                 inviterPrincipal: $inviter['principal'],
             );
             if ($existing !== null) {
                 $result['already_invited'][] = [
-                    'receiver_user_id' => $receiverUserId,
+                    'receiver_account_profile_id' => $receiverAccountProfileId,
                 ];
 
                 continue;
             }
 
+            [$status, $supersessionReason] = $this->initialInviteState(
+                receiverUserId: $receiverUserId,
+                receiverAccountProfileId: $receiverAccountProfileId,
+                targetRef: $target['target_ref'],
+            );
+
             /** @var InviteEdge $edge */
-            $edge = $this->transactions->run(function () use ($resolvedRecipient, $recipientPayload, $inviter, $target, $payload, $limits, $now): InviteEdge {
+            $edge = $this->transactions->run(function () use ($resolvedRecipient, $recipientPayload, $inviter, $target, $payload, $limits, $now, $status, $supersessionReason): InviteEdge {
                 $this->reserveSenderQuotasOrThrow(
                     issuedByUserId: (string) $inviter['issued_by_user_id'],
                     limits: $limits,
@@ -114,13 +123,15 @@ class InviteMutationService
                     'event_id' => $target['target_ref']['event_id'],
                     'occurrence_id' => $target['target_ref']['occurrence_id'],
                     'receiver_user_id' => $resolvedRecipient['user_id'],
+                    'receiver_account_profile_id' => (string) $resolvedRecipient['receiver_account_profile_id'],
                     'receiver_contact_hash' => $recipientPayload['contact_hash'] ?? null,
                     'inviter_principal' => $this->toStoredPrincipal($inviter['principal']),
                     'account_profile_id' => $inviter['account_profile_id'],
                     'issued_by_user_id' => $inviter['issued_by_user_id'],
                     'inviter_display_name' => $inviter['display_name'],
                     'inviter_avatar_url' => $inviter['avatar_url'],
-                    'status' => 'pending',
+                    'status' => $status,
+                    'supersession_reason' => $supersessionReason,
                     'credited_acceptance' => false,
                     'source' => 'direct_invite',
                     'message' => isset($payload['message']) ? trim((string) $payload['message']) : null,
@@ -146,7 +157,9 @@ class InviteMutationService
 
             $result['created'][] = [
                 'invite_id' => (string) $edge->getAttribute('_id'),
-                'receiver_user_id' => $receiverUserId,
+                'receiver_account_profile_id' => $receiverAccountProfileId,
+                'status' => (string) $edge->status,
+                'supersession_reason' => $edge->supersession_reason ? (string) $edge->supersession_reason : null,
             ];
 
             $this->telemetry->emit(
@@ -155,8 +168,10 @@ class InviteMutationService
                 properties: [
                     'invite_id' => (string) $edge->getAttribute('_id'),
                     'receiver_user_id' => $receiverUserId,
+                    'receiver_account_profile_id' => $receiverAccountProfileId,
                     'target_ref' => $target['target_ref'],
                     'inviter_principal' => $inviter['principal'],
+                    'status' => (string) $edge->status,
                     'source' => 'direct_invite',
                 ],
                 idempotencyKey: 'invite.created:'.(string) $edge->getAttribute('_id'),
@@ -193,14 +208,19 @@ class InviteMutationService
     /**
      * @return array<string, mixed>
      */
-    public function acceptForUserId(string $userId, string $inviteId, ?string $idempotencyKey = null): array
+    public function acceptForUserId(
+        string $userId,
+        string $inviteId,
+        ?string $idempotencyKey = null,
+        ?string $shareCode = null,
+    ): array
     {
         return $this->idempotencyService->runWithReplay(
             command: 'invite.accept',
             actorUserId: $userId,
             idempotencyKey: $idempotencyKey,
             fingerprintPayload: ['invite_id' => $inviteId],
-            callback: fn (): array => $this->acceptForUserIdWithoutReplay($userId, $inviteId),
+            callback: fn (): array => $this->acceptForUserIdWithoutReplay($userId, $inviteId, $shareCode),
         );
     }
 
@@ -210,15 +230,21 @@ class InviteMutationService
     public function supersedePendingInvitesForDirectConfirmation(
         string $userId,
         string $eventId,
-        ?string $occurrenceId = null,
+        string $occurrenceId,
     ): array {
         $targetRef = [
             'event_id' => $eventId,
             'occurrence_id' => $occurrenceId,
         ];
 
+        $receiverAccountProfileId = $this->recipientAccountProfileIdForUserId($userId);
+        if ($receiverAccountProfileId === null) {
+            return [];
+        }
+
         $supersededIds = $this->supersedePendingInvites(
             receiverUserId: $userId,
+            receiverAccountProfileId: $receiverAccountProfileId,
             targetRef: $targetRef,
             reason: self::SUPERSESSION_REASON_DIRECT_CONFIRMATION,
         );
@@ -233,11 +259,16 @@ class InviteMutationService
     /**
      * @return array<string, mixed>
      */
-    private function acceptForUserIdWithoutReplay(string $userId, string $inviteId): array
+    private function acceptForUserIdWithoutReplay(string $userId, string $inviteId, ?string $shareCode = null): array
     {
         /** @var InviteEdge|null $edge */
         $edge = InviteEdge::query()->find($inviteId);
-        if (! $edge || (string) $edge->receiver_user_id !== $userId) {
+        $actingReceiverAccountProfileId = $this->recipientAccountProfileIdForUserId($userId);
+        if ($actingReceiverAccountProfileId === null || ! $edge || ! $this->edgeBelongsToReceiver($edge, $userId, $actingReceiverAccountProfileId)) {
+            throw new InviteDomainException('invite_not_found', 404);
+        }
+        $receiverAccountProfileId = $this->receiverAccountProfileIdForEdge($edge);
+        if ($receiverAccountProfileId === null) {
             throw new InviteDomainException('invite_not_found', 404);
         }
 
@@ -249,55 +280,28 @@ class InviteMutationService
             return $this->acceptResponse($edge, 'expired', [], false);
         }
 
-        $existingWinner = InviteEdge::query()
-            ->where('receiver_user_id', $userId)
-            ->where('event_id', (string) $edge->event_id)
-            ->where('occurrence_id', $edge->occurrence_id ? (string) $edge->occurrence_id : null)
-            ->where('credited_acceptance', true)
-            ->first();
+        $existingWinner = $this->existingCreditedWinner(
+            eventId: (string) $edge->event_id,
+            occurrenceId: (string) $edge->occurrence_id,
+            receiverUserId: $userId,
+            receiverAccountProfileId: $receiverAccountProfileId,
+        );
 
         if ($existingWinner !== null && (string) $existingWinner->getAttribute('_id') !== (string) $edge->getAttribute('_id')) {
-            if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
-                $edge->fill([
-                    'status' => 'superseded',
-                    'supersession_reason' => self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED,
-                    'credited_acceptance' => false,
-                ]);
-                $edge->save();
-                $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($edge));
-            }
-
-            $this->telemetry->emit(
-                event: 'invite.accepted',
-                userId: $userId,
-                properties: [
-                    'invite_id' => (string) $existingWinner->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => false,
-                    'target_ref' => $this->targetRef($existingWinner),
-                ],
-                idempotencyKey: 'invite.accepted:'.(string) $existingWinner->getAttribute('_id').':already_accepted',
-                source: 'invite_api',
-                context: [
-                    'actor' => ['type' => 'user', 'id' => $userId],
-                    'target' => ['type' => 'user', 'id' => $userId],
-                    'object' => ['type' => 'event', 'id' => (string) $existingWinner->event_id],
-                ],
-            );
-
-            return $this->acceptResponse($existingWinner, 'already_accepted', [], false);
+            return $this->acceptExistingWinner($existingWinner, $edge, $userId);
         }
 
         if ((string) $edge->status === 'accepted' && (bool) $edge->credited_acceptance) {
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => true,
-                    'target_ref' => $this->targetRef($edge),
-                ],
+                properties: $this->buildAcceptedTelemetryProperties(
+                    edge: $edge,
+                    status: 'already_accepted',
+                    creditedAcceptance: true,
+                    supersededIds: [],
+                    shareCode: $shareCode,
+                ),
                 idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_accepted',
                 source: 'invite_api',
                 context: [
@@ -317,12 +321,13 @@ class InviteMutationService
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => false,
-                    'target_ref' => $this->targetRef($edge),
-                ],
+                properties: $this->buildAcceptedTelemetryProperties(
+                    edge: $edge,
+                    status: 'already_accepted',
+                    creditedAcceptance: false,
+                    supersededIds: [],
+                    shareCode: $shareCode,
+                ),
                 idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
                 source: 'invite_api',
                 context: [
@@ -338,7 +343,7 @@ class InviteMutationService
         if ($this->attendanceGateway->hasActiveAttendanceConfirmation(
             $userId,
             (string) $edge->event_id,
-            $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+            (string) $edge->occurrence_id,
         )) {
             if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
                 $edge->fill([
@@ -353,12 +358,13 @@ class InviteMutationService
             $this->telemetry->emit(
                 event: 'invite.accepted',
                 userId: $userId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'status' => 'already_accepted',
-                    'credited_acceptance' => false,
-                    'target_ref' => $this->targetRef($edge),
-                ],
+                properties: $this->buildAcceptedTelemetryProperties(
+                    edge: $edge,
+                    status: 'already_accepted',
+                    creditedAcceptance: false,
+                    supersededIds: [],
+                    shareCode: $shareCode,
+                ),
                 idempotencyKey: 'invite.accepted:'.(string) $edge->getAttribute('_id').':already_confirmed',
                 source: 'invite_api',
                 context: [
@@ -371,26 +377,45 @@ class InviteMutationService
             return $this->acceptResponse($edge, 'already_accepted', [], false);
         }
 
-        $result = $this->transactions->run(function () use ($edge, $userId): array {
-            $acceptedAt = Carbon::now();
+        try {
+            $result = $this->transactions->run(function () use ($edge, $userId, $receiverAccountProfileId): array {
+                $acceptedAt = Carbon::now();
 
-            $edge->fill([
-                'status' => 'accepted',
-                'supersession_reason' => null,
-                'credited_acceptance' => true,
-                'accepted_at' => $acceptedAt,
-            ]);
-            $edge->save();
+                $edge->fill([
+                    'status' => 'accepted',
+                    'supersession_reason' => null,
+                    'credited_acceptance' => true,
+                    'accepted_at' => $acceptedAt,
+                ]);
+                $edge->save();
 
-            $supersededIds = $this->supersedePendingInvites(
+                $supersededIds = $this->supersedePendingInvites(
+                    receiverUserId: $userId,
+                    receiverAccountProfileId: $receiverAccountProfileId,
+                    targetRef: $this->targetRef($edge),
+                    reason: self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED,
+                    exceptInviteId: (string) $edge->getAttribute('_id'),
+                );
+
+                return [$edge, $supersededIds];
+            });
+        } catch (Throwable $exception) {
+            if (! $this->isDuplicateKey($exception)) {
+                throw $exception;
+            }
+
+            $winner = $this->existingCreditedWinner(
+                eventId: (string) $edge->event_id,
+                occurrenceId: (string) $edge->occurrence_id,
                 receiverUserId: $userId,
-                targetRef: $this->targetRef($edge),
-                reason: self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED,
-                exceptInviteId: (string) $edge->getAttribute('_id'),
+                receiverAccountProfileId: $receiverAccountProfileId,
             );
+            if ($winner === null || (string) $winner->getAttribute('_id') === (string) $edge->getAttribute('_id')) {
+                throw $exception;
+            }
 
-            return [$edge, $supersededIds];
-        });
+            return $this->acceptExistingWinner($winner, $edge, $userId);
+        }
 
         /** @var InviteEdge $acceptedEdge */
         [$acceptedEdge, $supersededIds] = $result;
@@ -400,14 +425,13 @@ class InviteMutationService
         $this->telemetry->emit(
             event: 'invite.accepted',
             userId: $userId,
-            properties: [
-                'invite_id' => (string) $acceptedEdge->getAttribute('_id'),
-                'status' => 'accepted',
-                'credited_acceptance' => true,
-                'superseded_count' => count($supersededIds),
-                'superseded_invite_ids' => array_values($supersededIds),
-                'target_ref' => $this->targetRef($acceptedEdge),
-            ],
+            properties: $this->buildAcceptedTelemetryProperties(
+                edge: $acceptedEdge,
+                status: 'accepted',
+                creditedAcceptance: true,
+                supersededIds: $supersededIds,
+                shareCode: $shareCode,
+            ),
             idempotencyKey: 'invite.accepted:'.(string) $acceptedEdge->getAttribute('_id').':accepted',
             source: 'invite_api',
             context: [
@@ -418,6 +442,39 @@ class InviteMutationService
         );
 
         return $this->acceptResponse($acceptedEdge, 'accepted', $supersededIds, true);
+    }
+
+    /**
+     * @param  array<int, string>  $supersededIds
+     * @return array<string, mixed>
+     */
+    private function buildAcceptedTelemetryProperties(
+        InviteEdge $edge,
+        string $status,
+        bool $creditedAcceptance,
+        array $supersededIds = [],
+        ?string $shareCode = null,
+    ): array {
+        $properties = [
+            'invite_id' => (string) $edge->getAttribute('_id'),
+            'status' => $status,
+            'credited_acceptance' => $creditedAcceptance,
+            'event_id' => (string) $edge->event_id,
+            'occurrence_id' => (string) $edge->occurrence_id,
+            'source' => 'invite_flow',
+            'invite_source' => (string) ($edge->source ?? 'direct_invite'),
+            'target_ref' => $this->targetRef($edge),
+        ];
+        if ($status === 'accepted') {
+            $properties['superseded_count'] = count($supersededIds);
+            $properties['superseded_invite_ids'] = array_values($supersededIds);
+        }
+        $normalizedShareCode = $shareCode === null ? '' : strtoupper(trim($shareCode));
+        if ($normalizedShareCode !== '') {
+            $properties['code'] = $normalizedShareCode;
+        }
+
+        return $properties;
     }
 
     /**
@@ -446,7 +503,8 @@ class InviteMutationService
     {
         /** @var InviteEdge|null $edge */
         $edge = InviteEdge::query()->find($inviteId);
-        if (! $edge || (string) $edge->receiver_user_id !== $userId) {
+        $actingReceiverAccountProfileId = $this->recipientAccountProfileIdForUserId($userId);
+        if ($actingReceiverAccountProfileId === null || ! $edge || ! $this->edgeBelongsToReceiver($edge, $userId, $actingReceiverAccountProfileId)) {
             throw new InviteDomainException('invite_not_found', 404);
         }
 
@@ -548,7 +606,7 @@ class InviteMutationService
 
     /**
      * @param  array<int, array<string, mixed>>  $recipients
-     * @return array<int, array{receiver_user_id:?string,contact_hash:?string}>
+     * @return array<int, array{receiver_account_profile_id:?string,contact_hash:?string}>
      */
     private function normalizeRecipients(array $recipients): array
     {
@@ -556,25 +614,25 @@ class InviteMutationService
         $normalized = [];
 
         foreach ($recipients as $recipient) {
-            $receiverUserId = isset($recipient['receiver_user_id']) && trim((string) $recipient['receiver_user_id']) !== ''
-                ? trim((string) $recipient['receiver_user_id'])
+            $receiverAccountProfileId = isset($recipient['receiver_account_profile_id']) && trim((string) $recipient['receiver_account_profile_id']) !== ''
+                ? trim((string) $recipient['receiver_account_profile_id'])
                 : null;
             $contactHash = isset($recipient['contact_hash']) && trim((string) $recipient['contact_hash']) !== ''
                 ? trim((string) $recipient['contact_hash'])
                 : null;
 
-            if ($receiverUserId === null && $contactHash === null) {
+            if ($receiverAccountProfileId === null && $contactHash === null) {
                 continue;
             }
 
-            $signature = ($receiverUserId ?? 'contact').'::'.($contactHash ?? '');
+            $signature = ($receiverAccountProfileId ?? 'contact').'::'.($contactHash ?? '');
             if (isset($seen[$signature])) {
                 continue;
             }
 
             $seen[$signature] = true;
             $normalized[] = [
-                'receiver_user_id' => $receiverUserId,
+                'receiver_account_profile_id' => $receiverAccountProfileId,
                 'contact_hash' => $contactHash,
             ];
         }
@@ -583,13 +641,13 @@ class InviteMutationService
     }
 
     /**
-     * @param  array{receiver_user_id:?string,contact_hash:?string}  $recipient
-     * @return array{user_id:string,display_name:?string,avatar_url:?string}|null
+     * @param  array{receiver_account_profile_id:?string,contact_hash:?string}  $recipient
+     * @return array{user_id:string,receiver_account_profile_id?:?string,display_name:?string,avatar_url:?string}|null
      */
     private function resolveRecipient(string $senderUserId, array $recipient): ?array
     {
-        if ($recipient['receiver_user_id'] !== null) {
-            return $this->identityGateway->resolveUserRecipient($recipient['receiver_user_id']);
+        if ($recipient['receiver_account_profile_id'] !== null) {
+            return $this->identityGateway->resolveAccountProfileRecipient($recipient['receiver_account_profile_id']);
         }
 
         /** @var ContactHashDirectory|null $directory */
@@ -602,36 +660,157 @@ class InviteMutationService
             return null;
         }
 
-        return $this->identityGateway->resolveUserRecipient((string) $directory->matched_user_id);
+        return $this->profileBackedRecipient(
+            $this->identityGateway->resolveUserRecipient((string) $directory->matched_user_id)
+        );
     }
 
     /**
-     * @param  array{event_id:string,occurrence_id:?string}  $targetRef
+     * @param  array<string, mixed>|null  $recipient
+     * @return array{user_id:string,receiver_account_profile_id?:?string,display_name:?string,avatar_url:?string}|null
+     */
+    private function profileBackedRecipient(?array $recipient): ?array
+    {
+        if ($recipient === null) {
+            return null;
+        }
+
+        $receiverAccountProfileId = $this->nullableString($recipient['receiver_account_profile_id'] ?? null);
+        if ($receiverAccountProfileId === null) {
+            return null;
+        }
+
+        $recipient['receiver_account_profile_id'] = $receiverAccountProfileId;
+
+        return $recipient;
+    }
+
+    /**
+     * @param  array{event_id:string,occurrence_id:string}  $targetRef
+     * @return array{0:string,1:?string}
+     */
+    private function initialInviteState(
+        string $receiverUserId,
+        string $receiverAccountProfileId,
+        array $targetRef,
+    ): array {
+        if ($this->attendanceGateway->hasActiveAttendanceConfirmation(
+            $receiverUserId,
+            $targetRef['event_id'],
+            $targetRef['occurrence_id'],
+        )) {
+            return ['superseded', self::SUPERSESSION_REASON_DIRECT_CONFIRMATION];
+        }
+
+        $creditedWinnerQuery = InviteEdge::query()
+            ->where('event_id', $targetRef['event_id'])
+            ->where('occurrence_id', $targetRef['occurrence_id'])
+            ->where('credited_acceptance', true);
+        $this->applyReceiverScope($creditedWinnerQuery, $receiverAccountProfileId);
+
+        if ($creditedWinnerQuery->exists()) {
+            return ['superseded', self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED];
+        }
+
+        return ['pending', null];
+    }
+
+    /**
+     * @param  array{event_id:string,occurrence_id:string}  $targetRef
      * @param  array{kind:string,id:string}  $inviterPrincipal
      */
-    private function existingInvite(string $receiverUserId, array $targetRef, array $inviterPrincipal): ?InviteEdge
-    {
-        /** @var InviteEdge|null $edge */
-        $edge = InviteEdge::query()
-            ->where('receiver_user_id', $receiverUserId)
+    private function existingInvite(
+        string $receiverUserId,
+        string $receiverAccountProfileId,
+        array $targetRef,
+        array $inviterPrincipal,
+    ): ?InviteEdge {
+        $query = InviteEdge::query()
             ->where('event_id', $targetRef['event_id'])
             ->where('occurrence_id', $targetRef['occurrence_id'])
             ->where('inviter_principal.kind', $inviterPrincipal['kind'])
             ->where('inviter_principal.principal_id', $inviterPrincipal['id'])
-            ->first();
+            ->where('receiver_account_profile_id', $receiverAccountProfileId);
+
+        /** @var InviteEdge|null $edge */
+        $edge = $query->first();
 
         return $edge;
     }
 
     /**
-     * @return array{event_id:string,occurrence_id:?string}
+     * @return array{event_id:string,occurrence_id:string}
      */
     private function targetRef(InviteEdge $edge): array
     {
         return [
             'event_id' => (string) $edge->event_id,
-            'occurrence_id' => $edge->occurrence_id ? (string) $edge->occurrence_id : null,
+            'occurrence_id' => (string) $edge->occurrence_id,
         ];
+    }
+
+    private function existingCreditedWinner(
+        string $eventId,
+        string $occurrenceId,
+        string $receiverUserId,
+        string $receiverAccountProfileId,
+    ): ?InviteEdge {
+        $query = InviteEdge::query()
+            ->where('event_id', $eventId)
+            ->where('occurrence_id', $occurrenceId)
+            ->where('credited_acceptance', true);
+        $this->applyReceiverScope($query, $receiverAccountProfileId);
+
+        /** @var InviteEdge|null $winner */
+        $winner = $query->first();
+
+        return $winner;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function acceptExistingWinner(InviteEdge $winner, InviteEdge $edge, string $userId): array
+    {
+        if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
+            $edge->fill([
+                'status' => 'superseded',
+                'supersession_reason' => self::SUPERSESSION_REASON_OTHER_INVITE_CREDITED,
+                'credited_acceptance' => false,
+            ]);
+            $edge->save();
+            $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($edge));
+        }
+
+        $this->telemetry->emit(
+            event: 'invite.accepted',
+            userId: $userId,
+            properties: [
+                'invite_id' => (string) $winner->getAttribute('_id'),
+                'status' => 'already_accepted',
+                'credited_acceptance' => false,
+                'target_ref' => $this->targetRef($winner),
+            ],
+            idempotencyKey: 'invite.accepted:'.(string) $winner->getAttribute('_id').':already_accepted',
+            source: 'invite_api',
+            context: [
+                'actor' => ['type' => 'user', 'id' => $userId],
+                'target' => ['type' => 'user', 'id' => $userId],
+                'object' => ['type' => 'event', 'id' => (string) $winner->event_id],
+            ],
+        );
+
+        return $this->acceptResponse($winner, 'already_accepted', [], false);
+    }
+
+    private function isDuplicateKey(Throwable $exception): bool
+    {
+        if ((int) $exception->getCode() === 11000) {
+            return true;
+        }
+
+        return str_contains(strtolower($exception->getMessage()), 'duplicate key')
+            || str_contains($exception->getMessage(), 'E11000');
     }
 
     /**
@@ -656,22 +835,24 @@ class InviteMutationService
     }
 
     /**
-     * @param  array{event_id:string,occurrence_id:?string}  $targetRef
+     * @param  array{event_id:string,occurrence_id:string}  $targetRef
      * @return array<int, string>
      */
     private function supersedePendingInvites(
         string $receiverUserId,
+        string $receiverAccountProfileId,
         array $targetRef,
         string $reason,
         ?string $exceptInviteId = null,
     ): array {
         /** @var \Illuminate\Support\Collection<int, InviteEdge> $candidates */
-        $candidates = InviteEdge::query()
-            ->where('receiver_user_id', $receiverUserId)
+        $query = InviteEdge::query()
             ->where('event_id', $targetRef['event_id'])
             ->where('occurrence_id', $targetRef['occurrence_id'])
-            ->whereIn('status', ['pending', 'viewed'])
-            ->get();
+            ->whereIn('status', ['pending', 'viewed']);
+        $this->applyReceiverScope($query, $receiverAccountProfileId);
+
+        $candidates = $query->get();
 
         $supersededIds = [];
         foreach ($candidates as $candidate) {
@@ -709,12 +890,65 @@ class InviteMutationService
 
     private function groupHasOtherPending(InviteEdge $edge): bool
     {
-        return InviteEdge::query()
-            ->where('receiver_user_id', (string) $edge->receiver_user_id)
+        $receiverAccountProfileId = $this->receiverAccountProfileIdForEdge($edge);
+        if ($receiverAccountProfileId === null) {
+            return false;
+        }
+
+        $query = InviteEdge::query()
             ->where('event_id', (string) $edge->event_id)
-            ->where('occurrence_id', $edge->occurrence_id ? (string) $edge->occurrence_id : null)
-            ->whereIn('status', ['pending', 'viewed'])
-            ->count() > 0;
+            ->where('occurrence_id', (string) $edge->occurrence_id)
+            ->whereIn('status', ['pending', 'viewed']);
+        $this->applyReceiverScope(
+            $query,
+            $receiverAccountProfileId,
+        );
+
+        return $query->count() > 0;
+    }
+
+    private function edgeBelongsToReceiver(
+        InviteEdge $edge,
+        string $receiverUserId,
+        string $receiverAccountProfileId,
+    ): bool {
+        $edgeProfileId = $this->nullableString($edge->receiver_account_profile_id ?? null);
+        if ($edgeProfileId !== null) {
+            return $edgeProfileId === $receiverAccountProfileId;
+        }
+
+        return false;
+    }
+
+    private function receiverAccountProfileIdForEdge(InviteEdge $edge): ?string
+    {
+        return $this->nullableString($edge->receiver_account_profile_id ?? null);
+    }
+
+    private function recipientAccountProfileIdForUserId(string $userId): ?string
+    {
+        $recipient = $this->identityGateway->resolveUserRecipientOwnership($userId);
+        if (! is_array($recipient)) {
+            return null;
+        }
+
+        return $this->nullableString($recipient['receiver_account_profile_id'] ?? null);
+    }
+
+    private function applyReceiverScope(mixed $query, string $receiverAccountProfileId): void
+    {
+        $query->where('receiver_account_profile_id', $receiverAccountProfileId);
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     private function isExpired(InviteEdge $edge): bool

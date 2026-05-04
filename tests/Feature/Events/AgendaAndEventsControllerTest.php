@@ -11,9 +11,12 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AttendanceCommitment;
+use App\Models\Tenants\EventType;
+use App\Models\Tenants\Taxonomy;
+use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantSettings;
-use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
@@ -312,46 +315,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Past Event', $items[0]['title']);
     }
 
-    public function test_agenda_filters_by_typed_taxonomy_terms(): void
+    public function test_agenda_filters_by_effective_event_taxonomy_terms(): void
     {
         $this->createEvent([
             'title' => 'Event Taxonomy Match',
             'taxonomy_terms' => [
                 ['type' => 'mood', 'value' => 'sunset'],
-            ],
-        ]);
-
-        $this->createEvent([
-            'title' => 'Venue Taxonomy Match',
-            'venue' => [
-                'id' => 'venue-2',
-                'display_name' => 'Casa Noturna',
-                'taxonomy_terms' => [
-                    ['type' => 'cuisine', 'value' => 'seafood'],
-                ],
-            ],
-        ]);
-
-        $this->createEvent([
-            'title' => 'Artist Taxonomy Match',
-            'event_parties' => [
-                [
-                    'party_type' => 'artist',
-                    'party_ref_id' => 'artist-3',
-                    'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                    'display_name' => 'DJ Mar',
-                    'slug' => 'dj-mar',
-                    'profile_type' => 'artist',
-                    'avatar_url' => null,
-                    'cover_url' => null,
-                    'highlight' => false,
-                    'genres' => ['house'],
-                    'taxonomy_terms' => [
-                        ['type' => 'music_genre', 'value' => 'samba'],
-                    ],
-                    ],
-                ],
             ],
         ]);
 
@@ -368,20 +337,77 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertCount(1, $response->json('items'));
         $this->assertSame('Event Taxonomy Match', $response->json('items.0.title'));
+    }
+
+    public function test_agenda_taxonomy_filter_uses_effective_occurrence_taxonomy_overrides(): void
+    {
+        $sportTaxonomy = Taxonomy::query()->create([
+            'slug' => 'sport_kind',
+            'name' => 'Sport Kind',
+            'applies_to' => ['event'],
+        ]);
+        TaxonomyTerm::query()->create([
+            'taxonomy_id' => (string) $sportTaxonomy->_id,
+            'slug' => 'futebol',
+            'name' => 'Futebol',
+        ]);
+        TaxonomyTerm::query()->create([
+            'taxonomy_id' => (string) $sportTaxonomy->_id,
+            'slug' => 'handebol',
+            'name' => 'Handebol',
+        ]);
+
+        $eventType = EventType::query()->create([
+            'name' => 'Synthetic Sports',
+            'slug' => 'synthetic-sports',
+            'allowed_taxonomies' => ['sport_kind'],
+        ]);
+
+        $event = $this->createEvent([
+            'title' => 'Synthetic multi occurrence sports event',
+            'type' => [
+                'id' => (string) $eventType->_id,
+                'name' => 'Synthetic Sports',
+                'slug' => 'synthetic-sports',
+                'allowed_taxonomies' => ['sport_kind'],
+            ],
+            'taxonomy_terms' => [
+                ['type' => 'sport_kind', 'value' => 'futebol'],
+            ],
+        ]);
+
+        $now = Carbon::now()->addDay();
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+            [
+                'date_time_start' => $now->copy()->setHour(10),
+                'date_time_end' => $now->copy()->setHour(12),
+                'taxonomy_terms' => [
+                    ['type' => 'sport_kind', 'value' => 'futebol'],
+                ],
+            ],
+            [
+                'date_time_start' => $now->copy()->addDay()->setHour(10),
+                'date_time_end' => $now->copy()->addDay()->setHour(12),
+                'taxonomy_terms' => [
+                    ['type' => 'sport_kind', 'value' => 'handebol'],
+                ],
+            ],
+        ]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}agenda?taxonomy[0][type]=cuisine&taxonomy[0][value]=seafood&page=1&page_size=10"
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=sport_kind&taxonomy[0][value]=futebol&page=1&page_size=10"
         );
-        $response->assertStatus(200);
-        $this->assertCount(1, $response->json('items'));
-        $this->assertSame('Venue Taxonomy Match', $response->json('items.0.title'));
 
-        $response = $this->getJson(
-            "{$this->base_api_tenant}agenda?taxonomy[0][type]=music_genre&taxonomy[0][value]=samba&page=1&page_size=10"
-        );
         $response->assertStatus(200);
-        $this->assertCount(1, $response->json('items'));
-        $this->assertSame('Artist Taxonomy Match', $response->json('items.0.title'));
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame('futebol', $items[0]['taxonomy_terms'][0]['value'] ?? null);
+        $this->assertSame(
+            0,
+            EventOccurrence::query()
+                ->where('_id', $items[0]['occurrence_id'] ?? '')
+                ->value('occurrence_index')
+        );
     }
 
     public function test_agenda_supports_text_search_query_param(): void
@@ -658,7 +684,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
         ]);
 
-        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+        $this->createActiveAttendanceCommitment(
+            (string) $confirmed->_id,
+            $this->firstOccurrenceId($confirmed),
+        );
 
         $response = $this->getJson("{$this->base_api_tenant}agenda?confirmed_only=1&page=1&page_size=10");
         $response->assertStatus(200);
@@ -684,6 +713,180 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('items'));
     }
 
+    public function test_agenda_filters_by_occurrence_ids_without_walking_unrelated_events(): void
+    {
+        $target = $this->createEvent([
+            'title' => 'Pending Invite Target',
+            'date_time_start' => Carbon::now()->addDays(3),
+            'date_time_end' => Carbon::now()->addDays(3)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Unrelated Agenda Item',
+            'date_time_start' => Carbon::now()->addDay(),
+            'date_time_end' => Carbon::now()->addDay()->addHours(2),
+        ]);
+
+        $targetOccurrenceId = $this->firstOccurrenceId($target);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?occurrence_ids[]={$targetOccurrenceId}&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_more', false);
+
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame('Pending Invite Target', (string) ($items[0]['title'] ?? ''));
+        $this->assertSame((string) $target->_id, (string) ($items[0]['event_id'] ?? ''));
+        $this->assertSame($targetOccurrenceId, (string) ($items[0]['occurrence_id'] ?? ''));
+    }
+
+    public function test_agenda_filters_by_occurrence_ids_with_geo_parameters(): void
+    {
+        $target = $this->createEvent([
+            'title' => 'Pending Invite Geo Target',
+            'date_time_start' => Carbon::now()->addDays(3),
+            'date_time_end' => Carbon::now()->addDays(3)->addHours(2),
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.495395, -20.671339],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.495395, -20.671339],
+            ],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Pending Invite Geo Unrelated',
+            'date_time_start' => Carbon::now()->addDays(4),
+            'date_time_end' => Carbon::now()->addDays(4)->addHours(2),
+            'location' => [
+                'mode' => 'physical',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.4950, -20.6710],
+                ],
+            ],
+            'geo_location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.4950, -20.6710],
+            ],
+        ]);
+
+        $targetOccurrenceId = $this->firstOccurrenceId($target);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?occurrence_ids[]={$targetOccurrenceId}&origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=5000&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_more', false);
+
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame('Pending Invite Geo Target', (string) ($items[0]['title'] ?? ''));
+        $this->assertSame($targetOccurrenceId, (string) ($items[0]['occurrence_id'] ?? ''));
+    }
+
+    public function test_agenda_filters_by_occurrence_ids_with_search_parameters(): void
+    {
+        $target = $this->createEvent([
+            'title' => 'Solar Pending Invite Target',
+            'date_time_start' => Carbon::now()->addDays(3),
+            'date_time_end' => Carbon::now()->addDays(3)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Solar Pending Invite Unrelated',
+            'date_time_start' => Carbon::now()->addDays(4),
+            'date_time_end' => Carbon::now()->addDays(4)->addHours(2),
+        ]);
+
+        $targetOccurrenceId = $this->firstOccurrenceId($target);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?search=Solar&occurrence_ids[]={$targetOccurrenceId}&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('has_more', false);
+
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame('Solar Pending Invite Target', (string) ($items[0]['title'] ?? ''));
+        $this->assertSame($targetOccurrenceId, (string) ($items[0]['occurrence_id'] ?? ''));
+    }
+
+    public function test_occurrence_ids_are_applied_in_initial_agenda_and_stream_pipeline_stages(): void
+    {
+        $occurrenceId = '507f1f77bcf86cd799439011';
+        $baseFilters = [
+            'categories' => [],
+            'tags' => [],
+            'taxonomy' => [],
+            'occurrence_ids' => [$occurrenceId],
+            'search' => null,
+            'past_only' => false,
+            'live_now_only' => false,
+            'confirmed_only' => false,
+            'origin_lat' => -20.671339,
+            'origin_lng' => -40.495395,
+            'max_distance_meters' => 5000.0,
+            'use_geo' => true,
+        ];
+
+        $geoAgendaPipeline = $this->buildAgendaPipelineForTest($baseFilters, true);
+        $this->assertTrue(
+            $this->matchExpressionContainsDocumentId(
+                $geoAgendaPipeline[0]['$geoNear']['query'] ?? [],
+                $occurrenceId
+            )
+        );
+
+        $searchAgendaPipeline = $this->buildAgendaPipelineForTest([
+            ...$baseFilters,
+            'search' => 'Solar',
+            'origin_lat' => null,
+            'origin_lng' => null,
+            'max_distance_meters' => null,
+            'use_geo' => false,
+        ], false);
+        $this->assertTrue(
+            $this->matchExpressionContainsDocumentId(
+                $searchAgendaPipeline[0]['$match'] ?? [],
+                $occurrenceId
+            )
+        );
+
+        $geoStreamPipeline = $this->buildStreamPipelineForTest($baseFilters, true);
+        $this->assertTrue(
+            $this->matchExpressionContainsDocumentId(
+                $geoStreamPipeline[0]['$geoNear']['query'] ?? [],
+                $occurrenceId
+            )
+        );
+
+        $streamPipeline = $this->buildStreamPipelineForTest([
+            ...$baseFilters,
+            'origin_lat' => null,
+            'origin_lng' => null,
+            'max_distance_meters' => null,
+            'use_geo' => false,
+        ], false);
+        $this->assertTrue(
+            $this->matchExpressionContainsDocumentId(
+                $streamPipeline[0]['$match'] ?? [],
+                $occurrenceId
+            )
+        );
+    }
+
     public function test_agenda_confirmed_only_ignores_geo_distance_filtering(): void
     {
         $confirmed = $this->createEvent([
@@ -701,7 +904,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ],
         ]);
 
-        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+        $this->createActiveAttendanceCommitment(
+            (string) $confirmed->_id,
+            $this->firstOccurrenceId($confirmed),
+        );
 
         $response = $this->getJson(
             "{$this->base_api_tenant}agenda?confirmed_only=1&origin_lat=0&origin_lng=0&max_distance_meters=1&page=1&page_size=10"
@@ -914,7 +1120,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $confirmed = $this->createEvent(['title' => 'Confirmed Stream Event']);
         $other = $this->createEvent(['title' => 'Other Stream Event']);
 
-        $this->createActiveAttendanceCommitment((string) $confirmed->_id);
+        $this->createActiveAttendanceCommitment(
+            (string) $confirmed->_id,
+            $this->firstOccurrenceId($confirmed),
+        );
 
         $response = $this->get(
             "{$this->base_api_tenant}events/stream?confirmed_only=1",
@@ -929,6 +1138,29 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $this->assertStringContainsString((string) $confirmed->_id, $content);
         $this->assertStringNotContainsString((string) $other->_id, $content);
+    }
+
+    public function test_event_stream_filters_by_occurrence_ids_without_geo(): void
+    {
+        $target = $this->createEvent(['title' => 'Target Stream Occurrence']);
+        $other = $this->createEvent(['title' => 'Other Stream Occurrence']);
+        $targetOccurrenceId = $this->firstOccurrenceId($target);
+
+        $response = $this->get(
+            "{$this->base_api_tenant}events/stream?occurrence_ids[]={$targetOccurrenceId}",
+            [
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $response->assertStatus(200);
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString((string) $target->_id, $content);
+        $this->assertStringContainsString($targetOccurrenceId, $content);
+        $this->assertStringNotContainsString((string) $other->_id, $content);
+        $this->assertStringNotContainsString($this->firstOccurrenceId($other), $content);
     }
 
     public function test_agenda_requires_auth(): void
@@ -953,7 +1185,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     public function test_agenda_rejects_page_above_safe_public_depth(): void
     {
         $response = $this->getJson(
-            "{$this->base_api_tenant}agenda?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1)."&page_size=10"
+            "{$this->base_api_tenant}agenda?page=".(InputConstraints::PUBLIC_PAGE_MAX + 1).'&page_size=10'
         );
 
         $response->assertStatus(422);
@@ -1003,7 +1235,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     public function test_agenda_rejects_unbounded_public_geo_radius(): void
     {
         $response = $this->getJson(
-            "{$this->base_api_tenant}agenda?origin_lat=-20&origin_lng=-40&max_distance_meters=".(InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS + 1)."&page=1&page_size=10"
+            "{$this->base_api_tenant}agenda?origin_lat=-20&origin_lng=-40&max_distance_meters=".(InputConstraints::PUBLIC_GEO_DISTANCE_MAX_METERS + 1).'&page=1&page_size=10'
         );
 
         $response->assertStatus(422);
@@ -1158,7 +1390,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         return $event->fresh();
     }
 
-    private function createActiveAttendanceCommitment(string $eventId, ?string $occurrenceId = null): void
+    private function createActiveAttendanceCommitment(string $eventId, string $occurrenceId): void
     {
         AttendanceCommitment::create([
             'user_id' => (string) $this->user->getAuthIdentifier(),
@@ -1170,6 +1402,69 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'confirmed_at' => Carbon::now(),
             'canceled_at' => null,
         ]);
+    }
+
+    private function firstOccurrenceId(Event $event): string
+    {
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('occurrence_index')
+            ->firstOrFail();
+
+        return (string) $occurrence->_id;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildAgendaPipelineForTest(array $filters, bool $useGeo): array
+    {
+        $method = new \ReflectionMethod(EventQueryService::class, 'buildAgendaPipeline');
+        $method->setAccessible(true);
+
+        /** @var array<int, array<string, mixed>> $pipeline */
+        $pipeline = $method->invoke(app(EventQueryService::class), $filters, 0, 10, $useGeo, null);
+
+        return $pipeline;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildStreamPipelineForTest(array $filters, bool $useGeo): array
+    {
+        $method = new \ReflectionMethod(EventQueryService::class, 'buildStreamPipeline');
+        $method->setAccessible(true);
+
+        /** @var array<int, array<string, mixed>> $pipeline */
+        $pipeline = $method->invoke(app(EventQueryService::class), $filters, Carbon::now()->subMinute(), $useGeo, null);
+
+        return $pipeline;
+    }
+
+    /**
+     * @param  array<string, mixed>  $expression
+     */
+    private function matchExpressionContainsDocumentId(array $expression, string $documentId): bool
+    {
+        $inValues = data_get($expression, '_id.$in');
+        if (is_array($inValues)) {
+            foreach ($inValues as $value) {
+                if ((string) $value === $documentId) {
+                    return true;
+                }
+            }
+        }
+
+        foreach ($expression as $value) {
+            if (is_array($value) && $this->matchExpressionContainsDocumentId($value, $documentId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function initializeSystem(): void

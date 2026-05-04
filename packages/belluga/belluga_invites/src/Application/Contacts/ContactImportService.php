@@ -9,6 +9,7 @@ use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Support\InviteDomainException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Context;
+use MongoDB\BSON\UTCDateTime;
 
 class ContactImportService
 {
@@ -43,34 +44,48 @@ class ContactImportService
         $saltVersion = isset($payload['salt_version']) ? (string) $payload['salt_version'] : null;
         $matches = $this->identityGateway->matchImportedContacts($contacts, $user, $saltVersion);
         $now = Carbon::now();
+        $timestamp = new UTCDateTime((int) $now->getTimestampMs());
 
+        $operations = [];
         foreach ($contacts as $contact) {
             $hash = $contact['hash'];
-            /** @var ContactHashDirectory|null $directory */
-            $directory = ContactHashDirectory::query()
-                ->where('importing_user_id', $ownerUserId)
-                ->where('contact_hash', $hash)
-                ->first();
-            $directory ??= new ContactHashDirectory([
-                'importing_user_id' => $ownerUserId,
-                'contact_hash' => $hash,
-                'imported_at' => $now,
-            ]);
-
             $match = $matches[$hash] ?? null;
-            $directory->fill([
-                'type' => $contact['type'],
-                'salt_version' => $saltVersion,
-                'matched_user_id' => $match['user_id'] ?? null,
-                'match_snapshot' => $match === null
-                    ? null
-                    : [
-                        'display_name' => $match['display_name'] ?? null,
-                        'avatar_url' => $match['avatar_url'] ?? null,
+            $operations[] = [
+                'updateOne' => [
+                    [
+                        'importing_user_id' => $ownerUserId,
+                        'contact_hash' => $hash,
                     ],
-                'last_seen_at' => $now,
-            ]);
-            $directory->save();
+                    [
+                        '$set' => [
+                            'type' => $contact['type'],
+                            'salt_version' => $saltVersion,
+                            'matched_user_id' => $match['user_id'] ?? null,
+                            'match_snapshot' => $match === null
+                                ? null
+                                : [
+                                    'display_name' => $match['display_name'] ?? null,
+                                    'avatar_url' => $match['avatar_url'] ?? null,
+                                ],
+                            'last_seen_at' => $timestamp,
+                            'updated_at' => $timestamp,
+                        ],
+                        '$setOnInsert' => [
+                            'importing_user_id' => $ownerUserId,
+                            'contact_hash' => $hash,
+                            'imported_at' => $timestamp,
+                            'created_at' => $timestamp,
+                        ],
+                    ],
+                    ['upsert' => true],
+                ],
+            ];
+        }
+
+        if ($operations !== []) {
+            ContactHashDirectory::raw(
+                fn ($collection) => $collection->bulkWrite($operations, ['ordered' => false])
+            );
         }
 
         return [

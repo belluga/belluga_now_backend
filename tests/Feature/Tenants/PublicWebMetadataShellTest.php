@@ -13,6 +13,7 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Application\Events\EventQueryService;
+use Belluga\Invites\Application\Mutations\InviteShareService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
@@ -278,6 +279,51 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<meta property="og:description" content="Quiosques, píer e um pôr do sol forte no fim da tarde.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/praia-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/static/praia-das-virtudes">', false);
+    }
+
+    public function test_invite_public_route_injects_dynamic_share_metadata(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $this->applyPublicWebMetadata([
+            'default_title' => 'Fallback tenant title',
+            'default_description' => 'Fallback tenant description.',
+            'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+
+        $inviteShareService = Mockery::mock(InviteShareService::class);
+        $inviteShareService->shouldReceive('preview')
+            ->once()
+            ->with('PREVIEW1234')
+            ->andReturn([
+                'code' => 'PREVIEW1234',
+                'inviter_principal' => [
+                    'kind' => 'user',
+                    'principal_id' => 'user-1',
+                ],
+                'invite' => [
+                    'event_name' => 'Festival na Orla',
+                    'event_image_url' => 'https://tenant.example/media/invite-cover.png',
+                    'location' => 'Praia do Morro',
+                    'host_name' => 'Palco Principal',
+                    'event_date' => now()->toIso8601String(),
+                    'inviter_candidates' => [
+                        [
+                            'display_name' => 'Sender User',
+                            'status' => 'pending',
+                        ],
+                    ],
+                ],
+            ]);
+        $this->app->instance(InviteShareService::class, $inviteShareService);
+
+        $response = $this->get("{$this->base_tenant_url}invite?code=PREVIEW1234");
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $response->assertSee('<meta property="og:title" content="Festival na Orla | '.$this->resolvedSiteName.'">', false);
+        $response->assertSee('<meta property="og:description" content="Sender User convidou você para Festival na Orla em Praia do Morro.">', false);
+        $response->assertSee('<meta property="og:image" content="https://tenant.example/media/invite-cover.png">', false);
+        $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/invite?code=PREVIEW1234">', false);
     }
 
     public function test_home_route_uses_branding_fallback_metadata(): void

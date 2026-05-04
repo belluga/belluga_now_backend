@@ -27,10 +27,6 @@ class TelemetryEmitter implements TelemetryEmitterContract
         string $source = 'api',
         array $context = []
     ): void {
-        if (! $userId) {
-            return;
-        }
-
         $tenant = Tenant::current();
         if (! $tenant || ! $tenant->isCurrent()) {
             return;
@@ -42,7 +38,24 @@ class TelemetryEmitter implements TelemetryEmitterContract
             return;
         }
 
-        $idempotencyKey = $idempotencyKey ?: $this->buildIdempotencyKey($event, $userId);
+        $actor = $this->resolveEnvelopeEntity(
+            candidate: $context['actor'] ?? null,
+            defaultType: $userId ? 'user' : 'pre_auth',
+            defaultId: $userId,
+        );
+
+        if ($actor === null && $userId === null) {
+            $actor = [
+                'type' => 'pre_auth',
+                'id' => $idempotencyKey ?: (string) Str::uuid(),
+            ];
+        }
+
+        if ($actor === null) {
+            return;
+        }
+
+        $idempotencyKey = $idempotencyKey ?: $this->buildIdempotencyKey($event, (string) $actor['id']);
         $envelope = $this->buildEnvelope(
             event: $event,
             userId: $userId,
@@ -51,6 +64,7 @@ class TelemetryEmitter implements TelemetryEmitterContract
             idempotencyKey: $idempotencyKey,
             properties: $properties,
             context: $context,
+            actor: $actor,
         );
 
         DeliverTelemetryEventJob::dispatch($envelope, $trackers);
@@ -63,19 +77,14 @@ class TelemetryEmitter implements TelemetryEmitterContract
      */
     private function buildEnvelope(
         string $event,
-        string $userId,
+        ?string $userId,
         string $tenantId,
         string $source,
         string $idempotencyKey,
         array $properties,
-        array $context
+        array $context,
+        array $actor
     ): array {
-        $actor = $this->resolveEnvelopeEntity(
-            candidate: $context['actor'] ?? null,
-            defaultType: 'user',
-            defaultId: $userId,
-        );
-
         return [
             'event' => $event,
             'occurred_at' => now()->toISOString(),
@@ -96,13 +105,13 @@ class TelemetryEmitter implements TelemetryEmitterContract
                 defaultType: 'user',
                 defaultId: $userId,
             ),
-            'metadata' => [
+            'metadata' => array_filter([
                 'tenant_id' => $tenantId,
                 'user_id' => $userId,
                 'source' => $source,
                 'idempotency_key' => $idempotencyKey,
                 ...$properties,
-            ],
+            ], static fn (mixed $value): bool => $value !== null && $value !== ''),
         ];
     }
 
