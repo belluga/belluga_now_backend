@@ -32,7 +32,9 @@ class PhoneOtpChallengeStore
         $resendAvailableAtUtc = $this->toUtcDateTime($resendAvailableAt);
 
         for ($attempt = 1; $attempt <= 3; $attempt++) {
-            $pending = $this->pendingForPhone($phone);
+            $this->expireStalePendingForPhone($phone, $now);
+
+            $pending = $this->activePendingForPhone($phone, $now);
             if ($pending !== null) {
                 $cooldownAt = $this->toCarbon($pending->resend_available_at);
                 if ($cooldownAt !== null && $cooldownAt->isFuture()) {
@@ -85,7 +87,9 @@ class PhoneOtpChallengeStore
                     throw $exception;
                 }
 
-                $pending = $this->pendingForPhone($phone);
+                $this->expireStalePendingForPhone($phone, $now);
+
+                $pending = $this->activePendingForPhone($phone, $now);
                 if ($pending !== null) {
                     $cooldownAt = $this->toCarbon($pending->resend_available_at);
                     if ($cooldownAt !== null && $cooldownAt->isFuture()) {
@@ -218,11 +222,43 @@ class PhoneOtpChallengeStore
         return $challenge;
     }
 
+    public function activePendingForPhone(string $phone, Carbon $now): ?PhoneOtpChallenge
+    {
+        /** @var PhoneOtpChallenge|null $challenge */
+        $challenge = PhoneOtpChallenge::query()
+            ->where('phone', $phone)
+            ->where('status', PhoneOtpChallenge::STATUS_PENDING)
+            ->where('expires_at', '>', $now)
+            ->orderByDesc('created_at')
+            ->first();
+
+        return $challenge;
+    }
+
     private function collection(): \MongoDB\Collection
     {
         return DB::connection('tenant')
             ->getMongoDB()
             ->selectCollection('phone_otp_challenges');
+    }
+
+    private function expireStalePendingForPhone(string $phone, Carbon $now): void
+    {
+        $nowUtc = $this->toUtcDateTime($now);
+
+        $this->collection()->updateMany(
+            [
+                'phone' => $phone,
+                'status' => PhoneOtpChallenge::STATUS_PENDING,
+                'expires_at' => ['$lte' => $nowUtc],
+            ],
+            [
+                '$set' => [
+                    'status' => PhoneOtpChallenge::STATUS_EXPIRED,
+                    'updated_at' => $nowUtc,
+                ],
+            ],
+        );
     }
 
     private function parseObjectId(string $challengeId): ?ObjectId
