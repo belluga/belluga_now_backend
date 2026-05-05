@@ -8,6 +8,7 @@ use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
+use MongoDB\BSON\ObjectId;
 
 class AccountProfileAgendaOccurrencesService
 {
@@ -22,20 +23,29 @@ class AccountProfileAgendaOccurrencesService
     public function forProfile(AccountProfile $profile): array
     {
         $profileId = trim((string) $profile->getKey());
-        if ($profileId === '') {
+        if ($profileId === '' || ! $this->profileHasAgendaCapability($profile)) {
             return [];
         }
 
+        $profileIdCandidates = $this->buildProfileIdCandidates($profileId);
         $query = EventOccurrence::query()
             ->where('is_event_published', true)
-            ->where('effective_ends_at', '>', Carbon::now());
-
-        if ($this->usesPlaceRefAgendaMatching($profile)) {
-            $query->where('place_ref.type', 'account_profile')
-                ->where('place_ref.id', $profileId);
-        } else {
-            $query->where('event_parties.party_ref_id', $profileId);
-        }
+            ->where('effective_ends_at', '>', Carbon::now())
+            ->where(function ($query) use ($profileIdCandidates): void {
+                $query->where(function ($query) use ($profileIdCandidates): void {
+                    $query->where('place_ref.type', 'account_profile')
+                        ->where(function ($query) use ($profileIdCandidates): void {
+                            $query->whereIn('place_ref.id', $profileIdCandidates)
+                                ->orWhereIn('place_ref._id', $profileIdCandidates);
+                        });
+                })->orWhereRaw([
+                    'event_parties' => [
+                        '$elemMatch' => [
+                            'party_ref_id' => ['$in' => $profileIdCandidates],
+                        ],
+                    ],
+                ]);
+            });
 
         return $query
             ->orderBy('starts_at')
@@ -46,10 +56,29 @@ class AccountProfileAgendaOccurrencesService
             ->all();
     }
 
-    private function usesPlaceRefAgendaMatching(AccountProfile $profile): bool
+    private function profileHasAgendaCapability(AccountProfile $profile): bool
     {
-        return $this->profileRegistryService->isPoiEnabled(
+        return $this->profileRegistryService->hasEvents(
             trim((string) ($profile->profile_type ?? ''))
         );
+    }
+
+    /**
+     * @return array<int, string|ObjectId>
+     */
+    private function buildProfileIdCandidates(string $profileId): array
+    {
+        $candidates = [$profileId];
+
+        if ($this->looksLikeObjectId($profileId)) {
+            $candidates[] = new ObjectId($profileId);
+        }
+
+        return $candidates;
+    }
+
+    private function looksLikeObjectId(string $value): bool
+    {
+        return (bool) preg_match('/^[a-f0-9]{24}$/i', $value);
     }
 }

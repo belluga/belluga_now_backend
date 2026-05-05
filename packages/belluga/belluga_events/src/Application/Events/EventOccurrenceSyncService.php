@@ -31,17 +31,27 @@ class EventOccurrenceSyncService
         $now = Carbon::now();
         $publication = $this->normalizePublication($event->publication ?? [], $event->created_at);
         $eventGeoLocation = $this->resolveEventGeoLocation($event);
+        $existingDocuments = $this->loadOrderedExistingDocuments($event);
+        $documentsById = $this->keyDocumentsById($existingDocuments);
+        $documentsBySlug = $this->keyDocumentsBySlug($existingDocuments);
         $resolvedDocuments = [];
         $allowIndexFallback = ! $this->occurrencesContainIdentity($occurrences);
         foreach ($occurrences as $index => $occurrence) {
             $resolvedDocuments[$index] = is_array($occurrence)
-                ? $this->resolveExistingOccurrenceDocument($eventId, $occurrence, (int) $index, $allowIndexFallback)
+                ? $this->resolveExistingOccurrenceDocument(
+                    $occurrence,
+                    $existingDocuments,
+                    $documentsById,
+                    $documentsBySlug,
+                    (int) $index,
+                    $allowIndexFallback
+                )
                 : null;
         }
-        $this->moveResolvedDocumentsToTemporaryIndexes($resolvedDocuments, $now);
         $claimedOccurrenceSlugs = $this->collectClaimedOccurrenceSlugs($occurrences, $resolvedDocuments);
 
         $activeDocumentIds = [];
+        $occurrenceRefs = [];
         foreach ($occurrences as $index => $occurrence) {
             $start = $this->toCarbon($occurrence['date_time_start'] ?? null) ?? $now;
             $end = $this->toCarbon($occurrence['date_time_end'] ?? null);
@@ -58,7 +68,6 @@ class EventOccurrenceSyncService
 
             $payload = [
                 'event_id' => $eventId,
-                'occurrence_index' => $index,
                 'slug' => (string) ($event->slug ?? ''),
                 'occurrence_slug' => $this->resolveOccurrenceSlug($occurrence, $document, (string) ($event->slug ?? ''), $eventId, $index, $claimedOccurrenceSlugs),
                 'title' => (string) ($event->title ?? ''),
@@ -100,6 +109,7 @@ class EventOccurrenceSyncService
             ];
 
             if ($document) {
+                $document->unset('occurrence_index');
                 $document->fill($payload);
                 $document->save();
             } else {
@@ -107,41 +117,31 @@ class EventOccurrenceSyncService
             }
 
             if (isset($document->_id)) {
-                $activeDocumentIds[] = (string) $document->_id;
+                $documentId = (string) $document->_id;
+                $activeDocumentIds[] = $documentId;
+                $occurrenceRefs[] = [
+                    'occurrence_id' => $documentId,
+                    'occurrence_slug' => $this->normalizeOptionalString($document->occurrence_slug ?? null),
+                    'order' => $index,
+                ];
             }
         }
 
-        $query = EventOccurrence::query()->where('event_id', $eventId);
+        $event->forceFill([
+            'occurrence_refs' => $occurrenceRefs,
+        ])->saveQuietly();
+
+        $staleDocuments = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId);
         if ($activeDocumentIds !== []) {
-            $query->whereNotIn('_id', $this->buildDocumentIdCandidates($activeDocumentIds));
+            $staleDocuments->whereNotIn('_id', $this->buildDocumentIdCandidates($activeDocumentIds));
         }
 
-        $query->update([
-            'deleted_at' => $now,
-            'updated_at' => $now,
-        ]);
-    }
-
-    /**
-     * @param  array<int, EventOccurrence|null>  $documents
-     */
-    private function moveResolvedDocumentsToTemporaryIndexes(array $documents, Carbon $now): void
-    {
-        $movedDocumentIds = [];
-        foreach ($documents as $index => $document) {
-            if (! $document || ! isset($document->_id)) {
-                continue;
-            }
-
-            $documentId = (string) $document->_id;
-            if (isset($movedDocumentIds[$documentId])) {
-                continue;
-            }
-
-            $document->occurrence_index = -100000 - (int) $index;
+        foreach ($staleDocuments->cursor() as $document) {
+            $document->unset('occurrence_index');
+            $document->deleted_at = $now;
             $document->updated_at = $now;
             $document->save();
-            $movedDocumentIds[$documentId] = true;
         }
     }
 
@@ -149,8 +149,10 @@ class EventOccurrenceSyncService
      * @param  array<string, mixed>  $occurrence
      */
     private function resolveExistingOccurrenceDocument(
-        string $eventId,
         array $occurrence,
+        array $orderedDocuments,
+        array $documentsById,
+        array $documentsBySlug,
         int $index,
         bool $allowIndexFallback
     ): ?EventOccurrence {
@@ -160,10 +162,7 @@ class EventOccurrenceSyncService
                 continue;
             }
 
-            $document = EventOccurrence::withTrashed()
-                ->where('event_id', $eventId)
-                ->whereIn('_id', $this->buildDocumentIdCandidates([$id]))
-                ->first();
+            $document = $documentsById[$id] ?? null;
             if ($document) {
                 return $document;
             }
@@ -171,10 +170,7 @@ class EventOccurrenceSyncService
 
         $slug = $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null);
         if ($slug !== null) {
-            $document = EventOccurrence::withTrashed()
-                ->where('event_id', $eventId)
-                ->where('occurrence_slug', $slug)
-                ->first();
+            $document = $documentsBySlug[$slug] ?? null;
             if ($document) {
                 return $document;
             }
@@ -184,10 +180,126 @@ class EventOccurrenceSyncService
             return null;
         }
 
-        return EventOccurrence::withTrashed()
+        return $orderedDocuments[$index] ?? null;
+    }
+
+    /**
+     * @return array<int, EventOccurrence>
+     */
+    private function loadOrderedExistingDocuments(Event $event): array
+    {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        if ($eventId === '') {
+            return [];
+        }
+
+        $documents = EventOccurrence::withTrashed()
             ->where('event_id', $eventId)
-            ->where('occurrence_index', $index)
-            ->first();
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values()
+            ->all();
+
+        $occurrenceRefs = $this->normalizeOccurrenceRefs($event->occurrence_refs ?? []);
+        if ($occurrenceRefs === []) {
+            return $documents;
+        }
+
+        $orderById = [];
+        $orderBySlug = [];
+        foreach ($occurrenceRefs as $ref) {
+            $order = (int) ($ref['order'] ?? count($orderById));
+            $occurrenceId = $this->normalizeOptionalString($ref['occurrence_id'] ?? null);
+            $occurrenceSlug = $this->normalizeOptionalString($ref['occurrence_slug'] ?? null);
+            if ($occurrenceId !== null) {
+                $orderById[$occurrenceId] = $order;
+            }
+            if ($occurrenceSlug !== null) {
+                $orderBySlug[$occurrenceSlug] = $order;
+            }
+        }
+
+        usort($documents, function (EventOccurrence $left, EventOccurrence $right) use ($orderById, $orderBySlug): int {
+            $leftRank = $this->resolveDocumentOrderRank($left, $orderById, $orderBySlug);
+            $rightRank = $this->resolveDocumentOrderRank($right, $orderById, $orderBySlug);
+            if ($leftRank !== $rightRank) {
+                return $leftRank <=> $rightRank;
+            }
+
+            $leftStart = $this->toCarbon($left->starts_at)?->getTimestamp() ?? PHP_INT_MAX;
+            $rightStart = $this->toCarbon($right->starts_at)?->getTimestamp() ?? PHP_INT_MAX;
+            if ($leftStart !== $rightStart) {
+                return $leftStart <=> $rightStart;
+            }
+
+            return strcmp((string) ($left->_id ?? ''), (string) ($right->_id ?? ''));
+        });
+
+        return $documents;
+    }
+
+    /**
+     * @param  array<int, EventOccurrence>  $documents
+     * @return array<string, EventOccurrence>
+     */
+    private function keyDocumentsById(array $documents): array
+    {
+        $mapped = [];
+        foreach ($documents as $document) {
+            $documentId = isset($document->_id) ? trim((string) $document->_id) : '';
+            if ($documentId !== '') {
+                $mapped[$documentId] = $document;
+            }
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * @param  array<int, EventOccurrence>  $documents
+     * @return array<string, EventOccurrence>
+     */
+    private function keyDocumentsBySlug(array $documents): array
+    {
+        $mapped = [];
+        foreach ($documents as $document) {
+            $slug = $this->normalizeOptionalString($document->occurrence_slug ?? null);
+            if ($slug !== null) {
+                $mapped[$slug] = $document;
+            }
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeOccurrenceRefs(mixed $value): array
+    {
+        $refs = $this->normalizeArray($value);
+
+        return array_values(array_filter($refs, static fn (mixed $ref): bool => is_array($ref)));
+    }
+
+    /**
+     * @param  array<string, int>  $orderById
+     * @param  array<string, int>  $orderBySlug
+     */
+    private function resolveDocumentOrderRank(EventOccurrence $document, array $orderById, array $orderBySlug): int
+    {
+        $documentId = isset($document->_id) ? trim((string) $document->_id) : '';
+        if ($documentId !== '' && array_key_exists($documentId, $orderById)) {
+            return $orderById[$documentId];
+        }
+
+        $slug = $this->normalizeOptionalString($document->occurrence_slug ?? null);
+        if ($slug !== null && array_key_exists($slug, $orderBySlug)) {
+            return $orderBySlug[$slug];
+        }
+
+        return PHP_INT_MAX;
     }
 
     /**

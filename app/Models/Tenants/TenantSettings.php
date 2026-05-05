@@ -20,6 +20,7 @@ class TenantSettings extends PackageTenantSettings
         'resend_email',
         'tenant_public_auth',
         'outbound_integrations',
+        'phone_otp_review_access',
     ];
 
     /**
@@ -106,6 +107,14 @@ class TenantSettings extends PackageTenantSettings
      * @return array<string, mixed>
      */
     public function getOutboundIntegrationsAttribute(mixed $value): array
+    {
+        return $this->normalizeArray($value);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getPhoneOtpReviewAccessAttribute(mixed $value): array
     {
         return $this->normalizeArray($value);
     }

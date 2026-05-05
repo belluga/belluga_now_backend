@@ -104,7 +104,6 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         ]);
         $occurrence = EventOccurrence::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_index' => 0,
             'slug' => 'legacy-event',
             'title' => 'Legacy Event',
             'taxonomy_terms' => $legacyTerms,
@@ -202,7 +201,6 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
 
             EventOccurrence::query()->create([
                 'event_id' => (string) $event->_id,
-                'occurrence_index' => 0,
                 'slug' => "legacy-event-{$index}",
                 'occurrence_slug' => "legacy-event-{$index}",
                 'title' => "Legacy Event {$index}",

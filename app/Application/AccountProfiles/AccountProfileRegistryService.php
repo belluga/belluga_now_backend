@@ -79,6 +79,14 @@ class AccountProfileRegistryService
         return (bool) ($capabilities['is_reference_location_enabled'] ?? false);
     }
 
+    public function hasEvents(string $profileType): bool
+    {
+        $definition = $this->typeDefinition($profileType);
+        $capabilities = $definition['capabilities'] ?? [];
+
+        return (bool) ($capabilities['has_events'] ?? false);
+    }
+
     /**
      * @return array<string, string>|null
      */
