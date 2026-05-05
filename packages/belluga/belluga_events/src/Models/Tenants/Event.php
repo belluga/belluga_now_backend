@@ -36,6 +36,7 @@ class Event extends Model
         'created_by',
         'event_parties',
         'account_context_ids',
+        'occurrence_refs',
         'publication',
         'is_active',
     ];

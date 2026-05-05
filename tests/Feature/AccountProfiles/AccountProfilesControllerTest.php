@@ -569,16 +569,29 @@ class AccountProfilesControllerTest extends TestCaseTenant
             startsAt: Carbon::now()->addDay(),
             endsAt: Carbon::now()->addDay()->addHours(2),
         );
-        $secondFutureOccurrence = EventOccurrence::query()
+        $firstFutureOccurrence = EventOccurrence::query()
             ->where('event_id', (string) $futureEvent->_id)
-            ->firstOrFail()
-            ->replicate();
-        $secondFutureOccurrence->occurrence_index = 1;
+            ->firstOrFail();
+        $secondFutureOccurrence = $firstFutureOccurrence->replicate();
         $secondFutureOccurrence->occurrence_slug = 'future-venue-event-occ-2';
         $secondFutureOccurrence->starts_at = Carbon::now()->addDays(2);
         $secondFutureOccurrence->ends_at = Carbon::now()->addDays(2)->addHours(2);
         $secondFutureOccurrence->effective_ends_at = Carbon::now()->addDays(2)->addHours(2);
+        $secondFutureOccurrence->unset('occurrence_index');
         $secondFutureOccurrence->save();
+        $futureEvent->occurrence_refs = [
+            [
+                'occurrence_id' => (string) $firstFutureOccurrence->_id,
+                'occurrence_slug' => (string) $firstFutureOccurrence->occurrence_slug,
+                'order' => 0,
+            ],
+            [
+                'occurrence_id' => (string) $secondFutureOccurrence->_id,
+                'occurrence_slug' => (string) $secondFutureOccurrence->occurrence_slug,
+                'order' => 1,
+            ],
+        ];
+        $futureEvent->save();
         $this->createAgendaEventForAccountProfile(
             $profile,
             title: 'Past Venue Event',

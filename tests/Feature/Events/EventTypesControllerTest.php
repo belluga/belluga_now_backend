@@ -335,7 +335,6 @@ class EventTypesControllerTest extends TestCaseTenant
 
         EventOccurrence::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_index' => 0,
             'occurrence_slug' => 'old-event-occ-1',
             'type' => [
                 'id' => (string) $eventType->_id,
@@ -421,7 +420,6 @@ class EventTypesControllerTest extends TestCaseTenant
 
         EventOccurrence::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_index' => 0,
             'occurrence_slug' => 'visual-event-occ-1',
             'type' => [
                 'id' => (string) $eventType->_id,
@@ -541,7 +539,6 @@ class EventTypesControllerTest extends TestCaseTenant
 
         EventOccurrence::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_index' => 0,
             'occurrence_slug' => 'partial-visual-event-occ-1',
             'type' => [
                 'id' => (string) $eventType->_id,
@@ -683,7 +680,6 @@ class EventTypesControllerTest extends TestCaseTenant
 
         EventOccurrence::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_index' => 0,
             'occurrence_slug' => 'visual-event-cover-occ-1',
             'type' => [
                 'id' => (string) $eventType->_id,

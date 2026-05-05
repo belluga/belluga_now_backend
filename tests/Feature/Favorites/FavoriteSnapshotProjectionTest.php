@@ -225,7 +225,6 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
 
         return EventOccurrence::query()->create([
             'event_id' => $eventId,
-            'occurrence_index' => 0,
             'slug' => 'event-slug',
             'occurrence_slug' => $occurrenceSlug,
             'title' => 'Occurrence Snapshot',
