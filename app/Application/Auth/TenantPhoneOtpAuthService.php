@@ -12,12 +12,14 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
+use App\Models\Tenants\TenantSettings;
 use App\Support\Auth\AbilityCatalog;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 
@@ -27,6 +29,8 @@ class TenantPhoneOtpAuthService
         private readonly PhoneNumberNormalizer $phoneNormalizer,
         private readonly PhoneOtpDeliverySettingsResolver $deliverySettings,
         private readonly TenantPublicAuthMethodResolver $authMethodResolver,
+        private readonly PhoneOtpChallengeStore $challengeStore,
+        private readonly PhoneOtpReviewAccessCodeHasher $reviewAccessCodeHasher,
         private readonly AnonymousIdentityMerger $identityMerger,
         private readonly AccountProfileBootstrapService $profileBootstrapper,
         private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
@@ -39,48 +43,40 @@ class TenantPhoneOtpAuthService
     {
         $this->assertPhoneOtpEnabled();
 
-        $settings = $this->deliverySettings->resolve($payload['delivery_channel'] ?? null);
         $phone = $this->phoneNormalizer->normalize($payload['phone']);
+        $reviewAccess = $this->reviewAccessForPhone($phone);
+        $settings = $reviewAccess !== null
+            ? $this->reviewChallengeSettings($payload)
+            : $this->deliverySettings->resolve($payload['delivery_channel'] ?? null);
         $now = Carbon::now();
-
-        $activeChallenge = $this->activeChallengeForPhone($phone, $now);
-        if ($activeChallenge !== null) {
-            $resendAvailableAt = $this->toCarbon($activeChallenge->resend_available_at);
-            if ($resendAvailableAt !== null && $resendAvailableAt->isFuture()) {
-                throw new PhoneOtpCooldownException(max(1, (int) ceil($now->diffInSeconds($resendAvailableAt))));
-            }
-
-            $activeChallenge->status = PhoneOtpChallenge::STATUS_SUPERSEDED;
-            $activeChallenge->save();
-        }
 
         $code = $this->generateOtpCode();
         $expiresAt = $now->copy()->addMinutes($settings->ttlMinutes);
         $resendAvailableAt = $now->copy()->addSeconds($settings->resendCooldownSeconds);
 
-        $challenge = PhoneOtpChallenge::create([
-            'phone' => $phone,
-            'phone_hash' => $this->phoneNormalizer->hash($phone),
-            'code_hash' => Hash::make($code),
-            'status' => PhoneOtpChallenge::STATUS_PENDING,
-            'delivery_channel' => $settings->channel,
-            'delivery_webhook_url' => $settings->webhookUrl,
-            'expires_at' => $expiresAt,
-            'resend_available_at' => $resendAvailableAt,
-            'attempts' => 0,
-            'max_attempts' => $settings->maxAttempts,
-            'device_name' => $payload['device_name'] ?? null,
-            'requested_at' => $now,
-        ]);
-
-        DeliverPhoneOtpWebhookJob::dispatch(
-            $settings->webhookUrl,
-            $settings->channel,
-            $phone,
-            $code,
-            (string) $challenge->_id,
-            $expiresAt->toISOString(),
+        $challenge = $this->challengeStore->issue(
+            phone: $phone,
+            phoneHash: $this->phoneNormalizer->hash($phone),
+            codeHash: Hash::make($code),
+            deliveryChannel: $settings->channel,
+            deliveryWebhookUrl: $settings->webhookUrl,
+            expiresAt: $expiresAt,
+            resendAvailableAt: $resendAvailableAt,
+            maxAttempts: $settings->maxAttempts,
+            deviceName: $payload['device_name'] ?? null,
+            now: $now,
         );
+
+        if (! $this->shouldBypassReviewDelivery($reviewAccess)) {
+            DeliverPhoneOtpWebhookJob::dispatch(
+                (string) $settings->webhookUrl,
+                $settings->channel,
+                $phone,
+                $code,
+                (string) $challenge->_id,
+                $expiresAt->toISOString(),
+            );
+        }
 
         return new PhoneOtpChallengeResult(
             challengeId: (string) $challenge->_id,
@@ -124,23 +120,35 @@ class TenantPhoneOtpAuthService
 
         $expiresAt = $this->toCarbon($challenge->expires_at);
         if ($expiresAt === null || $expiresAt->lessThanOrEqualTo($now)) {
-            $challenge->status = PhoneOtpChallenge::STATUS_EXPIRED;
-            $challenge->save();
+            $this->challengeStore->markExpiredIfPending((string) $challenge->_id, $now);
 
             throw ValidationException::withMessages([
                 'code' => ['The OTP challenge has expired.'],
             ]);
         }
 
-        if (! Hash::check((string) $payload['code'], (string) $challenge->code_hash)) {
-            $challenge->attempts = ((int) ($challenge->attempts ?? 0)) + 1;
-            if ($challenge->attempts >= (int) ($challenge->max_attempts ?? 5)) {
-                $challenge->status = PhoneOtpChallenge::STATUS_LOCKED;
-            }
-            $challenge->save();
+        $reviewAccess = $this->reviewAccessForPhone($phone);
+        $reviewCodeMatched = $reviewAccess !== null
+            && $this->reviewAccessCodeHasher->check((string) $payload['code'], $reviewAccess['code_hash'] ?? null);
+
+        if (! $reviewCodeMatched && ! Hash::check((string) $payload['code'], (string) $challenge->code_hash)) {
+            $this->challengeStore->recordInvalidAttempt(
+                challengeId: (string) $challenge->_id,
+                phone: $phone,
+                maxAttempts: (int) ($challenge->max_attempts ?? 5),
+                now: $now,
+            );
 
             throw ValidationException::withMessages([
                 'code' => ['The OTP code is invalid.'],
+            ]);
+        }
+
+        $this->assertPhoneUserCanAuthenticate($phone, $reviewCodeMatched);
+
+        if (! $this->challengeStore->consumePending((string) $challenge->_id, $phone, $now)) {
+            throw ValidationException::withMessages([
+                'code' => ['The OTP challenge is no longer active.'],
             ]);
         }
 
@@ -150,10 +158,6 @@ class TenantPhoneOtpAuthService
             $user,
             $payload['anonymous_user_ids'] ?? []
         );
-
-        $challenge->status = PhoneOtpChallenge::STATUS_VERIFIED;
-        $challenge->verified_at = $now;
-        $challenge->save();
 
         $this->profileBootstrapper->ensurePersonalAccount($user);
         $user->refresh();
@@ -165,6 +169,15 @@ class TenantPhoneOtpAuthService
             $this->sanitizeAbilities($this->resolveAbilities($user)),
             (string) $tenant->_id,
         );
+
+        if ($reviewCodeMatched) {
+            Log::info('Phone OTP review access authenticated.', [
+                'tenant_id' => (string) ($tenant->_id ?? ''),
+                'challenge_id' => (string) $challenge->_id,
+                'phone_hash' => $this->phoneNormalizer->hash($phone),
+                'user_id' => (string) ($user->_id ?? ''),
+            ]);
+        }
 
         return new PhoneOtpVerificationResult(
             user: $user->fresh(),
@@ -185,19 +198,6 @@ class TenantPhoneOtpAuthService
         ]);
     }
 
-    private function activeChallengeForPhone(string $phone, Carbon $now): ?PhoneOtpChallenge
-    {
-        /** @var PhoneOtpChallenge|null $challenge */
-        $challenge = PhoneOtpChallenge::query()
-            ->where('phone', $phone)
-            ->where('status', PhoneOtpChallenge::STATUS_PENDING)
-            ->where('expires_at', '>', $now)
-            ->orderByDesc('created_at')
-            ->first();
-
-        return $challenge;
-    }
-
     private function findChallenge(string $id): ?PhoneOtpChallenge
     {
         try {
@@ -214,6 +214,17 @@ class TenantPhoneOtpAuthService
 
     private function findOrCreateVerifiedPhoneUser(string $phone, Carbon $now): AccountUser
     {
+        /** @var AccountUser|null $existing */
+        $existing = AccountUser::withTrashed()
+            ->where('phones', 'all', [$phone])
+            ->first();
+
+        if ($existing !== null && ! $existing->isActive()) {
+            throw ValidationException::withMessages([
+                'phone' => ['This phone number cannot be used to authenticate.'],
+            ]);
+        }
+
         /** @var AccountUser|null $user */
         $user = AccountUser::query()
             ->where('phones', 'all', [$phone])
@@ -343,6 +354,88 @@ class TenantPhoneOtpAuthService
         }
 
         return $ids->all();
+    }
+
+    /**
+     * @return array{phone_e164:string,code_hash:string}|null
+     */
+    private function reviewAccessForPhone(string $phone): ?array
+    {
+        $settings = TenantSettings::current()?->getAttribute('phone_otp_review_access');
+        if (! is_array($settings)) {
+            return null;
+        }
+
+        $configuredPhone = trim((string) ($settings['phone_e164'] ?? ''));
+        $codeHash = trim((string) ($settings['code_hash'] ?? ''));
+        if ($configuredPhone === '' || $codeHash === '') {
+            return null;
+        }
+
+        try {
+            $normalizedConfiguredPhone = $this->phoneNormalizer->normalize($configuredPhone);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($normalizedConfiguredPhone !== $phone) {
+            return null;
+        }
+
+        return [
+            'phone_e164' => $normalizedConfiguredPhone,
+            'code_hash' => $codeHash,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function reviewChallengeSettings(array $payload): PhoneOtpDeliverySettings
+    {
+        $settings = TenantSettings::current()?->getAttribute('outbound_integrations');
+        $otp = is_array($settings) && is_array($settings['otp'] ?? null) ? $settings['otp'] : [];
+        $requestedChannel = trim((string) ($payload['delivery_channel'] ?? ''));
+        $channel = in_array($requestedChannel, ['whatsapp', 'sms'], true) ? $requestedChannel : 'whatsapp';
+
+        return new PhoneOtpDeliverySettings(
+            webhookUrl: '',
+            channel: $channel,
+            ttlMinutes: max(1, (int) ($otp['ttl_minutes'] ?? 10)),
+            resendCooldownSeconds: max(1, (int) ($otp['resend_cooldown_seconds'] ?? 60)),
+            maxAttempts: max(1, (int) ($otp['max_attempts'] ?? 5)),
+        );
+    }
+
+    /**
+     * @param  array<string, string>|null  $reviewAccess
+     */
+    private function shouldBypassReviewDelivery(?array $reviewAccess): bool
+    {
+        return $reviewAccess !== null;
+    }
+
+    private function assertPhoneUserCanAuthenticate(string $phone, bool $reviewCodeMatched): void
+    {
+        /** @var AccountUser|null $existing */
+        $existing = AccountUser::withTrashed()
+            ->where('phones', 'all', [$phone])
+            ->first();
+
+        if ($existing === null || $existing->isActive()) {
+            return;
+        }
+
+        if ($reviewCodeMatched) {
+            Log::warning('Phone OTP review access denied for disabled user.', [
+                'phone_hash' => $this->phoneNormalizer->hash($phone),
+                'user_id' => (string) ($existing->_id ?? ''),
+            ]);
+        }
+
+        throw ValidationException::withMessages([
+            'phone' => ['This phone number cannot be used to authenticate.'],
+        ]);
     }
 
     /**
