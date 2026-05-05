@@ -153,10 +153,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $response->json('data.event_id');
         $this->assertTrue(
-            EventOccurrence::query()
-                ->where('event_id', $eventId)
-                ->where('occurrence_index', 0)
-                ->exists()
+            $this->occurrenceDocumentAtOrderOrNull($eventId, 0) !== null
         );
     }
 
@@ -171,10 +168,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $eventId = (string) $response->json('data.event_id');
         $stored = Event::query()->findOrFail($eventId);
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $expected = '<p><strong>Evento 🎉</strong> underline link <s>riscado</s></p>';
         $this->assertSame($expected, (string) $response->json('data.content'));
@@ -197,10 +191,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $eventId = (string) $response->json('data.event_id');
         $stored = Event::query()->findOrFail($eventId);
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $this->assertSame('', (string) $response->json('data.content'));
         $this->assertSame('', (string) $stored->content);
@@ -223,10 +214,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $expected = '<p>Linha 1 🎉<br />Linha 2</p>';
         $stored = Event::query()->findOrFail($eventId);
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $this->assertSame($expected, (string) $response->json('data.content'));
         $this->assertSame($expected, $stored->content);
@@ -1211,10 +1199,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('artist', data_get($legacy->event_parties, '0.metadata.profile_type'));
         $this->assertNull($legacy->artists);
 
-        $syncedOccurrence = EventOccurrence::query()
-            ->where('event_id', (string) $legacy->_id)
-            ->where('occurrence_index', 0)
-            ->first();
+        $syncedOccurrence = $this->occurrenceDocumentAtOrderOrNull((string) $legacy->_id, 0);
         $this->assertNotNull($syncedOccurrence);
         $this->assertCount(1, $syncedOccurrence->event_parties ?? []);
         $this->assertSame('artist', data_get($syncedOccurrence->event_parties, '0.party_type'));
@@ -1459,10 +1444,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $response->json('data.event_id');
         $event = Event::query()->findOrFail($eventId);
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $this->assertSame('Showcase', data_get($event->taxonomy_terms, '0.name'));
         $this->assertSame('Event Style', data_get($occurrence->taxonomy_terms, '0.taxonomy_name'));
@@ -1494,10 +1476,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertJsonPath('data.occurrences.1.programming_items.0.end_time', '18:30');
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
         $this->assertSame('18:30', data_get($storedOccurrence, 'programming_items.0.end_time'));
 
         $publicDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$storedOccurrence->_id}");
@@ -1523,10 +1502,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertJsonPath('data.occurrences.0.taxonomy_terms.0.value', 'showcase');
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $this->assertSame('showcase', data_get($storedOccurrence, 'own_taxonomy_terms.0.value'));
         $this->assertSame('showcase', data_get($storedOccurrence, 'taxonomy_terms.0.value'));
 
@@ -1562,10 +1538,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Updated occurrence dates only',
@@ -1582,10 +1555,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertJsonPath('data.occurrences.0.own_taxonomy_terms.0.value', 'showcase');
         $updated->assertJsonPath('data.occurrences.0.programming_items.0.end_time', '18:30');
 
-        $freshOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $this->assertSame((string) $this->band->_id, data_get($freshOccurrence, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('showcase', data_get($freshOccurrence, 'own_taxonomy_terms.0.value'));
         $this->assertSame('18:30', data_get($freshOccurrence, 'programming_items.0.end_time'));
@@ -1619,10 +1589,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => [[
@@ -1640,10 +1607,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertJsonCount(0, 'data.occurrences.0.own_taxonomy_terms');
         $updated->assertJsonCount(0, 'data.occurrences.0.programming_items');
 
-        $freshOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $this->assertSame([], $freshOccurrence->own_event_parties ?? []);
         $this->assertSame([], $freshOccurrence->own_taxonomy_terms ?? []);
         $this->assertSame([], $freshOccurrence->programming_items ?? []);
@@ -1690,14 +1654,14 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $firstOccurrence = EventOccurrence::query()
+        $storedOccurrences = EventOccurrence::query()
             ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+        $firstOccurrence = $storedOccurrences[0];
+        $secondOccurrence = $storedOccurrences[1];
         $firstOccurrenceId = (string) $firstOccurrence->_id;
         $secondOccurrenceId = (string) $secondOccurrence->_id;
 
@@ -1730,12 +1694,14 @@ class EventCrudControllerTest extends TestCaseTenant
             ->whereIn('_id', [$firstOccurrenceId, new ObjectId($firstOccurrenceId)])
             ->firstOrFail();
 
-        $this->assertSame(0, (int) $freshSecond->occurrence_index);
+        $orderedRefs = $this->orderedOccurrenceRefsForEvent($eventId);
+        $this->assertSame([$secondOccurrenceId, $firstOccurrenceId], array_column($orderedRefs, 'occurrence_id'));
+        $this->assertOccurrenceIndexAbsent($freshSecond);
         $this->assertSame((string) $this->band->_id, data_get($freshSecond, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('clinic', data_get($freshSecond, 'own_taxonomy_terms.0.value'));
         $this->assertSame('Segunda programacao', data_get($freshSecond, 'programming_items.0.title'));
 
-        $this->assertSame(1, (int) $freshFirst->occurrence_index);
+        $this->assertOccurrenceIndexAbsent($freshFirst);
         $this->assertSame((string) $this->artist->_id, data_get($freshFirst, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('showcase', data_get($freshFirst, 'own_taxonomy_terms.0.value'));
         $this->assertSame('Primeira programacao', data_get($freshFirst, 'programming_items.0.title'));
@@ -1772,14 +1738,14 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $firstOccurrence = EventOccurrence::query()
+        $storedOccurrences = EventOccurrence::query()
             ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+        $firstOccurrence = $storedOccurrences[0];
+        $secondOccurrence = $storedOccurrences[1];
         $firstOccurrenceId = (string) $firstOccurrence->_id;
         $secondOccurrenceId = (string) $secondOccurrence->_id;
 
@@ -1815,10 +1781,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertStatus(200);
         $this->assertSame(3, EventOccurrence::query()->where('event_id', $eventId)->count());
 
-        $insertedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $orderedRefs = $this->orderedOccurrenceRefsForEvent($eventId);
+        $this->assertSame([$firstOccurrenceId, $secondOccurrenceId], array_column(array_slice($orderedRefs, 1), 'occurrence_id'));
+        $insertedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $freshFirst = EventOccurrence::query()
             ->whereIn('_id', [$firstOccurrenceId, new ObjectId($firstOccurrenceId)])
             ->firstOrFail();
@@ -1836,14 +1801,133 @@ class EventCrudControllerTest extends TestCaseTenant
         ];
         $this->assertCount(3, array_unique($occurrenceSlugs));
 
-        $this->assertSame(1, (int) $freshFirst->occurrence_index);
+        $this->assertOccurrenceIndexAbsent($insertedOccurrence);
+        $this->assertOccurrenceIndexAbsent($freshFirst);
         $this->assertSame((string) $this->artist->_id, data_get($freshFirst, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('showcase', data_get($freshFirst, 'own_taxonomy_terms.0.value'));
         $this->assertSame('Primeira programacao', data_get($freshFirst, 'programming_items.0.title'));
 
-        $this->assertSame(2, (int) $freshSecond->occurrence_index);
+        $this->assertOccurrenceIndexAbsent($freshSecond);
         $this->assertSame((string) $this->band->_id, data_get($freshSecond, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('Segunda programacao', data_get($freshSecond, 'programming_items.0.title'));
+    }
+
+    public function test_event_update_readding_occurrence_after_removal_reuses_freed_indexes_without_duplicate_key(): void
+    {
+        $occurrences = $this->makeOccurrences(3);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'end_time' => '18:00',
+            'title' => 'Primeira programacao',
+        ]];
+        $occurrences[1]['programming_items'] = [[
+            'time' => '19:00',
+            'end_time' => '20:00',
+            'title' => 'Segunda programacao',
+        ]];
+        $occurrences[2]['programming_items'] = [[
+            'time' => '21:00',
+            'end_time' => '22:00',
+            'title' => 'Terceira programacao',
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $storedOccurrences = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        $this->assertCount(3, $storedOccurrences);
+        $firstOccurrence = $storedOccurrences[0];
+        $secondOccurrence = $storedOccurrences[1];
+        $thirdOccurrence = $storedOccurrences[2];
+        $firstOccurrenceId = (string) $firstOccurrence->_id;
+        $secondOccurrenceId = (string) $secondOccurrence->_id;
+        $thirdOccurrenceId = (string) $thirdOccurrence->_id;
+
+        $legacyEvent = $this->eventDocument($eventId);
+        $legacyEvent->unset('occurrence_refs');
+        $legacyEvent->save();
+
+        $firstStart = Carbon::now()->addDays(1)->setHour(18)->setMinute(0)->setSecond(0);
+        $secondStart = Carbon::now()->addDays(2)->setHour(18)->setMinute(0)->setSecond(0);
+        $removed = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => [
+                [
+                    'occurrence_id' => $firstOccurrenceId,
+                    'occurrence_slug' => (string) $firstOccurrence->occurrence_slug,
+                    'date_time_start' => $firstStart->toISOString(),
+                    'date_time_end' => $firstStart->copy()->addHours(2)->toISOString(),
+                ],
+                [
+                    'occurrence_id' => $secondOccurrenceId,
+                    'occurrence_slug' => (string) $secondOccurrence->occurrence_slug,
+                    'date_time_start' => $secondStart->toISOString(),
+                    'date_time_end' => $secondStart->copy()->addHours(2)->toISOString(),
+                ],
+            ],
+        ]);
+
+        $removed->assertStatus(200);
+        $this->assertSame(2, EventOccurrence::query()->where('event_id', $eventId)->count());
+
+        $readdedStart = Carbon::now()->addDays(3)->setHour(18)->setMinute(0)->setSecond(0);
+        $readded = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => [
+                [
+                    'occurrence_id' => $firstOccurrenceId,
+                    'occurrence_slug' => (string) $firstOccurrence->occurrence_slug,
+                    'date_time_start' => $firstStart->toISOString(),
+                    'date_time_end' => $firstStart->copy()->addHours(2)->toISOString(),
+                ],
+                [
+                    'occurrence_id' => $secondOccurrenceId,
+                    'occurrence_slug' => (string) $secondOccurrence->occurrence_slug,
+                    'date_time_start' => $secondStart->toISOString(),
+                    'date_time_end' => $secondStart->copy()->addHours(2)->toISOString(),
+                ],
+                [
+                    'date_time_start' => $readdedStart->toISOString(),
+                    'date_time_end' => $readdedStart->copy()->addHours(2)->toISOString(),
+                    'programming_items' => [[
+                        'time' => '22:30',
+                        'end_time' => '23:30',
+                        'title' => 'Programacao re-adicionada',
+                    ]],
+                ],
+            ],
+        ]);
+
+        $readded->assertStatus(200);
+        $this->assertSame(3, EventOccurrence::query()->where('event_id', $eventId)->count());
+
+        $freshFirst = EventOccurrence::query()
+            ->whereIn('_id', [$firstOccurrenceId, new ObjectId($firstOccurrenceId)])
+            ->firstOrFail();
+        $freshSecond = EventOccurrence::query()
+            ->whereIn('_id', [$secondOccurrenceId, new ObjectId($secondOccurrenceId)])
+            ->firstOrFail();
+        $orderedRefs = $this->orderedOccurrenceRefsForEvent($eventId);
+        $this->assertSame([$firstOccurrenceId, $secondOccurrenceId], array_column(array_slice($orderedRefs, 0, 2), 'occurrence_id'));
+        $insertedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 2);
+        $deletedThird = EventOccurrence::withTrashed()
+            ->whereIn('_id', [$thirdOccurrenceId, new ObjectId($thirdOccurrenceId)])
+            ->firstOrFail();
+
+        $this->assertOccurrenceIndexAbsent($freshFirst);
+        $this->assertOccurrenceIndexAbsent($freshSecond);
+        $this->assertOccurrenceIndexAbsent($insertedOccurrence);
+        $this->assertNotSame($thirdOccurrenceId, (string) $insertedOccurrence->_id);
+        $this->assertSame('Programacao re-adicionada', data_get($insertedOccurrence, 'programming_items.0.title'));
+        $this->assertNotNull($deletedThird->deleted_at);
+        $this->assertOccurrenceIndexAbsent($deletedThird);
     }
 
     public function test_event_update_rejects_duplicate_occurrence_identity_ids(): void
@@ -1855,10 +1939,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => [
@@ -1888,10 +1969,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => [
@@ -1921,14 +1999,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $firstOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $firstOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => [[
@@ -1952,10 +2024,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $storedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => [
@@ -2778,10 +2847,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->artist->slug, data_get($legacyArchived->event_parties, '0.metadata.slug'));
         $this->assertNull($legacyArchived->artists);
 
-        $occurrence = EventOccurrence::withTrashed()
-            ->where('event_id', $legacyArchivedId)
-            ->where('occurrence_index', 0)
-            ->first();
+        $occurrence = $this->occurrenceDocumentAtOrderOrNull($legacyArchivedId, 0, withTrashed: true);
         $this->assertNotNull($occurrence);
         $this->assertNotNull($occurrence->deleted_at);
         $this->assertCount(1, $occurrence->event_parties ?? []);
@@ -3052,10 +3118,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertJsonPath('data.title', 'Visible After Update');
 
         $event = Event::withTrashed()->findOrFail($eventId);
-        $occurrence = EventOccurrence::withTrashed()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->first();
+        $occurrence = $this->occurrenceDocumentAtOrderOrNull($eventId, 0, withTrashed: true);
         $this->assertNotNull($occurrence);
         $this->assertNull($event->deleted_at);
         $this->assertNull($occurrence->deleted_at);
@@ -3084,10 +3147,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertJsonPath('data.publication.status', 'draft');
 
         $event = Event::withTrashed()->findOrFail($eventId);
-        $occurrence = EventOccurrence::withTrashed()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->first();
+        $occurrence = $this->occurrenceDocumentAtOrderOrNull($eventId, 0, withTrashed: true);
         $this->assertNotNull($occurrence);
         $this->assertNull($event->deleted_at);
         $this->assertNull($occurrence->deleted_at);
@@ -3330,10 +3390,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
         $response->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
 
-        $freshSecondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $freshSecondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
@@ -3928,14 +3985,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
 
         $eventId = (string) $response->json('data.event_id');
-        $firstOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $firstOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $this->assertFalse((bool) ($firstOccurrence->has_location_override ?? false));
         $this->assertSame((string) $this->venue->_id, data_get($firstOccurrence, 'place_ref.id'));
@@ -3964,10 +4015,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
         $updated->assertJsonPath('data.occurrences.1.programming_count', 1);
 
-        $freshSecondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $freshSecondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
         $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
         $this->assertNull(data_get($freshSecondOccurrence, 'location_override'));
         $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
@@ -4080,10 +4128,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$secondOccurrence->_id}");
 
@@ -4131,10 +4176,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $created->json('data.event_id');
         $eventSlug = (string) $created->json('data.slug');
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $aliasResponse = $this->getJson("{$this->base_api_tenant}events/{$secondOccurrence->occurrence_slug}");
 
@@ -4190,10 +4232,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $selectedOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $selectedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$selectedOccurrence->_id}");
 
@@ -4260,14 +4299,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $firstEventId = (string) $firstCreated->json('data.event_id');
         $secondEventId = (string) $secondCreated->json('data.event_id');
 
-        $firstSelectedOccurrence = EventOccurrence::query()
-            ->where('event_id', $firstEventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
-        $secondSelectedOccurrence = EventOccurrence::query()
-            ->where('event_id', $secondEventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $firstSelectedOccurrence = $this->occurrenceDocumentAtOrder($firstEventId, 1);
+        $secondSelectedOccurrence = $this->occurrenceDocumentAtOrder($secondEventId, 1);
 
         $firstRead = $this->getJson("{$this->base_api_tenant}events/{$firstEventId}?occurrence={$firstSelectedOccurrence->_id}");
         $firstRead->assertStatus(200);
@@ -4352,14 +4385,8 @@ class EventCrudControllerTest extends TestCaseTenant
             collect($event->event_parties ?? [])->pluck('party_ref_id')->map(static fn ($id) => (string) $id)->values()->all()
         );
 
-        $firstOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $firstOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=20");
         $agenda->assertStatus(200);
@@ -4871,10 +4898,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(500);
 
         $event = Event::query()->findOrFail($eventId);
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $this->assertSame('Before Update Rollback', (string) $event->title);
         $this->assertSame('Before Update Rollback', (string) $occurrence->title);
@@ -4901,10 +4925,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(500);
 
         $event = Event::withTrashed()->findOrFail($eventId);
-        $occurrence = EventOccurrence::withTrashed()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0, withTrashed: true);
 
         $this->assertNull($event->deleted_at);
         $this->assertNull($occurrence->deleted_at);
@@ -4940,10 +4961,7 @@ class EventCrudControllerTest extends TestCaseTenant
         Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
 
         $event = Event::query()->findOrFail($eventId);
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 0)
-            ->firstOrFail();
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
         $publication = is_array($event->publication) ? $event->publication : (array) $event->publication;
 
@@ -4993,10 +5011,7 @@ class EventCrudControllerTest extends TestCaseTenant
         app(EventOccurrenceReconciliationService::class)->reconcileEvent($event->fresh());
         Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
 
-        $secondOccurrence = EventOccurrence::query()
-            ->where('event_id', $eventId)
-            ->where('occurrence_index', 1)
-            ->firstOrFail();
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $this->assertSame('Repair Guard Canonical Title', (string) $secondOccurrence->title);
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_event_parties.0.party_ref_id'));
@@ -5568,6 +5583,108 @@ class EventCrudControllerTest extends TestCaseTenant
         }
 
         return new UTCDateTime((int) Carbon::parse($value)->valueOf());
+    }
+
+    private function eventDocument(string $eventId, bool $withTrashed = false): Event
+    {
+        $query = $withTrashed
+            ? Event::withTrashed()
+            : Event::query();
+
+        return $query
+            ->whereIn('_id', [$eventId, new ObjectId($eventId)])
+            ->firstOrFail();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function orderedOccurrenceRefsForEvent(string $eventId, bool $withTrashed = false): array
+    {
+        $event = $this->eventDocument($eventId, $withTrashed);
+        $refs = $event->occurrence_refs ?? [];
+        if ($refs instanceof \MongoDB\Model\BSONArray || $refs instanceof \MongoDB\Model\BSONDocument) {
+            $refs = $refs->getArrayCopy();
+        }
+
+        if (! is_array($refs)) {
+            return [];
+        }
+
+        $normalized = array_values(array_filter(array_map(function (mixed $ref): ?array {
+            if ($ref instanceof \MongoDB\Model\BSONArray || $ref instanceof \MongoDB\Model\BSONDocument) {
+                $ref = $ref->getArrayCopy();
+            }
+
+            return is_array($ref) ? $ref : null;
+        }, $refs)));
+
+        usort($normalized, static function (array $left, array $right): int {
+            return ((int) ($left['order'] ?? PHP_INT_MAX)) <=> ((int) ($right['order'] ?? PHP_INT_MAX));
+        });
+
+        if ($normalized !== []) {
+            return $normalized;
+        }
+
+        $query = $withTrashed
+            ? EventOccurrence::withTrashed()
+            : EventOccurrence::query();
+
+        return $query
+            ->where('event_id', $eventId)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values()
+            ->map(static function (EventOccurrence $occurrence, int $order): array {
+                return [
+                    'occurrence_id' => (string) $occurrence->_id,
+                    'occurrence_slug' => (string) ($occurrence->occurrence_slug ?? ''),
+                    'order' => $order,
+                ];
+            })
+            ->all();
+    }
+
+    private function occurrenceDocumentAtOrder(string $eventId, int $order, bool $withTrashed = false): EventOccurrence
+    {
+        $occurrence = $this->occurrenceDocumentAtOrderOrNull($eventId, $order, $withTrashed);
+        if ($occurrence !== null) {
+            return $occurrence;
+        }
+
+        $this->fail("Occurrence order {$order} not found for event {$eventId}.");
+    }
+
+    private function occurrenceDocumentAtOrderOrNull(string $eventId, int $order, bool $withTrashed = false): ?EventOccurrence
+    {
+        $refs = $this->orderedOccurrenceRefsForEvent($eventId, $withTrashed);
+        foreach ($refs as $ref) {
+            if ((int) ($ref['order'] ?? -1) !== $order) {
+                continue;
+            }
+
+            $occurrenceId = trim((string) ($ref['occurrence_id'] ?? ''));
+            if ($occurrenceId === '') {
+                return null;
+            }
+
+            $query = $withTrashed
+                ? EventOccurrence::withTrashed()
+                : EventOccurrence::query();
+
+            return $query
+                ->whereIn('_id', [$occurrenceId, new ObjectId($occurrenceId)])
+                ->first();
+        }
+
+        return null;
+    }
+
+    private function assertOccurrenceIndexAbsent(EventOccurrence $occurrence): void
+    {
+        $this->assertArrayNotHasKey('occurrence_index', $occurrence->getAttributes());
     }
 
     /**

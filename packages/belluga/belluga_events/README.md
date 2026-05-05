@@ -72,7 +72,7 @@ Collections:
 
 Key occurrence fields:
 - `event_id`
-- `occurrence_index`
+- `occurrence_slug`
 - `starts_at`
 - `ends_at`
 - `is_event_published`
@@ -80,8 +80,12 @@ Key occurrence fields:
 - `deleted_at`
 - mirrored fields for read/filter (`venue`, `artists`, `tags`, `taxonomy_terms`, etc.)
 
+Event-owned occurrence order:
+- `events.occurrence_refs[] = { occurrence_id, occurrence_slug?, order }`
+
 Identity rule:
-- unique per event occurrence: `(event_id, occurrence_index)`
+- event occurrence identity is document `_id` / `occurrence_slug`
+- occurrence order authority resides on `events.occurrence_refs`, not on occurrence documents
 
 Migration scope:
 - tenant-only package migrations loaded from `database/migrations`
@@ -392,7 +396,7 @@ Important index families:
 - event timeline/sync (`event_id`, `starts_at`)
 - filtering (`place_ref.type/id`, `categories`, `tags`, typed taxonomy terms on event + venue + artists)
 - geo (`geo_location` 2dsphere)
-- occurrence identity (`event_id`, `occurrence_index`, unique)
+- occurrence identity (`occurrence_slug`, unique)
 
 Tenant migration model:
 - events and occurrences are migrated in tenant databases (Spatie multitenancy flow)

@@ -194,12 +194,9 @@ class EventAttendanceControllerTest extends TestCaseTenant
     public function test_confirm_supersedes_only_pending_invites_for_same_occurrence(): void
     {
         $event = $this->createEventWithOccurrences();
-        $occurrences = EventOccurrence::query()
-            ->where('event_id', (string) $event->_id)
-            ->orderBy('occurrence_index')
-            ->get();
-        $firstOccurrenceId = (string) $occurrences->get(0)?->_id;
-        $secondOccurrenceId = (string) $occurrences->get(1)?->_id;
+        $occurrenceIds = $this->occurrenceIdsForEvent($event);
+        $firstOccurrenceId = $occurrenceIds[0] ?? '';
+        $secondOccurrenceId = $occurrenceIds[1] ?? '';
         $this->assertNotSame('', $firstOccurrenceId);
         $this->assertNotSame('', $secondOccurrenceId);
 
@@ -338,12 +335,43 @@ class EventAttendanceControllerTest extends TestCaseTenant
 
     private function firstOccurrenceId(Event $event): string
     {
-        $occurrence = EventOccurrence::query()
-            ->where('event_id', (string) $event->_id)
-            ->orderBy('occurrence_index')
-            ->firstOrFail();
+        $occurrenceIds = $this->occurrenceIdsForEvent($event);
+        $this->assertNotSame([], $occurrenceIds);
 
-        return (string) $occurrence->_id;
+        return $occurrenceIds[0];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function occurrenceIdsForEvent(Event $event): array
+    {
+        $refs = $event->fresh()?->occurrence_refs ?? [];
+        if ($refs instanceof \MongoDB\Model\BSONArray || $refs instanceof \MongoDB\Model\BSONDocument) {
+            $refs = $refs->getArrayCopy();
+        }
+
+        if (is_array($refs) && $refs !== []) {
+            $normalized = array_values(array_filter(array_map(function (mixed $ref): ?array {
+                if ($ref instanceof \MongoDB\Model\BSONArray || $ref instanceof \MongoDB\Model\BSONDocument) {
+                    $ref = $ref->getArrayCopy();
+                }
+
+                return is_array($ref) ? $ref : null;
+            }, $refs)));
+            usort($normalized, static fn (array $left, array $right): int => ((int) ($left['order'] ?? PHP_INT_MAX)) <=> ((int) ($right['order'] ?? PHP_INT_MAX)));
+
+            return array_values(array_filter(array_map(static fn (array $ref): string => trim((string) ($ref['occurrence_id'] ?? '')), $normalized)));
+        }
+
+        return EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->map(static fn (EventOccurrence $occurrence): string => (string) $occurrence->_id)
+            ->values()
+            ->all();
     }
 
     private function createEventWithOccurrences(): Event
