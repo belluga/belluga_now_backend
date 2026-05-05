@@ -291,7 +291,6 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
 
         EventOccurrence::query()->create([
             'event_id' => (string) $event->_id,
-            'occurrence_index' => 0,
             'slug' => (string) $event->slug,
             'occurrence_slug' => 'legacy-account-context-event-0',
             'title' => (string) $event->title,

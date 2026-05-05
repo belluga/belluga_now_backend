@@ -508,12 +508,6 @@ class EventManagementService
             return [];
         }
 
-        foreach ($existingOccurrences as $existingOccurrence) {
-            if ((int) ($existingOccurrence['occurrence_index'] ?? -1) === $index) {
-                return $existingOccurrence;
-            }
-        }
-
         return $existingOccurrences[$index] ?? [];
     }
 
