@@ -8,6 +8,7 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Hash;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -31,7 +32,7 @@ class SystemInitializationServiceTest extends TestCase
             landlord: ['name' => 'Landlord HQ'],
             tenant: ['name' => 'Tenant A', 'subdomain' => 'tenant-a'],
             role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'secret123'],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'LaunchSafe!246'],
             themeDataSettings: [
                 'brightness_default' => 'light',
                 'primary_seed_color' => '#fff',
@@ -49,5 +50,11 @@ class SystemInitializationServiceTest extends TestCase
         $this->assertNotEmpty($result->token);
         $this->assertSame('Root User', $result->user->name);
         $this->assertTrue($service->isInitialized());
+        $credential = collect($result->user->fresh()->credentials ?? [])
+            ->first(static fn (array $credential): bool => ($credential['provider'] ?? null) === 'password'
+                && ($credential['subject'] ?? null) === 'root@example.org');
+        $this->assertNull($result->user->fresh()?->getAttribute('password'));
+        $this->assertIsArray($credential);
+        $this->assertTrue(Hash::check('LaunchSafe!246', (string) $credential['secret_hash']));
     }
 }

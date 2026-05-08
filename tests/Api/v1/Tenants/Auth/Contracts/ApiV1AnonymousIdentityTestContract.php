@@ -3,6 +3,7 @@
 namespace Tests\Api\v1\Tenants\Auth\Contracts;
 
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Testing\TestResponse;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;
@@ -16,9 +17,7 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
         parent::setUp();
 
         Tenant::forgetCurrent();
-        $this->tenantModel = Tenant::query()
-            ->where('slug', $this->tenant->slug)
-            ->firstOrFail();
+        $this->tenantModel = $this->ensureCanonicalTenantExists($this->tenant);
         $this->tenantModel->makeCurrent();
     }
 
@@ -40,9 +39,9 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
         return sprintf('%sanonymous/identities', $this->base_api_tenant);
     }
 
-    protected function issueAnonymousIdentity(array $payload): TestResponse
+    protected function issueAnonymousIdentity(array $payload, array $server = []): TestResponse
     {
-        return $this->json(
+        return $this->withServerVariables($server)->json(
             method: 'post',
             uri: $this->anonymousIdentityEndpoint(),
             data: $payload
@@ -66,6 +65,7 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
         $response = $this->issueAnonymousIdentity($payload);
 
         $response->assertStatus(201);
+        $response->assertHeader('X-Api-Security-Domain', 'tenant_public_anonymous_identity');
         $response->assertJsonStructure([
             'data' => [
                 'user_id',
@@ -80,6 +80,41 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
         $label->user_id = $response->json('data.user_id');
         $label->token = $response->json('data.token');
         $label->password = $payload['fingerprint']['hash'];
+    }
+
+    public function testAnonymousIdentityRouteAppliesLiveSecurityDomainThrottling(): void
+    {
+        $overrides = array_map(function (array $override): array {
+            return match ((string) ($override['domain'] ?? '')) {
+                'tenant_public_anonymous_identity' => [...$override, 'requests_per_minute' => 1],
+                default => $override,
+            };
+        }, (array) config('api_security.route_overrides', []));
+
+        config()->set('api_security.route_overrides', $overrides);
+        config()->set('api_security.lifecycle.enabled', false);
+        config()->set('api_security.levels.L2.requests_per_minute', 9999);
+        Cache::flush();
+
+        $first = $this->issueAnonymousIdentity([
+            'device_name' => 'integration-device-throttle',
+            'fingerprint' => [
+                'hash' => hash('sha256', 'anonymous-throttle-one'),
+                'user_agent' => 'IntegrationTest/1.0',
+            ],
+        ], ['REMOTE_ADDR' => '127.0.0.111']);
+        $first->assertStatus(201);
+        $first->assertHeader('X-Api-Security-Domain', 'tenant_public_anonymous_identity');
+
+        $second = $this->issueAnonymousIdentity([
+            'device_name' => 'integration-device-throttle-2',
+            'fingerprint' => [
+                'hash' => hash('sha256', 'anonymous-throttle-two'),
+                'user_agent' => 'IntegrationTest/1.0',
+            ],
+        ], ['REMOTE_ADDR' => '127.0.0.111']);
+        $second->assertStatus(429);
+        $second->assertHeader('X-Api-Security-Domain', 'tenant_public_anonymous_identity');
     }
 
     public function testAnonymousIdentityReissueReturnsSameUser(): void

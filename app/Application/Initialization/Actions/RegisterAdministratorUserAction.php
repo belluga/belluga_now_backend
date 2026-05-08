@@ -9,6 +9,7 @@ use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\TenantRoleTemplate;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Hash;
 
 class RegisterAdministratorUserAction
 {
@@ -26,12 +27,12 @@ class RegisterAdministratorUserAction
         $user = LandlordUser::query()
             ->where('emails', 'all', [$primaryEmail])
             ->first();
+        $secretHash = Hash::make((string) $userData['password']);
 
         if (! $user) {
             $user = LandlordUser::create([
                 'name' => $userData['name'],
                 'emails' => [$primaryEmail],
-                'password' => $userData['password'],
                 'identity_state' => 'validated',
                 'verified_at' => Carbon::now(),
                 'promotion_audit' => [
@@ -46,10 +47,15 @@ class RegisterAdministratorUserAction
         } else {
             $user->name = $userData['name'];
             $user->save();
+            $secretHash = $this->accessService->credential($user, 'password', $primaryEmail)['secret_hash'] ?? null;
+            if (! is_string($secretHash) || $secretHash === '') {
+                $secretHash = $this->accessService->firstPasswordCredentialHash($user) ?? Hash::make((string) $userData['password']);
+            }
         }
 
         $this->accessService->ensureEmail($user, $primaryEmail);
-        $this->accessService->syncCredential($user, 'password', $primaryEmail, $user->password);
+        $this->accessService->syncPasswordCredentialsForEmails($user, $secretHash);
+        $this->accessService->removeLegacyPasswordState($user);
 
         $role->users()->save($user);
 

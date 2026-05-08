@@ -4,15 +4,22 @@ declare(strict_types=1);
 
 namespace App\Application\Profiles;
 
+use App\Application\Auth\PasswordResetFlowService;
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Models\Landlord\LandlordUser;
 use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class LandlordProfileService
 {
+    public function __construct(
+        private readonly LandlordUserAccessService $accessService,
+        private readonly PasswordResetFlowService $passwordResetFlowService,
+    ) {}
+
     public function updateProfile(LandlordUser $user, array $attributes): LandlordUser
     {
         if ($attributes === []) {
@@ -29,52 +36,38 @@ class LandlordProfileService
 
     public function updatePassword(LandlordUser $user, string $password): void
     {
-        $user->password = Hash::make($password);
-        $user->password_type = 'laravel';
-        $user->save();
+        $this->synchronizePasswordState($user, Hash::make($password));
     }
 
     public function sendResetToken(string $email): void
     {
-        $token = $this->generateNumericToken();
-
         $user = $this->findByEmail($email);
 
-        if ($user) {
-            DB::connection('landlord')
-                ->table('password_reset_tokens')
-                ->insert([
-                    'user_id' => $user->id,
-                    'token' => $token,
-                ]);
-        }
+        $this->passwordResetFlowService->issue(
+            email: $email,
+            broker: \App\Application\Auth\PasswordResetTokenService::LANDLORD_USERS_BROKER,
+            scope: null,
+            user: $user,
+            userIdResolver: static fn (LandlordUser $resolvedUser): mixed => $resolvedUser->id,
+        );
     }
 
     public function resetPassword(string $email, string $token, string $password): void
     {
         $user = $this->findByEmail($email);
 
-        if (! $user) {
-            throw ValidationException::withMessages([
-                'reset_token' => 'Invalid token',
-            ]);
-        }
-
-        $record = DB::connection('landlord')
-            ->table('password_reset_tokens')
-            ->where('token', $token)
-            ->where('user_id', $user->id)
-            ->first();
-
-        if (! $record) {
-            throw ValidationException::withMessages([
-                'reset_token' => 'Invalid token',
-            ]);
-        }
-
-        $user->password = Hash::make($password);
-        $user->password_type = 'laravel';
-        $user->save();
+        $this->passwordResetFlowService->reset(
+            email: $email,
+            token: $token,
+            password: $password,
+            broker: \App\Application\Auth\PasswordResetTokenService::LANDLORD_USERS_BROKER,
+            scope: null,
+            user: $user,
+            userIdResolver: static fn (LandlordUser $resolvedUser): mixed => $resolvedUser->id,
+            applyReset: function (LandlordUser $resolvedUser, string $newPassword): void {
+                $this->applyResetPassword($resolvedUser, $newPassword);
+            },
+        );
     }
 
     public function addEmail(LandlordUser $user, string $email): LandlordUser
@@ -104,11 +97,17 @@ class LandlordProfileService
         $user->emails = array_values($emails);
         $user->save();
 
+        $canonicalHash = $this->accessService->firstPasswordCredentialHash($user);
+        if (is_string($canonicalHash) && $canonicalHash !== '') {
+            $this->accessService->syncCredential($user, 'password', $normalizedEmail, $canonicalHash);
+        }
+
         return $user->fresh();
     }
 
     public function removeEmail(LandlordUser $user, string $email): LandlordUser
     {
+        $normalizedEmail = strtolower($email);
         $emails = $user->emails ?? [];
 
         if (count($emails) <= 1) {
@@ -118,9 +117,13 @@ class LandlordProfileService
             );
         }
 
-        $filtered = array_values(array_filter($emails, static fn (string $existing): bool => $existing !== $email));
+        $filtered = array_values(array_filter(
+            $emails,
+            static fn (string $existing): bool => strtolower($existing) !== $normalizedEmail
+        ));
         $user->emails = $filtered;
         $user->save();
+        $this->accessService->removeCredentialForSubject($user, 'password', $normalizedEmail);
 
         return $user->fresh();
     }
@@ -190,9 +193,16 @@ class LandlordProfileService
         return $user->fresh();
     }
 
-    private function generateNumericToken(): string
+    private function synchronizePasswordState(LandlordUser $user, string $passwordHash): void
     {
-        return str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
+        $this->accessService->syncPasswordCredentialsForEmails($user, $passwordHash);
+        $this->accessService->removeLegacyPasswordState($user);
+    }
+
+    protected function applyResetPassword(LandlordUser $user, string $password): void
+    {
+        $this->synchronizePasswordState($user, Hash::make($password));
+        $this->accessService->revokeTokens($user);
     }
 
     private function findByEmail(string $email): ?LandlordUser

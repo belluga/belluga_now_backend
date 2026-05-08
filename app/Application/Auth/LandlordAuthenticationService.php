@@ -20,9 +20,10 @@ class LandlordAuthenticationService
 
     public function login(string $email, string $password, string $deviceName): AuthenticationResult
     {
+        $email = strtolower($email);
         $user = $this->findUserByEmail($email);
 
-        if (! $user || ! Hash::check($password, (string) $user->password)) {
+        if (! $user || ! $this->credentialsMatch($user, $email, $password)) {
             throw new InvalidCredentialsException;
         }
 
@@ -44,13 +45,13 @@ class LandlordAuthenticationService
     public function logout(LandlordUser $user, bool $allDevices, ?string $deviceName = null): void
     {
         if ($allDevices) {
-            $user->tokens()->delete();
+            $this->accessService->revokeTokens($user);
 
             return;
         }
 
         if ($deviceName !== null) {
-            $user->tokens()->where('name', $deviceName)->delete();
+            $this->accessService->revokeTokens($user, $deviceName);
         }
     }
 
@@ -61,17 +62,18 @@ class LandlordAuthenticationService
     {
         return DB::connection('landlord')->transaction(function () use ($payload): AuthenticationResult {
             $email = strtolower((string) $payload['email']);
+            $secretHash = Hash::make((string) $payload['password']);
 
             $user = LandlordUser::create([
                 'name' => $payload['name'],
                 'emails' => [$email],
-                'password' => $payload['password'],
                 'identity_state' => 'registered',
                 'promotion_audit' => [],
             ]);
 
             $this->accessService->ensureEmail($user, $email);
-            $this->accessService->syncCredential($user, 'password', $email, (string) $user->password);
+            $this->accessService->syncPasswordCredentialsForEmails($user, $secretHash);
+            $this->accessService->removeLegacyPasswordState($user);
 
             $abilities = $user->getPermissions();
             $tenantPermissions = collect($user->tenant_roles ?? [])
@@ -94,6 +96,21 @@ class LandlordAuthenticationService
         return LandlordUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->first();
+    }
+
+    private function credentialsMatch(LandlordUser $user, string $email, string $password): bool
+    {
+        $credential = $this->accessService->credential($user, 'password', $email);
+
+        if ($credential === null) {
+            return false;
+        }
+
+        $secretHash = $credential['secret_hash'] ?? null;
+
+        return is_string($secretHash)
+            && $secretHash !== ''
+            && Hash::check($password, $secretHash);
     }
 
     /**

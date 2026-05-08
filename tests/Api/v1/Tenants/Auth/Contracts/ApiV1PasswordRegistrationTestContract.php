@@ -27,10 +27,9 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         parent::setUp();
 
         Tenant::forgetCurrent();
-        $this->tenantModel = Tenant::query()
-            ->where('slug', $this->tenant->slug)
-            ->firstOrFail();
+        $this->tenantModel = $this->ensureCanonicalTenantExists($this->tenant);
         $this->tenantModel->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $this->tenantModel);
     }
 
     protected function tearDown(): void

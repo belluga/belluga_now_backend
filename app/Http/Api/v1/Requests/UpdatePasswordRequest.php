@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use App\Support\Validation\InputConstraints;
+use App\Support\Validation\CanonicalPasswordRules;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -27,13 +27,7 @@ class UpdatePasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'password' => [
-                'required',
-                'string',
-                'min:'.InputConstraints::PASSWORD_MIN,
-                'max:'.InputConstraints::PASSWORD_MAX,
-                'confirmed',
-            ],
+            'password' => CanonicalPasswordRules::required(confirmed: true),
         ];
     }
 

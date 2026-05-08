@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Push;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -132,6 +133,89 @@ class PushMessageFlowTest extends TestCase
     {
         $response = $this->getJson($this->baseUrl.'/missing/data');
         $response->assertStatus(401);
+    }
+
+    public function test_account_push_message_data_and_actions_reject_token_with_removed_account_binding(): void
+    {
+        $messageId = $this->createAccountPushMessageWithBearerToken();
+
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'account-push-removed-binding',
+            [
+                'push-messages:read',
+            ],
+            tenantId: (string) Tenant::current()?->_id,
+            accountId: (string) $this->account->_id
+        );
+        $token->accessToken->setAttribute('account_id', null);
+        $token->accessToken->save();
+
+        $this->assertAccountPushMessageDataAndActionsRejectBearerToken($messageId, $token->plainTextToken);
+    }
+
+    public function test_account_push_message_data_and_actions_reject_account_bound_token_without_read_ability(): void
+    {
+        $messageId = $this->createAccountPushMessageWithBearerToken();
+
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'account-push-create-only',
+            [
+                'push-messages:create',
+            ],
+            tenantId: (string) Tenant::current()?->_id,
+            accountId: (string) $this->account->_id
+        );
+
+        $this->assertAccountPushMessageDataAndActionsRejectBearerToken($messageId, $token->plainTextToken);
+    }
+
+    public function test_account_push_message_data_and_actions_accept_resource_wildcard_bearer_token(): void
+    {
+        $messageId = $this->createAccountPushMessageWithBearerToken(['push-messages:*']);
+
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'account-push-wildcard-read',
+            [
+                'push-messages:*',
+            ],
+            tenantId: (string) Tenant::current()?->_id,
+            accountId: (string) $this->account->_id
+        );
+
+        $this->assertAccountPushMessageDataAndActionsAcceptBearerToken($messageId, $token->plainTextToken);
+    }
+
+    public function test_account_push_message_data_and_actions_reject_other_account_bearer_token(): void
+    {
+        $messageId = $this->createAccountPushMessageWithBearerToken();
+        $otherAccount = Account::create([
+            'name' => 'Other Account '.Str::uuid()->toString(),
+            'document' => strtoupper(Str::random(14)),
+        ]);
+        $otherRole = $otherAccount->roleTemplates()->create([
+            'name' => 'Other Push Operator',
+            'permissions' => ['push-messages:*'],
+        ]);
+        $operator = $this->userService->create($otherAccount, [
+            'name' => (string) $this->operator->name,
+            'email' => (string) $this->operator->emails[0],
+            'password' => 'Secret!234',
+        ], (string) $otherRole->_id);
+
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $operator,
+            'account-push-other-account',
+            [
+                'push-messages:*',
+            ],
+            tenantId: (string) Tenant::current()?->_id,
+            accountId: (string) $otherAccount->_id
+        );
+
+        $this->assertAccountPushMessageDataAndActionsRejectBearerToken($messageId, $token->plainTextToken);
     }
 
     public function test_push_message_data_missing_returns_ok_false(): void
@@ -618,6 +702,49 @@ class PushMessageFlowTest extends TestCase
         $create->assertStatus(403);
     }
 
+    public function test_tenant_push_route_accepts_account_bound_token_despite_stale_ambient_account(): void
+    {
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'tenant-push-stale-ambient-account',
+            [
+                'tenant-push-messages:create',
+                'tenant-push-messages:read',
+            ],
+            tenantId: (string) Tenant::current()?->_id,
+            accountId: (string) $this->account->_id
+        );
+
+        $staleAccount = Account::create([
+            'name' => 'Stale Ambient Account '.Str::uuid()->toString(),
+            'document' => strtoupper(Str::random(14)),
+        ]);
+        $staleAccount->makeCurrent();
+        $this->assertFalse($this->operator->fresh()->haveAccessTo($staleAccount));
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this
+            ->withHeaders(['Authorization' => "Bearer {$token->plainTextToken}"])
+            ->postJson('api/v1/push/messages', $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+        $this->app['auth']->forgetGuards();
+
+        $data = $this
+            ->withHeaders(['Authorization' => "Bearer {$token->plainTextToken}"])
+            ->getJson('api/v1/push/messages/'.$messageId.'/data');
+        $data->assertOk();
+        $data->assertJsonPath('ok', true);
+        $data->assertJsonPath('push_message_id', $messageId);
+    }
+
     public function test_tenant_push_list_requires_tenant_access(): void
     {
         $restricted = LandlordUser::create([
@@ -637,16 +764,25 @@ class PushMessageFlowTest extends TestCase
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
-        [$secondaryTenant, $secondaryOperator, $secondaryHost] = $this->seedSecondaryTenantContext();
+        [$secondaryTenant, $secondaryOperator, $secondaryHost, $secondaryAccount] = $this->seedSecondaryTenantContext();
 
         $payload = $this->buildPayload();
         $this->withServerVariables(['HTTP_HOST' => $secondaryHost]);
-        Sanctum::actingAs($secondaryOperator, [
-            'tenant-push-messages:create',
-            'tenant-push-messages:read',
-        ]);
+        $this->assertNotSame((string) $secondaryAccount->_id, (string) Account::current()?->_id);
+        $secondaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $secondaryOperator,
+            'tenant-push-stale-account-context',
+            [
+                'tenant-push-messages:create',
+                'tenant-push-messages:read',
+            ],
+            tenantId: (string) $secondaryTenant->_id,
+            accountId: (string) $secondaryAccount->_id
+        );
 
-        $create = $this->postJson('api/v1/push/messages', $payload);
+        $create = $this
+            ->withHeaders(['Authorization' => "Bearer {$secondaryToken->plainTextToken}"])
+            ->postJson('api/v1/push/messages', $payload);
         $create->assertCreated();
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
@@ -3645,6 +3781,78 @@ class PushMessageFlowTest extends TestCase
     }
 
     /**
+     * @param  array<int, string>  $abilities
+     */
+    private function createAccountPushMessageWithBearerToken(array $abilities = ['push-messages:create']): string
+    {
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'account-push-create',
+            $abilities,
+            tenantId: (string) Tenant::current()?->_id,
+            accountId: (string) $this->account->_id
+        );
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this
+            ->withHeaders(['Authorization' => "Bearer {$token->plainTextToken}"])
+            ->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+        $this->app['auth']->forgetGuards();
+
+        return $this->resolveMessageId($payload['internal_name']);
+    }
+
+    private function assertAccountPushMessageDataAndActionsAcceptBearerToken(string $messageId, string $plainTextToken): void
+    {
+        $this->app['auth']->forgetGuards();
+
+        $data = $this
+            ->withHeaders(['Authorization' => "Bearer {$plainTextToken}"])
+            ->getJson($this->baseUrl.'/'.$messageId.'/data');
+        $data->assertOk();
+        $data->assertJsonPath('ok', true);
+
+        $this->app['auth']->forgetGuards();
+
+        $action = $this
+            ->withHeaders(['Authorization' => "Bearer {$plainTextToken}"])
+            ->postJson($this->baseUrl.'/'.$messageId.'/actions', [
+                'action' => 'opened',
+                'step_index' => 0,
+                'idempotency_key' => 'opened:'.$messageId.':'.Str::uuid()->toString(),
+            ]);
+        $action->assertOk();
+    }
+
+    private function assertAccountPushMessageDataAndActionsRejectBearerToken(string $messageId, string $plainTextToken): void
+    {
+        $this->app['auth']->forgetGuards();
+
+        $data = $this
+            ->withHeaders(['Authorization' => "Bearer {$plainTextToken}"])
+            ->getJson($this->baseUrl.'/'.$messageId.'/data');
+        $data->assertStatus(403);
+
+        $this->app['auth']->forgetGuards();
+
+        $action = $this
+            ->withHeaders(['Authorization' => "Bearer {$plainTextToken}"])
+            ->postJson($this->baseUrl.'/'.$messageId.'/actions', [
+                'action' => 'opened',
+                'step_index' => 0,
+                'idempotency_key' => 'opened:'.$messageId.':'.Str::uuid()->toString(),
+            ]);
+        $action->assertStatus(403);
+    }
+
+    /**
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
      */
@@ -3812,7 +4020,7 @@ class PushMessageFlowTest extends TestCase
     }
 
     /**
-     * @return array{0: Tenant, 1: AccountUser, 2: string}
+     * @return array{0: Tenant, 1: AccountUser, 2: string, 3: Account}
      */
     private function seedSecondaryTenantContext(): array
     {
@@ -3849,7 +4057,7 @@ class PushMessageFlowTest extends TestCase
 
         $host = (string) parse_url($tenant->getMainDomain(), PHP_URL_HOST);
 
-        return [$tenant, $operator, $host];
+        return [$tenant, $operator, $host, $account];
     }
 
     private function initializeSystem(): void

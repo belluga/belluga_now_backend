@@ -5,6 +5,7 @@ namespace Tests\Api\v1\Admin;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Testing\TestResponse;
 use MongoDB\BSON\ObjectId;
 use Tests\Api\Traits\AccountAuthFunctions;
@@ -63,6 +64,11 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
                 'token',
             ],
         ]);
+        $this->assertPasswordCredentialForEmail(
+            $this->landlord->user_cross_tenant_admin->user_id,
+            $this->landlord->user_cross_tenant_admin->email_1,
+            $this->landlord->user_cross_tenant_admin->password
+        );
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
 
@@ -88,6 +94,11 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
                 'token',
             ],
         ]);
+        $this->assertPasswordCredentialForEmail(
+            $this->landlord->user_cross_tenant_admin->user_id,
+            $this->landlord->user_cross_tenant_admin->email_2,
+            $this->landlord->user_cross_tenant_admin->password
+        );
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
 
@@ -161,9 +172,11 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
         $email = fake()->unique()->safeEmail();
         $password = 'SecurePass!123';
 
-        $tenantBase = "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/v1/";
+        $tenant = $this->canonicalTenant();
+        $tenantBase = "http://{$tenant->subdomain}.{$this->host}/api/v1/";
         $tenantDomain = 'tenant.belluga.test';
-        $this->makeCanonicalTenantCurrent();
+        $tenant->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $tenant);
 
         $this->json(
             method: 'post',
@@ -240,7 +253,7 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
 
     public function test_admin_login_works_on_tenant_subdomain(): void
     {
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
+        $tenantHost = $this->canonicalTenantHost();
 
         $login = $this->json(
             method: 'post',
@@ -299,8 +312,9 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
 
     public function test_admin_tenant_subdomain_token_can_patch_map_ui_settings_namespace(): void
     {
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
-        $tenantId = $this->landlord->tenant_primary->id;
+        $tenant = $this->canonicalTenant();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $tenantId = (string) $tenant->_id;
 
         $crossAdmin = LandlordUser::query()->find($this->landlord->user_cross_tenant_admin->user_id);
         $this->assertNotNull($crossAdmin);
@@ -349,9 +363,7 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
 
     public function test_landlord_tenant_telemetry_endpoints_reject_tenant_outside_operator_access_scope(): void
     {
-        $primaryTenant = Tenant::query()
-            ->where('slug', $this->landlord->tenant_primary->slug)
-            ->firstOrFail();
+        $primaryTenant = $this->canonicalTenant();
 
         $targetTenant = Tenant::query()
             ->where('slug', 'telemetry-bypass-target')
@@ -414,7 +426,7 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
 
     public function test_admin_login_wrong_password_on_tenant_subdomain_returns_credentials_error(): void
     {
-        $tenantHost = "{$this->landlord->tenant_primary->subdomain}.{$this->host}";
+        $tenantHost = $this->canonicalTenantHost();
 
         $response = $this->json(
             method: 'post',
@@ -578,6 +590,43 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated
 
         $this->userLogout($deviceName)->assertStatus(200);
         $this->landlord->user_cross_tenant_admin->token = '';
+    }
+
+    private function assertPasswordCredentialForEmail(string $userId, string $email, string $plainPassword): void
+    {
+        $user = LandlordUser::query()->find($userId);
+
+        $this->assertNotNull($user);
+        $this->assertNull($user->getAttribute('password'));
+        $this->assertNull($user->getAttribute('password_type'));
+
+        $credential = collect($user->credentials ?? [])
+            ->first(static fn (array $credential): bool => ($credential['provider'] ?? null) === 'password'
+                && ($credential['subject'] ?? null) === strtolower($email));
+
+        $this->assertIsArray($credential);
+        $this->assertTrue(Hash::check($plainPassword, (string) $credential['secret_hash']));
+    }
+
+    private function canonicalTenant(): Tenant
+    {
+        $tenant = $this->resolveCanonicalTenant(
+            $this->landlord->tenant_primary,
+            allowSingleTenantContext: true
+        );
+
+        $this->landlord->tenant_primary->id = (string) $tenant->_id;
+        $this->landlord->tenant_primary->slug = (string) $tenant->slug;
+        $this->landlord->tenant_primary->subdomain = (string) $tenant->subdomain;
+
+        return $tenant;
+    }
+
+    private function canonicalTenantHost(): string
+    {
+        $tenant = $this->canonicalTenant();
+
+        return "{$tenant->subdomain}.{$this->host}";
     }
 
     protected function payloadUserLoginWrongPassword(): array

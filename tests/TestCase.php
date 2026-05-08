@@ -3,6 +3,8 @@
 namespace Tests;
 
 use App\Models\Landlord\Tenant;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Tests\Api\Traits\ClearConfigCacheOnce;
 use Tests\Api\Traits\MigrateFreshSeedOnce;
@@ -151,6 +153,45 @@ abstract class TestCase extends BaseTestCase
         $tenant->makeCurrent();
 
         return $tenant;
+    }
+
+    /**
+     * @param  array<int, string>  $enabledMethods
+     * @param  array<int, string>  $availableMethods
+     */
+    protected function setTenantPublicAuthFixture(
+        array $enabledMethods,
+        array $availableMethods = ['password', 'phone_otp'],
+        bool $allowTenantCustomization = true,
+        ?Tenant $tenant = null,
+    ): void {
+        $landlordSettings = LandlordSettings::current();
+        if ($landlordSettings === null) {
+            $landlordSettings = new LandlordSettings;
+            $landlordSettings->setAttribute('_id', 'settings_root');
+        }
+
+        $landlordSettings->setAttribute('tenant_public_auth', [
+            'available_methods' => $availableMethods,
+            'allow_tenant_customization' => $allowTenantCustomization,
+        ]);
+        $landlordSettings->save();
+
+        $tenant ??= Tenant::current() ?? $this->resolveCanonicalTenant(allowSingleTenantContext: true);
+        $tenant->makeCurrent();
+
+        $tenantSettings = TenantSettings::current();
+        if ($tenantSettings === null) {
+            $tenantSettings = new TenantSettings;
+            $tenantSettings->setAttribute('_id', 'settings_root');
+        }
+
+        $tenantSettings->setAttribute('tenant_public_auth', [
+            'enabled_methods' => $enabledMethods,
+        ]);
+        $tenantSettings->save();
+
+        $tenant->makeCurrent();
     }
 
     protected function getGlobal($key): mixed

@@ -6,6 +6,7 @@ namespace Tests\Feature\Security;
 
 use App\Models\Landlord\ApiAbuseSignal;
 use App\Models\Landlord\ApiAbuseSignalAggregate;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
@@ -26,49 +27,87 @@ class ApiSecurityHardeningMiddlewareTest extends TestCase
         Route::patch('/api/v1/_security_test/settings/values/map_ui', static fn () => response()->json(['ok' => true]));
         Route::post('/api/v1/_security_test/events/admin', static fn () => response()->json(['ok' => true]));
         Route::post('/api/v1/_security_test/account_onboardings', static fn () => response()->json(['ok' => true]));
+        Route::post('/api/v1/_security_test/domain-alpha', static fn () => response()->json(['ok' => true]));
+        Route::post('/api/v1/_security_test/domain-beta', static fn () => response()->json(['ok' => true]));
+        Route::post('/api/v1/_security_test/public-login', static fn () => response()->json(['ok' => true]));
 
         $overrides = (array) config('api_security.route_overrides', []);
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/l3$#',
+            'domain' => 'security_test_l3',
             'methods' => ['POST'],
             'level' => 'L3',
             'require_idempotency' => true,
         ];
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/l2$#',
+            'domain' => 'security_test_l2',
             'methods' => ['POST'],
             'level' => 'L2',
             'require_idempotency' => false,
         ];
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/checkout/confirm$#',
+            'domain' => 'security_test_checkout',
             'methods' => ['POST'],
             'level' => 'L3',
             'require_idempotency' => true,
         ];
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/events/[^/]+/occurrences/[^/]+/admission$#',
+            'domain' => 'security_test_admission',
             'methods' => ['POST'],
             'level' => 'L3',
             'require_idempotency' => true,
         ];
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/settings/values/[^/]+$#',
+            'domain' => 'security_test_settings',
             'methods' => ['PATCH'],
             'level' => 'L2',
             'require_idempotency' => false,
         ];
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/events/admin$#',
+            'domain' => 'security_test_events_admin',
             'methods' => ['POST'],
             'level' => 'L2',
             'require_idempotency' => false,
         ];
         $overrides[] = [
             'pattern' => '#^api/v1/_security_test/account_onboardings$#',
+            'domain' => 'security_test_account_onboardings',
             'methods' => ['POST'],
             'level' => 'L2',
             'require_idempotency' => false,
+        ];
+        $overrides[] = [
+            'pattern' => '#^api/v1/_security_test/domain-alpha$#',
+            'domain' => 'security_test_domain_alpha',
+            'methods' => ['POST'],
+            'level' => 'L2',
+            'require_idempotency' => false,
+            'requests_per_minute' => 1,
+        ];
+        $overrides[] = [
+            'pattern' => '#^api/v1/_security_test/domain-beta$#',
+            'domain' => 'security_test_domain_beta',
+            'methods' => ['POST'],
+            'level' => 'L2',
+            'require_idempotency' => false,
+            'requests_per_minute' => 3,
+        ];
+        $overrides[] = [
+            'pattern' => '#^api/v1/_security_test/public-login$#',
+            'domain' => 'security_test_public_login',
+            'methods' => ['POST'],
+            'level' => 'L2',
+            'require_idempotency' => false,
+            'requests_per_minute' => 50,
+            'subject_input' => 'email',
+            'subject_kind' => 'email',
+            'subject_requests_per_minute' => 1,
+            'fail_closed_on_backend_error' => true,
         ];
         config()->set('api_security.route_overrides', $overrides);
 
@@ -294,6 +333,70 @@ class ApiSecurityHardeningMiddlewareTest extends TestCase
         $events->assertHeader('X-Api-Security-Level', 'L2');
     }
 
+    public function test_rate_limit_buckets_are_scoped_by_security_domain(): void
+    {
+        config()->set('api_security.lifecycle.enabled', false);
+        Cache::flush();
+
+        $alphaOne = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.41'])
+            ->postJson('/api/v1/_security_test/domain-alpha', ['payload' => 'alpha-1']);
+        $alphaOne->assertOk();
+        $alphaOne->assertHeader('X-Api-Security-Domain', 'security_test_domain_alpha');
+
+        $alphaTwo = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.41'])
+            ->postJson('/api/v1/_security_test/domain-alpha', ['payload' => 'alpha-2']);
+        $alphaTwo->assertStatus(429);
+        $alphaTwo->assertHeader('X-Api-Security-Domain', 'security_test_domain_alpha');
+
+        $betaOne = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.41'])
+            ->postJson('/api/v1/_security_test/domain-beta', ['payload' => 'beta-1']);
+        $betaOne->assertOk();
+        $betaOne->assertHeader('X-Api-Security-Domain', 'security_test_domain_beta');
+
+        $betaTwo = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.41'])
+            ->postJson('/api/v1/_security_test/domain-beta', ['payload' => 'beta-2']);
+        $betaTwo->assertOk();
+
+        $betaThree = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.41'])
+            ->postJson('/api/v1/_security_test/domain-beta', ['payload' => 'beta-3']);
+        $betaThree->assertOk();
+
+        $betaFour = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.41'])
+            ->postJson('/api/v1/_security_test/domain-beta', ['payload' => 'beta-4']);
+        $betaFour->assertStatus(429);
+        $betaFour->assertHeader('X-Api-Security-Domain', 'security_test_domain_beta');
+    }
+
+    public function test_subject_rate_limit_bucket_applies_across_ips_for_public_login_routes(): void
+    {
+        config()->set('api_security.lifecycle.enabled', false);
+        Cache::flush();
+
+        $first = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.71'])
+            ->postJson('/api/v1/_security_test/public-login', [
+                'email' => 'shared-login@example.org',
+                'password' => 'Secret!234',
+            ]);
+        $first->assertOk();
+        $first->assertHeader('X-Api-Security-Domain', 'security_test_public_login');
+
+        $second = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.72'])
+            ->postJson('/api/v1/_security_test/public-login', [
+                'email' => 'SHARED-LOGIN@example.org',
+                'password' => 'Secret!234',
+            ]);
+        $second->assertStatus(429);
+        $second->assertHeader('X-Api-Security-Domain', 'security_test_public_login');
+
+        $control = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.73'])
+            ->postJson('/api/v1/_security_test/public-login', [
+                'email' => 'different-login@example.org',
+                'password' => 'Secret!234',
+            ]);
+        $control->assertOk();
+        $control->assertHeader('X-Api-Security-Domain', 'security_test_public_login');
+    }
+
     public function test_abuse_signal_records_are_persisted_for_violations(): void
     {
         $this->postJson('/api/v1/_security_test/l3', ['payload' => 'no-idempotency'])
@@ -324,6 +427,99 @@ class ApiSecurityHardeningMiddlewareTest extends TestCase
         $response = $this->postJson('/api/v1/_security_test/l2', ['payload' => 'alpha']);
         $response->assertStatus(503);
         $response->assertJsonPath('code', 'rate_limit_unavailable');
+    }
+
+    public function test_public_login_routes_fail_closed_when_the_rate_limiter_backend_errors(): void
+    {
+        RateLimiter::shouldReceive('tooManyAttempts')
+            ->once()
+            ->andThrow(new RuntimeException('rate limiter backend unavailable'));
+
+        $response = $this->postJson('/api/v1/_security_test/public-login', [
+            'email' => 'subject@example.org',
+            'password' => 'Secret!234',
+        ]);
+
+        $response->assertStatus(503);
+        $response->assertJsonPath('code', 'rate_limit_unavailable');
+        $response->assertHeader('X-Api-Security-Domain', 'security_test_public_login');
+    }
+
+    public function test_public_auth_routes_have_explicit_risk_matrix_entries(): void
+    {
+        $matrix = collect((array) config('api_security.risk_matrix', []))
+            ->keyBy(static fn (array $entry): string => (string) ($entry['domain'] ?? ''));
+
+        $expectations = [
+            'tenant_public_anonymous_identity' => ['pattern' => '#^api/v1/anonymous/identities$#', 'requests_per_minute' => 30, 'subject_requests_per_minute' => 30],
+            'tenant_public_phone_otp_challenge' => ['pattern' => '#^api/v1/auth/otp/challenge$#', 'requests_per_minute' => 30, 'subject_requests_per_minute' => 30],
+            'tenant_public_phone_otp_verify' => ['pattern' => '#^api/v1/auth/otp/verify$#', 'requests_per_minute' => 60, 'subject_requests_per_minute' => 60],
+            'tenant_public_password_login' => ['pattern' => '#^api/v1/auth/login$#', 'requests_per_minute' => 20, 'subject_requests_per_minute' => 20],
+            'tenant_public_password_register' => ['pattern' => '#^api/v1/auth/register/password$#', 'requests_per_minute' => 20, 'subject_requests_per_minute' => 20],
+            'tenant_public_password_reset_token' => ['pattern' => '#^api/v1/auth/password_token$#', 'requests_per_minute' => 10, 'subject_requests_per_minute' => 10],
+            'tenant_public_password_reset' => ['pattern' => '#^api/v1/auth/password_reset$#', 'requests_per_minute' => 10, 'subject_requests_per_minute' => 10],
+            'landlord_public_password_login' => ['pattern' => '#^admin/api/v1/auth/login$#', 'requests_per_minute' => 20, 'subject_requests_per_minute' => 20],
+            'landlord_public_password_reset_token' => ['pattern' => '#^admin/api/v1/auth/password_token$#', 'requests_per_minute' => 10, 'subject_requests_per_minute' => 10],
+            'landlord_public_password_reset' => ['pattern' => '#^admin/api/v1/auth/password_reset$#', 'requests_per_minute' => 10, 'subject_requests_per_minute' => 10],
+        ];
+
+        foreach ($expectations as $domain => $expected) {
+            $entry = $matrix->get($domain);
+
+            $this->assertIsArray($entry, "Expected risk-matrix entry for {$domain}.");
+            $this->assertSame($expected['pattern'], $entry['pattern'] ?? null);
+            $this->assertSame(['POST'], $entry['methods'] ?? null);
+            $this->assertSame('L2', $entry['level'] ?? null);
+            $this->assertSame(false, $entry['require_idempotency'] ?? null);
+            $this->assertSame($expected['requests_per_minute'], $entry['requests_per_minute'] ?? null);
+            $this->assertSame($expected['subject_requests_per_minute'], $entry['subject_requests_per_minute'] ?? null);
+        }
+    }
+
+    public function test_public_auth_risk_matrix_patterns_match_real_post_routes(): void
+    {
+        $expectations = [
+            'tenant_public_anonymous_identity' => '/api/v1/anonymous/identities',
+            'tenant_public_phone_otp_challenge' => '/api/v1/auth/otp/challenge',
+            'tenant_public_phone_otp_verify' => '/api/v1/auth/otp/verify',
+            'tenant_public_password_login' => '/api/v1/auth/login',
+            'tenant_public_password_register' => '/api/v1/auth/register/password',
+            'tenant_public_password_reset_token' => '/api/v1/auth/password_token',
+            'tenant_public_password_reset' => '/api/v1/auth/password_reset',
+            'landlord_public_password_login' => '/admin/api/v1/auth/login',
+            'landlord_public_password_reset_token' => '/admin/api/v1/auth/password_token',
+            'landlord_public_password_reset' => '/admin/api/v1/auth/password_reset',
+        ];
+
+        $matrix = collect((array) config('api_security.risk_matrix', []))
+            ->keyBy(static fn (array $entry): string => (string) ($entry['domain'] ?? ''));
+
+        foreach ($expectations as $domain => $path) {
+            $entry = $matrix->get($domain);
+            $this->assertIsArray($entry, "Expected risk-matrix entry for {$domain}.");
+
+            $route = app('router')->getRoutes()->match(Request::create($path, 'POST'));
+            $this->assertSame(ltrim($path, '/'), $route->uri());
+            $this->assertSame(1, preg_match((string) ($entry['pattern'] ?? ''), ltrim($path, '/')));
+        }
+    }
+
+    public function test_tenant_public_password_routes_remain_guarded_by_explicit_auth_method_middleware(): void
+    {
+        foreach ([
+            '/api/v1/auth/login',
+            '/api/v1/auth/register/password',
+            '/api/v1/auth/password_token',
+            '/api/v1/auth/password_reset',
+        ] as $path) {
+            $route = app('router')->getRoutes()->match(Request::create($path, 'POST'));
+
+            $this->assertContains(
+                'App\\Http\\Middleware\\EnsureTenantPublicAuthMethod:password',
+                $route->gatherMiddleware(),
+                sprintf('Expected `%s` to remain protected by EnsureTenantPublicAuthMethod::class.:password.', $path),
+            );
+        }
     }
 
     private function setTrustedProxiesEnv(string $value): void

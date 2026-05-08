@@ -114,6 +114,43 @@ class EnvironmentResolverServiceTest extends TestCase
         }
     }
 
+    public function test_resolve_exposes_landlord_public_auth_catalog_without_tenant_fail_closed_collapse(): void
+    {
+        $landlord = LandlordSettings::current();
+        $originalLandlord = $landlord?->getAttribute('tenant_public_auth');
+        if ($landlord === null) {
+            $landlord = new LandlordSettings();
+            $landlord->setAttribute('_id', 'settings_root');
+        }
+
+        $landlord->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => true,
+        ]);
+        $landlord->save();
+
+        Tenant::forgetCurrent();
+
+        try {
+            $result = $this->service->resolve([
+                'request_root' => 'https://landlord.test',
+            ]);
+
+            $this->assertSame('landlord', $result['type']);
+            $this->assertSame(['password', 'phone_otp'], $result['settings']['tenant_public_auth']['available_methods'] ?? []);
+            $this->assertSame(['password', 'phone_otp'], $result['settings']['tenant_public_auth']['enabled_methods'] ?? []);
+            $this->assertSame(['password', 'phone_otp'], $result['settings']['tenant_public_auth']['effective_methods'] ?? []);
+            $this->assertSame('password', $result['settings']['tenant_public_auth']['effective_primary_method'] ?? null);
+        } finally {
+            if ($originalLandlord !== null) {
+                $landlord->setAttribute('tenant_public_auth', $originalLandlord);
+            } else {
+                $landlord->setAttribute('tenant_public_auth', null);
+            }
+            $landlord->save();
+        }
+    }
+
     public function test_resolve_tenant_on_landlord_host_keeps_canonical_tenant_main_domain(): void
     {
         $tenant = Tenant::query()->firstOrFail();

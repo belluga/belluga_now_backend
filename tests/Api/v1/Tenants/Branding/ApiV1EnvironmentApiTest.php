@@ -559,6 +559,44 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         }
     }
 
+    public function test_environment_api_exposes_landlord_public_auth_catalog_without_tenant_fail_closed_collapse(): void
+    {
+        $tenant = $this->currentTenant();
+
+        $landlord = LandlordSettings::current();
+        $originalLandlordAuth = $landlord?->getAttribute('tenant_public_auth');
+        if ($landlord === null) {
+            $landlord = new LandlordSettings;
+            $landlord->setAttribute('_id', 'settings_root');
+        }
+
+        $landlord->setAttribute('tenant_public_auth', [
+            'available_methods' => ['password', 'phone_otp'],
+            'allow_tenant_customization' => true,
+        ]);
+        $landlord->save();
+
+        Tenant::forgetCurrent();
+
+        try {
+            $response = $this->get("http://{$this->host}/api/v1/environment");
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('type', 'landlord');
+            $response->assertJsonPath('settings.tenant_public_auth.available_methods.0', 'password');
+            $response->assertJsonPath('settings.tenant_public_auth.available_methods.1', 'phone_otp');
+            $response->assertJsonPath('settings.tenant_public_auth.enabled_methods.0', 'password');
+            $response->assertJsonPath('settings.tenant_public_auth.enabled_methods.1', 'phone_otp');
+            $response->assertJsonPath('settings.tenant_public_auth.effective_methods.0', 'password');
+            $response->assertJsonPath('settings.tenant_public_auth.effective_methods.1', 'phone_otp');
+            $response->assertJsonPath('settings.tenant_public_auth.effective_primary_method', 'password');
+        } finally {
+            $landlord->setAttribute('tenant_public_auth', $originalLandlordAuth);
+            $landlord->save();
+            $tenant->makeCurrent();
+        }
+    }
+
     public function test_environment_api_exposes_phone_otp_sms_fallback_flag_without_webhook_url(): void
     {
         $tenant = $this->currentTenant();

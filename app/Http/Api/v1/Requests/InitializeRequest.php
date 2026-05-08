@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Requests;
 
 use App\Models\Landlord\LandlordUser;
 use App\Rules\EmailAvailableRule;
+use App\Support\Validation\CanonicalPasswordRules;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -37,7 +38,7 @@ class InitializeRequest extends FormRequest
             'tenant.domains' => ['nullable', 'array'],
             'user.name' => 'string|max:'.InputConstraints::NAME_MAX,
             'user.email' => $this->emailRules(),
-            'user.password' => 'required|string|min:'.InputConstraints::PASSWORD_MIN.'|max:'.InputConstraints::PASSWORD_MAX,
+            'user.password' => CanonicalPasswordRules::required(),
             'role.name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'role.description' => ['nullable', 'string', 'max:'.InputConstraints::DESCRIPTION_MAX],
             'role.permissions' => ['required', 'array', 'max:'.InputConstraints::PERMISSIONS_ARRAY_MAX],

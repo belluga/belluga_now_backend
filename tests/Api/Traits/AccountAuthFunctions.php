@@ -37,6 +37,8 @@ trait AccountAuthFunctions
 
     protected function accountLoginRaw(TenantLabels $tenant, UserLabels $user, string $device_name = 'default'): TestResponse
     {
+        $this->setTenantPublicAuthFixture(['password'], tenant: $this->resolveCanonicalTenant($tenant));
+
         $force_base_api = "http://{$tenant->subdomain}.{$this->host}/api/v1/";
         $response = $this->json(
             method: 'post',
@@ -57,6 +59,8 @@ trait AccountAuthFunctions
 
     protected function accountLogin(UserLabels $user, string $device_name = 'default'): TestResponse
     {
+        $this->setTenantPublicAuthFixture(['password']);
+
         $response = $this->json(
             method: 'post',
             uri: "{$this->base_api_tenant}auth/login",

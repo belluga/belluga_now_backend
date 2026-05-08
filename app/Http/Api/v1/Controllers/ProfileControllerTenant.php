@@ -73,16 +73,11 @@ class ProfileControllerTenant extends Controller
     {
         $email = $request->validated()['email'];
         $this->profileService->sendResetToken($email);
-
-        $user = $this->accountUserQueryService->findByEmail($email);
-
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'auth_password_token_generated',
-                userId: (string) $user->_id,
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
+        $this->telemetry->emit(
+            event: 'auth_password_token_generated',
+            userId: null,
+            idempotencyKey: $request->header('X-Request-Id')
+        );
 
         return response()->json([
             'message' => "Token gerado e será enviado caso exista uma conta com o email '$email'.",
