@@ -12,6 +12,7 @@ use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
+use Belluga\Invites\Contracts\InvitePushDeliveryContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteEdge;
@@ -29,6 +30,7 @@ class InviteMutationService
         private readonly InviteTransactionRunner $transactions,
         private readonly InviteAttendanceGatewayContract $attendanceGateway,
         private readonly InviteIdentityGatewayContract $identityGateway,
+        private readonly InvitePushDeliveryContract $pushDelivery,
         private readonly InviteTelemetryEmitterContract $telemetry,
         private readonly InviteTargetResolverService $targetResolver,
         private readonly InviteRuntimeSettingsService $runtimeSettings,
@@ -162,6 +164,8 @@ class InviteMutationService
                 'supersession_reason' => $edge->supersession_reason ? (string) $edge->supersession_reason : null,
             ];
 
+            $this->dispatchDirectInvitePush($edge);
+
             $this->telemetry->emit(
                 event: 'invite.created',
                 userId: $senderUserId,
@@ -190,6 +194,15 @@ class InviteMutationService
         }
 
         return $result;
+    }
+
+    private function dispatchDirectInvitePush(InviteEdge $edge): void
+    {
+        try {
+            $this->pushDelivery->sendDirectInvite($edge);
+        } catch (Throwable) {
+            // Invite persistence remains authoritative even when push delivery is unavailable.
+        }
     }
 
     /**

@@ -2707,6 +2707,43 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame(1, PushCredential::query()->count());
     }
 
+    public function test_tenant_credential_upsert_recovers_from_corrupted_private_key_ciphertext(): void
+    {
+        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+
+        PushCredential::query()->delete();
+
+        $id = new \MongoDB\BSON\ObjectId;
+        $now = new UTCDateTime(now());
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('push_credentials')
+            ->insertOne([
+                '_id' => $id,
+                'project_id' => 'legacy-project',
+                'client_email' => 'legacy@example.org',
+                'private_key' => 'corrupted-ciphertext',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+        $update = $this->putJson('api/v1/settings/push/credentials', [
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => "-----BEGIN PRIVATE KEY-----\nupdated-secret\n-----END PRIVATE KEY-----",
+        ]);
+
+        $update->assertOk();
+        $update->assertJsonPath('data.id', (string) $id);
+        $this->assertSame(1, PushCredential::query()->count());
+
+        $credential = PushCredential::query()->find($id);
+        $this->assertNotNull($credential);
+        $this->assertSame('project-id', $credential->project_id);
+        $this->assertSame('client@example.org', $credential->client_email);
+        $this->assertStringContainsString('BEGIN PRIVATE KEY', $credential->private_key);
+    }
+
     public function test_tenant_credentials_index_returns_without_private_key(): void
     {
         Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
