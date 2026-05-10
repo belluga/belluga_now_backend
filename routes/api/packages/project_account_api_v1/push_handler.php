@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Http\Middleware\InitializeAccount;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageActionController;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageController;
 use Belluga\PushHandler\Http\Controllers\Account\PushMessageDataController;
@@ -31,9 +30,9 @@ Route::middleware('auth:sanctum')
                     ->middleware('account', 'abilities:push-messages:delete');
 
                 Route::get('/{push_message_id}/data', [PushMessageDataController::class, 'show'])
-                    ->middleware(InitializeAccount::class);
+                    ->middleware('account', 'abilities:push-messages:read');
                 Route::post('/{push_message_id}/actions', [PushMessageActionController::class, 'store'])
-                    ->middleware(InitializeAccount::class);
+                    ->middleware('account', 'abilities:push-messages:read');
                 Route::post('/{push_message_id}/send', PushMessageSendController::class)
                     ->middleware('account', 'abilities:push-messages:send');
             });

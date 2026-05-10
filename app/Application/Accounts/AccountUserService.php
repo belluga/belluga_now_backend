@@ -9,6 +9,7 @@ use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -18,7 +19,8 @@ class AccountUserService
 {
     public function __construct(
         private readonly PasswordIdentityRegistrar $passwordIdentityRegistrar,
-        private readonly AccountUserAccessService $accessService
+        private readonly AccountUserAccessService $accessService,
+        private readonly PushUserGatewayContract $pushUsers,
     ) {}
 
     /**
@@ -45,6 +47,11 @@ class AccountUserService
                     'account_id' => $account->id,
                 ]);
             }
+
+            $this->pushUsers->syncPushDeviceAccountIds(
+                (string) $user->_id,
+                $user->fresh()->getAccessToIds(),
+            );
 
             return $user->fresh();
         });
@@ -85,7 +92,15 @@ class AccountUserService
 
             if (count($user->getAccessToIds()) === 0) {
                 $user->delete();
+                $this->pushUsers->deactivatePushDevicesForUser((string) $user->_id);
+
+                return;
             }
+
+            $this->pushUsers->syncPushDeviceAccountIds(
+                (string) $user->_id,
+                $user->getAccessToIds(),
+            );
         });
     }
 

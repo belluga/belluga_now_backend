@@ -103,7 +103,7 @@ class InitializationControllerTest extends TestCase
             'user' => [
                 'name' => 'Admin Test',
                 'email' => 'admin@example.org',
-                'password' => 'secret123',
+                'password' => 'LaunchSafe!246',
             ],
             'tenant' => [
                 'name' => 'Belluga Solutions Test',

@@ -3,6 +3,7 @@
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
+use App\Application\LandlordUsers\LandlordPasswordCredentialBackfillService;
 use App\Application\Security\ApiAbuseSignalRecorder;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\Tenant;
@@ -148,6 +149,15 @@ Artisan::command('events:legacy-event-parties:repair {--dry-run}', function () {
 
     return 0;
 })->purpose('Inspect or repair legacy events that still rely on artists/venue event_parties drift.');
+
+Artisan::command('landlord:password-credentials:repair {--dry-run}', function () {
+    $summary = app(LandlordPasswordCredentialBackfillService::class)
+        ->repair((bool) $this->option('dry-run'));
+
+    $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+    return 0;
+})->purpose('Inspect or repair landlord users so password credentials are canonical and legacy landlord password fields are removed.');
 
 Artisan::command('events:occurrences:repair {tenant_slug?} {--all}', function () {
     /** @var EventOccurrenceReconciliationService $service */

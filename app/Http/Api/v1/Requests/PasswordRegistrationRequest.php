@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Support\Validation\CanonicalPasswordRules;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -22,12 +23,7 @@ class PasswordRegistrationRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'email' => ['required', 'email', 'max:'.InputConstraints::EMAIL_MAX],
-            'password' => [
-                'required',
-                'string',
-                'min:'.InputConstraints::PASSWORD_MIN,
-                'max:'.InputConstraints::PASSWORD_MAX,
-            ],
+            'password' => CanonicalPasswordRules::required(),
             'anonymous_user_ids' => [
                 'sometimes',
                 'array',

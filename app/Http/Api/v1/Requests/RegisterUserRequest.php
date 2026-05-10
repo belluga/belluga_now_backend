@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Rules\EmailAvailableRule;
+use App\Support\Validation\CanonicalPasswordRules;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Validation\Rules\Password;
 
 class RegisterUserRequest extends FormRequest
 {
@@ -37,11 +37,7 @@ class RegisterUserRequest extends FormRequest
                 'max:'.InputConstraints::EMAIL_MAX,
                 new EmailAvailableRule('landlord', 'landlord_users'),
             ],
-            'password' => [
-                'required',
-                'confirmed',
-                Password::defaults()->max(InputConstraints::PASSWORD_MAX),
-            ],
+            'password' => CanonicalPasswordRules::required(confirmed: true),
             'device_name' => 'required|string|max:'.InputConstraints::NAME_MAX,
         ];
     }

@@ -94,6 +94,42 @@ class BrandingManifestServiceTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
     }
 
+    public function test_resolve_favicon_asset_ignores_zero_byte_dedicated_icon_and_falls_back_to_pwa_icon(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        Storage::disk('public')->put("tenants/{$tenant->slug}/logos/favicon.ico", '');
+        Storage::disk('public')->put("tenants/{$tenant->slug}/pwa/icon-192x192.png", 'tenant-pwa-icon');
+
+        $tenant->branding_data = [
+            'logo_settings' => [
+                'favicon_uri' => "https://tenant-alpha.test/storage/tenants/{$tenant->slug}/logos/favicon.ico",
+            ],
+            'pwa_icon' => [
+                'icon192_uri' => 'https://tenant-alpha.test/icon/icon-192x192.png?v=tenant-pwa-icon',
+                'icon512_uri' => '',
+                'source_uri' => '',
+                'icon_maskable512_uri' => '',
+            ],
+        ];
+        $tenant->save();
+        $tenant->fresh()?->makeCurrent();
+
+        $resolvedAsset = $this->service->resolveFaviconAsset();
+        $state = $this->service->resolveFaviconRouteStateFromBranding($tenant->branding_data);
+        $response = $this->service->assetResponse($resolvedAsset);
+
+        $this->assertSame('https://tenant-alpha.test/icon/icon-192x192.png?v=tenant-pwa-icon', $resolvedAsset);
+        $this->assertSame(
+            ['has_dedicated_asset' => false, 'uses_pwa_fallback' => true],
+            $state,
+        );
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     public function test_asset_response_resolves_landlord_canonical_favicon_for_tenant_fallback(): void
     {
         Storage::fake('public');

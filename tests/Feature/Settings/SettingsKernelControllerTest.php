@@ -550,6 +550,32 @@ class SettingsKernelControllerTest extends TestCaseTenant
         }
     }
 
+    public function test_patch_tenant_public_auth_rejects_landlord_catalog_without_phone_otp(): void
+    {
+        $landlord = LandlordSettings::current();
+        $original = $landlord?->getAttribute('tenant_public_auth');
+        if ($landlord === null) {
+            $landlord = new LandlordSettings;
+            $landlord->setAttribute('_id', \Belluga\Settings\Models\SettingsDocument::ROOT_ID);
+        }
+
+        try {
+            $this->asLandlordHost();
+            Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['*']);
+            $hostApi = sprintf('http://%s/admin/api/v1/', $this->host);
+
+            $response = $this->patchJson($hostApi.'settings/values/tenant_public_auth', [
+                'available_methods' => ['password'],
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['available_methods']);
+        } finally {
+            $landlord->setAttribute('tenant_public_auth', $original);
+            $landlord->save();
+        }
+    }
+
     public function test_patch_tenant_public_auth_rejects_tenant_override_when_landlord_disables_customization(): void
     {
         $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();

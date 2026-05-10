@@ -15,7 +15,20 @@ return [
     |
     */
 
-    'default' => env('CACHE_STORE', 'database'),
+    'default' => env('CACHE_STORE', 'mongodb'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rate Limiter Store
+    |--------------------------------------------------------------------------
+    |
+    | The rate limiter may use a dedicated cache store that differs from the
+    | application's default cache store. When unset, it falls back to the
+    | current default cache store.
+    |
+    */
+
+    'limiter' => env('CACHE_LIMITER', env('CACHE_STORE', 'mongodb')),
 
     /*
     |--------------------------------------------------------------------------
@@ -26,7 +39,7 @@ return [
     | well as their drivers. You may even define multiple stores for the
     | same cache driver to group types of items stored in your caches.
     |
-    | Supported drivers: "array", "database", "file", "memcached",
+    | Supported drivers: "array", "file", "memcached",
     |                    "redis", "dynamodb", "octane", "null"
     |
     */
@@ -38,12 +51,17 @@ return [
             'serialize' => false,
         ],
 
-        'database' => [
-            'driver' => 'database',
-            'connection' => env('DB_CACHE_CONNECTION'),
-            'table' => env('DB_CACHE_TABLE', 'cache'),
-            'lock_connection' => env('DB_CACHE_LOCK_CONNECTION'),
-            'lock_table' => env('DB_CACHE_LOCK_TABLE'),
+        // Intentionally disabled in this Mongo-first app so accidental
+        // Cache::store('database') usage fails fast instead of routing through
+        // Laravel's relational DatabaseStore semantics.
+        'database' => null,
+
+        'mongodb' => [
+            'driver' => 'mongodb',
+            'connection' => env('DB_CACHE_CONNECTION', 'mongodb'),
+            'collection' => env('DB_CACHE_COLLECTION', 'cache'),
+            'lock_connection' => env('DB_CACHE_LOCK_CONNECTION', 'mongodb'),
+            'lock_collection' => env('DB_CACHE_LOCK_COLLECTION', 'cache_locks'),
         ],
 
         'file' => [

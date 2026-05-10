@@ -261,7 +261,12 @@ class ApiSecurityHardening
      * @return array{
      *     level:string,
      *     label:string,
+     *     domain:?string,
      *     requests_per_minute:int,
+     *     subject_input:?string,
+     *     subject_kind:?string,
+     *     subject_requests_per_minute:?int,
+     *     fail_closed_on_backend_error:bool,
      *     require_idempotency:bool,
      *     replay_window_seconds:int,
      *     level_source:string
@@ -317,8 +322,8 @@ class ApiSecurityHardening
 
     /**
      * @param  array<string,mixed>  $candidate
-     * @param  array{level:string,label:string,requests_per_minute:int,require_idempotency:bool,replay_window_seconds:int,level_source:string}  $current
-     * @return array{level:string,label:string,requests_per_minute:int,require_idempotency:bool,replay_window_seconds:int,level_source:string}
+     * @param  array{level:string,label:string,domain:?string,requests_per_minute:int,subject_input:?string,subject_kind:?string,subject_requests_per_minute:?int,fail_closed_on_backend_error:bool,require_idempotency:bool,replay_window_seconds:int,level_source:string}  $current
+     * @return array{level:string,label:string,domain:?string,requests_per_minute:int,subject_input:?string,subject_kind:?string,subject_requests_per_minute:?int,fail_closed_on_backend_error:bool,require_idempotency:bool,replay_window_seconds:int,level_source:string}
      */
     private function mergeMonotonicProfile(array $current, array $candidate, string $source): array
     {
@@ -351,10 +356,45 @@ class ApiSecurityHardening
             $sourceForLevel = $source;
         }
 
+        $domain = $current['domain'] ?? null;
+        if (array_key_exists('domain', $candidate)) {
+            $candidateDomain = trim((string) $candidate['domain']);
+            if ($candidateDomain !== '') {
+                $domain = $candidateDomain;
+            }
+        }
+
+        $subjectInput = $current['subject_input'] ?? null;
+        if (array_key_exists('subject_input', $candidate)) {
+            $candidateSubjectInput = trim((string) $candidate['subject_input']);
+            $subjectInput = $candidateSubjectInput !== '' ? $candidateSubjectInput : null;
+        }
+
+        $subjectKind = $current['subject_kind'] ?? null;
+        if (array_key_exists('subject_kind', $candidate)) {
+            $candidateSubjectKind = trim((string) $candidate['subject_kind']);
+            $subjectKind = $candidateSubjectKind !== '' ? $candidateSubjectKind : null;
+        }
+
+        $subjectRequestsPerMinute = $current['subject_requests_per_minute'] ?? null;
+        if (array_key_exists('subject_requests_per_minute', $candidate)) {
+            $subjectRequestsPerMinute = max(1, (int) $candidate['subject_requests_per_minute']);
+        }
+
+        $failClosedOnBackendError = (bool) ($current['fail_closed_on_backend_error'] ?? false);
+        if (array_key_exists('fail_closed_on_backend_error', $candidate)) {
+            $failClosedOnBackendError = (bool) $candidate['fail_closed_on_backend_error'];
+        }
+
         return [
             'level' => $effectiveLevel,
             'label' => (string) $effectiveByLevel['label'],
+            'domain' => $domain,
             'requests_per_minute' => max(1, min($rpmCandidates)),
+            'subject_input' => $subjectInput,
+            'subject_kind' => $subjectKind,
+            'subject_requests_per_minute' => $subjectRequestsPerMinute,
+            'fail_closed_on_backend_error' => $failClosedOnBackendError,
             'require_idempotency' => (bool) $current['require_idempotency'] || $candidateRequiresIdempotency,
             'replay_window_seconds' => max($windowCandidates),
             'level_source' => $sourceForLevel,
@@ -362,7 +402,7 @@ class ApiSecurityHardening
     }
 
     /**
-     * @return array{level:string,label:string,requests_per_minute:int,require_idempotency:bool,replay_window_seconds:int}
+     * @return array{level:string,label:string,domain:?string,requests_per_minute:int,subject_input:?string,subject_kind:?string,subject_requests_per_minute:?int,fail_closed_on_backend_error:bool,require_idempotency:bool,replay_window_seconds:int}
      */
     private function buildProfileFromLevel(string $level): array
     {
@@ -372,7 +412,12 @@ class ApiSecurityHardening
         return [
             'level' => $level,
             'label' => (string) ($fallback['label'] ?? $level),
+            'domain' => null,
             'requests_per_minute' => max(1, (int) ($fallback['requests_per_minute'] ?? 300)),
+            'subject_input' => null,
+            'subject_kind' => null,
+            'subject_requests_per_minute' => null,
+            'fail_closed_on_backend_error' => (bool) config('api_security.rate_limit.fail_closed_on_backend_error', false),
             'require_idempotency' => (bool) ($fallback['require_idempotency'] ?? false),
             'replay_window_seconds' => max(30, (int) ($fallback['replay_window_seconds'] ?? 600)),
         ];
@@ -454,20 +499,21 @@ class ApiSecurityHardening
         ?string $cfRayId,
         bool $observeMode,
     ): ?Response {
-        $level = (string) $profile['level'];
-        $maxAttempts = (int) $profile['requests_per_minute'];
         $windowSeconds = max(1, (int) config('api_security.rate_limit.window_seconds', 60));
-        $prefix = (string) config('api_security.rate_limit.cache_prefix', 'api_security:rate');
-        $key = sprintf('%s:%s:%s', $prefix, strtolower($level), $identity);
+        $contexts = $this->resolveRateLimitContexts($request, $profile, $identity, $tenantReference);
 
         try {
-            if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
-                $retryAfter = max(1, RateLimiter::availableIn($key));
+            foreach ($contexts as $context) {
+                if (! RateLimiter::tooManyAttempts($context['key'], $context['max_attempts'])) {
+                    continue;
+                }
+
+                $retryAfter = max(1, RateLimiter::availableIn($context['key']));
 
                 return $this->handleViolation(
                     request: $request,
                     profile: $profile,
-                    identity: $identity,
+                    identity: $context['identity'],
                     tenantReference: $tenantReference,
                     code: 'rate_limited',
                     status: 429,
@@ -479,33 +525,134 @@ class ApiSecurityHardening
                 );
             }
 
-            RateLimiter::hit($key, $windowSeconds);
+            foreach ($contexts as $context) {
+                RateLimiter::hit($context['key'], $windowSeconds);
+            }
         } catch (Throwable $exception) {
             Log::error('API security rate limiter backend failed.', [
                 'code' => 'rate_limiter_backend_error',
                 'path' => '/'.ltrim($request->path(), '/'),
                 'method' => strtoupper($request->method()),
-                'level' => $level,
+                'level' => (string) $profile['level'],
+                'domain' => (string) ($profile['domain'] ?? ''),
                 'correlation_id' => $correlationId,
                 'cf_ray_id' => $cfRayId,
                 'exception_class' => $exception::class,
                 'exception_message' => $exception->getMessage(),
             ]);
 
-            if ((bool) config('api_security.rate_limit.fail_closed_on_backend_error', false) && ! $observeMode) {
+            if ((bool) ($profile['fail_closed_on_backend_error'] ?? config('api_security.rate_limit.fail_closed_on_backend_error', false)) && ! $observeMode) {
                 return $this->buildErrorResponse(
                     status: 503,
                     code: 'rate_limit_unavailable',
                     message: 'Rate limiting is temporarily unavailable.',
                     correlationId: $correlationId,
                     cfRayId: $cfRayId,
-                    level: $level,
+                    level: (string) $profile['level'],
                     profile: $profile
                 );
             }
         }
 
         return null;
+    }
+
+    /**
+     * @return list<array{key:string,identity:string,max_attempts:int}>
+     */
+    private function resolveRateLimitContexts(
+        Request $request,
+        array $profile,
+        string $identity,
+        ?string $tenantReference,
+    ): array {
+        $contexts = [[
+            'key' => $this->rateLimitKey(
+                (string) $profile['level'],
+                (string) ($profile['domain'] ?? ''),
+                $identity
+            ),
+            'identity' => $identity,
+            'max_attempts' => (int) $profile['requests_per_minute'],
+        ]];
+
+        $subjectIdentity = $this->resolveRateLimitSubjectIdentity($request, $profile, $tenantReference);
+        if ($subjectIdentity === null || $subjectIdentity === $identity) {
+            return $contexts;
+        }
+
+        $contexts[] = [
+            'key' => $this->rateLimitKey(
+                (string) $profile['level'],
+                (string) ($profile['domain'] ?? ''),
+                $subjectIdentity
+            ),
+            'identity' => $subjectIdentity,
+            'max_attempts' => max(1, (int) ($profile['subject_requests_per_minute'] ?? $profile['requests_per_minute'])),
+        ];
+
+        return $contexts;
+    }
+
+    private function rateLimitKey(string $level, string $domain, string $identity): string
+    {
+        $prefix = (string) config('api_security.rate_limit.cache_prefix', 'api_security:rate');
+
+        return sprintf(
+            '%s:%s:%s:%s',
+            $prefix,
+            strtolower($level),
+            $domain !== '' ? $domain : 'default',
+            $identity
+        );
+    }
+
+    private function resolveRateLimitSubjectIdentity(Request $request, array $profile, ?string $tenantReference): ?string
+    {
+        $subjectInput = trim((string) ($profile['subject_input'] ?? ''));
+        if ($subjectInput === '') {
+            return null;
+        }
+
+        $rawSubject = Arr::get($request->all(), $subjectInput);
+        if (! is_scalar($rawSubject)) {
+            return null;
+        }
+
+        $subjectKind = trim((string) ($profile['subject_kind'] ?? 'identifier'));
+        $normalizedSubject = $this->normalizeRateLimitSubject((string) $rawSubject, $subjectKind);
+        if ($normalizedSubject === null) {
+            return null;
+        }
+
+        $scope = trim((string) $tenantReference);
+        $domain = trim((string) ($profile['domain'] ?? ''));
+
+        return 'subject:'.hash_hmac(
+            'sha256',
+            implode('|', [
+                $scope !== '' ? $scope : 'global',
+                $domain !== '' ? $domain : 'default',
+                $subjectKind,
+                $normalizedSubject,
+            ]),
+            (string) config('app.key', 'api-security-rate-limit-subject')
+        );
+    }
+
+    private function normalizeRateLimitSubject(string $value, string $kind): ?string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return match ($kind) {
+            'email' => strtolower($trimmed),
+            'phone' => ($digits = preg_replace('/\D+/', '', $trimmed)) !== '' ? $digits : null,
+            'fingerprint' => strtolower($trimmed),
+            default => strtolower($trimmed),
+        };
     }
 
     /**
@@ -1080,6 +1227,9 @@ class ApiSecurityHardening
         $response->headers->set('X-Api-Security-Level', (string) ($profile['level'] ?? 'L2'));
         $response->headers->set('X-Api-Security-Label', (string) ($profile['label'] ?? 'L2 Balanced'));
         $response->headers->set('X-Api-Security-Level-Source', (string) ($profile['level_source'] ?? 'system_default'));
+        if (is_string($profile['domain'] ?? null) && trim((string) $profile['domain']) !== '') {
+            $response->headers->set('X-Api-Security-Domain', trim((string) $profile['domain']));
+        }
         $response->headers->set('X-Api-Security-Observe-Mode', $this->isObserveMode() ? 'true' : 'false');
 
         $edgePolicy = (string) data_get(config('api_security.cloudflare.edge_policy_by_level'), (string) ($profile['level'] ?? 'L2'), '');
@@ -1126,6 +1276,9 @@ class ApiSecurityHardening
         return $this->withSecurityHeaders($response, $correlationId, $cfRayId, [
             'level' => $level,
             'label' => (string) data_get(config('api_security.levels.'.$level), 'label', $level),
+            'domain' => is_string($profile['domain'] ?? null)
+                ? trim((string) $profile['domain'])
+                : null,
             'level_source' => (string) ($profile['level_source'] ?? 'system_default'),
         ]);
     }

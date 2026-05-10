@@ -323,6 +323,9 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<meta property="og:title" content="Festival na Orla | '.$this->resolvedSiteName.'">', false);
         $response->assertSee('<meta property="og:description" content="Sender User convidou você para Festival na Orla em Praia do Morro.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/invite-cover.png">', false);
+        $response->assertSee('<meta name="twitter:title" content="Festival na Orla | '.$this->resolvedSiteName.'">', false);
+        $response->assertSee('<meta name="twitter:description" content="Sender User convidou você para Festival na Orla em Praia do Morro.">', false);
+        $response->assertSee('<meta name="twitter:image" content="https://tenant.example/media/invite-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/invite?code=PREVIEW1234">', false);
     }
 

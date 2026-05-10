@@ -42,7 +42,38 @@ interface PushUserGatewayContract
     public function findUserForTenant(?string $userId, ?string $email): ?Authenticatable;
 
     /**
-     * @param  callable(Authenticatable): void  $callback
+     * @return array<int, string>
      */
-    public function chunkUsers(?string $accountId, int $chunkSize, callable $callback): void;
+    public function resolveAccountIds(Authenticatable $user): array;
+
+    /**
+     * @param  array<int, string>  $userIds
+     */
+    public function countActivePushTargetsByUserIds(?string $accountId, array $userIds): int;
+
+    public function countActivePushTargets(?string $accountId): int;
+
+    /**
+     * @param  array<int, string>  $userIds
+     * @param  callable(array<int, array{id:string,user_id:string,push_token:string}>): void  $callback
+     */
+    public function chunkActivePushTargetsByUserIds(?string $accountId, array $userIds, int $chunkSize, callable $callback): void;
+
+    /**
+     * @param  callable(array<int, array{id:string,user_id:string,push_token:string}>): void  $callback
+     */
+    public function chunkActivePushTargets(?string $accountId, int $chunkSize, callable $callback): void;
+
+    /**
+     * @param  array<int, string>  $sourceUserIds
+     * @param  array<int, string>  $targetAccountIds
+     */
+    public function reassignPushDevices(string $targetUserId, array $sourceUserIds, array $targetAccountIds = []): void;
+
+    /**
+     * @param  array<int, string>  $accountIds
+     */
+    public function syncPushDeviceAccountIds(string $userId, array $accountIds): void;
+
+    public function deactivatePushDevicesForUser(string $userId): void;
 }

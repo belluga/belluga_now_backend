@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Rules\EmailAvailableRule;
+use App\Support\Validation\CanonicalPasswordRules;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -34,12 +35,7 @@ class LandlordUserCreateRequest extends FormRequest
                 'max:'.InputConstraints::EMAIL_MAX,
                 new EmailAvailableRule('landlord', 'landlord_users'),
             ],
-            'password' => [
-                'required',
-                'string',
-                'min:'.InputConstraints::PASSWORD_MIN,
-                'max:'.InputConstraints::PASSWORD_MAX,
-            ],
+            'password' => CanonicalPasswordRules::required(),
             'role_id' => [
                 'required',
                 'string',

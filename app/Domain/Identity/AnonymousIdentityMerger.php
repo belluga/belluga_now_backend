@@ -14,6 +14,7 @@ use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
 use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,7 @@ class AnonymousIdentityMerger
 {
     public function __construct(
         private readonly ProximityPreferenceOwnershipService $proximityPreferenceOwnershipService,
+        private readonly PushUserGatewayContract $pushUsers,
     ) {}
 
     /**
@@ -152,6 +154,13 @@ class AnonymousIdentityMerger
                 sourceUserIds: $sourceCollection->map(
                     static fn (AccountUser $user): string => (string) $user->_id,
                 )->all(),
+            );
+            $this->pushUsers->reassignPushDevices(
+                targetUserId: (string) $target->_id,
+                sourceUserIds: $sourceCollection->map(
+                    static fn (AccountUser $user): string => (string) $user->_id,
+                )->all(),
+                targetAccountIds: $target->getAccessToIds(),
             );
 
             $promotionAudit = $promotionAudit

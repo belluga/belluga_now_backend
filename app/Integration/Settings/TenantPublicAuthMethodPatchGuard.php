@@ -83,6 +83,9 @@ class TenantPublicAuthMethodPatchGuard implements SettingsNamespacePatchGuardCon
         if ($availableMethods === []) {
             $errors['available_methods'][] = 'Configure at least one tenant-public auth method.';
         }
+        if (! in_array($this->resolver->failClosedPrimaryMethod(), $availableMethods, true)) {
+            $errors['available_methods'][] = 'The phone_otp method is required for fail-closed tenant-public auth governance.';
+        }
 
         if (isset($current['allow_tenant_customization']) && ! is_bool($current['allow_tenant_customization'])) {
             $errors['allow_tenant_customization'][] = 'The allow_tenant_customization field must be true or false.';

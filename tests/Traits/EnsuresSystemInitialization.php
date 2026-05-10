@@ -2,6 +2,7 @@
 
 namespace Tests\Traits;
 
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordRole;
@@ -32,16 +33,6 @@ trait EnsuresSystemInitialization
         }
 
         static::$systemInitialized = false;
-
-        if ($hasLandlordUser) {
-            $this->hydrateFromDatabase(
-                syncCrossTenantUsers: true,
-                createCrossTenantUsers: true
-            );
-            static::$systemInitialized = true;
-
-            return;
-        }
 
         $response = $this->withServerVariables([
             'HTTP_HOST' => $this->host,
@@ -240,6 +231,8 @@ trait EnsuresSystemInitialization
     {
         $adminEmail = 'cross-admin@belluga.test';
         $visitorEmail = 'cross-visitor@belluga.test';
+        /** @var LandlordUserAccessService $accessService */
+        $accessService = app(LandlordUserAccessService::class);
 
         $crossAdmin = LandlordUser::query()
             ->where('emails', 'all', [$adminEmail])
@@ -249,19 +242,21 @@ trait EnsuresSystemInitialization
             $crossAdmin = LandlordUser::create([
                 'name' => 'Cross Tenant Admin',
                 'emails' => [$adminEmail],
-                'password' => Hash::make('Secret!234'),
                 'identity_state' => 'registered',
             ]);
+            $accessService->syncPasswordCredentialsForEmails($crossAdmin, Hash::make('Secret!234'));
+            $accessService->removeLegacyPasswordState($crossAdmin);
         }
 
         if ($crossAdmin) {
             $crossAdmin->name = 'Cross Tenant Admin';
             $crossAdmin->emails = [$adminEmail];
             $crossAdmin->identity_state = 'registered';
-            $crossAdmin->password = Hash::make('Secret!234');
             $crossAdmin->phones = [];
             $crossAdmin->tenant_roles = [];
             $crossAdmin->save();
+            $accessService->syncPasswordCredentialsForEmails($crossAdmin, Hash::make('Secret!234'));
+            $accessService->removeLegacyPasswordState($crossAdmin);
         }
 
         if (! $crossAdmin) {
@@ -275,8 +270,10 @@ trait EnsuresSystemInitialization
 
         $this->landlord->user_cross_tenant_admin->name = $crossAdmin->name;
         $this->landlord->user_cross_tenant_admin->email_1 = $crossAdmin->emails[0] ?? $adminEmail;
+        $this->landlord->user_cross_tenant_admin->email_2 = '';
         $this->landlord->user_cross_tenant_admin->user_id = (string) $crossAdmin->_id;
         $this->landlord->user_cross_tenant_admin->password = 'Secret!234';
+        $this->landlord->user_cross_tenant_admin->password_reset_token = '';
         $this->landlord->user_cross_tenant_admin->token = $adminToken;
 
         $crossVisitor = LandlordUser::query()
@@ -287,19 +284,21 @@ trait EnsuresSystemInitialization
             $crossVisitor = LandlordUser::create([
                 'name' => 'Cross Tenant Visitor',
                 'emails' => [$visitorEmail],
-                'password' => Hash::make('Secret!234'),
                 'identity_state' => 'registered',
             ]);
+            $accessService->syncPasswordCredentialsForEmails($crossVisitor, Hash::make('Secret!234'));
+            $accessService->removeLegacyPasswordState($crossVisitor);
         }
 
         if ($crossVisitor) {
             $crossVisitor->name = 'Cross Tenant Visitor';
             $crossVisitor->emails = [$visitorEmail];
             $crossVisitor->identity_state = 'registered';
-            $crossVisitor->password = Hash::make('Secret!234');
             $crossVisitor->phones = [];
             $crossVisitor->tenant_roles = [];
             $crossVisitor->save();
+            $accessService->syncPasswordCredentialsForEmails($crossVisitor, Hash::make('Secret!234'));
+            $accessService->removeLegacyPasswordState($crossVisitor);
         }
 
         if (! $crossVisitor) {
@@ -313,8 +312,10 @@ trait EnsuresSystemInitialization
 
         $this->landlord->user_cross_tenant_visitor->name = $crossVisitor->name;
         $this->landlord->user_cross_tenant_visitor->email_1 = $crossVisitor->emails[0] ?? $visitorEmail;
+        $this->landlord->user_cross_tenant_visitor->email_2 = '';
         $this->landlord->user_cross_tenant_visitor->user_id = (string) $crossVisitor->_id;
         $this->landlord->user_cross_tenant_visitor->password = 'Secret!234';
+        $this->landlord->user_cross_tenant_visitor->password_reset_token = '';
         $this->landlord->user_cross_tenant_visitor->token = $visitorToken;
     }
 
