@@ -3397,7 +3397,11 @@ class PushMessageFlowTest extends TestCase
 
         $expiresAt = Carbon::now()->addMinutes(10);
         $client = $this->app->make(FcmHttpV1Client::class);
-        $client->send($message, $tokens, 'instance-budget', $expiresAt, 10);
+        $result = $client->send($message, $tokens, 'instance-budget', $expiresAt, 10);
+
+        $this->assertSame(500, $result['accepted_count']);
+        $this->assertCount(500, $result['responses']);
+        $this->assertSame('accepted', $result['responses'][0]['status'] ?? null);
 
         Http::assertSentCount(2);
         Http::assertSent(function ($request) use ($tokens) {

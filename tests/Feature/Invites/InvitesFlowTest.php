@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Invites;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Jobs\Telemetry\DeliverTelemetryEventJob;
@@ -238,6 +239,28 @@ class InvitesFlowTest extends TestCaseTenant
         );
 
         Bus::assertDispatched(SendPushMessageJob::class);
+    }
+
+    public function test_invite_stream_accepts_access_token_query_for_web_sse_clients(): void
+    {
+        $plainTextToken = $this->app
+            ->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser($this->receiver, 'Invite stream token', ['*'])
+            ->plainTextToken;
+
+        $response = $this->get(
+            "{$this->base_api_tenant}invites/stream?access_token={$plainTextToken}",
+            [
+                'Accept' => 'text/event-stream',
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+            ]
+        );
+
+        $response->assertOk();
+        $this->assertStringStartsWith(
+            'text/event-stream',
+            (string) $response->headers->get('Content-Type')
+        );
     }
 
     public function test_send_invite_to_multiple_recipients_updates_created_count_and_metrics(): void

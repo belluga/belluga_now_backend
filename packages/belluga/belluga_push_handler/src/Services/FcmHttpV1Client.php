@@ -263,7 +263,7 @@ class FcmHttpV1Client implements FcmClientContract
      */
     private function parseBatchResponse(Response $response, array $tokens): array
     {
-        $contentType = (string) ($response->header('Content-Type')[0] ?? '');
+        $contentType = $this->stringHeader($response, 'Content-Type');
         $boundary = $this->extractBoundary($contentType);
 
         if ($boundary === null) {
@@ -330,6 +330,17 @@ class FcmHttpV1Client implements FcmClientContract
         ksort($resolved);
 
         return array_values($resolved);
+    }
+
+    private function stringHeader(Response $response, string $name): string
+    {
+        $header = $response->header($name);
+
+        if (is_array($header)) {
+            return (string) ($header[0] ?? '');
+        }
+
+        return is_string($header) ? $header : '';
     }
 
     private function extractBoundary(string $contentType): ?string
