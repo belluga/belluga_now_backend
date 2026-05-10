@@ -7,6 +7,7 @@ namespace Tests\Feature\Events;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Push\PushChannelNamingService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -16,9 +17,14 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Models\Tenants\InviteEdge;
+use Belluga\PushHandler\Contracts\PushTopicTransportContract;
+use Belluga\PushHandler\Models\Tenants\PushCredential;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
+use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Tests\Fakes\FakePushTopicTransport;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -43,9 +49,12 @@ class EventAttendanceControllerTest extends TestCaseTenant
 
     private AccountUser $user;
 
+    private FakePushTopicTransport $topicTransport;
+
     protected function setUp(): void
     {
         parent::setUp();
+        config(['queue.default' => 'sync']);
 
         if (! self::$bootstrapped) {
             $this->refreshLandlordAndTenantDatabases();
@@ -64,6 +73,8 @@ class EventAttendanceControllerTest extends TestCaseTenant
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser('Attendance User');
+        $this->topicTransport = new FakePushTopicTransport();
+        $this->app->instance(PushTopicTransportContract::class, $this->topicTransport);
         Sanctum::actingAs($this->user, ['*']);
     }
 
@@ -116,6 +127,35 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $list = $this->getJson("{$this->base_api_tenant}events/attendance/confirmed");
         $list->assertOk();
         $this->assertSame([], $list->json('data.confirmed_occurrence_ids'));
+    }
+
+    public function test_confirm_and_unconfirm_sync_occurrence_topic_membership_for_active_push_devices(): void
+    {
+        $this->seedPushRuntimeReady();
+        $this->registerActivePushToken($this->user, 'attendance-topic-token');
+
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+        $expectedTopic = $this->app->make(PushChannelNamingService::class)
+            ->confirmedOccurrenceTopic($occurrenceId);
+
+        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
+            'occurrence_id' => $occurrenceId,
+        ])->assertOk();
+
+        $this->assertContains([
+            'topic' => $expectedTopic,
+            'tokens' => ['attendance-topic-token'],
+        ], $this->topicTransport->subscriptions);
+
+        $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/unconfirm", [
+            'occurrence_id' => $occurrenceId,
+        ])->assertOk();
+
+        $this->assertContains([
+            'topic' => $expectedTopic,
+            'tokens' => ['attendance-topic-token'],
+        ], $this->topicTransport->unsubscriptions);
     }
 
     public function test_confirm_requires_occurrence_identity(): void
@@ -461,6 +501,46 @@ class EventAttendanceControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
 
         return $event->fresh();
+    }
+
+    private function seedPushRuntimeReady(): void
+    {
+        PushCredential::query()->delete();
+        TenantPushSettings::query()->delete();
+
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+
+        TenantPushSettings::create([
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+            'push' => [
+                'enabled' => true,
+                'max_ttl_days' => 30,
+            ],
+        ]);
+    }
+
+    private function registerActivePushToken(AccountUser $user, string $pushToken): void
+    {
+        PushDevice::query()->create([
+            'tenant_id' => (string) (Tenant::current()?->_id ?? Tenant::current()?->id ?? ''),
+            'account_user_id' => (string) $user->_id,
+            'account_ids' => $user->getAccessToIds(),
+            'device_id' => 'device-'.Str::random(6),
+            'platform' => 'android',
+            'push_token' => $pushToken,
+            'is_active' => true,
+            'last_registered_at' => Carbon::now(),
+        ]);
     }
 
     private function initializeSystem(): void

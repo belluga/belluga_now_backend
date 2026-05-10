@@ -220,7 +220,12 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $ref = new \ReflectionProperty($label, 'base_label');
         $ref->setAccessible(true);
 
-        return (string) $ref->getValue($label);
+        return sprintf(
+            '%s::%s::%s',
+            static::class,
+            $this->nameWithDataSet(),
+            (string) $ref->getValue($label),
+        );
     }
 
     private function seedAccountUser(

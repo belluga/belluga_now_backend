@@ -48,6 +48,20 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
         );
     }
 
+    private function throttleTestNamespace(): string
+    {
+        return str_replace('\\', '.', static::class);
+    }
+
+    private function throttleTestRemoteAddr(): string
+    {
+        $seed = crc32(static::class);
+        $thirdOctet = (($seed >> 8) & 0xff) ?: 1;
+        $fourthOctet = ($seed & 0xff) ?: 1;
+
+        return sprintf('127.0.%d.%d', $thirdOctet, $fourthOctet);
+    }
+
     public function testAnonymousIdentityIssuance(): void
     {
         $payload = [
@@ -95,24 +109,26 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
         config()->set('api_security.lifecycle.enabled', false);
         config()->set('api_security.levels.L2.requests_per_minute', 9999);
         Cache::flush();
+        $namespace = $this->throttleTestNamespace();
+        $remoteAddr = $this->throttleTestRemoteAddr();
 
         $first = $this->issueAnonymousIdentity([
             'device_name' => 'integration-device-throttle',
             'fingerprint' => [
-                'hash' => hash('sha256', 'anonymous-throttle-one'),
+                'hash' => hash('sha256', "{$namespace}.anonymous-throttle-one"),
                 'user_agent' => 'IntegrationTest/1.0',
             ],
-        ], ['REMOTE_ADDR' => '127.0.0.111']);
+        ], ['REMOTE_ADDR' => $remoteAddr]);
         $first->assertStatus(201);
         $first->assertHeader('X-Api-Security-Domain', 'tenant_public_anonymous_identity');
 
         $second = $this->issueAnonymousIdentity([
             'device_name' => 'integration-device-throttle-2',
             'fingerprint' => [
-                'hash' => hash('sha256', 'anonymous-throttle-two'),
+                'hash' => hash('sha256', "{$namespace}.anonymous-throttle-two"),
                 'user_agent' => 'IntegrationTest/1.0',
             ],
-        ], ['REMOTE_ADDR' => '127.0.0.111']);
+        ], ['REMOTE_ADDR' => $remoteAddr]);
         $second->assertStatus(429);
         $second->assertHeader('X-Api-Security-Domain', 'tenant_public_anonymous_identity');
     }

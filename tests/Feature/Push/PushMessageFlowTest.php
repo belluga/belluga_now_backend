@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Push;
 
+use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Integration\Push\PushUserGatewayAdapter;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -19,6 +21,7 @@ use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
@@ -29,6 +32,7 @@ use Belluga\PushHandler\Services\PushRecipientResolver;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Carbon\Carbon;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -106,7 +110,7 @@ class PushMessageFlowTest extends TestCase
                         return in_array((string) $user->_id, $ids, true);
                     }
 
-                    return true;
+                    return $type === 'all';
                 }
             };
         });
@@ -125,6 +129,7 @@ class PushMessageFlowTest extends TestCase
     private function resetPushTestState(): void
     {
         PushMessage::query()->delete();
+        PushDevice::query()->delete();
         PushDeliveryLog::query()->delete();
         TenantSettings::query()->delete();
     }
@@ -3145,6 +3150,27 @@ class PushMessageFlowTest extends TestCase
             {
                 public function __construct() {}
 
+                public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
+                {
+                    return 2;
+                }
+
+                public function streamResolvedTargetBatches(
+                    PushMessage $message,
+                    string $scope,
+                    ?string $accountId,
+                    int $batchSize,
+                    callable $callback
+                ): void {
+                    $callback([
+                        'tokens' => ['token-1', 'token-2'],
+                        'token_user_map' => [
+                            'token-1' => 'user-1',
+                            'token-2' => 'user-2',
+                        ],
+                    ]);
+                }
+
                 public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
                 {
                     return ['token-1', 'token-2'];
@@ -3202,10 +3228,15 @@ class PushMessageFlowTest extends TestCase
             'client_email' => 'client@example.org',
             'private_key' => $privateKey,
         ]);
+        Cache::flush();
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => Http::response(['name' => 'msg-1'], 200),
+            'https://fcm.googleapis.com/batch' => Http::response(
+                $this->fakeBatchResponseBody(['token-1', 'token-2']),
+                200,
+                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
+            ),
         ]);
 
         $message = PushMessage::create($this->buildPayload([
@@ -3224,20 +3255,23 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $client->send($message, ['token-1', 'token-2'], 'instance-1', $expiresAt, 10);
 
-        Http::assertSentCount(3);
+        Http::assertSentCount(2);
         Http::assertSent(function ($request) use ($expiresAt) {
-            if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
+            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
                 return false;
             }
-            $payload = $request->data()['message'] ?? [];
+            $body = $request->body();
+            if (! is_string($body)) {
+                return false;
+            }
 
-            return ($payload['notification']['title'] ?? null) === 'Override title'
-                && ($payload['data']['custom'] ?? null) === 'value'
-                && isset($payload['data']['push_message_id'])
-                && isset($payload['data']['message_instance_id'])
-                && ($payload['android']['ttl'] ?? null) === '600s'
-                && ($payload['webpush']['headers']['TTL'] ?? null) === '600'
-                && (string) ($payload['apns']['headers']['apns-expiration'] ?? '') === (string) $expiresAt->getTimestamp();
+            return str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1')
+                && str_contains($body, '"title":"Override title"')
+                && str_contains($body, '"custom":"value"')
+                && str_contains($body, '"ttl":"600s"')
+                && str_contains($body, '"TTL":"600"')
+                && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
+                && substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === 2;
         });
 
         Carbon::setTestNow();
@@ -3263,10 +3297,15 @@ class PushMessageFlowTest extends TestCase
             'client_email' => 'client@example.org',
             'private_key' => $privateKey,
         ]);
+        Cache::flush();
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => Http::response(['name' => 'msg-1'], 200),
+            'https://fcm.googleapis.com/batch' => Http::response(
+                $this->fakeBatchResponseBody(['token-1']),
+                200,
+                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
+            ),
         ]);
 
         $message = PushMessage::create($this->buildPayload([
@@ -3296,25 +3335,155 @@ class PushMessageFlowTest extends TestCase
         $client->send($message, ['token-1'], 'instance-2', $expiresAt, 15);
 
         Http::assertSent(function ($request) use ($expiresAt) {
-            if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
+            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
                 return false;
             }
 
-            $payload = $request->data()['message'] ?? [];
+            $body = $request->body();
+            if (! is_string($body)) {
+                return false;
+            }
 
-            return ($payload['notification']['title'] ?? null) === 'Default title'
-                && ($payload['notification']['body'] ?? null) === 'Default body'
-                && ($payload['android']['notification']['title'] ?? null) === 'Android title'
-                && ($payload['apns']['payload']['aps']['alert']['title'] ?? null) === 'Apns title'
-                && ($payload['apns']['payload']['aps']['alert']['body'] ?? null) === 'Apns body'
-                && isset($payload['data']['push_message_id'])
-                && isset($payload['data']['message_instance_id'])
-                && ($payload['android']['ttl'] ?? null) === '900s'
-                && ($payload['webpush']['headers']['TTL'] ?? null) === '900'
-                && (string) ($payload['apns']['headers']['apns-expiration'] ?? '') === (string) $expiresAt->getTimestamp();
+            return str_contains($body, '"title":"Default title"')
+                && str_contains($body, '"body":"Default body"')
+                && str_contains($body, '"notification":{"title":"Android title"}')
+                && str_contains($body, '"alert":{"title":"Apns title","body":"Apns body"}')
+                && str_contains($body, '"ttl":"900s"')
+                && str_contains($body, '"TTL":"900"')
+                && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
+                && substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === 1;
         });
 
         Carbon::setTestNow();
+    }
+
+    public function test_fcm_http_client_sends_up_to_five_hundred_recipients_in_one_provider_batch_request(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        PushCredential::query()->delete();
+        $keyResource = openssl_pkey_new([
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'private_key_bits' => 2048,
+        ]);
+        $privateKey = '';
+        openssl_pkey_export($keyResource, $privateKey);
+
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => $privateKey,
+        ]);
+        Cache::flush();
+
+        $tokens = [];
+        for ($index = 0; $index < 500; $index++) {
+            $tokens[] = 'token-'.$index;
+        }
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
+            'https://fcm.googleapis.com/batch' => Http::response(
+                $this->fakeBatchResponseBody($tokens),
+                200,
+                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
+            ),
+        ]);
+
+        $message = PushMessage::create($this->buildPayload());
+
+        $expiresAt = Carbon::now()->addMinutes(10);
+        $client = $this->app->make(FcmHttpV1Client::class);
+        $client->send($message, $tokens, 'instance-budget', $expiresAt, 10);
+
+        Http::assertSentCount(2);
+        Http::assertSent(function ($request) use ($tokens) {
+            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
+                return false;
+            }
+
+            $body = $request->body();
+            if (! is_string($body)) {
+                return false;
+            }
+
+            return substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === count($tokens);
+        });
+
+        Carbon::setTestNow();
+    }
+
+    public function test_explicit_user_audience_within_batch_limit_uses_single_push_device_query(): void
+    {
+        $userIds = [];
+        for ($index = 0; $index < 205; $index++) {
+            $user = $this->userService->create($this->account, [
+                'name' => sprintf('Query Budget User %03d', $index),
+                'email' => sprintf('query-budget-user-%03d@example.org', $index),
+                'password' => 'Secret!234',
+            ], (string) $this->operatorRole->_id);
+
+            $this->seedPushDevice($user, [
+                'device_id' => sprintf('query-budget-device-%03d', $index),
+                'platform' => 'android',
+                'push_token' => sprintf('query-budget-token-%03d', $index),
+                'is_active' => true,
+            ]);
+
+            $userIds[] = (string) $user->_id;
+        }
+
+        $resolver = $this->app->make(PushRecipientResolver::class);
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => $userIds,
+            ],
+        ]);
+
+        $queryCount = $this->countTenantQueries(function () use ($resolver, $message): void {
+            $resolver->resolveTokensWithUsers($message, 'account', (string) $this->account->_id);
+        });
+
+        $this->assertSame(1, $queryCount);
+    }
+
+    public function test_explicit_user_audience_above_batch_limit_uses_one_push_device_query_per_batch_window(): void
+    {
+        $userIds = [];
+        for ($index = 0; $index < 501; $index++) {
+            $user = $this->userService->create($this->account, [
+                'name' => sprintf('Query Budget Spill User %03d', $index),
+                'email' => sprintf('query-budget-spill-user-%03d@example.org', $index),
+                'password' => 'Secret!234',
+            ], (string) $this->operatorRole->_id);
+
+            $this->seedPushDevice($user, [
+                'device_id' => sprintf('query-budget-spill-device-%03d', $index),
+                'platform' => 'android',
+                'push_token' => sprintf('query-budget-spill-token-%03d', $index),
+                'is_active' => true,
+            ]);
+
+            $userIds[] = (string) $user->_id;
+        }
+
+        $resolver = $this->app->make(PushRecipientResolver::class);
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => $userIds,
+            ],
+        ]);
+
+        $queryCount = $this->countTenantQueries(function () use ($resolver, $message): void {
+            $resolver->resolveTokensWithUsers($message, 'account', (string) $this->account->_id);
+        });
+
+        $this->assertSame(2, $queryCount);
     }
 
     public function test_quota_check_blocked_returns_reason(): void
@@ -3371,13 +3540,9 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        AccountUser::query()->where('_id', $this->operator->_id)->update([
-            'devices' => [
-                [
-                    'device_id' => 'device-1',
-                    'push_token' => 'token-1',
-                ],
-            ],
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'device-1',
+            'push_token' => 'token-1',
         ]);
 
         $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
@@ -3406,13 +3571,9 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        AccountUser::query()->where('_id', $this->operator->_id)->update([
-            'devices' => [
-                [
-                    'device_id' => 'device-1',
-                    'push_token' => 'token-1',
-                ],
-            ],
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'device-1',
+            'push_token' => 'token-1',
         ]);
 
         $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
@@ -3427,16 +3588,13 @@ class PushMessageFlowTest extends TestCase
     public function test_register_updates_device_token_and_reactivates(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
-        $user->devices = [
-            [
-                'device_id' => 'device-1',
-                'platform' => 'android',
-                'push_token' => 'token-old',
-                'is_active' => false,
-                'invalidated_at' => new UTCDateTime,
-            ],
-        ];
-        $user->save();
+        $this->seedPushDevice($user, [
+            'device_id' => 'device-1',
+            'platform' => 'android',
+            'push_token' => 'token-old',
+            'is_active' => false,
+            'invalidated_at' => new UTCDateTime,
+        ]);
 
         $service = $this->app->make(PushDeviceService::class);
         $service->register($user, [
@@ -3445,18 +3603,19 @@ class PushMessageFlowTest extends TestCase
             'push_token' => 'token-new',
         ]);
 
-        $user->refresh();
-        $this->assertCount(1, $user->devices ?? []);
-        $device = $user->devices[0];
-        $this->assertSame('token-new', $device['push_token'] ?? null);
-        $this->assertTrue($device['is_active'] ?? false);
-        $this->assertNull($device['invalidated_at'] ?? null);
+        $device = PushDevice::query()
+            ->where('account_user_id', (string) $user->_id)
+            ->where('device_id', 'device-1')
+            ->firstOrFail();
+        $this->assertSame('token-new', $device->push_token);
+        $this->assertTrue((bool) $device->is_active);
+        $this->assertNull($device->invalidated_at);
     }
 
     public function test_invalidate_tokens_marks_inactive_and_keeps_others(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
-        $user->devices = [
+        $this->seedPushDevices($user, [
             [
                 'device_id' => 'device-1',
                 'platform' => 'android',
@@ -3467,26 +3626,29 @@ class PushMessageFlowTest extends TestCase
                 'platform' => 'ios',
                 'push_token' => 'token-2',
             ],
-        ];
-        $user->save();
+        ]);
 
         $service = $this->app->make(PushDeviceService::class);
         $service->invalidateTokens($user, ['token-1']);
 
-        $user->refresh();
-        $devices = collect($user->devices ?? []);
-        $device1 = $devices->firstWhere('device_id', 'device-1');
-        $device2 = $devices->firstWhere('device_id', 'device-2');
+        $device1 = PushDevice::query()
+            ->where('account_user_id', (string) $user->_id)
+            ->where('device_id', 'device-1')
+            ->firstOrFail();
+        $device2 = PushDevice::query()
+            ->where('account_user_id', (string) $user->_id)
+            ->where('device_id', 'device-2')
+            ->firstOrFail();
 
-        $this->assertSame(false, $device1['is_active'] ?? null);
-        $this->assertNotNull($device1['invalidated_at'] ?? null);
-        $this->assertTrue(($device2['is_active'] ?? true) === true);
+        $this->assertFalse((bool) $device1->is_active);
+        $this->assertNotNull($device1->invalidated_at);
+        $this->assertTrue((bool) $device2->is_active);
     }
 
     public function test_recipient_resolver_skips_inactive_tokens(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
-        $user->devices = [
+        $this->seedPushDevices($user, [
             [
                 'device_id' => 'device-1',
                 'platform' => 'android',
@@ -3499,13 +3661,388 @@ class PushMessageFlowTest extends TestCase
                 'push_token' => 'token-inactive',
                 'is_active' => false,
             ],
-        ];
-        $user->save();
+        ]);
 
         $resolver = $this->app->make(PushRecipientResolver::class);
         $tokens = $resolver->tokensForUser($user);
 
         $this->assertSame(['token-active'], $tokens);
+    }
+
+    public function test_recipient_resolver_queries_explicit_user_audience_by_ids_without_tenant_scan(): void
+    {
+        $target = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($target, [
+            'device_id' => 'target-device',
+            'platform' => 'android',
+            'push_token' => 'target-token',
+            'is_active' => true,
+        ]);
+
+        $other = $this->userService->create($this->account, [
+            'name' => 'Other Push User',
+            'email' => 'other-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+        $this->seedPushDevice($other, [
+            'device_id' => 'other-device',
+            'platform' => 'android',
+            'push_token' => 'other-token',
+            'is_active' => true,
+        ]);
+
+        $gateway = new class extends PushUserGatewayAdapter
+        {
+            public int $chunkAllTargetsCalls = 0;
+
+            public int $chunkTargetsByUserIdsCalls = 0;
+
+            /** @var array<int, string> */
+            public array $seenUserIds = [];
+
+            /** @var array<int, int> */
+            public array $seenBatchSizes = [];
+
+            public function chunkActivePushTargetsByUserIds(?string $accountId, array $userIds, int $chunkSize, callable $callback): void
+            {
+                $this->chunkTargetsByUserIdsCalls++;
+                $this->seenUserIds = array_values($userIds);
+                $this->seenBatchSizes[] = $chunkSize;
+
+                parent::chunkActivePushTargetsByUserIds($accountId, $userIds, $chunkSize, $callback);
+            }
+
+            public function chunkActivePushTargets(?string $accountId, int $chunkSize, callable $callback): void
+            {
+                $this->chunkAllTargetsCalls++;
+
+                parent::chunkActivePushTargets($accountId, $chunkSize, $callback);
+            }
+        };
+
+        $resolver = new PushRecipientResolver($gateway);
+
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $target->_id],
+            ],
+        ]);
+
+        $result = $resolver->resolveTokensWithUsers($message, 'tenant', null);
+
+        $this->assertSame(['target-token'], $result['tokens']);
+        $this->assertSame(['target-token' => (string) $target->_id], $result['token_user_map']);
+        $this->assertSame(1, $gateway->chunkTargetsByUserIdsCalls);
+        $this->assertSame(0, $gateway->chunkAllTargetsCalls);
+        $this->assertSame([(string) $target->_id], $gateway->seenUserIds);
+        $this->assertSame([500], $gateway->seenBatchSizes);
+    }
+
+    public function test_recipient_resolver_account_scope_excludes_foreign_account_users_even_when_ids_are_explicit(): void
+    {
+        $target = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($target, [
+            'device_id' => 'target-account-device',
+            'platform' => 'android',
+            'push_token' => 'target-account-token',
+            'is_active' => true,
+        ]);
+
+        $foreignAccount = Account::query()->create([
+            'name' => 'Foreign Push Account',
+            'document' => 'DOC-FOREIGN-PUSH',
+        ]);
+        $foreignRole = $foreignAccount->roleTemplates()->create([
+            'name' => 'Foreign Push Role',
+            'permissions' => ['push-messages:*'],
+        ]);
+        $foreignUser = $this->userService->create($foreignAccount, [
+            'name' => 'Foreign Push User',
+            'email' => 'foreign-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $foreignRole->_id);
+        $this->seedPushDevice($foreignUser, [
+            'device_id' => 'foreign-account-device',
+            'platform' => 'android',
+            'push_token' => 'foreign-account-token',
+            'is_active' => true,
+        ]);
+
+        $gateway = new class extends PushUserGatewayAdapter
+        {
+            public int $chunkAllTargetsCalls = 0;
+
+            public int $chunkTargetsByUserIdsCalls = 0;
+
+            /** @var array<int, string> */
+            public array $seenUserIds = [];
+
+            public ?string $receivedAccountId = null;
+
+            public function chunkActivePushTargetsByUserIds(?string $accountId, array $userIds, int $chunkSize, callable $callback): void
+            {
+                $this->chunkTargetsByUserIdsCalls++;
+                $this->receivedAccountId = $accountId;
+                $this->seenUserIds = array_values($userIds);
+
+                parent::chunkActivePushTargetsByUserIds($accountId, $userIds, $chunkSize, $callback);
+            }
+
+            public function chunkActivePushTargets(?string $accountId, int $chunkSize, callable $callback): void
+            {
+                $this->chunkAllTargetsCalls++;
+
+                parent::chunkActivePushTargets($accountId, $chunkSize, $callback);
+            }
+        };
+
+        $resolver = new PushRecipientResolver($gateway);
+
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [
+                    (string) $target->_id,
+                    (string) $foreignUser->_id,
+                ],
+            ],
+        ]);
+
+        $result = $resolver->resolveTokensWithUsers($message, 'account', (string) $this->account->_id);
+
+        $this->assertSame(['target-account-token'], $result['tokens']);
+        $this->assertSame(['target-account-token' => (string) $target->_id], $result['token_user_map']);
+        $this->assertSame(1, $gateway->chunkTargetsByUserIdsCalls);
+        $this->assertSame(0, $gateway->chunkAllTargetsCalls);
+        $this->assertSame((string) $this->account->_id, $gateway->receivedAccountId);
+        $this->assertEqualsCanonicalizing(
+            [(string) $target->_id, (string) $foreignUser->_id],
+            $gateway->seenUserIds
+        );
+    }
+
+    public function test_recipient_resolver_large_explicit_audience_stays_on_query_based_id_path(): void
+    {
+        $targetUserIds = [];
+        $expectedTokens = [];
+        $expectedTokenUserMap = [];
+
+        for ($index = 0; $index < 205; $index++) {
+            $user = $this->userService->create($this->account, [
+                'name' => sprintf('Large Audience User %03d', $index),
+                'email' => sprintf('large-audience-user-%03d@example.org', $index),
+                'password' => 'Secret!234',
+            ], (string) $this->operatorRole->_id);
+
+            $token = sprintf('large-audience-token-%03d', $index);
+            $this->seedPushDevice($user, [
+                'device_id' => sprintf('large-audience-device-%03d', $index),
+                'platform' => 'android',
+                'push_token' => $token,
+                'is_active' => true,
+            ]);
+
+            $userId = (string) $user->_id;
+            $targetUserIds[] = $userId;
+            $expectedTokens[] = $token;
+            $expectedTokenUserMap[$token] = $userId;
+        }
+
+        $gateway = new class extends PushUserGatewayAdapter
+        {
+            public int $chunkAllTargetsCalls = 0;
+
+            public int $chunkTargetsByUserIdsCalls = 0;
+
+            /** @var array<int, int> */
+            public array $receivedTargetCounts = [];
+
+            /** @var array<int, int> */
+            public array $receivedChunkSizes = [];
+
+            public function chunkActivePushTargetsByUserIds(?string $accountId, array $userIds, int $chunkSize, callable $callback): void
+            {
+                $this->chunkTargetsByUserIdsCalls++;
+                $this->receivedChunkSizes[] = $chunkSize;
+
+                parent::chunkActivePushTargetsByUserIds(
+                    $accountId,
+                    $userIds,
+                    $chunkSize,
+                    function (array $targets) use ($callback): void {
+                        $this->receivedTargetCounts[] = count($targets);
+                        $callback($targets);
+                    }
+                );
+            }
+
+            public function chunkActivePushTargets(?string $accountId, int $chunkSize, callable $callback): void
+            {
+                $this->chunkAllTargetsCalls++;
+
+                parent::chunkActivePushTargets($accountId, $chunkSize, $callback);
+            }
+        };
+
+        $resolver = new PushRecipientResolver($gateway);
+
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => $targetUserIds,
+            ],
+        ]);
+
+        $result = $resolver->resolveTokensWithUsers($message, 'account', (string) $this->account->_id);
+
+        $this->assertEqualsCanonicalizing($expectedTokens, $result['tokens']);
+        $this->assertSame($expectedTokenUserMap, $result['token_user_map']);
+        $this->assertSame(1, $gateway->chunkTargetsByUserIdsCalls);
+        $this->assertSame(0, $gateway->chunkAllTargetsCalls);
+        $this->assertSame([500], $gateway->receivedChunkSizes);
+        $this->assertSame([205], $gateway->receivedTargetCounts);
+    }
+
+    public function test_push_device_account_scope_sync_tracks_attach_and_detach_changes(): void
+    {
+        $user = $this->userService->create($this->account, [
+            'name' => 'Scoped Push User',
+            'email' => 'scoped-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+        $this->seedPushDevice($user, [
+            'device_id' => 'scoped-sync-device',
+            'platform' => 'android',
+            'push_token' => 'scoped-sync-token',
+            'is_active' => true,
+        ]);
+
+        $secondAccount = Account::query()->create([
+            'name' => 'Second Push Account',
+            'document' => 'DOC-SECOND-PUSH',
+        ]);
+        $secondRole = $secondAccount->roleTemplates()->create([
+            'name' => 'Second Push Admin',
+            'permissions' => ['push-messages:*'],
+        ]);
+
+        $resolver = $this->app->make(PushRecipientResolver::class);
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $user->_id],
+            ],
+        ]);
+
+        $beforeAttach = $resolver->resolveTokensWithUsers($message, 'account', (string) $secondAccount->_id);
+        $this->assertSame([], $beforeAttach['tokens']);
+
+        $accountManagement = $this->app->make(AccountManagementService::class);
+        $accountManagement->attachUser($secondAccount, $user->fresh(), $secondRole->fresh());
+
+        $afterAttach = $resolver->resolveTokensWithUsers($message, 'account', (string) $secondAccount->_id);
+        $this->assertSame(['scoped-sync-token'], $afterAttach['tokens']);
+        $this->assertSame(['scoped-sync-token' => (string) $user->_id], $afterAttach['token_user_map']);
+
+        $refreshedUser = AccountUser::query()->where('_id', $user->_id)->firstOrFail();
+        $accountManagement->detachUser($secondAccount, $refreshedUser, $secondRole->fresh());
+
+        $afterDetach = $resolver->resolveTokensWithUsers($message, 'account', (string) $secondAccount->_id);
+        $this->assertSame([], $afterDetach['tokens']);
+    }
+
+    public function test_removing_last_account_access_deactivates_push_devices(): void
+    {
+        $user = $this->userService->create($this->account, [
+            'name' => 'Removable Push User',
+            'email' => 'removable-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+        $this->seedPushDevice($user, [
+            'device_id' => 'removable-device',
+            'platform' => 'android',
+            'push_token' => 'removable-token',
+            'is_active' => true,
+        ]);
+
+        $this->userService->remove($this->account, $user->fresh());
+
+        $device = PushDevice::query()
+            ->where('account_user_id', (string) $user->_id)
+            ->where('device_id', 'removable-device')
+            ->firstOrFail();
+
+        $this->assertFalse((bool) $device->is_active);
+        $this->assertNotNull($device->invalidated_at);
+    }
+
+    public function test_recipient_resolver_returns_empty_for_unmaterialized_event_audience(): void
+    {
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($user, [
+            'device_id' => 'event-device',
+            'platform' => 'android',
+            'push_token' => 'event-token',
+            'is_active' => true,
+        ]);
+
+        $gateway = new class extends PushUserGatewayAdapter
+        {
+            public int $chunkAllTargetsCalls = 0;
+
+            public int $chunkTargetsByUserIdsCalls = 0;
+
+            public function chunkActivePushTargetsByUserIds(?string $accountId, array $userIds, int $chunkSize, callable $callback): void
+            {
+                $this->chunkTargetsByUserIdsCalls++;
+
+                parent::chunkActivePushTargetsByUserIds($accountId, $userIds, $chunkSize, $callback);
+            }
+
+            public function chunkActivePushTargets(?string $accountId, int $chunkSize, callable $callback): void
+            {
+                $this->chunkAllTargetsCalls++;
+
+                parent::chunkActivePushTargets($accountId, $chunkSize, $callback);
+            }
+        };
+
+        $resolver = new PushRecipientResolver($gateway);
+
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'event',
+                'event_id' => 'event-123',
+            ],
+        ]);
+
+        $result = $resolver->resolveTokensWithUsers($message, 'tenant', null);
+
+        $this->assertSame([], $result['tokens']);
+        $this->assertSame([], $result['token_user_map']);
+        $this->assertSame(0, $gateway->chunkTargetsByUserIdsCalls);
+        $this->assertSame(0, $gateway->chunkAllTargetsCalls);
+    }
+
+    public function test_explicit_user_audience_source_keeps_push_device_keyset_materialization_guardrail(): void
+    {
+        $resolverSource = $this->readSource('packages/belluga/belluga_push_handler/src/Services/PushRecipientResolver.php');
+        $gatewaySource = $this->readSource('app/Integration/Push/PushUserGatewayAdapter.php');
+
+        $this->assertStringContainsString("if (\$audienceType === 'users')", $resolverSource);
+        $this->assertStringContainsString('chunkActivePushTargetsByUserIds(', $resolverSource);
+        $this->assertStringContainsString('streamResolvedTargetBatches', $resolverSource);
+        $this->assertStringNotContainsString('isEligible($user, $message', $this->extractExplicitAudienceResolverSource($resolverSource));
+        $this->assertStringNotContainsString('activePushTokens($user)', $this->extractExplicitAudienceResolverSource($resolverSource));
+
+        $this->assertStringContainsString("options(['batchSize' => \$chunkSize])", $gatewaySource);
+        $this->assertStringContainsString("orderBy('_id')", $gatewaySource);
+        $this->assertStringContainsString("where('_id', '>', \$lastSeenId)", $gatewaySource);
+        $this->assertStringContainsString("limit(\$chunkSize)", $gatewaySource);
+        $this->assertStringContainsString("get(['_id', 'account_user_id', 'push_token'])", $gatewaySource);
+        $this->assertStringNotContainsString("\$upperBoundId", $gatewaySource);
+        $this->assertStringNotContainsString("get(['_id', 'devices'])", $gatewaySource);
     }
 
     public function test_invite_received_telemetry_uses_user_id_distinct_id(): void
@@ -3704,14 +4241,10 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        AccountUser::query()->where('_id', $this->operator->_id)->update([
-            'devices' => [
-                [
-                    'device_id' => 'device-1',
-                    'push_token' => 'token-1',
-                    'platform' => 'android',
-                ],
-            ],
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'device-1',
+            'push_token' => 'token-1',
+            'platform' => 'android',
         ]);
 
         $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
@@ -3719,9 +4252,11 @@ class PushMessageFlowTest extends TestCase
         ]);
         $send->assertOk();
 
-        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
-        $device = collect($user->devices ?? [])->firstWhere('device_id', 'device-1');
-        $this->assertSame(false, $device['is_active'] ?? null);
+        $device = PushDevice::query()
+            ->where('account_user_id', (string) $this->operator->_id)
+            ->where('device_id', 'device-1')
+            ->firstOrFail();
+        $this->assertFalse((bool) $device->is_active);
 
         $retry = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
             'user_id' => (string) $this->operator->_id,
@@ -4054,6 +4589,103 @@ class PushMessageFlowTest extends TestCase
         $this->landlord->tenant_primary->id = (string) $tenant->_id;
 
         return $tenant;
+    }
+
+    private function readSource(string $relativePath): string
+    {
+        $path = base_path($relativePath);
+        $contents = file_get_contents($path);
+
+        if (! is_string($contents) || $contents === '') {
+            throw new \RuntimeException(sprintf('Unable to read source file [%s].', $relativePath));
+        }
+
+        return $contents;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function seedPushDevice(AccountUser $user, array $attributes): PushDevice
+    {
+        return PushDevice::query()->create([
+            'tenant_id' => (string) (Tenant::current()?->_id ?? Tenant::current()?->id ?? ''),
+            'account_user_id' => (string) $user->_id,
+            'account_ids' => $user->getAccessToIds(),
+            'device_id' => $attributes['device_id'] ?? 'device-'.Str::random(6),
+            'platform' => $attributes['platform'] ?? 'android',
+            'push_token' => $attributes['push_token'] ?? 'token-'.Str::random(12),
+            'is_active' => $attributes['is_active'] ?? true,
+            'invalidated_at' => $attributes['invalidated_at'] ?? null,
+            'last_registered_at' => $attributes['last_registered_at'] ?? Carbon::now(),
+        ]);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $devices
+     */
+    private function seedPushDevices(AccountUser $user, array $devices): void
+    {
+        foreach ($devices as $attributes) {
+            $this->seedPushDevice($user, $attributes);
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $tokens
+     */
+    private function fakeBatchResponseBody(array $tokens): string
+    {
+        $boundary = 'fcm_batch_boundary';
+        $parts = [];
+
+        foreach (array_values($tokens) as $index => $token) {
+            $parts[] = implode("\r\n", [
+                "--{$boundary}",
+                'Content-Type: application/http',
+                "Content-ID: <item-{$index}>",
+                '',
+                'HTTP/1.1 200 OK',
+                'Content-Type: application/json; charset=UTF-8',
+                '',
+                json_encode(['name' => 'msg-'.$token], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                '',
+            ]);
+        }
+
+        $parts[] = "--{$boundary}--";
+
+        return implode("\r\n", $parts)."\r\n";
+    }
+
+    private function countTenantQueries(callable $callback): int
+    {
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        try {
+            $callback();
+
+            return count($connection->getQueryLog());
+        } finally {
+            $connection->disableQueryLog();
+        }
+    }
+
+    private function extractExplicitAudienceResolverSource(string $resolverSource): string
+    {
+        $start = strpos($resolverSource, "if (\$audienceType === 'users') {");
+        if ($start === false) {
+            throw new \RuntimeException('Unable to locate explicit users audience branch.');
+        }
+
+        $end = strpos($resolverSource, '// Semantic audiences must be materialized into explicit user IDs before', $start);
+        if ($end === false) {
+            throw new \RuntimeException('Unable to isolate explicit users audience branch.');
+        }
+
+        return substr($resolverSource, $start, $end - $start);
     }
 
     /**

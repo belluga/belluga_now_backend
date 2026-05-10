@@ -12,8 +12,10 @@ use Belluga\PushHandler\Contracts\PushSettingsMutationContract;
 use Belluga\PushHandler\Contracts\PushSettingsStoreContract;
 use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
 use Belluga\PushHandler\Contracts\PushTenantContextContract;
+use Belluga\PushHandler\Contracts\PushTopicTransportContract;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
+use Belluga\PushHandler\Services\KreaitTopicTransportClient;
 use Belluga\PushHandler\Services\PushAudienceEligibilityAllowAll;
 use Belluga\PushHandler\Services\PushPlanPolicyAllowAll;
 use Illuminate\Support\ServiceProvider;
@@ -40,6 +42,10 @@ class PushHandlerServiceProvider extends ServiceProvider
 
         if (! $this->app->bound(FcmClientContract::class)) {
             $this->app->bind(FcmClientContract::class, FcmHttpV1Client::class);
+        }
+
+        if (! $this->app->bound(PushTopicTransportContract::class)) {
+            $this->app->bind(PushTopicTransportContract::class, KreaitTopicTransportClient::class);
         }
 
         $this->ensureHostBinding(PushAccountContextContract::class);

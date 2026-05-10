@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Push;
 
 use Belluga\Invites\Application\Preview\InvitePreviewPayloadFactory;
+use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InvitePushDeliveryContract;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
@@ -22,11 +23,12 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
         private readonly PushMessageService $pushMessages,
         private readonly PushUserGatewayContract $users,
         private readonly InvitePreviewPayloadFactory $previewPayloads,
+        private readonly InviteIdentityGatewayContract $identities,
     ) {}
 
     public function sendDirectInvite(InviteEdge $edge): void
     {
-        if (! $this->shouldDeliver($edge)) {
+        if (! $this->isDirectInviteDeliverable($edge)) {
             return;
         }
 
@@ -84,12 +86,91 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
         ]);
     }
 
-    private function shouldDeliver(InviteEdge $edge): bool
+    public function sendAcceptedInvite(InviteEdge $edge): void
+    {
+        if (! $this->isAcceptedInviteDeliverable($edge)) {
+            return;
+        }
+
+        $senderUserId = trim((string) $edge->issued_by_user_id);
+        $recipient = $this->users->findUserForTenant($senderUserId, null);
+        if (! $recipient instanceof Authenticatable) {
+            return;
+        }
+
+        if ($this->users->activePushTokens($recipient) === []) {
+            return;
+        }
+
+        $invitePayload = $this->previewPayloads->fromInviteEdge($edge);
+        $notification = $this->acceptedNotificationCopy($edge, $invitePayload);
+
+        $this->pushMessages->create('tenant', null, [
+            'internal_name' => 'invite-accepted-'.(string) $edge->getAttribute('_id'),
+            'title_template' => $notification['title'],
+            'body_template' => $notification['body'],
+            'type' => 'invite_accepted',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [$senderUserId],
+            ],
+            'delivery' => [],
+            'payload_template' => [
+                'layoutType' => 'fullScreen',
+                'closeBehavior' => 'after_action',
+                'title' => $notification['title'],
+                'body' => $notification['body'],
+                'steps' => [[
+                    'slug' => 'invite-accepted',
+                    'type' => 'copy',
+                    'title' => $notification['title'],
+                    'body' => $notification['body'],
+                ]],
+                'buttons' => [],
+                'invite' => $invitePayload,
+                'invites' => [$invitePayload],
+                'accepted_by' => [
+                    'user_id' => trim((string) $edge->receiver_user_id),
+                    'display_name' => $notification['receiver_name'],
+                    'account_profile_id' => trim((string) $edge->receiver_account_profile_id),
+                ],
+            ],
+            'fcm_options' => [
+                'notification' => [
+                    'title' => $notification['title'],
+                    'body' => $notification['body'],
+                ],
+                'data' => [
+                    'event' => 'invite_accepted',
+                    'invite_id' => (string) ($invitePayload['id'] ?? ''),
+                    'event_id' => (string) ($invitePayload['event_id'] ?? ''),
+                    'occurrence_id' => (string) ($invitePayload['occurrence_id'] ?? ''),
+                    'push_type' => 'invite_accepted',
+                ],
+            ],
+        ]);
+    }
+
+    private function isDirectInviteDeliverable(InviteEdge $edge): bool
     {
         if (! in_array((string) ($edge->status ?? ''), ['pending', 'viewed'], true)) {
             return false;
         }
 
+        return $this->isRuntimeReady();
+    }
+
+    private function isAcceptedInviteDeliverable(InviteEdge $edge): bool
+    {
+        if ((string) ($edge->status ?? '') !== 'accepted' || ! (bool) ($edge->credited_acceptance ?? false)) {
+            return false;
+        }
+
+        return $this->isRuntimeReady();
+    }
+
+    private function isRuntimeReady(): bool
+    {
         $push = $this->pushSettings->resolvedPushConfig();
         if (($push['enabled'] ?? false) !== true) {
             return false;
@@ -136,5 +217,48 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
             'title' => $title,
             'body' => $body,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $invitePayload
+     * @return array{title:string,body:string,receiver_name:string}
+     */
+    private function acceptedNotificationCopy(InviteEdge $edge, array $invitePayload): array
+    {
+        $eventName = trim((string) ($invitePayload['event_name'] ?? ''));
+        $receiverName = $this->receiverDisplayName($edge);
+
+        $title = 'Seu convite foi aceito';
+
+        if ($receiverName !== '' && $eventName !== '') {
+            $body = $receiverName.' aceitou seu convite para '.$eventName.'.';
+        } elseif ($eventName !== '') {
+            $body = 'Seu convite para '.$eventName.' foi aceito.';
+        } elseif ($receiverName !== '') {
+            $body = $receiverName.' aceitou seu convite.';
+        } else {
+            $body = 'Seu convite foi aceito.';
+        }
+
+        return [
+            'title' => $title,
+            'body' => $body,
+            'receiver_name' => $receiverName,
+        ];
+    }
+
+    private function receiverDisplayName(InviteEdge $edge): string
+    {
+        $receiverAccountProfileId = trim((string) ($edge->receiver_account_profile_id ?? ''));
+        if ($receiverAccountProfileId === '') {
+            return '';
+        }
+
+        $resolved = $this->identities->resolveAccountProfileRecipient($receiverAccountProfileId);
+        if (! is_array($resolved)) {
+            return '';
+        }
+
+        return trim((string) ($resolved['display_name'] ?? ''));
     }
 }

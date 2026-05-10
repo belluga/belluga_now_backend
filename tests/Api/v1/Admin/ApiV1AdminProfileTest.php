@@ -105,6 +105,8 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
 
     public function test_public_password_login_rate_limit_tracks_the_email_subject_across_ips(): void
     {
+        $sharedEmail = 'shared-admin-login@example.org';
+
         $overrides = array_map(function (array $override): array {
             return match ((string) ($override['domain'] ?? '')) {
                 'landlord_public_password_login' => [
@@ -125,7 +127,7 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
             method: 'post',
             uri: 'admin/api/v1/auth/login',
             data: [
-                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'email' => $sharedEmail,
                 'password' => 'wrong-password',
                 'device_name' => 'api-client',
             ],
@@ -138,7 +140,7 @@ class ApiV1AdminProfileTest extends TestCaseAuthenticated
             method: 'post',
             uri: 'admin/api/v1/auth/login',
             data: [
-                'email' => strtoupper($this->landlord->user_cross_tenant_admin->email_1),
+                'email' => strtoupper($sharedEmail),
                 'password' => 'wrong-password',
                 'device_name' => 'api-client',
             ],

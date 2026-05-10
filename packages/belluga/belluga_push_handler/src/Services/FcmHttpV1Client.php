@@ -9,12 +9,14 @@ use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class FcmHttpV1Client implements FcmClientContract
 {
+    private const BATCH_ENDPOINT = 'https://fcm.googleapis.com/batch';
+
     public function __construct(
         private readonly PushCredentialService $credentialService
     ) {}
@@ -55,53 +57,14 @@ class FcmHttpV1Client implements FcmClientContract
         }
 
         foreach (array_chunk($tokens, $batchSize) as $chunk) {
-            $batchResponses = Http::pool(function (Pool $pool) use ($chunk, $accessToken, $endpoint, $basePayload) {
-                $requests = [];
-                foreach ($chunk as $token) {
-                    $payload = $basePayload;
-                    $payload['token'] = $token;
-                    $requests[] = $pool
-                        ->withToken($accessToken)
-                        ->post($endpoint, ['message' => $payload]);
-                }
+            $batchResponses = $this->sendBatchChunk($accessToken, $endpoint, $basePayload, $chunk);
 
-                return $requests;
-            });
-
-            foreach ($batchResponses as $index => $response) {
-                $token = $chunk[$index] ?? null;
-                if (! is_string($token) || $token === '') {
-                    continue;
-                }
-
-                if ($response instanceof ConnectionException) {
-                    $responses[] = [
-                        'token' => $token,
-                        'status' => 'failed',
-                        'error_code' => 'connection_error',
-                        'error_message' => $response->getMessage(),
-                    ];
-
-                    continue;
-                }
-
-                if ($response->successful()) {
+            foreach ($batchResponses as $entry) {
+                if (($entry['status'] ?? null) === 'accepted') {
                     $accepted++;
-                    $responses[] = [
-                        'token' => $token,
-                        'status' => 'accepted',
-                        'provider_message_id' => (string) ($response->json('name') ?? ''),
-                    ];
-
-                    continue;
                 }
 
-                $responses[] = [
-                    'token' => $token,
-                    'status' => 'failed',
-                    'error_code' => (string) ($response->json('error.status') ?? ''),
-                    'error_message' => (string) ($response->json('error.message') ?? $response->body()),
-                ];
+                $responses[] = $entry;
             }
         }
 
@@ -211,5 +174,213 @@ class FcmHttpV1Client implements FcmClientContract
     private function base64Url(string $value): string
     {
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    /**
+     * @param  array<int, string>  $tokens
+     * @param  array<string, mixed>  $basePayload
+     * @return array<int, array<string, mixed>>
+     */
+    private function sendBatchChunk(string $accessToken, string $endpoint, array $basePayload, array $tokens): array
+    {
+        $boundary = 'batch_'.bin2hex(random_bytes(12));
+        $requestPath = $this->requestPath($endpoint);
+        $body = $this->buildBatchBody($requestPath, $basePayload, $tokens, $boundary);
+
+        try {
+            $response = Http::withToken($accessToken)
+                ->withHeaders([
+                    'Content-Type' => "multipart/mixed; boundary={$boundary}",
+                    'Accept' => 'multipart/mixed',
+                ])
+                ->send('POST', self::BATCH_ENDPOINT, [
+                    'body' => $body,
+                ]);
+        } catch (ConnectionException $exception) {
+            return array_map(static fn (string $token): array => [
+                'token' => $token,
+                'status' => 'failed',
+                'error_code' => 'connection_error',
+                'error_message' => $exception->getMessage(),
+            ], $tokens);
+        }
+
+        if (! $response->successful()) {
+            return array_map(static fn (string $token): array => [
+                'token' => $token,
+                'status' => 'failed',
+                'error_code' => (string) $response->status(),
+                'error_message' => $response->body(),
+            ], $tokens);
+        }
+
+        return $this->parseBatchResponse($response, $tokens);
+    }
+
+    private function requestPath(string $endpoint): string
+    {
+        $parts = parse_url($endpoint);
+        $path = $parts['path'] ?? '';
+        $query = $parts['query'] ?? null;
+
+        return $query ? $path.'?'.$query : $path;
+    }
+
+    /**
+     * @param  array<string, mixed>  $basePayload
+     * @param  array<int, string>  $tokens
+     */
+    private function buildBatchBody(string $requestPath, array $basePayload, array $tokens, string $boundary): string
+    {
+        $parts = [];
+
+        foreach ($tokens as $index => $token) {
+            $payload = $basePayload;
+            $payload['token'] = $token;
+
+            $parts[] = implode("\r\n", [
+                "--{$boundary}",
+                'Content-Type: application/http',
+                "Content-ID: <item-{$index}>",
+                '',
+                "POST {$requestPath} HTTP/1.1",
+                'Content-Type: application/json; charset=UTF-8',
+                'Accept: application/json',
+                '',
+                json_encode(['message' => $payload], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                '',
+            ]);
+        }
+
+        $parts[] = "--{$boundary}--";
+
+        return implode("\r\n", $parts)."\r\n";
+    }
+
+    /**
+     * @param  array<int, string>  $tokens
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseBatchResponse(Response $response, array $tokens): array
+    {
+        $contentType = (string) ($response->header('Content-Type')[0] ?? '');
+        $boundary = $this->extractBoundary($contentType);
+
+        if ($boundary === null) {
+            return array_map(static fn (string $token): array => [
+                'token' => $token,
+                'status' => 'failed',
+                'error_code' => 'invalid_batch_response',
+                'error_message' => 'FCM batch response did not expose a multipart boundary.',
+            ], $tokens);
+        }
+
+        $resolved = [];
+        $segments = explode('--'.$boundary, $response->body());
+        foreach ($segments as $segment) {
+            $segment = ltrim($segment, "\r\n");
+            $segment = rtrim($segment, "\r\n");
+            if ($segment === '' || $segment === '--') {
+                continue;
+            }
+
+            [$partHeadersRaw, $partBodyRaw] = array_pad(preg_split("/\r\n\r\n/", $segment, 2), 2, '');
+            $contentId = $this->extractContentId($partHeadersRaw);
+            $tokenIndex = $this->extractTokenIndex($contentId);
+            if ($tokenIndex === null || ! array_key_exists($tokenIndex, $tokens)) {
+                continue;
+            }
+
+            [$statusLine, $nestedBody] = $this->extractNestedHttpResponse($partBodyRaw);
+            $statusCode = $this->extractStatusCode($statusLine);
+            $decoded = json_decode($nestedBody, true);
+            $token = $tokens[$tokenIndex];
+
+            if ($statusCode >= 200 && $statusCode < 300) {
+                $resolved[$tokenIndex] = [
+                    'token' => $token,
+                    'status' => 'accepted',
+                    'provider_message_id' => (string) (($decoded['name'] ?? '') ?: ''),
+                ];
+
+                continue;
+            }
+
+            $resolved[$tokenIndex] = [
+                'token' => $token,
+                'status' => 'failed',
+                'error_code' => (string) (($decoded['error']['status'] ?? '') ?: $statusCode),
+                'error_message' => (string) (($decoded['error']['message'] ?? '') ?: $nestedBody),
+            ];
+        }
+
+        foreach ($tokens as $index => $token) {
+            if (isset($resolved[$index])) {
+                continue;
+            }
+
+            $resolved[$index] = [
+                'token' => $token,
+                'status' => 'failed',
+                'error_code' => 'missing_batch_part',
+                'error_message' => 'No batch response part was returned for token.',
+            ];
+        }
+
+        ksort($resolved);
+
+        return array_values($resolved);
+    }
+
+    private function extractBoundary(string $contentType): ?string
+    {
+        if (! preg_match('/boundary="?([^";]+)"?/i', $contentType, $matches)) {
+            return null;
+        }
+
+        return trim((string) ($matches[1] ?? ''));
+    }
+
+    private function extractContentId(string $headers): ?string
+    {
+        if (! preg_match('/^Content-ID:\s*(.+)$/im', $headers, $matches)) {
+            return null;
+        }
+
+        return trim((string) ($matches[1] ?? ''));
+    }
+
+    private function extractTokenIndex(?string $contentId): ?int
+    {
+        if (! is_string($contentId) || $contentId === '') {
+            return null;
+        }
+
+        if (! preg_match('/item-(\d+)/', $contentId, $matches)) {
+            return null;
+        }
+
+        return (int) $matches[1];
+    }
+
+    /**
+     * @return array{0:string,1:string}
+     */
+    private function extractNestedHttpResponse(string $partBody): array
+    {
+        $partBody = ltrim($partBody, "\r\n");
+        [$statusAndHeaders, $nestedBody] = array_pad(preg_split("/\r\n\r\n/", $partBody, 2), 2, '');
+        [$statusLine] = preg_split("/\r\n/", $statusAndHeaders, 2);
+
+        return [trim((string) $statusLine), trim($nestedBody)];
+    }
+
+    private function extractStatusCode(string $statusLine): int
+    {
+        if (! preg_match('/\s(\d{3})\s/', $statusLine.' ', $matches)) {
+            return 0;
+        }
+
+        return (int) $matches[1];
     }
 }

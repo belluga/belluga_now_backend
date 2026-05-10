@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Belluga\Invites\Application\Mutations;
 
 use Belluga\Invites\Application\Feed\InviteProjectionService;
-use Belluga\Invites\Application\Feed\PrincipalSocialMetricsService;
 use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
-use Belluga\Invites\Contracts\InvitePushDeliveryContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
+use Belluga\Invites\Domain\Events\CreditedInviteAccepted;
+use Belluga\Invites\Domain\Events\DirectInviteCreated;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Support\InviteDomainException;
@@ -30,12 +30,10 @@ class InviteMutationService
         private readonly InviteTransactionRunner $transactions,
         private readonly InviteAttendanceGatewayContract $attendanceGateway,
         private readonly InviteIdentityGatewayContract $identityGateway,
-        private readonly InvitePushDeliveryContract $pushDelivery,
         private readonly InviteTelemetryEmitterContract $telemetry,
         private readonly InviteTargetResolverService $targetResolver,
         private readonly InviteRuntimeSettingsService $runtimeSettings,
         private readonly InviteProjectionService $projectionService,
-        private readonly PrincipalSocialMetricsService $metricsService,
         private readonly InviteQuotaCounterService $quotaCounters,
         private readonly InviteCommandIdempotencyService $idempotencyService,
     ) {}
@@ -67,8 +65,6 @@ class InviteMutationService
             'already_invited' => [],
             'blocked' => [],
         ];
-
-        $createdCount = 0;
 
         foreach ($recipientPayloads as $recipientPayload) {
             $resolvedRecipient = $this->resolveRecipient($senderUserId, $recipientPayload);
@@ -164,45 +160,10 @@ class InviteMutationService
                 'supersession_reason' => $edge->supersession_reason ? (string) $edge->supersession_reason : null,
             ];
 
-            $this->dispatchDirectInvitePush($edge);
-
-            $this->telemetry->emit(
-                event: 'invite.created',
-                userId: $senderUserId,
-                properties: [
-                    'invite_id' => (string) $edge->getAttribute('_id'),
-                    'receiver_user_id' => $receiverUserId,
-                    'receiver_account_profile_id' => $receiverAccountProfileId,
-                    'target_ref' => $target['target_ref'],
-                    'inviter_principal' => $inviter['principal'],
-                    'status' => (string) $edge->status,
-                    'source' => 'direct_invite',
-                ],
-                idempotencyKey: 'invite.created:'.(string) $edge->getAttribute('_id'),
-                source: 'invite_api',
-                context: [
-                    'actor' => ['type' => 'user', 'id' => $senderUserId],
-                    'target' => ['type' => 'user', 'id' => $receiverUserId],
-                    'object' => ['type' => 'event', 'id' => (string) $target['target_ref']['event_id']],
-                ],
-            );
-            $createdCount++;
-        }
-
-        if ($createdCount > 0) {
-            $this->metricsService->incrementInvitesSent($inviter['principal'], $createdCount);
+            event(new DirectInviteCreated((string) $edge->getAttribute('_id'), $senderUserId));
         }
 
         return $result;
-    }
-
-    private function dispatchDirectInvitePush(InviteEdge $edge): void
-    {
-        try {
-            $this->pushDelivery->sendDirectInvite($edge);
-        } catch (Throwable) {
-            // Invite persistence remains authoritative even when push delivery is unavailable.
-        }
     }
 
     /**
@@ -433,26 +394,12 @@ class InviteMutationService
         /** @var InviteEdge $acceptedEdge */
         [$acceptedEdge, $supersededIds] = $result;
         $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($acceptedEdge));
-        $this->metricsService->incrementCreditedAcceptances($this->fromStoredPrincipal((array) $acceptedEdge->inviter_principal));
-
-        $this->telemetry->emit(
-            event: 'invite.accepted',
-            userId: $userId,
-            properties: $this->buildAcceptedTelemetryProperties(
-                edge: $acceptedEdge,
-                status: 'accepted',
-                creditedAcceptance: true,
-                supersededIds: $supersededIds,
-                shareCode: $shareCode,
-            ),
-            idempotencyKey: 'invite.accepted:'.(string) $acceptedEdge->getAttribute('_id').':accepted',
-            source: 'invite_api',
-            context: [
-                'actor' => ['type' => 'user', 'id' => $userId],
-                'target' => ['type' => 'user', 'id' => $userId],
-                'object' => ['type' => 'event', 'id' => (string) $acceptedEdge->event_id],
-            ],
-        );
+        event(new CreditedInviteAccepted(
+            (string) $acceptedEdge->getAttribute('_id'),
+            $userId,
+            $supersededIds,
+            $shareCode,
+        ));
 
         return $this->acceptResponse($acceptedEdge, 'accepted', $supersededIds, true);
     }
@@ -978,18 +925,6 @@ class InviteMutationService
         return [
             'kind' => (string) ($principal['kind'] ?? ''),
             'principal_id' => (string) ($principal['id'] ?? ''),
-        ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $principal
-     * @return array{kind:string,id:string}
-     */
-    private function fromStoredPrincipal(array $principal): array
-    {
-        return [
-            'kind' => (string) ($principal['kind'] ?? ''),
-            'id' => (string) ($principal['principal_id'] ?? $principal['id'] ?? ''),
         ];
     }
 

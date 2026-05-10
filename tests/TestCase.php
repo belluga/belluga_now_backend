@@ -5,7 +5,9 @@ namespace Tests;
 use App\Models\Landlord\Tenant;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
+use Illuminate\Cache\RateLimiter as CacheRateLimiter;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\RateLimiter;
 use Tests\Api\Traits\ClearConfigCacheOnce;
 use Tests\Api\Traits\MigrateFreshSeedOnce;
 use Tests\Helpers\Landlord;
@@ -36,6 +38,15 @@ abstract class TestCase extends BaseTestCase
         $_SERVER['HTTP_HOST'] = $this->host;
         $_SERVER['SERVER_NAME'] = $this->host;
         $this->withServerVariables(['HTTP_HOST' => $this->host]);
+    }
+
+    protected function tearDown(): void
+    {
+        // RateLimiter facade mocks can leak across tests unless the bound instance is reset.
+        app()->forgetInstance(CacheRateLimiter::class);
+        RateLimiter::clearResolvedInstance(CacheRateLimiter::class);
+
+        parent::tearDown();
     }
 
     protected function normalizeTestUri(string $uri, ?string $hostOverride = null): string
