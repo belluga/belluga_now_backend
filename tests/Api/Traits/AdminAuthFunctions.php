@@ -7,6 +7,8 @@ use Tests\Helpers\UserLabels;
 
 trait AdminAuthFunctions
 {
+    private static int $adminLoginRequestCounter = 0;
+
     protected function adminLogout(
         UserLabels $user,
         ?string $device_name = null,
@@ -39,7 +41,9 @@ trait AdminAuthFunctions
 
     protected function adminLogin(UserLabels $user, string $device_name = 'default'): TestResponse
     {
-        $response = $this->json(
+        $response = $this->withServerVariables([
+            'REMOTE_ADDR' => $this->nextAdminLoginRemoteAddr(),
+        ])->json(
             method: 'post',
             uri: "http://{$this->host}/admin/api/v1/auth/login",
             data: [
@@ -57,5 +61,18 @@ trait AdminAuthFunctions
         }
 
         return $response;
+    }
+
+    private function nextAdminLoginRemoteAddr(): string
+    {
+        self::$adminLoginRequestCounter++;
+        $counter = self::$adminLoginRequestCounter;
+
+        return sprintf(
+            '173.%d.%d.%d',
+            16 + (($counter >> 16) % 200),
+            16 + (($counter >> 8) % 200),
+            16 + ($counter % 200),
+        );
     }
 }
