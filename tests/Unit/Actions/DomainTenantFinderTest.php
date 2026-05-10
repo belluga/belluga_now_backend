@@ -34,7 +34,7 @@ class DomainTenantFinderTest extends TestCase
         /** @var DomainTenantFinder $finder */
         $finder = $this->app->make(DomainTenantFinder::class);
 
-        $request = Request::create('https://tenant.example.test/environment', 'GET');
+        $request = Request::create('https://tenant.example.test/api/v1/environment', 'GET');
         $this->app->instance('request', $request);
 
         $result = $finder->findForRequest($request);

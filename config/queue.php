@@ -1,6 +1,9 @@
 <?php
 
-$databaseConnection = (string) env('DB_CONNECTION', 'sqlite');
+// Keep queue bootstrap aligned with this app's Mongo-first database default so
+// route/bootstrap guardrails can load safely even before a test/runtime env file
+// is materialized.
+$databaseConnection = (string) env('DB_CONNECTION', 'mongodb');
 $isMongoPrimaryConnection = str_starts_with($databaseConnection, 'mongodb')
     || in_array($databaseConnection, ['landlord', 'tenant'], true);
 

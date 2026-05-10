@@ -19,6 +19,10 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
     {
         parent::setUp();
 
+        $tenant = $this->ensureCanonicalTenantExists($this->tenant);
+        $tenant->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $tenant);
+
         $key = $this->accountSeedKey();
 
         if (! array_key_exists($key, static::$seededAccounts)) {
@@ -174,9 +178,7 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
     private function seedAccountAuthFixtures(): void
     {
         $tenantLabel = $this->tenant;
-        $tenant = Tenant::query()
-            ->where('subdomain', $tenantLabel->subdomain)
-            ->firstOrFail();
+        $tenant = $this->ensureCanonicalTenantExists($tenantLabel);
         $tenant->makeCurrent();
 
         $tenantLabel->id = (string) $tenant->_id;
@@ -218,7 +220,12 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $ref = new \ReflectionProperty($label, 'base_label');
         $ref->setAccessible(true);
 
-        return (string) $ref->getValue($label);
+        return sprintf(
+            '%s::%s::%s',
+            static::class,
+            $this->nameWithDataSet(),
+            (string) $ref->getValue($label),
+        );
     }
 
     private function seedAccountUser(

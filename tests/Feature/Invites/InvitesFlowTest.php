@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Invites;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Jobs\Telemetry\DeliverTelemetryEventJob;
@@ -24,7 +25,13 @@ use Belluga\Invites\Models\Tenants\InviteFeedProjection;
 use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
+use Belluga\PushHandler\Jobs\SendPushMessageJob;
+use Belluga\PushHandler\Models\Tenants\PushCredential;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
+use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -77,6 +84,10 @@ class InvitesFlowTest extends TestCaseTenant
         ContactHashDirectory::query()->delete();
         PrincipalSocialMetric::query()->delete();
         Event::query()->delete();
+        PushMessage::query()->delete();
+        PushCredential::query()->delete();
+        PushDevice::query()->delete();
+        TenantPushSettings::query()->delete();
 
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
@@ -133,6 +144,123 @@ class InvitesFlowTest extends TestCaseTenant
         $feedResponse->assertJsonPath('invites.0.event_date', $occurrence->starts_at->toISOString());
         $feedResponse->assertJsonPath('invites.0.location', 'Invite Venue');
         $feedResponse->assertJsonPath('invites.0.message', 'Come with us');
+    }
+
+    public function test_send_invite_authors_and_dispatches_invite_push_when_runtime_is_ready(): void
+    {
+        Bus::fake();
+        $this->seedPushRuntimeReady();
+        $this->registerActivePushToken($this->receiver, 'receiver-push-token');
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+            'message' => 'Come with us',
+        ]);
+
+        $response->assertOk();
+
+        $message = PushMessage::query()->first();
+        $this->assertNotNull($message);
+        $this->assertSame('tenant', (string) $message->scope);
+        $this->assertSame('invite_received', (string) $message->type);
+        $this->assertSame([(string) $this->receiver->_id], $message->audience['user_ids'] ?? []);
+        $this->assertSame('invite_received', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame(
+            (string) $this->event->_id,
+            data_get($message->payload_template, 'invite.target_ref.event_id'),
+        );
+        $this->assertSame(
+            $this->firstOccurrenceId($this->event),
+            data_get($message->payload_template, 'invite.target_ref.occurrence_id'),
+        );
+        $this->assertSame(
+            'Sender User',
+            data_get($message->payload_template, 'invite.inviter_candidates.0.display_name'),
+        );
+
+        Bus::assertDispatched(SendPushMessageJob::class);
+    }
+
+    public function test_send_invite_skips_invite_push_authoring_when_runtime_prerequisites_are_missing(): void
+    {
+        Bus::fake();
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertSame(0, PushMessage::query()->count());
+        Bus::assertNotDispatched(SendPushMessageJob::class);
+    }
+
+    public function test_accept_invite_authors_and_dispatches_invite_accepted_push_to_original_sender_when_runtime_is_ready(): void
+    {
+        Bus::fake();
+        $this->seedPushRuntimeReady();
+        $this->registerActivePushToken($this->sender, 'sender-push-token');
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+            'message' => 'Come with us',
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+        $response->assertOk();
+        $response->assertJsonPath('status', 'accepted');
+        $response->assertJsonPath('credited_acceptance', true);
+
+        $message = PushMessage::query()->first();
+        $this->assertNotNull($message);
+        $this->assertSame('tenant', (string) $message->scope);
+        $this->assertSame('invite_accepted', (string) $message->type);
+        $this->assertSame([(string) $this->sender->_id], $message->audience['user_ids'] ?? []);
+        $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame(
+            (string) $this->receiver->_id,
+            data_get($message->payload_template, 'accepted_by.user_id'),
+        );
+        $this->assertSame(
+            'Receiver User',
+            data_get($message->payload_template, 'accepted_by.display_name'),
+        );
+
+        Bus::assertDispatched(SendPushMessageJob::class);
+    }
+
+    public function test_invite_stream_accepts_access_token_query_for_web_sse_clients(): void
+    {
+        $plainTextToken = $this->app
+            ->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser($this->receiver, 'Invite stream token', ['*'])
+            ->plainTextToken;
+
+        $response = $this->get(
+            "{$this->base_api_tenant}invites/stream?access_token={$plainTextToken}",
+            [
+                'Accept' => 'text/event-stream',
+                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
+            ]
+        );
+
+        $response->assertOk();
+        $this->assertStringStartsWith(
+            'text/event-stream',
+            (string) $response->headers->get('Content-Type')
+        );
     }
 
     public function test_send_invite_to_multiple_recipients_updates_created_count_and_metrics(): void
@@ -720,6 +848,7 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('inviter_principal.kind', 'user');
         $response->assertJsonPath('invite.target_ref.event_id', (string) $this->event->_id);
         $response->assertJsonPath('invite.target_ref.occurrence_id', $occurrenceId);
+        $response->assertJsonPath('invite.event_image_url', 'https://example.org/thumb.jpg');
         $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Sender User');
         $response->assertJsonPath('invite.inviter_candidates.0.status', 'pending');
     }
@@ -1434,6 +1563,43 @@ class InvitesFlowTest extends TestCaseTenant
             ->update([
                 'capabilities.is_inviteable' => true,
             ]);
+    }
+
+    private function seedPushRuntimeReady(): void
+    {
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+
+        TenantPushSettings::create([
+            'firebase' => [
+                'apiKey' => 'key',
+                'appId' => 'app',
+                'projectId' => 'project',
+                'messagingSenderId' => 'sender',
+                'storageBucket' => 'bucket',
+            ],
+            'push' => [
+                'enabled' => true,
+                'max_ttl_days' => 30,
+            ],
+        ]);
+    }
+
+    private function registerActivePushToken(AccountUser $user, string $pushToken): void
+    {
+        PushDevice::query()->create([
+            'tenant_id' => (string) (Tenant::current()?->_id ?? Tenant::current()?->id ?? ''),
+            'account_user_id' => (string) $user->_id,
+            'account_ids' => $user->getAccessToIds(),
+            'device_id' => 'device-'.Str::random(6),
+            'platform' => 'android',
+            'push_token' => $pushToken,
+            'is_active' => true,
+            'last_registered_at' => Carbon::now(),
+        ]);
     }
 
     private function createEvent(): Event

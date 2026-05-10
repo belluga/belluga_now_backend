@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
+use Belluga\PushHandler\Domain\Events\PushDeviceRegistered;
+use Belluga\PushHandler\Domain\Events\PushDeviceUnregistered;
+use Belluga\PushHandler\Domain\Events\PushTokensInvalidated;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Contracts\Auth\Authenticatable;
 
@@ -22,7 +25,15 @@ class PushDeviceService
             return;
         }
 
+        $userId = $this->users->userId($user);
+        $pushToken = trim((string) ($payload['push_token'] ?? ''));
         $this->users->registerDevice($user, $payload);
+
+        if ($userId === null || $userId === '' || $pushToken === '') {
+            return;
+        }
+
+        event(new PushDeviceRegistered($userId, $pushToken));
     }
 
     /**
@@ -34,7 +45,17 @@ class PushDeviceService
             return;
         }
 
-        $this->users->invalidateTokens($user, $tokens);
+        $normalizedTokens = array_values(array_filter(array_map(
+            static fn (mixed $token): string => trim((string) $token),
+            $tokens,
+        ), static fn (string $token): bool => $token !== ''));
+        if ($normalizedTokens === []) {
+            return;
+        }
+
+        $this->users->invalidateTokens($user, $normalizedTokens);
+
+        event(new PushTokensInvalidated($normalizedTokens));
     }
 
     /**
@@ -46,6 +67,14 @@ class PushDeviceService
             return;
         }
 
+        $deviceId = trim((string) ($payload['device_id'] ?? ''));
+        $tokens = $deviceId !== '' ? $this->users->activePushTokensForDevice($user, $deviceId) : [];
         $this->users->unregisterDevice($user, $payload);
+
+        if ($tokens === []) {
+            return;
+        }
+
+        event(new PushDeviceUnregistered($tokens));
     }
 }

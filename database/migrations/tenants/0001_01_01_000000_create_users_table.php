@@ -48,11 +48,6 @@ return new class extends Migration
                 ]);
         });
 
-        Schema::create('password_reset_tokens', function (Blueprint $collection) {
-            $collection->unique('user_id');
-            $collection->index('token');
-        });
-
         Schema::create('sessions', function (Blueprint $collection) {
             $collection->unique('id');
             $collection->sparse('user_id');

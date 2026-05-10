@@ -7,6 +7,7 @@ namespace Tests\Unit\Application\LandlordUsers;
 use App\Application\LandlordUsers\LandlordUserCreator;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -45,5 +46,11 @@ class LandlordUserCreatorTest extends TestCase
         $this->assertCount(1, $user->promotion_audit);
         $this->assertEquals('anonymous', $user->promotion_audit[0]['from_state']);
         $this->assertEquals('registered', $user->promotion_audit[0]['to_state']);
+        $credential = collect($user->fresh()->credentials ?? [])
+            ->first(static fn (array $credential): bool => ($credential['provider'] ?? null) === 'password'
+                && ($credential['subject'] ?? null) === 'support@example.org');
+        $this->assertNull($user->fresh()?->getAttribute('password'));
+        $this->assertIsArray($credential);
+        $this->assertTrue(Hash::check('Secret!234', (string) $credential['secret_hash']));
     }
 }

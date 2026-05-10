@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Environment;
 
 use App\Application\Auth\TenantPublicAuthMethodResolver;
+use App\Application\Branding\BrandingManifestService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
@@ -22,6 +23,7 @@ class EnvironmentResolverService
         private readonly PushSettingsKernelBridge $pushSettings,
         private readonly TenantAppDomainResolverService $appDomainResolver,
         private readonly AccountProfileRegistryService $profileRegistryService,
+        private readonly BrandingManifestService $brandingManifestService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
         private readonly TenantEnvironmentSnapshotService $tenantSnapshotService,
     ) {}
@@ -135,15 +137,8 @@ class EnvironmentResolverService
      */
     private function resolveBrandingAssetState(array $branding): array
     {
-        $hasDedicatedFavicon = $this->hasNonEmptyBrandingValue(
-            $branding['logo_settings']['favicon_uri'] ?? null
-        );
-
         return [
-            'favicon' => [
-                'has_dedicated_asset' => $hasDedicatedFavicon,
-                'uses_pwa_fallback' => ! $hasDedicatedFavicon && $this->hasPwaFaviconFallback($branding),
-            ],
+            'favicon' => $this->brandingManifestService->resolveFaviconRouteStateFromBranding($branding),
         ];
     }
 
@@ -179,31 +174,6 @@ class EnvironmentResolverService
             'default_description' => (string) ($metadata['default_description'] ?? ''),
             'default_image' => $defaultImage,
         ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $branding
-     */
-    private function hasPwaFaviconFallback(array $branding): bool
-    {
-        $pwaIcon = $branding['pwa_icon'] ?? null;
-
-        if (! is_array($pwaIcon)) {
-            return false;
-        }
-
-        foreach (['icon192_uri', 'icon512_uri', 'source_uri'] as $key) {
-            if ($this->hasNonEmptyBrandingValue($pwaIcon[$key] ?? null)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function hasNonEmptyBrandingValue(mixed $value): bool
-    {
-        return is_string($value) && trim($value) !== '';
     }
 
     /**

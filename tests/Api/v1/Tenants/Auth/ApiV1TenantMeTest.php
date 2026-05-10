@@ -2,6 +2,7 @@
 
 namespace Tests\Api\v1\Tenants\Auth;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Support\Helpers\PhoneNumberParser;
@@ -18,6 +19,8 @@ class ApiV1TenantMeTest extends TestCaseTenant
 
     public function test_tenant_me_returns_profile_payload(): void
     {
+        $this->setTenantPublicAuthFixture(['password']);
+
         $email = fake()->unique()->safeEmail();
         $password = 'Secret!234';
 
@@ -97,7 +100,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
             'phones' => [PhoneNumberParser::parse('+55 27 99999-0042')],
             'identity_state' => 'registered',
         ]);
-        $token = $user->createToken('tenant-profile-test')->plainTextToken;
+        $token = $this->issueTenantScopedToken($user, 'tenant-profile-test');
 
         $this->json(
             method: 'patch',
@@ -151,7 +154,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
             'phones' => [PhoneNumberParser::parse('+55 27 99999-0099')],
             'identity_state' => 'registered',
         ]);
-        $token = $user->createToken('tenant-profile-test')->plainTextToken;
+        $token = $this->issueTenantScopedToken($user, 'tenant-profile-test');
 
         $add = $this->json(
             method: 'patch',
@@ -197,7 +200,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
             'phones' => [$phone],
             'identity_state' => 'registered',
         ]);
-        $token = $user->createToken('tenant-profile-test')->plainTextToken;
+        $token = $this->issueTenantScopedToken($user, 'tenant-profile-test');
 
         $response = $this->json(
             method: 'get',
@@ -211,5 +214,12 @@ class ApiV1TenantMeTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.display_name', '');
         $response->assertJsonPath('data.phone', $phone);
+    }
+
+    private function issueTenantScopedToken(AccountUser $user, string $tokenName): string
+    {
+        return $this->app->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser($user, $tokenName, [])
+            ->plainTextToken;
     }
 }

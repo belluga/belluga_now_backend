@@ -19,6 +19,7 @@ use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\TenantBrandingController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
+use App\Http\Middleware\CheckCurrentTenantRoleAbility;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
@@ -46,26 +47,56 @@ Route::prefix('domains')
     ->middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
         Route::get('/', [DomainController::class, 'index'])
-            ->middleware(['abilities:tenant-domains:read']);
+            ->middleware([
+                'abilities:tenant-domains:read',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:read',
+            ]);
 
         Route::post('/', [DomainController::class, 'store'])
-            ->middleware(['abilities:tenant-domains:update']);
+            ->middleware([
+                'abilities:tenant-domains:update',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:update',
+            ]);
 
         Route::delete('/{domain_id}', [DomainController::class, 'destroy'])
-            ->middleware(['abilities:tenant-domains:update']);
+            ->middleware([
+                'abilities:tenant-domains:update',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:update',
+            ]);
 
         Route::post('/{domain_id}/restore', [DomainController::class, 'restore'])
-            ->middleware(['abilities:tenant-domains:update']);
+            ->middleware([
+                'abilities:tenant-domains:update',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:update',
+            ]);
 
         Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy'])
-            ->middleware(['abilities:tenant-domains:update']);
+            ->middleware([
+                'abilities:tenant-domains:update',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:update',
+            ]);
     });
 
 Route::prefix('appdomains')
+    ->middleware(['auth:sanctum', CheckTenantAccess::class])
     ->group(function () {
-        Route::get('/', [TenantAppDomainController::class, 'index']);
-        Route::post('/', [TenantAppDomainController::class, 'store']);
-        Route::delete('/', [TenantAppDomainController::class, 'destroy']);
+        Route::get('/', [TenantAppDomainController::class, 'index'])
+            ->middleware([
+                'abilities:tenant-domains:read',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:read',
+            ]);
+
+        Route::post('/', [TenantAppDomainController::class, 'store'])
+            ->middleware([
+                'abilities:tenant-domains:update',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:update',
+            ]);
+
+        Route::delete('/', [TenantAppDomainController::class, 'destroy'])
+            ->middleware([
+                'abilities:tenant-domains:update',
+                CheckCurrentTenantRoleAbility::class.':tenant-domains:update',
+            ]);
     });
 
 // Rotas protegidas para o tenant

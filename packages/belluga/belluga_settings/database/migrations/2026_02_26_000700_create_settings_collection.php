@@ -12,14 +12,16 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (! Schema::hasTable('settings')) {
-            Schema::create('settings', function (Blueprint $collection): void {
+        $connectionName = (string) config('multitenancy.tenant_database_connection_name', 'tenant');
+        $schema = Schema::connection($connectionName);
+
+        if (! $schema->hasTable('settings')) {
+            $schema->create('settings', function (Blueprint $collection): void {
                 $collection->index(['created_at' => -1]);
                 $collection->index(['updated_at' => -1]);
             });
         }
 
-        $connectionName = (string) config('multitenancy.tenant_database_connection_name', 'tenant');
         $collection = DB::connection($connectionName)->getMongoDB()->selectCollection('settings');
 
         $count = (int) $collection->countDocuments([]);

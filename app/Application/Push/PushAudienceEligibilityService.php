@@ -33,6 +33,10 @@ class PushAudienceEligibilityService implements PushAudienceEligibilityContract
             return in_array((string) $user->_id, $ids, true);
         }
 
-        return true;
+        if ($type === 'all') {
+            return true;
+        }
+
+        return false;
     }
 }

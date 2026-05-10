@@ -113,11 +113,34 @@ class BrandingManifestService
     {
         $localPath = $this->resolveStoragePath($path);
 
-        if ($localPath === null || ! Storage::disk('public')->exists($localPath)) {
+        if (! $this->hasUsableAssetPath($localPath)) {
             return response('', 404);
         }
 
         return response()->file(Storage::disk('public')->path($localPath));
+    }
+
+    public function hasUsableAssetUri(?string $uri): bool
+    {
+        return $this->hasUsableAssetPath($this->resolveStoragePath($uri));
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
+     * @return array{has_dedicated_asset: bool, uses_pwa_fallback: bool}
+     */
+    public function resolveFaviconRouteStateFromBranding(array $branding): array
+    {
+        $faviconUri = $branding['logo_settings']['favicon_uri'] ?? null;
+        $hasDedicatedAsset = is_string($faviconUri)
+            && trim($faviconUri) !== ''
+            && $this->hasUsableAssetUri(trim($faviconUri));
+
+        return [
+            'has_dedicated_asset' => $hasDedicatedAsset,
+            'uses_pwa_fallback' => ! $hasDedicatedAsset
+                && $this->resolveFirstUsablePwaFaviconCandidate($branding) !== null,
+        ];
     }
 
     /**
@@ -127,9 +150,7 @@ class BrandingManifestService
     {
         $candidates = [
             $branding['logo_settings']['favicon_uri'] ?? null,
-            $branding['pwa_icon']['icon192_uri'] ?? null,
-            $branding['pwa_icon']['icon512_uri'] ?? null,
-            $branding['pwa_icon']['source_uri'] ?? null,
+            $this->resolveFirstUsablePwaFaviconCandidate($branding),
         ];
 
         foreach ($candidates as $candidate) {
@@ -138,7 +159,27 @@ class BrandingManifestService
             }
 
             $normalized = trim($candidate);
-            if ($normalized !== '') {
+            if ($normalized !== '' && $this->hasUsableAssetUri($normalized)) {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
+     */
+    private function resolveFirstUsablePwaFaviconCandidate(array $branding): ?string
+    {
+        foreach (['icon192_uri', 'icon512_uri', 'source_uri'] as $key) {
+            $candidate = $branding['pwa_icon'][$key] ?? null;
+            if (! is_string($candidate)) {
+                continue;
+            }
+
+            $normalized = trim($candidate);
+            if ($normalized !== '' && $this->hasUsableAssetUri($normalized)) {
                 return $normalized;
             }
         }
@@ -160,5 +201,19 @@ class BrandingManifestService
     private function buildLandlordManifest(Landlord $landlord): array
     {
         return $landlord->getManifestData();
+    }
+
+    private function hasUsableAssetPath(?string $path): bool
+    {
+        if ($path === null || $path === '') {
+            return false;
+        }
+
+        $disk = Storage::disk('public');
+        if (! $disk->exists($path)) {
+            return false;
+        }
+
+        return $disk->size($path) > 0;
     }
 }
