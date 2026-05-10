@@ -22,6 +22,7 @@ use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteCommandIdempotency;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
+use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
 use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
@@ -77,6 +78,7 @@ class InvitesFlowTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         InviteEdge::query()->delete();
+        InviteOutboxEvent::query()->delete();
         InviteFeedProjection::query()->delete();
         InviteQuotaCounter::query()->delete();
         InviteCommandIdempotency::query()->delete();
@@ -247,12 +249,33 @@ class InvitesFlowTest extends TestCaseTenant
             ->make(TenantScopedAccessTokenService::class)
             ->issueForAccountUser($this->receiver, 'Invite stream token', ['*'])
             ->plainTextToken;
+        $cursor = Carbon::now()->subMinute();
+
+        InviteOutboxEvent::query()->create([
+            'topic' => 'invites.receiver.'.$this->receiver->getKey(),
+            'receiver_user_id' => (string) $this->receiver->getKey(),
+            'payload' => [
+                'type' => 'invite.upsert',
+                'marker' => 'before-query-cursor',
+            ],
+            'dedupe_key' => 'stream-query-cursor-before',
+            'available_at' => $cursor->copy()->subSecond(),
+        ]);
+        InviteOutboxEvent::query()->create([
+            'topic' => 'invites.receiver.'.$this->receiver->getKey(),
+            'receiver_user_id' => (string) $this->receiver->getKey(),
+            'payload' => [
+                'type' => 'invite.upsert',
+                'marker' => 'after-query-cursor',
+            ],
+            'dedupe_key' => 'stream-query-cursor-after',
+            'available_at' => $cursor->copy()->addSecond(),
+        ]);
 
         $response = $this->get(
-            "{$this->base_api_tenant}invites/stream?access_token={$plainTextToken}",
+            "{$this->base_api_tenant}invites/stream?access_token={$plainTextToken}&last_event_id=".rawurlencode($cursor->toISOString()),
             [
                 'Accept' => 'text/event-stream',
-                'Last-Event-ID' => Carbon::now()->subMinute()->toISOString(),
             ]
         );
 
@@ -261,6 +284,9 @@ class InvitesFlowTest extends TestCaseTenant
             'text/event-stream',
             (string) $response->headers->get('Content-Type')
         );
+        $streamedContent = $response->streamedContent();
+        $this->assertStringContainsString('after-query-cursor', $streamedContent);
+        $this->assertStringNotContainsString('before-query-cursor', $streamedContent);
     }
 
     public function test_send_invite_to_multiple_recipients_updates_created_count_and_metrics(): void
