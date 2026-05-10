@@ -4,6 +4,7 @@ namespace Tests\Api\v1\Tenants\Branding;
 
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Auth\TenantPublicAuthMethodResolver;
+use App\Application\Branding\BrandingManifestService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Environment\TenantEnvironmentPayloadFactory;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -169,7 +170,14 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         app()->instance(
             TenantEnvironmentPayloadFactory::class,
-            new class(app(TelemetrySettingsKernelBridge::class), app(TenantPublicAuthMethodResolver::class), app(PushSettingsKernelBridge::class), app(AccountProfileRegistryService::class), app(BrandingPublicWebMediaService::class)) extends TenantEnvironmentPayloadFactory
+            new class(
+                app(TelemetrySettingsKernelBridge::class),
+                app(TenantPublicAuthMethodResolver::class),
+                app(PushSettingsKernelBridge::class),
+                app(AccountProfileRegistryService::class),
+                app(BrandingManifestService::class),
+                app(BrandingPublicWebMediaService::class),
+            ) extends TenantEnvironmentPayloadFactory
             {
                 public function buildSnapshotSource(Tenant $tenant): array
                 {
@@ -244,8 +252,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $this->snapshotTenant($tenant);
         $tenant->makeCurrent();
 
+        \Illuminate\Support\Facades\Storage::disk('public')->put(
+            "tenants/{$tenant->slug}/logos/favicon.ico",
+            'tenant-favicon',
+        );
+
         $tenantBranding = $tenant->branding_data ?? [];
-        $tenantBranding['logo_settings']['favicon_uri'] = 'https://tenant-sigma.test/storage/tenant-favicon.ico';
+        $tenantBranding['logo_settings']['favicon_uri'] = "https://{$tenant->subdomain}.{$this->host}/storage/tenants/{$tenant->slug}/logos/favicon.ico";
         $tenant->branding_data = $tenantBranding;
         $tenant->save();
 
@@ -368,9 +381,14 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $landlord = Landlord::singleton();
         $originalLandlordBranding = $landlord->branding_data ?? [];
 
+        \Illuminate\Support\Facades\Storage::disk('public')->put(
+            "tenants/{$tenant->slug}/pwa/icon-192x192.png",
+            'tenant-pwa-icon',
+        );
+
         $tenantBranding = $tenant->branding_data ?? [];
         $tenantBranding['logo_settings']['favicon_uri'] = '';
-        $tenantBranding['pwa_icon']['icon192_uri'] = 'https://tenant-sigma.test/storage/tenant-pwa-192.png';
+        $tenantBranding['pwa_icon']['icon192_uri'] = "https://{$tenant->subdomain}.{$this->host}/icon/icon-192x192.png?v=tenant-pwa-icon";
         $tenant->branding_data = $tenantBranding;
         $tenant->save();
 
@@ -388,6 +406,39 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         } finally {
             $landlord->branding_data = $originalLandlordBranding;
             $landlord->save();
+        }
+    }
+
+    public function test_environment_api_treats_zero_byte_favicon_as_pwa_fallback(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $tenant->makeCurrent();
+
+        $this->travelTo(now());
+        try {
+            \Illuminate\Support\Facades\Storage::disk('public')->put(
+                "tenants/{$tenant->slug}/logos/favicon.ico",
+                '',
+            );
+            \Illuminate\Support\Facades\Storage::disk('public')->put(
+                "tenants/{$tenant->slug}/pwa/icon-192x192.png",
+                'tenant-pwa-icon',
+            );
+
+            $tenantBranding = $tenant->branding_data ?? [];
+            $tenantBranding['logo_settings']['favicon_uri'] = "https://{$tenant->subdomain}.{$this->host}/storage/tenants/{$tenant->slug}/logos/favicon.ico";
+            $tenantBranding['pwa_icon']['icon192_uri'] = "https://{$tenant->subdomain}.{$this->host}/icon/icon-192x192.png?v=tenant-pwa-icon";
+            $tenant->branding_data = $tenantBranding;
+            $tenant->save();
+
+            $response = $this->get("{$this->base_api_tenant}environment");
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('branding_assets.favicon.has_dedicated_asset', false);
+            $response->assertJsonPath('branding_assets.favicon.uses_pwa_fallback', true);
+        } finally {
+            $this->travelBack();
         }
     }
 
