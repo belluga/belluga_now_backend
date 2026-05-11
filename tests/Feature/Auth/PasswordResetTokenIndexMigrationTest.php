@@ -29,6 +29,16 @@ class PasswordResetTokenIndexMigrationTest extends TestCase
             'unique' => true,
         ]);
         $collection->createIndex(['token' => 1], ['name' => 'token_1']);
+        $collection->insertMany([
+            [
+                'user_id' => 'legacy-user-1',
+                'token' => 'legacy-token-1',
+            ],
+            [
+                'user_id' => 'legacy-user-2',
+                'token' => 'legacy-token-2',
+            ],
+        ]);
 
         $migration = include base_path('database/migrations/landlord/2026_05_11_000900_update_password_reset_token_indexes.php');
         $migration->up();
@@ -42,6 +52,7 @@ class PasswordResetTokenIndexMigrationTest extends TestCase
         $this->assertFalse($indexes->has('token_1'));
         $this->assertSame(['slot_key' => 1], $indexes->get('slot_key_1'));
         $this->assertSame(['token_lookup_hash' => 1], $indexes->get('token_lookup_hash_1'));
+        $this->assertSame(0, $collection->countDocuments(['slot_key' => ['$exists' => false]]));
 
         $service = app(PasswordResetTokenService::class);
         $service->issueForUser('user-1', 'user@example.org', PasswordResetTokenService::TENANT_USERS_BROKER, 'tenant-a');

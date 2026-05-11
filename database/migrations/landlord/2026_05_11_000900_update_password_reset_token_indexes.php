@@ -15,6 +15,14 @@ return new class extends Migration
         $this->dropIndexIfExists($collection, 'user_id_1');
         $this->dropIndexIfExists($collection, 'token_1');
 
+        $collection->deleteMany([
+            '$or' => [
+                ['slot_key' => ['$exists' => false]],
+                ['slot_key' => null],
+                ['slot_key' => ''],
+            ],
+        ]);
+
         $collection->createIndex(['slot_key' => 1], ['unique' => true]);
         $collection->createIndex(['broker' => 1]);
         $collection->createIndex(['user_id' => 1]);
