@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Auth;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\PhoneOtpReviewAccessCodeHasher;
 use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
@@ -17,9 +19,12 @@ use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
+use Tests\Traits\SeedsTenantAccounts;
 
 class TenantPhoneOtpAuthTest extends TestCaseTenant
 {
+    use SeedsTenantAccounts;
+
     protected TenantLabels $tenant {
         get {
             return $this->landlord->tenant_primary;
@@ -53,6 +58,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         ]);
 
         $response->assertStatus(202);
+        $response->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_challenge');
         $response->assertJsonPath('data.phone', '+5527999990000');
         $response->assertJsonPath('data.delivery.channel', 'whatsapp');
         $this->assertNotEmpty($response->json('data.challenge_id'));
@@ -81,6 +87,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         ]);
 
         $response->assertStatus(202);
+        $response->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_challenge');
         $response->assertJsonPath('data.delivery.channel', 'sms');
 
         $challenge = PhoneOtpChallenge::query()->findOrFail($response->json('data.challenge_id'));
@@ -164,6 +171,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
             'device_name' => 'android-release-smoke',
         ]);
         $challenge->assertStatus(202);
+        $challenge->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_challenge');
 
         $otpCode = null;
         Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
@@ -182,6 +190,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         ]);
 
         $verify->assertStatus(200);
+        $verify->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_verify');
         $verify->assertJsonPath('data.identity_state', 'registered');
         $this->assertNotEmpty($verify->json('data.token'));
 
@@ -353,6 +362,75 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $inviteables->assertJsonPath('items.0.inviteable_reasons.0', 'contact_match');
     }
 
+    public function test_phone_otp_verification_for_multi_account_user_issues_unbound_public_token(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+
+        [$accountA, $roleA] = $this->seedAccountWithRole(['account-users:view', 'telemetry-settings:update']);
+        [$accountB, $roleB] = $this->seedAccountWithRole(['events:create']);
+        $phone = '+5527999990440';
+        $email = uniqid('multi-account-otp-', true).'@example.org';
+        AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Multi Account OTP',
+            'phones' => [$phone],
+            'emails' => [$email],
+            'credentials' => [],
+        ]);
+
+        $accountUserService = app(AccountUserService::class);
+        $accountUserService->create($accountA, [
+            'name' => 'Multi Account OTP',
+            'email' => $email,
+            'password' => 'Secret!234',
+        ], (string) $roleA->_id);
+        $accountUserService->create($accountB, [
+            'name' => 'Multi Account OTP',
+            'email' => $email,
+            'password' => 'Secret!234',
+        ], (string) $roleB->_id);
+
+        Account::current()?->forget();
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'multi-account-public-otp',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => $phone,
+            'code' => $otpCode,
+            'device_name' => 'multi-account-public-otp',
+        ]);
+
+        $verify->assertStatus(200);
+        $token = AccountUser::query()
+            ->findOrFail((string) $verify->json('data.user_id'))
+            ->tokens()
+            ->where('name', 'multi-account-public-otp')
+            ->first();
+
+        $this->assertNotNull($token);
+        $this->assertNull($token->account_id);
+        $this->assertSame([], (array) $token->abilities);
+
+        $settingsResponse = $this
+            ->withHeaders(['Authorization' => "Bearer {$verify->json('data.token')}"])
+            ->getJson("{$this->base_api_tenant}settings/telemetry");
+        $settingsResponse->assertStatus(403);
+    }
+
     public function test_phone_otp_challenge_can_use_whatsapp_webhook_when_otp_url_is_not_configured(): void
     {
         Queue::fake();
@@ -450,6 +528,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         ]);
 
         $response->assertStatus(429);
+        $response->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_challenge');
         $this->assertNotEmpty($response->json('retry_after'));
     }
 
@@ -493,6 +572,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
             'device_name' => 'android-release-smoke',
         ]);
         $challenge->assertStatus(202);
+        $challenge->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_challenge');
 
         $otpCode = null;
         Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
@@ -511,9 +591,11 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
 
         $first = $this->postJson("{$this->base_api_tenant}auth/otp/verify", $payload);
         $first->assertStatus(200);
+        $first->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_verify');
 
         $second = $this->postJson("{$this->base_api_tenant}auth/otp/verify", $payload);
         $second->assertStatus(422);
+        $second->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_verify');
         $second->assertJsonPath('errors.code.0', 'The OTP challenge is no longer active.');
     }
 

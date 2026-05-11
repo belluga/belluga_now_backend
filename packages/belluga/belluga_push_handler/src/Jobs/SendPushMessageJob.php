@@ -44,32 +44,50 @@ class SendPushMessageJob implements ShouldQueue, TenantAware
             return;
         }
 
-        $recipientPayload = $recipientResolver->resolveTokensWithUsers(
+        $audienceSize = $recipientResolver->countTargets(
             $message,
             $this->scope,
             $this->accountId
         );
-        $recipients = $recipientPayload['tokens'];
-        $tokenUserMap = $recipientPayload['token_user_map'];
         if ($this->scope === 'account' && $this->accountId !== null) {
-            $audienceSize = count($recipients);
             if (! $pushPlanPolicy->canSend($this->accountId, $message, $audienceSize)) {
                 return;
             }
         }
 
-        if ($recipients === []) {
+        if ($audienceSize === 0) {
             return;
         }
 
+        $acceptedCount = 0;
+        $deliveredAnyBatch = false;
+
         try {
-            $response = $deliveryService->deliver($message, $recipients, $tokenUserMap);
+            $recipientResolver->streamResolvedTargetBatches(
+                $message,
+                $this->scope,
+                $this->accountId,
+                500,
+                function (array $batch) use ($deliveryService, $message, &$acceptedCount, &$deliveredAnyBatch): void {
+                    $deliveredAnyBatch = true;
+                    $response = $deliveryService->deliver(
+                        $message,
+                        $batch['tokens'],
+                        $batch['token_user_map']
+                    );
+                    $acceptedCount += (int) ($response['accepted_count'] ?? 0);
+                }
+            );
         } catch (ValidationException) {
             return;
         }
 
+        if (! $deliveredAnyBatch) {
+            return;
+        }
+
         $metrics = $message->metrics ?? [];
-        $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + (int) ($response['accepted_count'] ?? 0);
+        $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + $acceptedCount;
         $metrics['sent_count'] = ($metrics['sent_count'] ?? 0) + 1;
 
         $message->metrics = $metrics;

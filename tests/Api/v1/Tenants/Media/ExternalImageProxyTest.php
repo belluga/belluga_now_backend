@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Api\v1\Tenants\Media;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Media\ExternalImageDnsResolverContract;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Http;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
@@ -97,17 +98,31 @@ final class ExternalImageProxyTest extends TestCaseTenant
         $this->assertNotNull($tenant);
         $tenant->makeCurrent();
 
-        $accountUser = AccountUser::create([
+        $account = Account::create([
+            'name' => 'External Image Account',
+            'document' => 'EXTERNALIMAGE01',
+        ]);
+        $accountUser = $account->users()->create([
             'name' => 'Account User',
             'emails' => ['account-user@belluga.test'],
             'password' => 'Secret!234',
             'identity_state' => 'registered',
         ]);
+        $accountUser->account_roles = [[
+            'account_id' => (string) $account->_id,
+            'permissions' => ['account-users:create', 'account-users:update'],
+            'name' => 'External Image Account Admin',
+        ]];
+        $accountUser->save();
 
-        $token = $accountUser->createToken(
-            'Test Token',
-            AbilityCatalog::all()
-        )->plainTextToken;
+        $token = $this->app->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser(
+                $accountUser,
+                'external-image-account-token',
+                ['account-users:create', 'account-users:update'],
+                accountId: (string) $account->_id,
+            )
+            ->plainTextToken;
 
         $accountHeaders = [
             'Authorization' => "Bearer {$token}",

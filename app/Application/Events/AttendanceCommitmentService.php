@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\Events;
 
+use App\Domain\Events\Events\OccurrenceAttendanceCanceled;
+use App\Domain\Events\Events\OccurrenceAttendanceConfirmed;
 use App\Models\Tenants\AttendanceCommitment;
 use Belluga\Invites\Application\Mutations\InviteMutationService;
 use Illuminate\Support\Carbon;
@@ -80,6 +82,8 @@ class AttendanceCommitmentService
             occurrenceId: $occurrenceId,
         );
 
+        event(new OccurrenceAttendanceConfirmed($userId, $eventId, $occurrenceId));
+
         return $commitment->fresh();
     }
 
@@ -99,6 +103,8 @@ class AttendanceCommitmentService
             'canceled_at' => Carbon::now(),
         ]);
         $commitment->save();
+
+        event(new OccurrenceAttendanceCanceled($userId, $eventId, $occurrenceId));
 
         return $commitment->fresh();
     }

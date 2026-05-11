@@ -7,7 +7,6 @@ namespace App\Application\Auth;
 use App\Exceptions\Auth\InvalidCredentialsException;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
@@ -27,21 +26,20 @@ class AccountAuthenticationService
 
         $account = Account::current();
         if (! $account) {
-            $accessIds = $user->getAccessToIds();
-            if ($accessIds !== []) {
-                $account = Account::query()
-                    ->whereIn('_id', $accessIds)
-                    ->first();
-            }
+            $account = $this->resolveSingleAccessibleAccount($user);
+        }
+        if (! $account || ! $user->haveAccessTo($account)) {
+            throw new InvalidCredentialsException;
         }
 
-        $abilities = $account ? $user->getPermissions($account) : [];
+        $abilities = $user->getPermissions($account);
 
         $token = $this->tenantScopedAccessTokenService
             ->issueForAccountUser(
                 $user,
                 $deviceName,
-                $this->sanitizeAbilities($user, $abilities)
+                $this->sanitizeAbilities($user, $abilities),
+                accountId: $account ? (string) $account->_id : null
             )
             ->plainTextToken;
 
@@ -68,6 +66,18 @@ class AccountAuthenticationService
             ->first();
     }
 
+    private function resolveSingleAccessibleAccount(AccountUser $user): ?Account
+    {
+        $accessIds = $user->getAccessToIds();
+        if (count($accessIds) !== 1) {
+            return null;
+        }
+
+        return Account::query()
+            ->where('_id', $accessIds[0])
+            ->first();
+    }
+
     /**
      * @param  array<int, string>  $abilities
      * @return array<int, string>
@@ -75,16 +85,11 @@ class AccountAuthenticationService
     private function sanitizeAbilities(AccountUser $user, array $abilities): array
     {
         if (in_array('*', $abilities, true)) {
-            Log::warning('Wildcard abilities expanded to explicit list for tenant token.', [
+            Log::warning('Wildcard account abilities preserved for account-bound token.', [
                 'user_id' => (string) $user->_id,
             ]);
 
-            $catalog = AbilityCatalog::all();
-
-            return array_values(array_filter(
-                $catalog,
-                static fn (string $ability): bool => str_starts_with($ability, 'account-')
-            ));
+            return ['*'];
         }
 
         return $abilities;

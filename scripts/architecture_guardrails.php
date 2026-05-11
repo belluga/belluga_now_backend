@@ -50,6 +50,8 @@ final class ArchitectureGuardrailRunner
         $this->checkFavoritesRegistryGuardrails();
         $this->checkCiLocalTestRuntimeGuardrails();
         $this->checkApiSecurityHardeningBaseline();
+        $this->checkAccountUserTokenIssuerGuardrails();
+        $this->checkAccountRouteAbilityBindingGuardrails();
 
         if ($this->violations === []) {
             fwrite(STDOUT, "[ARCH-GUARDRAILS] PASS - no architecture violations found.\n");
@@ -1343,13 +1345,57 @@ final class ArchitectureGuardrailRunner
             );
         }
 
-        foreach (['ticketing_checkout', 'ticketing_admission', 'settings_namespace_patch', 'events_admin_mutation'] as $requiredDomain) {
+        foreach ([
+            'ticketing_checkout',
+            'ticketing_admission',
+            'settings_namespace_patch',
+            'events_admin_mutation',
+            'tenant_public_anonymous_identity',
+            'tenant_public_phone_otp_challenge',
+            'tenant_public_phone_otp_verify',
+            'tenant_public_password_login',
+            'tenant_public_password_register',
+            'tenant_public_password_reset_token',
+            'tenant_public_password_reset',
+            'landlord_public_password_login',
+            'landlord_public_password_reset_token',
+            'landlord_public_password_reset',
+        ] as $requiredDomain) {
             if (! str_contains($configContent, "'domain' => '{$requiredDomain}'")) {
                 $this->addViolation(
                     'LAR-API-SECURITY-BASELINE',
                     $configPath,
                     1,
                     "api_security risk_matrix is missing required domain `{$requiredDomain}`."
+                );
+            }
+        }
+
+        foreach ([
+            'tenant_public_anonymous_identity' => ['subject_input' => 'fingerprint.hash', 'subject_requests_per_minute' => 30],
+            'tenant_public_phone_otp_challenge' => ['subject_input' => 'phone', 'subject_requests_per_minute' => 30],
+            'tenant_public_phone_otp_verify' => ['subject_input' => 'phone', 'subject_requests_per_minute' => 60],
+            'tenant_public_password_login' => ['subject_input' => 'email', 'subject_requests_per_minute' => 20],
+            'tenant_public_password_register' => ['subject_input' => 'email', 'subject_requests_per_minute' => 20],
+            'tenant_public_password_reset_token' => ['subject_input' => 'email', 'subject_requests_per_minute' => 10],
+            'tenant_public_password_reset' => ['subject_input' => 'email', 'subject_requests_per_minute' => 10],
+            'landlord_public_password_login' => ['subject_input' => 'email', 'subject_requests_per_minute' => 20],
+            'landlord_public_password_reset_token' => ['subject_input' => 'email', 'subject_requests_per_minute' => 10],
+            'landlord_public_password_reset' => ['subject_input' => 'email', 'subject_requests_per_minute' => 10],
+        ] as $requiredDomain => $expectedSubjectThrottle) {
+            $pattern = sprintf(
+                "~'domain'\\s*=>\\s*'%s'.*?'subject_input'\\s*=>\\s*'%s'.*?'subject_requests_per_minute'\\s*=>\\s*%d.*?'fail_closed_on_backend_error'\\s*=>\\s*true~s",
+                preg_quote($requiredDomain, '~'),
+                preg_quote($expectedSubjectThrottle['subject_input'], '~'),
+                $expectedSubjectThrottle['subject_requests_per_minute']
+            );
+
+            if (preg_match($pattern, $configContent) !== 1) {
+                $this->addViolation(
+                    'LAR-API-SECURITY-BASELINE',
+                    $configPath,
+                    1,
+                    "api_security domain `{$requiredDomain}` must declare subject-aware throttling with an explicit subject_requests_per_minute ceiling and fail_closed_on_backend_error=true."
                 );
             }
         }
@@ -1420,6 +1466,48 @@ final class ArchitectureGuardrailRunner
             );
         }
 
+        $tenantPublicRoutesPath = 'routes/api/public_tenant_maybe_api_v1.php';
+        $routes = $this->loadLaravelRoutes();
+        if ($routes === null) {
+            $this->addViolation(
+                'LAR-API-SECURITY-BASELINE',
+                $tenantPublicRoutesPath,
+                1,
+                'Cannot bootstrap Laravel routes for password middleware guardrails.'
+            );
+        } else {
+            foreach ([
+                '/api/v1/auth/login',
+                '/api/v1/auth/register/password',
+                '/api/v1/auth/password_token',
+                '/api/v1/auth/password_reset',
+            ] as $path) {
+                try {
+                    $route = $routes->match(\Illuminate\Http\Request::create($path, 'POST'));
+                } catch (\Throwable) {
+                    $route = null;
+                }
+
+                if ($route !== null && in_array(
+                    'App\\Http\\Middleware\\EnsureTenantPublicAuthMethod:password',
+                    $route->gatherMiddleware(),
+                    true,
+                )) {
+                    continue;
+                }
+
+                $this->addViolation(
+                    'LAR-API-SECURITY-BASELINE',
+                    $tenantPublicRoutesPath,
+                    1,
+                    sprintf(
+                        'Tenant public password route `%s` must remain guarded by EnsureTenantPublicAuthMethod::class.:password.',
+                        $path,
+                    )
+                );
+            }
+        }
+
         $bootstrapPath = 'bootstrap/app.php';
         $bootstrapContent = @file_get_contents($this->repoRoot.'/'.$bootstrapPath);
         if (! is_string($bootstrapContent)) {
@@ -1450,6 +1538,226 @@ final class ArchitectureGuardrailRunner
                 'trustProxies must include HEADER_X_FORWARDED_FOR for proxy-aware client identity.'
             );
         }
+    }
+
+    private function checkAccountUserTokenIssuerGuardrails(): void
+    {
+        $allowedIssuerFiles = [
+            'app/Application/Auth/TenantScopedAccessTokenService.php' => true,
+        ];
+
+        foreach ($this->collectPhpFiles(['app']) as $relativePath) {
+            if (isset($allowedIssuerFiles[$relativePath])) {
+                continue;
+            }
+
+            $content = @file_get_contents($this->repoRoot.'/'.$relativePath);
+            if (! is_string($content) || ! str_contains($content, 'createToken(')) {
+                continue;
+            }
+
+            if (! $this->contentReferencesTenantAccountUser($content)) {
+                continue;
+            }
+
+            if (preg_match_all('/->\s*createToken\s*\(/', $content, $matches, PREG_OFFSET_CAPTURE) < 1) {
+                continue;
+            }
+
+            foreach ($matches[0] as $match) {
+                $this->addViolation(
+                    'LAR-ACCOUNT-USER-TOKEN-ISSUER',
+                    $relativePath,
+                    $this->lineFromOffset($content, (int) ($match[1] ?? 0)),
+                    'Production AccountUser tokens must be issued through TenantScopedAccessTokenService::issueForAccountUser(); direct createToken(...) can bypass tenant/account binding.'
+                );
+            }
+        }
+    }
+
+    private function contentReferencesTenantAccountUser(string $content): bool
+    {
+        return str_contains($content, 'App\\Models\\Tenants\\AccountUser')
+            || preg_match('/\bAccountUser\b/', $content) === 1;
+    }
+
+    private function checkAccountRouteAbilityBindingGuardrails(): void
+    {
+        $accountScopedAbilityResources = $this->loadAccountScopedAbilityResourceCatalog();
+        if ($accountScopedAbilityResources === []) {
+            return;
+        }
+
+        $accountRouteFiles = [
+            'routes/api/account_api_v1.php',
+            'routes/api/project_account_api_v1.php',
+            ...$this->collectPhpFiles(['routes/api/packages/project_account_api_v1']),
+        ];
+        $accountRouteFiles = array_values(array_unique($accountRouteFiles));
+        sort($accountRouteFiles);
+
+        foreach ($accountRouteFiles as $relativePath) {
+            $lines = @file($this->repoRoot.'/'.$relativePath);
+            if (! is_array($lines)) {
+                continue;
+            }
+
+            $this->checkAccountRouteFileAbilityBinding($relativePath, $lines, $accountScopedAbilityResources);
+        }
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private function loadAccountScopedAbilityResourceCatalog(): array
+    {
+        $relativePath = 'app/Application/Auth/TenantScopedAccessTokenService.php';
+        $content = @file_get_contents($this->repoRoot.'/'.$relativePath);
+        if (! is_string($content)) {
+            $this->addViolation(
+                'LAR-ACCOUNT-TOKEN-BINDING-CATALOG',
+                $relativePath,
+                1,
+                'Cannot read TenantScopedAccessTokenService account-scoped ability resource catalog.'
+            );
+
+            return [];
+        }
+
+        if (preg_match('/ACCOUNT_SCOPED_ABILITY_RESOURCES\s*=\s*\[(.*?)\];/s', $content, $matches) !== 1) {
+            $this->addViolation(
+                'LAR-ACCOUNT-TOKEN-BINDING-CATALOG',
+                $relativePath,
+                1,
+                'TenantScopedAccessTokenService must declare ACCOUNT_SCOPED_ABILITY_RESOURCES so account route ability resources stay bound to token issuance.'
+            );
+
+            return [];
+        }
+
+        $resources = [];
+        $catalogBlock = (string) $matches[1];
+        if (preg_match_all('/[\'"]([a-z][a-z0-9-]*)[\'"]/', $catalogBlock, $resourceMatches) >= 1) {
+            foreach ($resourceMatches[1] as $resource) {
+                $resources[(string) $resource] = true;
+            }
+        }
+
+        if ($resources === []) {
+            $this->addViolation(
+                'LAR-ACCOUNT-TOKEN-BINDING-CATALOG',
+                $relativePath,
+                $this->lineFromOffset($content, (int) strpos($content, 'ACCOUNT_SCOPED_ABILITY_RESOURCES')),
+                'ACCOUNT_SCOPED_ABILITY_RESOURCES cannot be empty.'
+            );
+        }
+
+        return $resources;
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @param  array<string, true>  $accountScopedAbilityResources
+     */
+    private function checkAccountRouteFileAbilityBinding(string $relativePath, array $lines, array $accountScopedAbilityResources): void
+    {
+        $braceDepth = 0;
+        $activeAccountGroupDepths = [];
+        $pendingMiddleware = null;
+
+        foreach ($lines as $index => $line) {
+            $lineNumber = $index + 1;
+
+            if ($pendingMiddleware !== null) {
+                $pendingMiddleware['text'] .= "\n".$line;
+                if (str_contains($line, '->group')) {
+                    $pendingMiddleware['group_has_account'] = $this->middlewareTextContainsAccount($pendingMiddleware['text']);
+                }
+                if (! str_contains($line, '->group') && str_contains($line, ';')) {
+                    $pendingMiddleware = null;
+                }
+            }
+
+            if ($pendingMiddleware === null && str_contains($line, 'Route::middleware(')) {
+                $pendingMiddleware = [
+                    'text' => $line,
+                    'group_has_account' => str_contains($line, '->group')
+                        && $this->middlewareTextContainsAccount($line),
+                ];
+            }
+
+            $abilityResources = $this->extractAbilityResourcesFromMiddlewareText($line);
+            if ($abilityResources !== []) {
+                $hasAccountMiddleware = $this->middlewareTextContainsAccount($line) || $activeAccountGroupDepths !== [];
+                if (! $hasAccountMiddleware) {
+                    $this->addViolation(
+                        'LAR-ACCOUNT-ROUTE-BINDING',
+                        $relativePath,
+                        $lineNumber,
+                        'Account-prefixed route ability middleware must include `account` middleware on the route or an enclosing Route::middleware(...)->group(...).'
+                    );
+                }
+
+                foreach ($abilityResources as $resource) {
+                    if (isset($accountScopedAbilityResources[$resource])) {
+                        continue;
+                    }
+
+                    $this->addViolation(
+                        'LAR-ACCOUNT-TOKEN-BINDING-CATALOG',
+                        $relativePath,
+                        $lineNumber,
+                        "Account-prefixed route ability resource `{$resource}` is not declared in TenantScopedAccessTokenService::ACCOUNT_SCOPED_ABILITY_RESOURCES."
+                    );
+                }
+            }
+
+            $braceDepth += substr_count($line, '{') - substr_count($line, '}');
+            $braceDepth = max(0, $braceDepth);
+
+            if (($pendingMiddleware['group_has_account'] ?? false) === true) {
+                $activeAccountGroupDepths[] = max(1, $braceDepth);
+                $pendingMiddleware = null;
+            }
+
+            $activeAccountGroupDepths = array_values(array_filter(
+                $activeAccountGroupDepths,
+                static fn (int $depth): bool => $braceDepth >= $depth
+            ));
+        }
+    }
+
+    private function middlewareTextContainsAccount(string $text): bool
+    {
+        return preg_match('/[\'"]account[\'"]/', $text) === 1;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function extractAbilityResourcesFromMiddlewareText(string $text): array
+    {
+        if (preg_match_all('/\b(?:abilities|ability):([^\'"]+)/', $text, $matches) < 1) {
+            return [];
+        }
+
+        $resources = [];
+        foreach ($matches[1] as $rawList) {
+            $abilities = array_filter(array_map('trim', explode(',', (string) $rawList)));
+            foreach ($abilities as $ability) {
+                if ($ability === '' || $ability === '*') {
+                    continue;
+                }
+
+                $resource = explode(':', $ability, 2)[0] ?? '';
+                $resource = trim((string) $resource);
+                if ($resource !== '') {
+                    $resources[$resource] = true;
+                }
+            }
+        }
+
+        return array_keys($resources);
     }
 
     /**
@@ -1598,6 +1906,31 @@ final class ArchitectureGuardrailRunner
         }
 
         return $statements;
+    }
+
+    private function loadLaravelRoutes(): ?\Illuminate\Routing\RouteCollectionInterface
+    {
+        $autoloadPath = $this->repoRoot.'/vendor/autoload.php';
+        $bootstrapPath = $this->repoRoot.'/bootstrap/app.php';
+
+        if (! is_file($autoloadPath) || ! is_file($bootstrapPath)) {
+            return null;
+        }
+
+        require_once $autoloadPath;
+
+        $app = require $bootstrapPath;
+        if (! is_object($app) || ! method_exists($app, 'make')) {
+            return null;
+        }
+
+        try {
+            $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+
+            return $app->make('router')->getRoutes();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function relativePath(string $absolutePath): string

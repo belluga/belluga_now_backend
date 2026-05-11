@@ -276,6 +276,29 @@ class TenantDomainControllerTest extends TestCaseTenant
         $response->assertStatus(403);
     }
 
+    public function test_borrowed_token_read_ability_cannot_read_current_tenant_domains(): void
+    {
+        $otherTenant = $this->createSecondaryTenant();
+        $headers = $this->authHeaders($this->createLandlordPrincipalForTenantRoles(
+            email: 'borrowed-read@domains.test',
+            tenantRoles: [
+                [
+                    'tenant' => $this->tenantModel,
+                    'permissions' => ['tenant-domains:read'],
+                ],
+                [
+                    'tenant' => $otherTenant,
+                    'permissions' => ['tenant-domains:update'],
+                ],
+            ],
+        ), ['tenant-domains:read']);
+
+        $response = $this->withHeaders($headers)
+            ->getJson($this->domainsBaseUrl($otherTenant));
+
+        $response->assertStatus(403);
+    }
+
     public function test_store_forbidden_without_update_ability(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['tenant-domains:read']);
@@ -287,6 +310,48 @@ class TenantDomainControllerTest extends TestCaseTenant
         ]);
 
         $response->assertStatus(403);
+    }
+
+    public function test_borrowed_token_update_ability_cannot_mutate_current_tenant_domains(): void
+    {
+        $otherTenant = $this->createSecondaryTenant();
+        $headers = $this->authHeaders($this->createLandlordPrincipalForTenantRoles(
+            email: 'borrowed-update@domains.test',
+            tenantRoles: [
+                [
+                    'tenant' => $this->tenantModel,
+                    'permissions' => ['tenant-domains:update'],
+                ],
+                [
+                    'tenant' => $otherTenant,
+                    'permissions' => ['tenant-domains:read'],
+                ],
+            ],
+        ), ['tenant-domains:update']);
+
+        $blockedPath = 'borrowed-write-blocked.example.com';
+        $this->withHeaders($headers)
+            ->postJson($this->domainsBaseUrl($otherTenant), [
+                'path' => $blockedPath,
+            ])
+            ->assertStatus(403);
+        $this->assertFalse(
+            $otherTenant->fresh()->domains()->withTrashed()->where('path', $blockedPath)->exists()
+        );
+
+        $domain = $otherTenant->domains()->create([
+            'path' => 'borrowed-delete-blocked.example.com',
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+        ]);
+        $beforeDeletedAt = $domain->deleted_at?->toJSON();
+
+        $this->withHeaders($headers)
+            ->deleteJson(sprintf('%s/%s', $this->domainsBaseUrl($otherTenant), $domain->_id))
+            ->assertStatus(403);
+
+        $domain = $domain->fresh();
+        $this->assertSame($beforeDeletedAt, $domain->deleted_at?->toJSON());
+        $this->assertFalse($domain->trashed());
     }
 
     public function test_index_accepts_token_from_tenant_admin_login_flow(): void
@@ -336,5 +401,85 @@ class TenantDomainControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+    }
+
+    /**
+     * @param  array<int, array{tenant: Tenant, permissions: array<int, string>}>  $tenantRoles
+     */
+    private function createLandlordPrincipalForTenantRoles(
+        string $email,
+        array $tenantRoles
+    ): LandlordUser {
+        $user = LandlordUser::create([
+            'name' => str_replace('@domains.test', '', $email),
+            'emails' => [$email],
+            'identity_state' => 'registered',
+        ]);
+
+        $user->tenant_roles = array_map(
+            static fn (array $role): array => [
+                'name' => 'Tenant Domain Manager',
+                'slug' => 'tenant-domain-manager',
+                'permissions' => $role['permissions'],
+                'tenant_id' => (string) $role['tenant']->_id,
+            ],
+            $tenantRoles
+        );
+        $user->save();
+
+        return $user->fresh();
+    }
+
+    /**
+     * @param  array<int, string>  $tokenAbilities
+     * @return array<string, string>
+     */
+    private function authHeaders(LandlordUser $user, array $tokenAbilities): array
+    {
+        $token = $user
+            ->createToken('tenant-domain-test', $tokenAbilities)
+            ->plainTextToken;
+
+        return [
+            'Authorization' => "Bearer {$token}",
+            'Content-Type' => 'application/json',
+        ];
+    }
+
+    private function createSecondaryTenant(): Tenant
+    {
+        $tenant = Tenant::query()
+            ->where('subdomain', 'tenant-domain-secondary')
+            ->first();
+
+        if (! $tenant instanceof Tenant) {
+            $tenant = Tenant::create([
+                'name' => 'Tenant Domain Secondary',
+                'subdomain' => 'tenant-domain-secondary',
+                'app_domains' => ['tenant-domain-secondary.app'],
+            ]);
+        }
+
+        $tenant->domains()
+            ->withTrashed()
+            ->get()
+            ->each(static function ($domain): void {
+                $domain->forceDelete();
+            });
+        $tenant->domains()->create([
+            'path' => 'tenant-domain-secondary.test',
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+        ]);
+
+        return $tenant->fresh();
+    }
+
+    private function domainsBaseUrl(Tenant $tenant): string
+    {
+        return sprintf(
+            'http://%s.%s/admin/api/v1/domains',
+            $tenant->subdomain,
+            $this->host
+        );
     }
 }

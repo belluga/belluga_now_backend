@@ -9,6 +9,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,7 @@ class AccountManagementService
         private readonly AccountQueryService $accountQueryService,
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly MapPoiProjectionService $mapPoiProjectionService,
+        private readonly PushUserGatewayContract $pushUsers,
     ) {}
 
     public function paginateForUser(
@@ -236,11 +238,16 @@ class AccountManagementService
             ...$role->attributesToArray(),
             'account_id' => $account->id,
         ]);
+
+        $this->pushUsers->syncPushDeviceAccountIds(
+            (string) $user->_id,
+            $user->fresh()->getAccessToIds(),
+        );
     }
 
     public function detachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void
     {
-        DB::connection('tenant')->transaction(static function () use ($account, $user, $role): void {
+        DB::connection('tenant')->transaction(function () use ($account, $user, $role): void {
             $embeddedRole = $user->accountRoles()
                 ->where('slug', $role->slug)
                 ->where('account_id', $account->id)
@@ -249,6 +256,18 @@ class AccountManagementService
             if ($embeddedRole) {
                 $embeddedRole->delete();
                 $user->save();
+
+                $remainingAccessIds = $user->getAccessToIds();
+                if ($remainingAccessIds === []) {
+                    $this->pushUsers->deactivatePushDevicesForUser((string) $user->_id);
+
+                    return;
+                }
+
+                $this->pushUsers->syncPushDeviceAccountIds(
+                    (string) $user->_id,
+                    $remainingAccessIds,
+                );
             }
         });
     }

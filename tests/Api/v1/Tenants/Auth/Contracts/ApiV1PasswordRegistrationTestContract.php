@@ -11,6 +11,7 @@ use App\Models\Tenants\MergedAccountSnapshot;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
 use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Illuminate\Support\Carbon;
 use Illuminate\Testing\TestResponse;
 use Mockery;
@@ -21,16 +22,18 @@ use Tests\TestCaseTenant;
 abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
 {
     private Tenant $tenantModel;
+    private static int $registrationRequestCounter = 0;
+    private static int $anonymousIdentityRequestCounter = 0;
+    private static int $anonymousPushRegisterRequestCounter = 0;
 
     protected function setUp(): void
     {
         parent::setUp();
 
         Tenant::forgetCurrent();
-        $this->tenantModel = Tenant::query()
-            ->where('slug', $this->tenant->slug)
-            ->firstOrFail();
+        $this->tenantModel = $this->ensureCanonicalTenantExists($this->tenant);
         $this->tenantModel->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $this->tenantModel);
     }
 
     protected function tearDown(): void
@@ -52,10 +55,45 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
 
     protected function registerPassword(array $payload): TestResponse
     {
-        return $this->json(
+        return $this->withServerVariables([
+            'REMOTE_ADDR' => $this->nextRegistrationRemoteAddr(),
+        ])->json(
             method: 'post',
             uri: $this->registrationEndpoint(),
             data: $payload
+        );
+    }
+
+    private function nextRegistrationRemoteAddr(): string
+    {
+        self::$registrationRequestCounter++;
+
+        return $this->remoteAddrFromCounter(self::$registrationRequestCounter);
+    }
+
+    private function nextAnonymousIdentityRemoteAddr(): string
+    {
+        self::$anonymousIdentityRequestCounter++;
+
+        return $this->remoteAddrFromCounter(self::$anonymousIdentityRequestCounter);
+    }
+
+    private function nextAnonymousPushRegisterRemoteAddr(): string
+    {
+        self::$anonymousPushRegisterRequestCounter++;
+
+        return $this->remoteAddrFromCounter(self::$anonymousPushRegisterRequestCounter);
+    }
+
+    private function remoteAddrFromCounter(int $counter): string
+    {
+        $thirdOctet = intdiv($counter, 250) % 250;
+        $fourthOctet = $counter % 250;
+
+        return sprintf(
+            '127.0.%d.%d',
+            $thirdOctet === 0 ? 1 : $thirdOctet,
+            $fourthOctet === 0 ? 1 : $fourthOctet,
         );
     }
 
@@ -269,7 +307,10 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
             ->where('_id', new ObjectId($canonicalId))
             ->firstOrFail();
 
-        $devices = collect($canonicalUser->devices ?? []);
+        $devices = PushDevice::query()
+            ->where('account_user_id', (string) $canonicalUser->_id)
+            ->get();
+
         $this->assertNotNull($devices->firstWhere('device_id', 'merge-device-1'));
         $this->assertNotNull($devices->firstWhere('device_id', 'merge-device-2'));
         $this->assertCount(2, $devices);
@@ -556,7 +597,9 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
 
     protected function issueAnonymousIdentityForMerge(string $hash, string $deviceName): array
     {
-        $response = $this->json(
+        $response = $this->withServerVariables([
+            'REMOTE_ADDR' => $this->nextAnonymousIdentityRemoteAddr(),
+        ])->json(
             method: 'post',
             uri: "{$this->base_api_tenant}anonymous/identities",
             data: [
@@ -582,7 +625,9 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         string $platform,
         string $pushToken,
     ): void {
-        $response = $this->json(
+        $response = $this->withServerVariables([
+            'REMOTE_ADDR' => $this->nextAnonymousPushRegisterRemoteAddr(),
+        ])->json(
             method: 'post',
             uri: "{$this->base_api_tenant}push/register",
             data: [

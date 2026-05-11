@@ -35,7 +35,7 @@ class TenantPublicAuthMethodResolverTest extends TestCase
     }
 
     #[Test]
-    public function it_defaults_to_landlord_methods_when_tenant_has_no_enabled_subset(): void
+    public function it_fails_closed_to_phone_otp_when_tenant_has_no_enabled_subset(): void
     {
         $resolver = $this->app->make(TenantPublicAuthMethodResolver::class);
 
@@ -47,12 +47,32 @@ class TenantPublicAuthMethodResolverTest extends TestCase
             []
         );
 
-        $this->assertSame(['password', 'phone_otp'], $resolved['effective_methods']);
-        $this->assertSame('password', $resolved['effective_primary_method']);
+        $this->assertSame(['phone_otp'], $resolved['effective_methods']);
+        $this->assertSame('phone_otp', $resolved['effective_primary_method']);
     }
 
     #[Test]
-    public function it_keeps_landlord_methods_when_customization_is_disabled(): void
+    public function it_fails_closed_to_phone_otp_when_tenant_subset_is_invalid(): void
+    {
+        $resolver = $this->app->make(TenantPublicAuthMethodResolver::class);
+
+        $resolved = $resolver->resolve(
+            [
+                'available_methods' => ['password', 'phone_otp'],
+                'allow_tenant_customization' => true,
+            ],
+            [
+                'enabled_methods' => ['invalid-method'],
+            ]
+        );
+
+        $this->assertSame([], $resolved['enabled_methods']);
+        $this->assertSame(['phone_otp'], $resolved['effective_methods']);
+        $this->assertSame('phone_otp', $resolved['effective_primary_method']);
+    }
+
+    #[Test]
+    public function it_remains_fail_closed_to_phone_otp_when_customization_is_disabled(): void
     {
         $resolver = $this->app->make(TenantPublicAuthMethodResolver::class);
 
@@ -66,6 +86,24 @@ class TenantPublicAuthMethodResolverTest extends TestCase
             ]
         );
 
-        $this->assertSame(['password', 'phone_otp'], $resolved['effective_methods']);
+        $this->assertSame(['phone_otp'], $resolved['effective_methods']);
+        $this->assertSame('phone_otp', $resolved['effective_primary_method']);
+    }
+
+    #[Test]
+    public function it_injects_phone_otp_when_the_landlord_catalog_omits_it(): void
+    {
+        $resolver = $this->app->make(TenantPublicAuthMethodResolver::class);
+
+        $resolved = $resolver->resolve(
+            [
+                'available_methods' => ['password'],
+                'allow_tenant_customization' => true,
+            ],
+            []
+        );
+
+        $this->assertSame(['password', 'phone_otp'], $resolved['available_methods']);
+        $this->assertSame(['phone_otp'], $resolved['effective_methods']);
     }
 }

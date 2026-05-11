@@ -8,8 +8,10 @@ use App\Integration\Invites\InviteAttendanceGatewayAdapter;
 use App\Integration\Invites\InviteIdentityGatewayAdapter;
 use App\Integration\Invites\InviteTargetReadAdapter;
 use App\Integration\Invites\InviteTelemetryEmitterAdapter;
+use App\Application\Push\InvitePushDeliveryService;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
+use Belluga\Invites\Contracts\InvitePushDeliveryContract;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Illuminate\Support\ServiceProvider;
@@ -31,6 +33,11 @@ class InvitesIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             InviteTelemetryEmitterContract::class,
             InviteTelemetryEmitterAdapter::class
+        );
+
+        $this->app->bind(
+            InvitePushDeliveryContract::class,
+            InvitePushDeliveryService::class
         );
 
         $this->app->bind(

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Belluga\Favorites\Application\Favorites;
 
 use Belluga\Favorites\Contracts\FavoritesRegistryContract;
+use Belluga\Favorites\Domain\Events\FavoriteAdded;
+use Belluga\Favorites\Domain\Events\FavoriteRemoved;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Illuminate\Support\Carbon;
 
@@ -45,6 +47,13 @@ class FavoritesCommandService
             ],
         );
 
+        event(new FavoriteAdded(
+            $ownerUserId,
+            $selector['registry_key'],
+            $selector['target_type'],
+            $selector['target_id'],
+        ));
+
         return $selector;
     }
 
@@ -73,6 +82,13 @@ class FavoritesCommandService
             ->where('target_type', $selector['target_type'])
             ->where('target_id', $selector['target_id'])
             ->delete();
+
+        event(new FavoriteRemoved(
+            $ownerUserId,
+            $selector['registry_key'],
+            $selector['target_type'],
+            $selector['target_id'],
+        ));
 
         return $selector;
     }

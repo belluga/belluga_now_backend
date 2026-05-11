@@ -72,6 +72,14 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('mongodb', $config['default']);
     }
 
+    public function test_bootstrap_without_environment_defaults_to_mongodb_queue_in_mongo_first_app(): void
+    {
+        $config = $this->loadQueueConfig();
+
+        $this->assertSame('mongodb', $config['default']);
+        $this->assertSame('mongodb', $config['connections']['mongodb']['connection']);
+    }
+
     public function test_falls_back_to_primary_database_connection_when_mongodb_queue_connection_is_not_explicitly_set(): void
     {
         $this->setEnv('DB_CONNECTION', 'mongodb');

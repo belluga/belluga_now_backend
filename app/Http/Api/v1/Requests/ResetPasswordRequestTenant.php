@@ -19,14 +19,8 @@ class ResetPasswordRequestTenant extends ResetPasswordRequestContract
     {
         return [
             'email' => 'required|email|max:'.InputConstraints::EMAIL_MAX,
-            'password' => [
-                'required',
-                'string',
-                'min:'.InputConstraints::PASSWORD_MIN,
-                'max:'.InputConstraints::PASSWORD_MAX,
-                'confirmed',
-            ],
-            'reset_token' => 'required|string|max:255|exists:landlord.password_reset_tokens,token',
+            'password' => $this->canonicalPasswordRules(),
+            'reset_token' => 'required|string|max:255',
         ];
     }
 

@@ -8,6 +8,7 @@ use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Http\Requests\PushCredentialRequest;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Crypt;
 
 class PushCredentialController
 {
@@ -44,8 +45,16 @@ class PushCredentialController
             $credential = PushCredential::create($payload);
             $status = 201;
         } else {
-            $credential->fill($payload);
-            $credential->save();
+            PushCredential::query()
+                ->whereKey($credential->getKey())
+                ->update([
+                    'project_id' => $payload['project_id'],
+                    'client_email' => $payload['client_email'],
+                    'private_key' => Crypt::encryptString($payload['private_key']),
+                    'updated_at' => now(),
+                ]);
+
+            $credential = PushCredential::query()->findOrFail($credential->getKey());
         }
 
         return response()->json(['data' => $credential], $status);

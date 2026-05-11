@@ -19,7 +19,7 @@ class InviteRealtimeStreamController extends Controller
     {
         $user = $request->user();
         $userId = $user ? (string) $user->getAuthIdentifier() : '';
-        $lastEventId = $request->header('Last-Event-ID');
+        $lastEventId = $request->header('Last-Event-ID') ?: $request->query('last_event_id');
         $deltas = $this->streams->buildStreamDeltas($userId, is_string($lastEventId) ? $lastEventId : null);
 
         return response()->stream(function () use ($deltas): void {

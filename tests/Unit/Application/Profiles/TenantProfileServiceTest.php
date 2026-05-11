@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\Profiles;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\Auth\PasswordResetFlowService;
+use App\Application\Auth\PasswordResetTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Profiles\TenantProfileService;
@@ -12,9 +17,12 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -46,6 +54,13 @@ class TenantProfileServiceTest extends TestCase
             'password' => 'Secret!234',
             'identity_state' => 'registered',
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+
+        parent::tearDown();
     }
 
     public function test_update_profile_updates_attributes(): void
@@ -132,6 +147,211 @@ class TenantProfileServiceTest extends TestCase
         $this->expectException(ValidationException::class);
 
         $this->service->addPhones($this->user, ['invalid-phone']);
+    }
+
+    public function test_send_reset_token_passes_current_tenant_scope_to_password_reset_service(): void
+    {
+        $email = strtolower((string) $this->user->emails[0]);
+        $tenantScope = (string) Tenant::current()?->getKey();
+
+        $passwordResetFlowService = Mockery::mock(PasswordResetFlowService::class);
+        $passwordResetFlowService->shouldReceive('issue')
+            ->once()
+            ->withArgs(function (
+                string $resolvedEmail,
+                string $broker,
+                ?string $scope,
+                mixed $resolvedUser,
+                callable $userIdResolver,
+            ) use ($email, $tenantScope): bool {
+                return $resolvedEmail === $email
+                    && $broker === PasswordResetTokenService::TENANT_USERS_BROKER
+                    && $scope === $tenantScope
+                    && $resolvedUser instanceof AccountUser
+                    && $resolvedUser->is($this->user)
+                    && $userIdResolver($resolvedUser) === $this->user->id;
+            });
+
+        $service = new TenantProfileService(
+            Mockery::mock(AccountProfileBootstrapService::class),
+            Mockery::mock(AccountProfileManagementService::class),
+            Mockery::mock(AccountProfileMediaService::class),
+            $passwordResetFlowService,
+        );
+
+        $service->sendResetToken($email);
+
+        $this->assertSame($tenantScope, (string) Tenant::current()?->getKey());
+    }
+
+    public function test_send_reset_token_releases_user_cooldown_when_issuance_fails(): void
+    {
+        $email = strtolower((string) $this->user->emails[0]);
+        $tenantScope = (string) Tenant::current()?->getKey();
+
+        $passwordResetFlowService = Mockery::mock(PasswordResetFlowService::class);
+        $passwordResetFlowService->shouldReceive('issue')
+            ->once()
+            ->withArgs(function (
+                string $resolvedEmail,
+                string $broker,
+                ?string $scope,
+                mixed $resolvedUser,
+                callable $userIdResolver,
+            ) use ($email, $tenantScope): bool {
+                return $resolvedEmail === $email
+                    && $broker === PasswordResetTokenService::TENANT_USERS_BROKER
+                    && $scope === $tenantScope
+                    && $resolvedUser instanceof AccountUser
+                    && $resolvedUser->is($this->user)
+                    && $userIdResolver($resolvedUser) === $this->user->id;
+            })
+            ->andThrow(new RuntimeException('Simulated tenant reset issuance failure.'));
+
+        $service = new TenantProfileService(
+            Mockery::mock(AccountProfileBootstrapService::class),
+            Mockery::mock(AccountProfileManagementService::class),
+            Mockery::mock(AccountProfileMediaService::class),
+            $passwordResetFlowService,
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Simulated tenant reset issuance failure.');
+
+        $service->sendResetToken($email);
+    }
+
+    public function test_send_reset_token_uses_one_cooldown_for_all_emails_of_the_same_user(): void
+    {
+        $secondaryEmail = $this->uniqueEmail();
+        $this->user->emails = [$this->user->emails[0], $secondaryEmail];
+        $this->user->save();
+
+        $tokenService = $this->app->make(PasswordResetTokenService::class);
+        $primaryEmail = strtolower((string) $this->user->emails[0]);
+        $tenantScope = (string) Tenant::current()?->getKey();
+
+        $this->service->sendResetToken($primaryEmail);
+        $firstToken = $tokenService->latestIssuedTokenForTesting(
+            userId: $this->user->id,
+            broker: PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: $tenantScope,
+        );
+        $firstRecord = DB::connection('landlord')
+            ->table('password_reset_tokens')
+            ->where('user_id', $this->user->id)
+            ->where('scope_key', $tenantScope)
+            ->first();
+
+        $this->assertIsString($firstToken);
+        $this->assertNotNull($firstRecord);
+        $this->assertTrue(Hash::check($firstToken, (string) $firstRecord->token_hash));
+
+        $this->service->sendResetToken($secondaryEmail);
+        $secondToken = $tokenService->latestIssuedTokenForTesting(
+            userId: $this->user->id,
+            broker: PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: $tenantScope,
+        );
+        $secondRecord = DB::connection('landlord')
+            ->table('password_reset_tokens')
+            ->where('user_id', $this->user->id)
+            ->where('scope_key', $tenantScope)
+            ->first();
+
+        $this->assertSame($firstToken, $secondToken);
+        $this->assertNotNull($secondRecord);
+        $this->assertSame((string) $firstRecord->token_hash, (string) $secondRecord->token_hash);
+    }
+
+    public function test_reset_password_burns_the_token_before_password_persistence_failure(): void
+    {
+        $tokenService = $this->app->make(PasswordResetTokenService::class);
+        $token = $tokenService->issueForUser(
+            userId: $this->user->id,
+            email: (string) $this->user->emails[0],
+            broker: PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: (string) Tenant::current()?->getKey(),
+        );
+
+        $service = new class(
+            $this->app->make(AccountProfileBootstrapService::class),
+            $this->app->make(AccountProfileManagementService::class),
+            $this->app->make(AccountProfileMediaService::class),
+            $this->app->make(PasswordResetFlowService::class),
+        ) extends TenantProfileService {
+            protected function applyResetPassword(AccountUser $user, string $password): void
+            {
+                throw new RuntimeException('Simulated tenant password persistence failure.');
+            }
+        };
+
+        try {
+            $service->resetPassword((string) $this->user->emails[0], $token, 'Another!234');
+            $this->fail('Expected simulated tenant password persistence failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Simulated tenant password persistence failure.', $exception->getMessage());
+        }
+
+        $this->assertNull(
+            DB::connection('landlord')
+                ->table('password_reset_tokens')
+                ->where('user_id', $this->user->id)
+                ->first()
+        );
+
+        $this->expectException(ValidationException::class);
+
+        $service->resetPassword((string) $this->user->emails[0], $token, 'Another!234');
+    }
+
+    public function test_reset_password_releases_issue_cooldown_after_password_persistence_failure(): void
+    {
+        $tokenService = $this->app->make(PasswordResetTokenService::class);
+        $tenantScope = (string) Tenant::current()?->getKey();
+        $originalToken = $tokenService->issueForUser(
+            userId: $this->user->id,
+            email: (string) $this->user->emails[0],
+            broker: PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: $tenantScope,
+        );
+
+        $service = new class(
+            $this->app->make(AccountProfileBootstrapService::class),
+            $this->app->make(AccountProfileManagementService::class),
+            $this->app->make(AccountProfileMediaService::class),
+            $this->app->make(PasswordResetFlowService::class),
+        ) extends TenantProfileService {
+            protected function applyResetPassword(AccountUser $user, string $password): void
+            {
+                throw new RuntimeException('Simulated tenant password persistence failure.');
+            }
+        };
+
+        try {
+            $service->resetPassword((string) $this->user->emails[0], $originalToken, 'Another!234');
+            $this->fail('Expected simulated tenant password persistence failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Simulated tenant password persistence failure.', $exception->getMessage());
+        }
+
+        $service->sendResetToken((string) $this->user->emails[0]);
+
+        $reissuedToken = $tokenService->latestIssuedTokenForTesting(
+            userId: $this->user->id,
+            broker: PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: $tenantScope,
+        );
+        $reissuedRecord = DB::connection('landlord')
+            ->table('password_reset_tokens')
+            ->where('user_id', $this->user->id)
+            ->where('scope_key', $tenantScope)
+            ->first();
+
+        $this->assertIsString($reissuedToken);
+        $this->assertNotSame($originalToken, $reissuedToken);
+        $this->assertNotNull($reissuedRecord);
+        $this->assertTrue(Hash::check($reissuedToken, (string) $reissuedRecord->token_hash));
     }
 
     private function initializeSystem(): void
