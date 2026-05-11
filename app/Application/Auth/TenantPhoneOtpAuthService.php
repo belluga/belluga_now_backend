@@ -162,12 +162,14 @@ class TenantPhoneOtpAuthService
         $this->profileBootstrapper->ensurePersonalAccount($user);
         $user->refresh();
         $this->rematchExistingContactImports($user);
+        [$abilities, $accountId] = $this->resolveTokenIssuanceContext($user);
 
         $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
             $user,
             $this->tokenName($payload['device_name'] ?? null),
-            $this->sanitizeAbilities($this->resolveAbilities($user)),
+            $this->sanitizeAbilities($abilities),
             (string) $tenant->_id,
+            $accountId,
         );
 
         if ($reviewCodeMatched) {
@@ -439,25 +441,52 @@ class TenantPhoneOtpAuthService
     }
 
     /**
-     * @return array<int, string>
+     * @return array{0: array<int, string>, 1: string|null}
      */
-    private function resolveAbilities(AccountUser $user): array
+    private function resolveTokenIssuanceContext(AccountUser $user): array
     {
         $account = Account::current();
-        if (! $account) {
-            $accessIds = $user->getAccessToIds();
-            if ($accessIds !== []) {
-                $account = Account::query()
-                    ->whereIn('_id', $accessIds)
-                    ->first();
+        if ($account !== null) {
+            return [$this->resolveAbilitiesForAccount($user, $account), (string) $account->_id];
+        }
+
+        $accessIds = $this->normalizedAccessIds($user);
+        if (count($accessIds) === 1) {
+            $account = Account::query()
+                ->whereIn('_id', $accessIds)
+                ->first();
+
+            if ($account !== null) {
+                return [$this->resolveAbilitiesForAccount($user, $account), (string) $account->_id];
             }
         }
 
+        return [[], null];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveAbilitiesForAccount(AccountUser $user, Account $account): array
+    {
         try {
-            return $account ? $user->getPermissions($account) : $user->getPermissions();
+            return $user->getPermissions($account);
         } catch (AuthenticationException) {
             return [];
         }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizedAccessIds(AccountUser $user): array
+    {
+        return collect($user->getAccessToIds())
+            ->map(static fn (mixed $id): string => trim((string) $id))
+            ->filter(static fn (string $id): bool => $id !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
