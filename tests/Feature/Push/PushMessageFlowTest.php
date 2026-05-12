@@ -3232,11 +3232,12 @@ class PushMessageFlowTest extends TestCase
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/batch' => Http::response(
-                $this->fakeBatchResponseBody(['token-1', 'token-2']),
-                200,
-                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
-            ),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => static function ($request) {
+                $token = data_get($request->data(), 'message.token', 'missing-token');
+
+                return Http::response(['name' => 'msg-'.$token], 200);
+            },
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
         ]);
 
         $message = PushMessage::create($this->buildPayload([
@@ -3255,24 +3256,28 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $client->send($message, ['token-1', 'token-2'], 'instance-1', $expiresAt, 10);
 
-        Http::assertSentCount(2);
-        Http::assertSent(function ($request) use ($expiresAt) {
-            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
-                return false;
-            }
-            $body = $request->body();
-            if (! is_string($body)) {
-                return false;
-            }
+        Http::assertSentCount(3);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
+        foreach (['token-1', 'token-2'] as $token) {
+            Http::assertSent(function ($request) use ($expiresAt, $token) {
+                if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
+                    return false;
+                }
+                $body = $request->body();
+                if (! is_string($body)) {
+                    return false;
+                }
 
-            return str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1')
-                && str_contains($body, '"title":"Override title"')
-                && str_contains($body, '"custom":"value"')
-                && str_contains($body, '"ttl":"600s"')
-                && str_contains($body, '"TTL":"600"')
-                && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
-                && substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === 2;
-        });
+                return str_contains($body, '"token":"'.$token.'"')
+                    && str_contains($body, '"title":"Override title"')
+                    && str_contains($body, '"custom":"value"')
+                    && str_contains($body, '"ttl":"600s"')
+                    && str_contains($body, '"TTL":"600"')
+                    && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
+                    && ! str_contains($body, 'multipart/mixed')
+                    && ! str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1');
+            });
+        }
 
         Carbon::setTestNow();
     }
@@ -3301,11 +3306,8 @@ class PushMessageFlowTest extends TestCase
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/batch' => Http::response(
-                $this->fakeBatchResponseBody(['token-1']),
-                200,
-                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
-            ),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => Http::response(['name' => 'msg-token-1'], 200),
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
         ]);
 
         $message = PushMessage::create($this->buildPayload([
@@ -3334,8 +3336,10 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $client->send($message, ['token-1'], 'instance-2', $expiresAt, 15);
 
+        Http::assertSentCount(2);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
         Http::assertSent(function ($request) use ($expiresAt) {
-            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
+            if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
                 return false;
             }
 
@@ -3344,20 +3348,22 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
 
-            return str_contains($body, '"title":"Default title"')
+            return str_contains($body, '"token":"token-1"')
+                && str_contains($body, '"title":"Default title"')
                 && str_contains($body, '"body":"Default body"')
                 && str_contains($body, '"notification":{"title":"Android title"}')
                 && str_contains($body, '"alert":{"title":"Apns title","body":"Apns body"}')
                 && str_contains($body, '"ttl":"900s"')
                 && str_contains($body, '"TTL":"900"')
                 && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
-                && substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === 1;
+                && ! str_contains($body, 'multipart/mixed')
+                && ! str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1');
         });
 
         Carbon::setTestNow();
     }
 
-    public function test_fcm_http_client_sends_up_to_five_hundred_recipients_in_one_provider_batch_request(): void
+    public function test_fcm_http_client_sends_each_recipient_to_supported_http_v1_endpoint(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
 
@@ -3379,18 +3385,16 @@ class PushMessageFlowTest extends TestCase
         ]);
         Cache::flush();
 
-        $tokens = [];
-        for ($index = 0; $index < 500; $index++) {
-            $tokens[] = 'token-'.$index;
-        }
+        $tokens = ['token-0', 'token-1', 'token-2'];
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/batch' => Http::response(
-                $this->fakeBatchResponseBody($tokens),
-                200,
-                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
-            ),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => static function ($request) {
+                $token = data_get($request->data(), 'message.token', 'missing-token');
+
+                return Http::response(['name' => 'projects/project-id/messages/msg-'.$token], 200);
+            },
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
         ]);
 
         $message = PushMessage::create($this->buildPayload());
@@ -3399,23 +3403,16 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $result = $client->send($message, $tokens, 'instance-budget', $expiresAt, 10);
 
-        $this->assertSame(500, $result['accepted_count']);
-        $this->assertCount(500, $result['responses']);
+        $this->assertSame(3, $result['accepted_count']);
+        $this->assertCount(3, $result['responses']);
         $this->assertSame('accepted', $result['responses'][0]['status'] ?? null);
 
-        Http::assertSentCount(2);
-        Http::assertSent(function ($request) use ($tokens) {
-            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
-                return false;
-            }
-
-            $body = $request->body();
-            if (! is_string($body)) {
-                return false;
-            }
-
-            return substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === count($tokens);
-        });
+        Http::assertSentCount(4);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
+        foreach ($tokens as $token) {
+            Http::assertSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/v1/projects/project-id/messages:send'
+                && data_get($request->data(), 'message.token') === $token);
+        }
 
         Carbon::setTestNow();
     }
@@ -4633,33 +4630,6 @@ class PushMessageFlowTest extends TestCase
         foreach ($devices as $attributes) {
             $this->seedPushDevice($user, $attributes);
         }
-    }
-
-    /**
-     * @param  array<int, string>  $tokens
-     */
-    private function fakeBatchResponseBody(array $tokens): string
-    {
-        $boundary = 'fcm_batch_boundary';
-        $parts = [];
-
-        foreach (array_values($tokens) as $index => $token) {
-            $parts[] = implode("\r\n", [
-                "--{$boundary}",
-                'Content-Type: application/http',
-                "Content-ID: <item-{$index}>",
-                '',
-                'HTTP/1.1 200 OK',
-                'Content-Type: application/json; charset=UTF-8',
-                '',
-                json_encode(['name' => 'msg-'.$token], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                '',
-            ]);
-        }
-
-        $parts[] = "--{$boundary}--";
-
-        return implode("\r\n", $parts)."\r\n";
     }
 
     private function countTenantQueries(callable $callback): int
