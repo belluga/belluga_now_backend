@@ -204,6 +204,55 @@ class InvitesFlowTest extends TestCaseTenant
         Bus::assertNotDispatched(SendPushMessageJob::class);
     }
 
+    public function test_send_invite_to_multiple_recipients_authors_recipient_private_direct_push_messages(): void
+    {
+        Bus::fake();
+        $this->seedPushRuntimeReady();
+        $secondReceiver = $this->createAccountUser('Second Receiver User');
+        $this->registerActivePushToken($this->receiver, 'receiver-push-token');
+        $this->registerActivePushToken($secondReceiver, 'second-receiver-push-token');
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($secondReceiver)],
+            ],
+            'message' => 'Join this event',
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonCount(2, 'created');
+
+        $messages = PushMessage::query()
+            ->where('type', 'invite_received')
+            ->get();
+
+        $this->assertCount(2, $messages);
+        $this->assertSame(
+            collect([
+                (string) $this->receiver->_id,
+                (string) $secondReceiver->_id,
+            ])->sort()->values()->all(),
+            $messages
+                ->map(static fn (PushMessage $message): string => (string) (($message->audience['user_ids'][0] ?? '')))
+                ->sort()
+                ->values()
+                ->all(),
+        );
+
+        foreach ($messages as $message) {
+            $this->assertSame('users', $message->audience['type'] ?? null);
+            $this->assertCount(1, $message->audience['user_ids'] ?? []);
+            $this->assertSame('invite_received', data_get($message->fcm_options, 'data.event'));
+            $this->assertNotEmpty(data_get($message->fcm_options, 'data.invite_id'));
+            $this->assertStringStartsWith('invite-received-', (string) $message->internal_name);
+        }
+
+        Bus::assertDispatchedTimes(SendPushMessageJob::class, 2);
+    }
+
     public function test_accept_invite_authors_and_dispatches_invite_accepted_push_to_original_sender_when_runtime_is_ready(): void
     {
         Bus::fake();
