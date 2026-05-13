@@ -19,5 +19,5 @@ interface PushPlanPolicyDecisionContract
      *   reason: string|null
      * }
      */
-    public function quotaDecision(string $accountId, PushMessage $message, int $audienceSize): array;
+    public function quotaDecision(string $accountId, PushMessage $message, int $requestedUnits): array;
 }

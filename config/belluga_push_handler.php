@@ -4,6 +4,6 @@ declare(strict_types=1);
 
 return [
     'fcm' => [
-        'max_batch_size' => 500,
+        'direct_send_chunk_size' => 500,
     ],
 ];

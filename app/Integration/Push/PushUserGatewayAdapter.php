@@ -7,6 +7,7 @@ namespace App\Integration\Push;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
+use Belluga\PushHandler\Domain\Events\PushTokensInvalidated;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Carbon\Carbon;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -63,6 +64,31 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
                 ->where('account_user_id', $userId)
                 ->where('device_id', $deviceId)
                 ->where('is_active', true)
+                ->pluck('push_token')
+                ->all()
+        );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function activePushTokensForRecipient(?string $accountId, string $userId, ?string $deviceId = null): array
+    {
+        $userId = trim($userId);
+        $deviceId = trim((string) $deviceId);
+        if ($userId === '') {
+            return [];
+        }
+
+        $query = $this->baseActivePushDeviceQuery($accountId)
+            ->where('account_user_id', $userId);
+
+        if ($deviceId !== '') {
+            $query->where('device_id', $deviceId);
+        }
+
+        return $this->normalizeTokens(
+            $query
                 ->pluck('push_token')
                 ->all()
         );
@@ -358,6 +384,14 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
             return;
         }
 
+        $tokens = $this->normalizeTokens(
+            PushDevice::query()
+                ->where('account_user_id', $userId)
+                ->where('is_active', true)
+                ->pluck('push_token')
+                ->all()
+        );
+
         $now = Carbon::now();
         PushDevice::query()
             ->where('account_user_id', $userId)
@@ -366,6 +400,10 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
                 'invalidated_at' => $now,
                 'updated_at' => $now,
             ]);
+
+        if ($tokens !== []) {
+            event(new PushTokensInvalidated($tokens));
+        }
     }
 
     private function baseActivePushDeviceQuery(?string $accountId)

@@ -8,14 +8,19 @@ use App\Models\Landlord\Tenant;
 
 class PushChannelNamingService
 {
-    public function favoriteAccountProfileTopic(string $accountProfileId): string
+    public function allUsersTopic(): string
     {
-        return $this->topic('favorite_profile', $accountProfileId, 'fav');
+        return $this->topic('all_users', 'all_users', 'all');
     }
 
-    public function confirmedOccurrenceTopic(string $occurrenceId): string
+    public function favoriteAccountProfileTopic(string $accountProfileId): string
     {
-        return $this->topic('confirmed_occurrence', $occurrenceId, 'occ');
+        return $this->topic('favorite_account_profile', $accountProfileId, 'fav');
+    }
+
+    public function confirmedEventTopic(string $eventId): string
+    {
+        return $this->topic('event_confirmed', $eventId, 'evt');
     }
 
     private function topic(string $kind, string $subjectId, string $prefix): string

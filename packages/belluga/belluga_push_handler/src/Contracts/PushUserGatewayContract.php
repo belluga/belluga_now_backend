@@ -23,6 +23,11 @@ interface PushUserGatewayContract
     public function activePushTokensForDevice(Authenticatable $user, string $deviceId): array;
 
     /**
+     * @return array<int, string>
+     */
+    public function activePushTokensForRecipient(?string $accountId, string $userId, ?string $deviceId = null): array;
+
+    /**
      * @param  array<string, mixed>  $payload
      */
     public function registerDevice(Authenticatable $user, array $payload): void;

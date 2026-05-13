@@ -16,10 +16,10 @@ class PushMessageSendRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'user_id' => ['required_without:email', 'string'],
-            'email' => ['required_without:user_id', 'email'],
             'device_id' => ['nullable', 'string'],
             'dry_run' => ['nullable', 'boolean'],
+            'user_id' => ['prohibited'],
+            'email' => ['prohibited'],
         ];
     }
 }

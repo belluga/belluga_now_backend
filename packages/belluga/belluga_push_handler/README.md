@@ -32,7 +32,7 @@ The package does not call `loadRoutesFrom(...)`.
 
 Package config lives in `config/belluga_push_handler.php` and currently covers only runtime limits:
 - `delivery_ttl_minutes`
-- `fcm.max_batch_size`
+- `fcm.direct_send_chunk_size`
 - `fcm.max_ttl_days`
 
 Route paths are defined in host route files, not in package config.

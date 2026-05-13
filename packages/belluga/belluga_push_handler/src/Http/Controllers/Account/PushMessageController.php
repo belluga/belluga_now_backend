@@ -73,11 +73,11 @@ class PushMessageController
 
         $response = ['data' => $message];
         if ($this->planPolicy instanceof PushPlanPolicyDecisionContract) {
-            $audienceSize = $this->audienceService->audienceSize($message);
+            $requestedUnits = $this->audienceService->requestedUnits($message);
             $response['quota_decision'] = $this->planPolicy->quotaDecision(
                 $accountId,
                 $message,
-                $audienceSize
+                $requestedUnits
             );
         }
 
@@ -107,8 +107,7 @@ class PushMessageController
             }
         }
 
-        $message->fill($payload);
-        $message->save();
+        $message = $this->service->update($message, 'account', $accountId, $payload);
 
         return response()->json(['data' => $message]);
     }

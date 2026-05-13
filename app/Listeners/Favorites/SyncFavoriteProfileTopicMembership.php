@@ -4,29 +4,36 @@ declare(strict_types=1);
 
 namespace App\Listeners\Favorites;
 
-use App\Application\Push\PushTopicMembershipService;
+use App\Jobs\Push\SyncFavoriteAccountProfileTopicMembershipJob;
+use App\Models\Landlord\Tenant;
 use Belluga\Favorites\Domain\Events\FavoriteAdded;
 use Belluga\Favorites\Domain\Events\FavoriteRemoved;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
-final class SyncFavoriteProfileTopicMembership implements ShouldQueue
+final class SyncFavoriteProfileTopicMembership
 {
-    public function __construct(
-        private readonly PushTopicMembershipService $memberships,
-    ) {}
-
     public function handle(FavoriteAdded|FavoriteRemoved $event): void
     {
         if ($event->targetType !== 'account_profile') {
             return;
         }
 
-        if ($event instanceof FavoriteAdded) {
-            $this->memberships->subscribeUserToFavoriteProfile($event->ownerUserId, $event->targetId);
-
+        $tenantSlug = $this->currentTenantSlug();
+        if ($tenantSlug === null) {
             return;
         }
 
-        $this->memberships->unsubscribeUserFromFavoriteProfile($event->ownerUserId, $event->targetId);
+        SyncFavoriteAccountProfileTopicMembershipJob::dispatch(
+            tenantSlug: $tenantSlug,
+            userId: $event->ownerUserId,
+            accountProfileId: $event->targetId,
+        );
+    }
+
+    private function currentTenantSlug(): ?string
+    {
+        $tenant = Tenant::current();
+        $slug = trim((string) ($tenant?->slug ?? ''));
+
+        return $slug === '' ? null : $slug;
     }
 }
