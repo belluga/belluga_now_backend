@@ -129,7 +129,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $this->assertSame([], $list->json('data.confirmed_occurrence_ids'));
     }
 
-    public function test_confirm_and_unconfirm_sync_occurrence_topic_membership_for_active_push_devices(): void
+    public function test_confirm_and_unconfirm_sync_event_confirmed_topic_membership_for_active_push_devices(): void
     {
         $this->seedPushRuntimeReady();
         $this->registerActivePushToken($this->user, 'attendance-topic-token');
@@ -137,7 +137,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $event = $this->createEvent();
         $occurrenceId = $this->firstOccurrenceId($event);
         $expectedTopic = $this->app->make(PushChannelNamingService::class)
-            ->confirmedOccurrenceTopic($occurrenceId);
+            ->confirmedEventTopic((string) $event->_id);
 
         $this->postJson("{$this->base_api_tenant}events/{$event->_id}/attendance/confirm", [
             'occurrence_id' => $occurrenceId,

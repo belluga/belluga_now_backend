@@ -4,19 +4,31 @@ declare(strict_types=1);
 
 namespace App\Listeners\Push;
 
-use App\Application\Push\PushTopicMembershipService;
+use App\Jobs\Push\UnsubscribePushTokensFromAllTopicsJob;
+use App\Models\Landlord\Tenant;
 use Belluga\PushHandler\Domain\Events\PushDeviceUnregistered;
 use Belluga\PushHandler\Domain\Events\PushTokensInvalidated;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
-final class UnsubscribeInvalidatedPushTokens implements ShouldQueue
+final class UnsubscribeInvalidatedPushTokens
 {
-    public function __construct(
-        private readonly PushTopicMembershipService $memberships,
-    ) {}
-
     public function handle(PushTokensInvalidated|PushDeviceUnregistered $event): void
     {
-        $this->memberships->unsubscribeTokensFromAll($event->tokens);
+        $tenantSlug = $this->currentTenantSlug();
+        if ($tenantSlug === null) {
+            return;
+        }
+
+        UnsubscribePushTokensFromAllTopicsJob::dispatch(
+            tenantSlug: $tenantSlug,
+            tokens: $event->tokens,
+        );
+    }
+
+    private function currentTenantSlug(): ?string
+    {
+        $tenant = Tenant::current();
+        $slug = trim((string) ($tenant?->slug ?? ''));
+
+        return $slug === '' ? null : $slug;
     }
 }

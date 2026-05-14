@@ -4,6 +4,7 @@ use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\LandlordUsers\LandlordPasswordCredentialBackfillService;
+use App\Application\Push\PushTopicMembershipService;
 use App\Application\Security\ApiAbuseSignalRecorder;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\Tenant;
@@ -15,6 +16,7 @@ use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -207,6 +209,112 @@ Artisan::command('events:occurrences:repair {tenant_slug?} {--all}', function ()
 
     return 0;
 })->purpose('Explicit manual repair for event occurrence projections; not part of recurring scheduler runtime.');
+
+Artisan::command('push:topics:repair {tenant_slug?} {--all} {--chunk=200}', function (PushTopicMembershipService $memberships) {
+    $chunkSize = max(1, min((int) $this->option('chunk'), 1000));
+
+    $repairCurrentTenant = function (?string $tenantSlug = null) use ($memberships, $chunkSize): array {
+        $processed = 0;
+        $reconciled = 0;
+
+        PushDevice::query()
+            ->where('is_active', true)
+            ->orderBy('account_user_id')
+            ->orderBy('_id')
+            ->chunk($chunkSize, function ($devices) use ($memberships, &$processed, &$reconciled): void {
+                collect($devices)
+                    ->filter(static fn ($device): bool => $device instanceof PushDevice)
+                    ->groupBy(static fn (PushDevice $device): string => trim((string) ($device->account_user_id ?? '')))
+                    ->each(function ($userDevices, string $userId) use ($memberships, &$processed, &$reconciled): void {
+                        $processed += $userDevices->count();
+                        if ($userId === '') {
+                            return;
+                        }
+
+                        $tokens = $userDevices
+                            ->map(static fn (PushDevice $device): string => trim((string) ($device->push_token ?? '')))
+                            ->filter(static fn (string $token): bool => $token !== '')
+                            ->unique()
+                            ->values()
+                            ->all();
+
+                        if ($tokens === []) {
+                            return;
+                        }
+
+                        $memberships->syncTokensForUser($userId, $tokens);
+                        $reconciled += count($tokens);
+                    });
+            });
+
+        return [
+            'tenant_slug' => $tenantSlug ?? (string) Tenant::current()?->slug,
+            'processed_active_devices' => $processed,
+            'reconciled_tokens' => $reconciled,
+        ];
+    };
+
+    if ($this->option('all')) {
+        $summaries = [];
+
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $tenant->makeCurrent();
+
+            try {
+                $summaries[] = $repairCurrentTenant((string) $tenant->slug);
+            } finally {
+                $tenant->forgetCurrent();
+            }
+        }
+
+        $this->line(json_encode([
+            'mode' => 'all',
+            'tenants' => $summaries,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug !== '') {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant instanceof Tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+
+        $tenant->makeCurrent();
+
+        try {
+            $this->line(json_encode(
+                $repairCurrentTenant($tenantSlug),
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            ));
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        return 0;
+    }
+
+    if (! Tenant::current()) {
+        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $this->line(json_encode(
+        $repairCurrentTenant(),
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+    ));
+
+    return 0;
+})->purpose('Manually reproject canonical push topic memberships for active device tokens in one tenant or all tenants.');
 
 Artisan::command('taxonomies:term-snapshots:repair {tenant_slug?} {--all} {--type=} {--value=}', function () {
     $taxonomyType = trim((string) $this->option('type'));

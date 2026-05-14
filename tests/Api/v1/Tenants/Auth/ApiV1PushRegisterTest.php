@@ -3,6 +3,7 @@
 namespace Tests\Api\v1\Tenants\Auth;
 
 use App\Models\Landlord\Tenant;
+use App\Application\Push\PushChannelNamingService;
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
@@ -101,6 +102,8 @@ class ApiV1PushRegisterTest extends TestCaseTenant
     {
         $this->seedPushRuntimeReady();
         $headers = $this->issueAnonymousHeaders();
+        Tenant::current()?->makeCurrent();
+        $allUsersTopic = $this->app->make(PushChannelNamingService::class)->allUsersTopic();
 
         $this->json(
             method: 'post',
@@ -114,6 +117,10 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         )->assertStatus(200);
 
         $this->assertSame([['token-topic-123']], $this->topicTransport->unsubscribeAll);
+        $this->assertContains([
+            'topic' => $allUsersTopic,
+            'tokens' => ['token-topic-123'],
+        ], $this->topicTransport->subscriptions);
 
         $this->json(
             method: 'delete',

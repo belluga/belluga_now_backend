@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\FcmTopicSenderContract;
 use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Carbon\Carbon;
@@ -12,7 +13,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
-class FcmHttpV1Client implements FcmClientContract
+class FcmHttpV1Client implements FcmClientContract, FcmTopicSenderContract
 {
     public function __construct(
         private readonly PushCredentialService $credentialService
@@ -24,33 +25,17 @@ class FcmHttpV1Client implements FcmClientContract
      */
     public function send(PushMessage $message, array $tokens, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
     {
-        try {
-            $credentials = $this->credentialService->current();
-        } catch (MultiplePushCredentialsException $exception) {
-            return ['accepted_count' => 0, 'responses' => []];
-        }
-        if (! $credentials) {
+        [$accessToken, $endpoint] = $this->bootstrapTransport();
+        if ($accessToken === null || $endpoint === null) {
             return ['accepted_count' => 0, 'responses' => []];
         }
 
-        $accessToken = $this->accessToken(
-            projectId: (string) $credentials->project_id,
-            clientEmail: (string) $credentials->client_email,
-            privateKey: (string) $credentials->private_key
-        );
-
-        if ($accessToken === null) {
-            return ['accepted_count' => 0, 'responses' => []];
-        }
-
-        $endpoint = sprintf('https://fcm.googleapis.com/v1/projects/%s/messages:send', $credentials->project_id);
         $basePayload = $this->buildPayload($message, $messageInstanceId, $expiresAt);
-
         $responses = [];
         $accepted = 0;
 
         foreach ($tokens as $token) {
-            $entry = $this->sendToken($accessToken, $endpoint, $basePayload, $token);
+            $entry = $this->sendTarget($accessToken, $endpoint, $basePayload, 'token', $token);
             if (($entry['status'] ?? null) === 'accepted') {
                 $accepted++;
             }
@@ -61,6 +46,60 @@ class FcmHttpV1Client implements FcmClientContract
         return [
             'accepted_count' => $accepted,
             'responses' => $responses,
+        ];
+    }
+
+    /**
+     * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
+     */
+    public function sendTopic(PushMessage $message, string $topic, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
+    {
+        [$accessToken, $endpoint] = $this->bootstrapTransport();
+        if ($accessToken === null || $endpoint === null) {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
+
+        $topic = trim($topic);
+        if ($topic === '') {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
+
+        $basePayload = $this->buildPayload($message, $messageInstanceId, $expiresAt);
+        $entry = $this->sendTarget($accessToken, $endpoint, $basePayload, 'topic', $topic);
+
+        return [
+            'accepted_count' => ($entry['status'] ?? null) === 'accepted' ? 1 : 0,
+            'responses' => [$entry],
+        ];
+    }
+
+    /**
+     * @return array{0:?string,1:?string}
+     */
+    private function bootstrapTransport(): array
+    {
+        try {
+            $credentials = $this->credentialService->current();
+        } catch (MultiplePushCredentialsException $exception) {
+            return [null, null];
+        }
+        if (! $credentials) {
+            return [null, null];
+        }
+
+        $accessToken = $this->accessToken(
+            projectId: (string) $credentials->project_id,
+            clientEmail: (string) $credentials->client_email,
+            privateKey: (string) $credentials->private_key
+        );
+
+        if ($accessToken === null) {
+            return [null, null];
+        }
+
+        return [
+            $accessToken,
+            sprintf('https://fcm.googleapis.com/v1/projects/%s/messages:send', $credentials->project_id),
         ];
     }
 
@@ -169,10 +208,15 @@ class FcmHttpV1Client implements FcmClientContract
      * @param  array<string, mixed>  $basePayload
      * @return array<string, mixed>
      */
-    private function sendToken(string $accessToken, string $endpoint, array $basePayload, string $token): array
-    {
+    private function sendTarget(
+        string $accessToken,
+        string $endpoint,
+        array $basePayload,
+        string $targetField,
+        string $targetValue
+    ): array {
         $payload = $basePayload;
-        $payload['token'] = $token;
+        $payload[$targetField] = $targetValue;
 
         try {
             $response = Http::withToken($accessToken)
@@ -183,7 +227,7 @@ class FcmHttpV1Client implements FcmClientContract
                 ]);
         } catch (ConnectionException $exception) {
             return [
-                'token' => $token,
+                $targetField => $targetValue,
                 'status' => 'failed',
                 'error_code' => 'connection_error',
                 'error_message' => $exception->getMessage(),
@@ -192,14 +236,14 @@ class FcmHttpV1Client implements FcmClientContract
 
         if ($response->successful()) {
             return [
-                'token' => $token,
+                $targetField => $targetValue,
                 'status' => 'accepted',
                 'provider_message_id' => (string) (($response->json('name') ?? '') ?: ''),
             ];
         }
 
         return [
-            'token' => $token,
+            $targetField => $targetValue,
             'status' => 'failed',
             'error_code' => (string) (($response->json('error.status') ?? '') ?: $response->status()),
             'error_message' => (string) (($response->json('error.message') ?? '') ?: $response->body()),

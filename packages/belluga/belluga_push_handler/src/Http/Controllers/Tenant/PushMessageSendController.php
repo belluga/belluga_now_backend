@@ -7,6 +7,7 @@ namespace Belluga\PushHandler\Http\Controllers\Tenant;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Http\Requests\PushMessageSendRequest;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Belluga\PushHandler\Services\PushAudienceTopologyClassifier;
 use Belluga\PushHandler\Services\PushDeliveryService;
 use Belluga\PushHandler\Services\PushDeviceService;
 use Belluga\PushHandler\Services\PushMessageAudienceService;
@@ -22,7 +23,8 @@ class PushMessageSendController
         private readonly PushDeliveryService $deliveryService,
         private readonly PushDeviceService $pushDeviceService,
         private readonly PushMessageAudienceService $audienceService,
-        private readonly PushUserGatewayContract $users
+        private readonly PushUserGatewayContract $users,
+        private readonly PushAudienceTopologyClassifier $audienceTopology,
     ) {}
 
     public function __invoke(PushMessageSendRequest $request): JsonResponse
@@ -53,9 +55,22 @@ class PushMessageSendController
             return response()->json(['ok' => false, 'reason' => 'invalid_type'], 422);
         }
 
-        $payload = $request->validated();
+        try {
+            $this->audienceTopology->assertIndividualDirect($message);
+        } catch (ValidationException $exception) {
+            return response()->json([
+                'message' => 'Transactional direct send only supports canonical individual direct audiences.',
+                'errors' => $exception->errors(),
+                'reason' => 'unsupported_audience',
+            ], 422);
+        }
 
-        $user = $this->resolveUser($payload);
+        $recipientUserId = $this->audienceTopology->directRecipientUserId($message);
+        if (! is_string($recipientUserId) || $recipientUserId === '') {
+            return response()->json(['ok' => false, 'reason' => 'user_not_found'], 404);
+        }
+
+        $user = $this->users->findUserForTenant($recipientUserId, null);
         if (! $user) {
             return response()->json(['ok' => false, 'reason' => 'user_not_found'], 404);
         }
@@ -66,22 +81,21 @@ class PushMessageSendController
             return response()->json(['ok' => false, 'reason' => 'forbidden'], 403);
         }
 
-        $tokens = $this->recipientResolver->tokensForUser($user);
-        if (! empty($payload['device_id'])) {
-            $tokens = $this->users->activePushTokensForDevice($user, (string) $payload['device_id']);
-        }
+        $payload = $request->validated();
+        $tokens = $this->recipientResolver->resolveDirectTokens(
+            $message,
+            'tenant',
+            null,
+            isset($payload['device_id']) ? (string) $payload['device_id'] : null,
+        );
 
         if ($tokens === []) {
             return response()->json(['ok' => false, 'reason' => 'no_tokens'], 422);
         }
 
-        $recipientUserId = $this->users->userId($user);
-        if ($recipientUserId === null || $recipientUserId === '') {
-            return response()->json(['ok' => false, 'reason' => 'unauthorized'], 401);
-        }
-
+        $isDryRun = (bool) ($payload['dry_run'] ?? false);
         $messageInstanceId = null;
-        if (! ($payload['dry_run'] ?? false)) {
+        if (! $isDryRun) {
             try {
                 $tokenUserMap = array_fill_keys($tokens, $recipientUserId);
                 $response = $this->deliveryService->deliver($message, $tokens, $tokenUserMap);
@@ -97,9 +111,21 @@ class PushMessageSendController
                 $this->pushDeviceService->invalidateTokens($user, $invalidTokens);
             }
 
+            $acceptedCount = (int) ($response['accepted_count'] ?? 0);
+            if ($acceptedCount < 1) {
+                return response()->json([
+                    'ok' => false,
+                    'reason' => 'delivery_failed',
+                ], 422);
+            }
+
             $metrics = $message->metrics ?? [];
-            $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + (int) ($response['accepted_count'] ?? 0);
+            $metrics['accepted_count'] = ($metrics['accepted_count'] ?? 0) + $acceptedCount;
             $metrics['sent_count'] = ($metrics['sent_count'] ?? 0) + 1;
+            $metrics['delivery_topology_counts'] = $this->incrementDirectSendMetric(
+                is_array($metrics['delivery_topology_counts'] ?? null) ? $metrics['delivery_topology_counts'] : []
+            );
+            $metrics['last_delivery_topology'] = PushAudienceTopologyClassifier::INDIVIDUAL_DIRECT;
             $message->metrics = $metrics;
             $message->save();
         }
@@ -108,7 +134,8 @@ class PushMessageSendController
             'ok' => true,
             'push_message_id' => (string) $message->_id,
             'recipient_user_id' => $recipientUserId,
-            'queued' => true,
+            'delivery_topology' => PushAudienceTopologyClassifier::INDIVIDUAL_DIRECT,
+            'delivery_status' => $isDryRun ? 'dry_run' : 'accepted',
         ];
         if (is_string($messageInstanceId) && $messageInstanceId !== '') {
             $responsePayload['message_instance_id'] = $messageInstanceId;
@@ -132,6 +159,7 @@ class PushMessageSendController
                 'accepted_count' => (int) ($response['accepted_count'] ?? 0),
                 'responses' => $sanitized,
                 'message_instance_id' => $response['message_instance_id'] ?? null,
+                'delivery_topology' => $response['delivery_topology'] ?? PushAudienceTopologyClassifier::INDIVIDUAL_DIRECT,
             ];
         }
 
@@ -165,16 +193,14 @@ class PushMessageSendController
     }
 
     /**
-     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $counts
+     * @return array<string, int>
      */
-    private function resolveUser(array $payload): ?\Illuminate\Contracts\Auth\Authenticatable
+    private function incrementDirectSendMetric(array $counts): array
     {
-        $userId = isset($payload['user_id']) ? (string) $payload['user_id'] : null;
-        $email = isset($payload['email']) ? (string) $payload['email'] : null;
+        $counts[PushAudienceTopologyClassifier::INDIVIDUAL_DIRECT] = (int) ($counts[PushAudienceTopologyClassifier::INDIVIDUAL_DIRECT] ?? 0) + 1;
+        $counts[PushAudienceTopologyClassifier::CHANNEL_TOPIC] = (int) ($counts[PushAudienceTopologyClassifier::CHANNEL_TOPIC] ?? 0);
 
-        return $this->users->findUserForTenant(
-            $userId !== '' ? $userId : null,
-            $email !== '' ? $email : null
-        );
+        return $counts;
     }
 }

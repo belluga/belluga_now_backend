@@ -247,7 +247,11 @@ class AccountManagementService
 
     public function detachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void
     {
-        DB::connection('tenant')->transaction(function () use ($account, $user, $role): void {
+        $deactivateUserId = null;
+        $syncUserId = null;
+        $syncAccessIds = [];
+
+        DB::connection('tenant')->transaction(function () use ($account, $user, $role, &$deactivateUserId, &$syncUserId, &$syncAccessIds): void {
             $embeddedRole = $user->accountRoles()
                 ->where('slug', $role->slug)
                 ->where('account_id', $account->id)
@@ -259,17 +263,25 @@ class AccountManagementService
 
                 $remainingAccessIds = $user->getAccessToIds();
                 if ($remainingAccessIds === []) {
-                    $this->pushUsers->deactivatePushDevicesForUser((string) $user->_id);
+                    $deactivateUserId = (string) $user->_id;
 
                     return;
                 }
 
-                $this->pushUsers->syncPushDeviceAccountIds(
-                    (string) $user->_id,
-                    $remainingAccessIds,
-                );
+                $syncUserId = (string) $user->_id;
+                $syncAccessIds = $remainingAccessIds;
             }
         });
+
+        if (is_string($deactivateUserId) && $deactivateUserId !== '') {
+            $this->pushUsers->deactivatePushDevicesForUser($deactivateUserId);
+
+            return;
+        }
+
+        if (is_string($syncUserId) && $syncUserId !== '') {
+            $this->pushUsers->syncPushDeviceAccountIds($syncUserId, $syncAccessIds);
+        }
     }
 
     /**
