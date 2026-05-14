@@ -21,6 +21,39 @@ class AttendanceCommitmentService
     /**
      * @return array<int, string>
      */
+    public function confirmedEventIds(string $userId): array
+    {
+        return AttendanceCommitment::query()
+            ->where('user_id', $userId)
+            ->where('kind', 'free_confirmation')
+            ->where('status', 'active')
+            ->pluck('event_id')
+            ->map(static fn (mixed $eventId): string => (string) $eventId)
+            ->filter(static fn (string $eventId): bool => trim($eventId) !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function hasConfirmedEvent(string $userId, string $eventId): bool
+    {
+        $userId = trim($userId);
+        $eventId = trim($eventId);
+        if ($userId === '' || $eventId === '') {
+            return false;
+        }
+
+        return AttendanceCommitment::query()
+            ->where('user_id', $userId)
+            ->where('event_id', $eventId)
+            ->where('kind', 'free_confirmation')
+            ->where('status', 'active')
+            ->exists();
+    }
+
+    /**
+     * @return array<int, string>
+     */
     public function confirmedOccurrenceIds(string $userId): array
     {
         return AttendanceCommitment::query()

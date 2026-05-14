@@ -20,9 +20,20 @@ class PushUserTopicProjectionService
     public function topicsForUserId(string $userId): array
     {
         return array_values(array_unique(array_filter(array_merge(
+            $this->allUsersTopics(),
             $this->favoriteProfileTopicsForUserId($userId),
-            $this->confirmedOccurrenceTopicsForUserId($userId),
+            $this->confirmedEventTopicsForUserId($userId),
         ), static fn (string $topic): bool => trim($topic) !== '')));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function allUsersTopics(): array
+    {
+        $topic = $this->naming->allUsersTopic();
+
+        return $topic === '' ? [] : [$topic];
     }
 
     /**
@@ -47,21 +58,42 @@ class PushUserTopicProjectionService
             ->all();
     }
 
+    public function userHasFavoriteAccountProfile(string $userId, string $accountProfileId): bool
+    {
+        $userId = trim($userId);
+        $accountProfileId = trim($accountProfileId);
+        if ($userId === '' || $accountProfileId === '') {
+            return false;
+        }
+
+        return FavoriteEdge::query()
+            ->where('owner_user_id', $userId)
+            ->where('registry_key', 'account_profile')
+            ->where('target_type', 'account_profile')
+            ->where('target_id', $accountProfileId)
+            ->exists();
+    }
+
     /**
      * @return array<int, string>
      */
-    public function confirmedOccurrenceTopicsForUserId(string $userId): array
+    public function confirmedEventTopicsForUserId(string $userId): array
     {
         $userId = trim($userId);
         if ($userId === '') {
             return [];
         }
 
-        return collect($this->attendance->confirmedOccurrenceIds($userId))
-            ->map(fn (string $occurrenceId): string => $this->naming->confirmedOccurrenceTopic($occurrenceId))
+        return collect($this->attendance->confirmedEventIds($userId))
+            ->map(fn (string $eventId): string => $this->naming->confirmedEventTopic($eventId))
             ->filter(static fn (string $topic): bool => trim($topic) !== '')
             ->unique()
             ->values()
             ->all();
+    }
+
+    public function userHasConfirmedEvent(string $userId, string $eventId): bool
+    {
+        return $this->attendance->hasConfirmedEvent($userId, $eventId);
     }
 }

@@ -6,7 +6,7 @@ namespace Belluga\PushHandler\Contracts;
 
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 
-interface PushPlanPolicyContract
+interface PushChannelTargetResolverContract
 {
-    public function canSend(string $accountId, PushMessage $message, int $requestedUnits): bool;
+    public function resolveTopic(PushMessage $message): ?string;
 }

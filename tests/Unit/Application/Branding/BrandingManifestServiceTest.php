@@ -54,6 +54,52 @@ class BrandingManifestServiceTest extends TestCase
         $this->assertNotNull($value);
     }
 
+    public function test_resolve_pwa_icon_ignores_ambient_tenant_on_landlord_host(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlord = Landlord::singleton();
+        $originalLandlordBranding = is_array($landlord->branding_data) ? $landlord->branding_data : [];
+        $originalTenantBranding = is_array($tenant->branding_data) ? $tenant->branding_data : [];
+
+        $landlord->branding_data = array_replace_recursive($originalLandlordBranding, [
+            'pwa_icon' => [
+                'icon192_uri' => 'https://belluga.space/icon/icon-192x192.png?v=landlord-icon',
+            ],
+        ]);
+        $landlord->save();
+
+        $tenant->branding_data = array_replace_recursive($originalTenantBranding, [
+            'pwa_icon' => [
+                'icon192_uri' => 'https://tenant-alpha.test/icon/icon-192x192.png?v=tenant-icon',
+            ],
+        ]);
+        $tenant->save();
+        $tenant->fresh()?->makeCurrent();
+
+        try {
+            $landlordHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+            if (! is_string($landlordHost) || trim($landlordHost) === '') {
+                $landlordHost = trim(str_replace(['https://', 'http://'], '', (string) config('app.url')), '/');
+            }
+
+            $value = $this->service->resolvePwaIcon('icon192_uri', $landlordHost);
+
+            $this->assertSame(
+                'https://belluga.space/icon/icon-192x192.png?v=landlord-icon',
+                $value,
+            );
+        } finally {
+            $landlord->branding_data = $originalLandlordBranding;
+            $landlord->save();
+
+            $tenant->branding_data = $originalTenantBranding;
+            $tenant->save();
+            Tenant::forgetCurrent();
+        }
+    }
+
     public function test_asset_response_returns_not_found_when_missing(): void
     {
         Storage::fake('public');

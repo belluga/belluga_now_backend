@@ -84,7 +84,11 @@ class AccountUserService
 
     public function remove(Account $account, AccountUser $user): void
     {
-        DB::connection('tenant')->transaction(function () use ($account, $user): void {
+        $deactivateUserId = null;
+        $syncUserId = null;
+        $syncAccessIds = [];
+
+        DB::connection('tenant')->transaction(function () use ($account, $user, &$deactivateUserId, &$syncUserId, &$syncAccessIds): void {
             $user->accountRoles()
                 ->where('account_id', $account->id)
                 ->first()
@@ -92,16 +96,24 @@ class AccountUserService
 
             if (count($user->getAccessToIds()) === 0) {
                 $user->delete();
-                $this->pushUsers->deactivatePushDevicesForUser((string) $user->_id);
+                $deactivateUserId = (string) $user->_id;
 
                 return;
             }
 
-            $this->pushUsers->syncPushDeviceAccountIds(
-                (string) $user->_id,
-                $user->getAccessToIds(),
-            );
+            $syncUserId = (string) $user->_id;
+            $syncAccessIds = $user->getAccessToIds();
         });
+
+        if (is_string($deactivateUserId) && $deactivateUserId !== '') {
+            $this->pushUsers->deactivatePushDevicesForUser($deactivateUserId);
+
+            return;
+        }
+
+        if (is_string($syncUserId) && $syncUserId !== '') {
+            $this->pushUsers->syncPushDeviceAccountIds($syncUserId, $syncAccessIds);
+        }
     }
 
     /**

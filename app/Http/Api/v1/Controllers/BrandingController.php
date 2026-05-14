@@ -37,49 +37,76 @@ class BrandingController extends Controller
         return $this->brandingService->resolvePwaIcon($parameter) ?? '';
     }
 
-    public function getFavicon(): Response|BinaryFileResponse
+    public function getFavicon(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->brandingService->resolveFaviconAsset());
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolveFaviconAsset($request->getHost()),
+            $request
+        );
     }
 
-    public function getLogoLight(): Response|BinaryFileResponse
+    public function getLogoLight(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getLogoSettingsParameter('light_logo_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolveLogoSetting('light_logo_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getLogoDark(): Response|BinaryFileResponse
+    public function getLogoDark(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getLogoSettingsParameter('dark_logo_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolveLogoSetting('dark_logo_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getMaskableIcon(): Response|BinaryFileResponse
+    public function getMaskableIcon(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getPwaIconParameter('icon_maskable512_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolvePwaIcon('icon_maskable512_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getIcon192(): Response|BinaryFileResponse
+    public function getIcon192(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getPwaIconParameter('icon192_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolvePwaIcon('icon192_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getIcon512(): Response|BinaryFileResponse
+    public function getIcon512(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getPwaIconParameter('icon512_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolvePwaIcon('icon512_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getIconSource(): Response|BinaryFileResponse
+    public function getIconSource(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getPwaIconParameter('source_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolvePwaIcon('source_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getIconLight(): Response|BinaryFileResponse
+    public function getIconLight(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getLogoSettingsParameter('light_icon_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolveLogoSetting('light_icon_uri', $request->getHost()),
+            $request
+        );
     }
 
-    public function getIconDark(): Response|BinaryFileResponse
+    public function getIconDark(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingAssetResponse($this->getLogoSettingsParameter('dark_icon_uri'));
+        return $this->brandingAssetResponse(
+            $this->brandingService->resolveLogoSetting('dark_icon_uri', $request->getHost()),
+            $request
+        );
     }
 
     public function getAssetLinks(): JsonResponse
@@ -96,10 +123,10 @@ class BrandingController extends Controller
         )->header('Content-Type', 'application/json');
     }
 
-    private function brandingAssetResponse(?string $path): Response|BinaryFileResponse
+    private function brandingAssetResponse(?string $path, Request $request): Response|BinaryFileResponse
     {
         return $this->withNoStoreHeaders(
-            $this->brandingService->assetResponse($path)
+            $this->brandingService->assetResponse($path, $request->getHost())
         );
     }
 

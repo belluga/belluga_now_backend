@@ -6,19 +6,34 @@ namespace Tests\Feature\Push;
 
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
+use App\Application\Events\AttendanceCommitmentService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Push\PushAudienceEligibilityService;
+use App\Domain\Events\Events\OccurrenceAttendanceConfirmed;
+use App\Jobs\Push\ReconcilePushTokenTopicsJob;
+use App\Jobs\Push\SyncEventConfirmedTopicMembershipJob;
+use App\Jobs\Push\SyncFavoriteAccountProfileTopicMembershipJob;
+use App\Application\Push\PushChannelNamingService;
+use App\Application\Push\PushTopicMembershipService;
+use App\Application\Push\PushUserTopicProjectionService;
 use App\Integration\Push\PushUserGatewayAdapter;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Belluga\Events\Models\Tenants\Event;
+use Belluga\Favorites\Models\Tenants\FavoriteEdge;
+use Belluga\Favorites\Domain\Events\FavoriteAdded;
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\FcmTopicSenderContract;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Belluga\PushHandler\Domain\Events\PushDeviceRegistered;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
@@ -28,10 +43,13 @@ use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
 use Belluga\PushHandler\Services\PushDeliveryService;
 use Belluga\PushHandler\Services\PushDeviceService;
+use Belluga\PushHandler\Services\PushCredentialService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
+use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Carbon\Carbon;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -103,14 +121,14 @@ class PushMessageFlowTest extends TestCase
                         return false;
                     }
 
-                    $type = $audience['type'] ?? 'all';
+                    $type = $audience['type'] ?? 'all_users';
                     if ($type === 'users') {
                         $ids = $audience['user_ids'] ?? [];
 
                         return in_array((string) $user->_id, $ids, true);
                     }
 
-                    return $type === 'all';
+                    return $type === 'all_users';
                 }
             };
         });
@@ -266,11 +284,16 @@ class PushMessageFlowTest extends TestCase
     public function test_push_message_data_forbidden_when_not_in_audience(): void
     {
         $this->actingAsOperator();
+        $otherUser = $this->userService->create($this->account, [
+            'name' => 'Audience Other User',
+            'email' => 'push-audience-other-'.Str::uuid()->toString().'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => [Str::uuid()->toString()],
+                'user_ids' => [(string) $otherUser->_id],
             ],
         ]);
 
@@ -593,11 +616,16 @@ class PushMessageFlowTest extends TestCase
     public function test_push_message_actions_forbidden_when_not_eligible(): void
     {
         $this->actingAsOperator();
+        $otherUser = $this->userService->create($this->account, [
+            'name' => 'Action Other User',
+            'email' => 'push-action-other-'.Str::uuid()->toString().'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => [Str::uuid()->toString()],
+                'user_ids' => [(string) $otherUser->_id],
             ],
         ]);
 
@@ -771,7 +799,12 @@ class PushMessageFlowTest extends TestCase
 
         [$secondaryTenant, $secondaryOperator, $secondaryHost, $secondaryAccount] = $this->seedSecondaryTenantContext();
 
-        $payload = $this->buildPayload();
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $secondaryOperator->_id],
+            ],
+        ]);
         $this->withServerVariables(['HTTP_HOST' => $secondaryHost]);
         $this->assertNotSame((string) $secondaryAccount->_id, (string) Account::current()?->_id);
         $secondaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
@@ -817,7 +850,12 @@ class PushMessageFlowTest extends TestCase
 
         [$secondaryTenant, $secondaryOperator, $secondaryHost] = $this->seedSecondaryTenantContext();
 
-        $payload = $this->buildPayload();
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $secondaryOperator->_id],
+            ],
+        ]);
         $this->withServerVariables(['HTTP_HOST' => $secondaryHost]);
         Sanctum::actingAs($secondaryOperator, [
             'tenant-push-messages:create',
@@ -935,16 +973,153 @@ class PushMessageFlowTest extends TestCase
     public function test_push_message_create_allows_event_audience_without_qualifier(): void
     {
         $this->actingAsOperator();
+        $event = Event::create([
+            'type' => 'show',
+            'title' => 'Push Event '.Str::uuid()->toString(),
+            'date_time_start' => Carbon::now()->addDay(),
+            'account_context_ids' => [(string) $this->account->_id],
+            'created_by' => [
+                'type' => 'account_user',
+                'id' => (string) $this->operator->_id,
+            ],
+            'is_active' => true,
+        ]);
 
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'event',
-                'event_id' => 'event-id',
+                'event_id' => (string) $event->_id,
             ],
         ]);
 
         $response = $this->postJson($this->baseUrl, $payload);
         $response->assertCreated();
+
+        $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->firstOrFail();
+        $this->assertSame('event_confirmed', (string) data_get($message->audience, 'type'));
+        $this->assertSame((string) $event->_id, (string) data_get($message->audience, 'event_id'));
+    }
+
+    public function test_push_message_create_rejects_legacy_all_audience_type(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'all',
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.type',
+        ]);
+    }
+
+    public function test_push_message_create_rejects_event_qualifier_input(): void
+    {
+        $this->actingAsOperator();
+        $event = Event::create([
+            'type' => 'show',
+            'title' => 'Push Event Qualifier '.Str::uuid()->toString(),
+            'date_time_start' => Carbon::now()->addDay(),
+            'account_context_ids' => [(string) $this->account->_id],
+            'created_by' => [
+                'type' => 'account_user',
+                'id' => (string) $this->operator->_id,
+            ],
+            'is_active' => true,
+        ]);
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'event',
+                'event_id' => (string) $event->_id,
+                'event_qualifier' => 'all',
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.event_qualifier',
+        ]);
+    }
+
+    public function test_push_message_create_rejects_foreign_event_audience(): void
+    {
+        $this->actingAsOperator();
+        $event = Event::create([
+            'type' => 'show',
+            'title' => 'Foreign Push Event '.Str::uuid()->toString(),
+            'date_time_start' => Carbon::now()->addDay(),
+            'account_context_ids' => [Str::uuid()->toString()],
+            'created_by' => [
+                'type' => 'account_user',
+                'id' => (string) $this->operator->_id,
+            ],
+            'is_active' => true,
+        ]);
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'event',
+                'event_id' => (string) $event->_id,
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.event_id',
+        ]);
+    }
+
+    public function test_push_message_create_rejects_all_users_audience_for_account_scope(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'all_users',
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.type',
+        ]);
+    }
+
+    public function test_push_message_create_rejects_foreign_favorite_account_profile_audience(): void
+    {
+        $this->actingAsOperator();
+
+        $foreignAccount = Account::create([
+            'name' => 'Foreign Favorite Account '.Str::uuid()->toString(),
+            'document' => strtoupper(Str::random(14)),
+        ]);
+        $foreignProfile = AccountProfile::create([
+            'account_id' => (string) $foreignAccount->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Foreign Favorite Profile',
+            'is_active' => true,
+        ]);
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'favorite_account_profile',
+                'account_profile_id' => (string) $foreignProfile->_id,
+            ],
+        ]);
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.account_profile_id',
+        ]);
     }
 
     public function test_push_message_create_validates_query_params(): void
@@ -1376,9 +1551,26 @@ class PushMessageFlowTest extends TestCase
     {
         $this->actingAsOperator();
 
+        $payload = $this->buildPayload();
+        $payload['audience'] = [
+            'type' => 'users',
+        ];
+
+        $response = $this->postJson($this->baseUrl, $payload);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience.user_ids',
+        ]);
+    }
+
+    public function test_push_message_create_rejects_multi_user_direct_audience(): void
+    {
+        $this->actingAsOperator();
+
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id, Str::uuid()->toString()],
             ],
         ]);
 
@@ -2299,7 +2491,7 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushPlanPolicyContract::class, static function () {
             return new class implements PushPlanPolicyContract
             {
-                public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
+                public function canSend(string $accountId, PushMessage $message, int $requestedUnits): bool
                 {
                     return false;
                 }
@@ -2328,18 +2520,18 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushPlanPolicyContract::class, static function () {
             return new class implements PushPlanPolicyContract, PushPlanPolicyDecisionContract
             {
-                public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
+                public function canSend(string $accountId, PushMessage $message, int $requestedUnits): bool
                 {
                     return true;
                 }
 
-                public function quotaDecision(string $accountId, PushMessage $message, int $audienceSize): array
+                public function quotaDecision(string $accountId, PushMessage $message, int $requestedUnits): array
                 {
                     return [
                         'allowed' => true,
                         'limit' => 100,
                         'current_used' => 10,
-                        'requested' => $audienceSize,
+                        'requested' => $requestedUnits,
                         'remaining_after' => 90,
                         'period' => 'monthly',
                     ];
@@ -2364,13 +2556,22 @@ class PushMessageFlowTest extends TestCase
     {
         Sanctum::actingAs($this->operator, ['push-messages:send']);
 
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Quota Check Favorite Profile',
+            'is_active' => true,
+        ]);
+
         $response = $this->getJson(sprintf(
-            'api/v1/accounts/%s/push/quota-check?audience_size=5',
-            $this->account->slug
+            'api/v1/accounts/%s/push/quota-check?audience[type]=favorite_account_profile&audience[account_profile_id]=%s',
+            $this->account->slug,
+            (string) $profile->_id
         ));
 
         $response->assertOk();
         $response->assertJsonPath('allowed', true);
+        $response->assertJsonPath('requested', 1);
     }
 
     public function test_quota_check_invalid_input_returns422(): void
@@ -2383,6 +2584,21 @@ class PushMessageFlowTest extends TestCase
         ));
 
         $response->assertStatus(422);
+    }
+
+    public function test_quota_check_rejects_legacy_audience_size_input(): void
+    {
+        Sanctum::actingAs($this->operator, ['push-messages:send']);
+
+        $response = $this->getJson(sprintf(
+            'api/v1/accounts/%s/push/quota-check?audience_size=5',
+            $this->account->slug
+        ));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'audience_size',
+        ]);
     }
 
     public function test_fcm_options_invalid_key_returns422(): void
@@ -2520,17 +2736,51 @@ class PushMessageFlowTest extends TestCase
         $update->assertJsonPath('data.body_template', 'Tenant update');
     }
 
+    public function test_tenant_push_message_update_accepts_all_users_audience_contract(): void
+    {
+        Sanctum::actingAs($this->operator, [
+            'tenant-push-messages:create',
+            'tenant-push-messages:update',
+        ]);
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson('api/v1/push/messages', $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $update = $this->patchJson('api/v1/push/messages/'.$messageId, [
+            'audience' => [
+                'type' => 'all_users',
+            ],
+        ]);
+
+        $update->assertOk();
+        $update->assertJsonPath('data.audience.type', 'all_users');
+    }
+
     public function test_tenant_message_data_forbidden_when_not_eligible(): void
     {
         Sanctum::actingAs($this->operator, [
             'tenant-push-messages:create',
             'tenant-push-messages:read',
         ]);
+        $otherUser = $this->userService->create($this->account, [
+            'name' => 'Tenant Data Other User',
+            'email' => 'tenant-push-data-other-'.Str::uuid()->toString().'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => [Str::uuid()->toString()],
+                'user_ids' => [(string) $otherUser->_id],
             ],
         ]);
 
@@ -2550,11 +2800,16 @@ class PushMessageFlowTest extends TestCase
             'tenant-push-messages:create',
             'tenant-push-messages:read',
         ]);
+        $otherUser = $this->userService->create($this->account, [
+            'name' => 'Tenant Action Other User',
+            'email' => 'tenant-push-action-other-'.Str::uuid()->toString().'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => [Str::uuid()->toString()],
+                'user_ids' => [(string) $otherUser->_id],
             ],
         ]);
 
@@ -2593,7 +2848,8 @@ class PushMessageFlowTest extends TestCase
 
         $payload = $this->buildPayload([
             'audience' => [
-                'type' => 'all',
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
             ],
         ]);
 
@@ -2610,6 +2866,11 @@ class PushMessageFlowTest extends TestCase
     public function test_audience_eligibility_contract_override_allows_data(): void
     {
         $this->actingAsOperator();
+        $otherUser = $this->userService->create($this->account, [
+            'name' => 'Eligibility Override User',
+            'email' => 'push-eligibility-override-'.Str::uuid()->toString().'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
         $this->app->bind(PushAudienceEligibilityContract::class, static function () {
             return new class implements PushAudienceEligibilityContract
@@ -2628,7 +2889,7 @@ class PushMessageFlowTest extends TestCase
         $payload = $this->buildPayload([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => [Str::uuid()->toString()],
+                'user_ids' => [(string) $otherUser->_id],
             ],
         ]);
 
@@ -2659,9 +2920,7 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
-            'user_id' => (string) $this->operator->_id,
-        ]);
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send');
 
         $send->assertStatus(422);
     }
@@ -3070,9 +3329,9 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
-    public function test_delivery_service_batches_tokens_by_config(): void
+    public function test_delivery_service_chunks_tokens_by_direct_send_chunk_size_config(): void
     {
-        config(['belluga_push_handler.fcm.max_batch_size' => 500]);
+        config(['belluga_push_handler.fcm.direct_send_chunk_size' => 500]);
 
         $batches = [];
         $this->app->bind(FcmClientContract::class, function () use (&$batches) {
@@ -3199,6 +3458,9 @@ class PushMessageFlowTest extends TestCase
             $this->app->make(PushDeliveryService::class),
             $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
             $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
         );
 
         $message->refresh();
@@ -3206,6 +3468,263 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame(1, $message->metrics['sent_count'] ?? null);
         $this->assertSame('sent', $message->status);
         $this->assertNotNull($message->sent_at);
+    }
+
+    public function test_send_job_does_not_mark_direct_delivery_sent_when_every_provider_response_fails(): void
+    {
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract
+            {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    return [
+                        'accepted_count' => 0,
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'failed',
+                            'error_code' => 'UNAVAILABLE',
+                            'error_message' => 'Provider unavailable.',
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
+
+        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
+            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver
+            {
+                public function __construct() {}
+
+                public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
+                {
+                    return 2;
+                }
+
+                public function streamResolvedTargetBatches(
+                    PushMessage $message,
+                    string $scope,
+                    ?string $accountId,
+                    int $batchSize,
+                    callable $callback
+                ): void {
+                    $callback([
+                        'tokens' => ['token-1', 'token-2'],
+                        'token_user_map' => [
+                            'token-1' => 'user-1',
+                            'token-2' => 'user-2',
+                        ],
+                    ]);
+                }
+
+                public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return ['token-1', 'token-2'];
+                }
+
+                public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [
+                        'tokens' => ['token-1', 'token-2'],
+                        'token_user_map' => [
+                            'token-1' => 'user-1',
+                            'token-2' => 'user-2',
+                        ],
+                    ];
+                }
+            };
+        });
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+        $this->assertSame(0, data_get($message->metrics ?? [], 'accepted_count', 0));
+        $this->assertSame(0, data_get($message->metrics ?? [], 'sent_count', 0));
+        $this->assertNotSame('sent', $message->status);
+        $this->assertNull($message->sent_at);
+    }
+
+    public function test_send_job_delivers_shared_all_users_audience_via_topic(): void
+    {
+        $topics = [];
+        $this->bindTopicOnlyTransportSpy($topics);
+
+        PushDeliveryLog::query()->delete();
+
+        $message = PushMessage::create(array_replace($this->buildPayload([
+            'audience' => [
+                'type' => 'all_users',
+            ],
+        ]), [
+            'scope' => 'tenant',
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'tenant', null);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+
+        $this->assertCount(1, $topics);
+        $this->assertSame(
+            $this->app->make(\App\Application\Push\PushChannelNamingService::class)->allUsersTopic(),
+            $topics[0]
+        );
+        $this->assertSame(1, $message->metrics['accepted_count'] ?? null);
+        $this->assertSame(1, data_get($message->metrics, 'delivery_topology_counts.channel_topic'));
+        $this->assertSame('channel_topic', data_get($message->metrics, 'last_delivery_topology'));
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame('channel_topic', (string) $log->delivery_topology);
+        $this->assertSame('topic', (string) $log->target_type);
+    }
+
+    public function test_send_job_delivers_shared_favorite_account_profile_audience_via_topic_only(): void
+    {
+        $topics = [];
+        $this->bindTopicOnlyTransportSpy($topics);
+
+        PushDeliveryLog::query()->delete();
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Topic Favorite Profile',
+            'is_active' => true,
+        ]);
+
+        $message = PushMessage::create(array_replace($this->buildPayload([
+            'audience' => [
+                'type' => 'favorite_account_profile',
+                'account_profile_id' => (string) $profile->_id,
+            ],
+        ]), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+
+        $this->assertSame([
+            $this->app->make(PushChannelNamingService::class)->favoriteAccountProfileTopic((string) $profile->_id),
+        ], $topics);
+        $this->assertSame(1, data_get($message->metrics, 'delivery_topology_counts.channel_topic'));
+        $this->assertSame('channel_topic', data_get($message->metrics, 'last_delivery_topology'));
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame('channel_topic', (string) $log->delivery_topology);
+        $this->assertSame('topic', (string) $log->target_type);
+    }
+
+    public function test_send_job_delivers_shared_event_confirmed_audience_via_topic_only(): void
+    {
+        $topics = [];
+        $this->bindTopicOnlyTransportSpy($topics);
+
+        PushDeliveryLog::query()->delete();
+
+        $event = Event::query()->create([
+            'title' => 'Topic Confirmed Event',
+            'account_context_ids' => [(string) $this->account->_id],
+        ]);
+
+        $message = PushMessage::create(array_replace($this->buildPayload([
+            'audience' => [
+                'type' => 'event_confirmed',
+                'event_id' => (string) $event->_id,
+            ],
+        ]), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+
+        $this->assertSame([
+            $this->app->make(PushChannelNamingService::class)->confirmedEventTopic((string) $event->_id),
+        ], $topics);
+        $this->assertSame(1, data_get($message->metrics, 'delivery_topology_counts.channel_topic'));
+        $this->assertSame('channel_topic', data_get($message->metrics, 'last_delivery_topology'));
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame('channel_topic', (string) $log->delivery_topology);
+        $this->assertSame('topic', (string) $log->target_type);
+    }
+
+    public function test_send_job_does_not_mark_topic_delivery_sent_when_provider_accepts_none(): void
+    {
+        $topics = [];
+        $this->bindTopicOnlyTransportSpy($topics, acceptedCount: 0, status: 'failed');
+
+        $message = PushMessage::create(array_replace($this->buildPayload([
+            'audience' => [
+                'type' => 'all_users',
+            ],
+        ]), [
+            'scope' => 'tenant',
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'tenant', null);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+        $this->assertSame([
+            $this->app->make(\App\Application\Push\PushChannelNamingService::class)->allUsersTopic(),
+        ], $topics);
+        $this->assertSame(0, data_get($message->metrics ?? [], 'accepted_count', 0));
+        $this->assertSame(0, data_get($message->metrics ?? [], 'sent_count', 0));
+        $this->assertNotSame('sent', $message->status);
+        $this->assertNull($message->sent_at);
     }
 
     public function test_fcm_http_client_builds_payload_with_overrides(): void
@@ -3232,11 +3751,12 @@ class PushMessageFlowTest extends TestCase
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/batch' => Http::response(
-                $this->fakeBatchResponseBody(['token-1', 'token-2']),
-                200,
-                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
-            ),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => static function ($request) {
+                $token = data_get($request->data(), 'message.token', 'missing-token');
+
+                return Http::response(['name' => 'msg-'.$token], 200);
+            },
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
         ]);
 
         $message = PushMessage::create($this->buildPayload([
@@ -3255,24 +3775,28 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $client->send($message, ['token-1', 'token-2'], 'instance-1', $expiresAt, 10);
 
-        Http::assertSentCount(2);
-        Http::assertSent(function ($request) use ($expiresAt) {
-            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
-                return false;
-            }
-            $body = $request->body();
-            if (! is_string($body)) {
-                return false;
-            }
+        Http::assertSentCount(3);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
+        foreach (['token-1', 'token-2'] as $token) {
+            Http::assertSent(function ($request) use ($expiresAt, $token) {
+                if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
+                    return false;
+                }
+                $body = $request->body();
+                if (! is_string($body)) {
+                    return false;
+                }
 
-            return str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1')
-                && str_contains($body, '"title":"Override title"')
-                && str_contains($body, '"custom":"value"')
-                && str_contains($body, '"ttl":"600s"')
-                && str_contains($body, '"TTL":"600"')
-                && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
-                && substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === 2;
-        });
+                return str_contains($body, '"token":"'.$token.'"')
+                    && str_contains($body, '"title":"Override title"')
+                    && str_contains($body, '"custom":"value"')
+                    && str_contains($body, '"ttl":"600s"')
+                    && str_contains($body, '"TTL":"600"')
+                    && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
+                    && ! str_contains($body, 'multipart/mixed')
+                    && ! str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1');
+            });
+        }
 
         Carbon::setTestNow();
     }
@@ -3301,11 +3825,8 @@ class PushMessageFlowTest extends TestCase
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/batch' => Http::response(
-                $this->fakeBatchResponseBody(['token-1']),
-                200,
-                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
-            ),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => Http::response(['name' => 'msg-token-1'], 200),
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
         ]);
 
         $message = PushMessage::create($this->buildPayload([
@@ -3334,8 +3855,10 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $client->send($message, ['token-1'], 'instance-2', $expiresAt, 15);
 
+        Http::assertSentCount(2);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
         Http::assertSent(function ($request) use ($expiresAt) {
-            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
+            if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
                 return false;
             }
 
@@ -3344,20 +3867,22 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
 
-            return str_contains($body, '"title":"Default title"')
+            return str_contains($body, '"token":"token-1"')
+                && str_contains($body, '"title":"Default title"')
                 && str_contains($body, '"body":"Default body"')
                 && str_contains($body, '"notification":{"title":"Android title"}')
                 && str_contains($body, '"alert":{"title":"Apns title","body":"Apns body"}')
                 && str_contains($body, '"ttl":"900s"')
                 && str_contains($body, '"TTL":"900"')
                 && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
-                && substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === 1;
+                && ! str_contains($body, 'multipart/mixed')
+                && ! str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1');
         });
 
         Carbon::setTestNow();
     }
 
-    public function test_fcm_http_client_sends_up_to_five_hundred_recipients_in_one_provider_batch_request(): void
+    public function test_fcm_http_client_sends_each_recipient_to_supported_http_v1_endpoint(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
 
@@ -3379,18 +3904,16 @@ class PushMessageFlowTest extends TestCase
         ]);
         Cache::flush();
 
-        $tokens = [];
-        for ($index = 0; $index < 500; $index++) {
-            $tokens[] = 'token-'.$index;
-        }
+        $tokens = ['token-0', 'token-1', 'token-2'];
 
         Http::fake([
             'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
-            'https://fcm.googleapis.com/batch' => Http::response(
-                $this->fakeBatchResponseBody($tokens),
-                200,
-                ['Content-Type' => 'multipart/mixed; boundary=fcm_batch_boundary']
-            ),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => static function ($request) {
+                $token = data_get($request->data(), 'message.token', 'missing-token');
+
+                return Http::response(['name' => 'projects/project-id/messages/msg-'.$token], 200);
+            },
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
         ]);
 
         $message = PushMessage::create($this->buildPayload());
@@ -3399,13 +3922,68 @@ class PushMessageFlowTest extends TestCase
         $client = $this->app->make(FcmHttpV1Client::class);
         $result = $client->send($message, $tokens, 'instance-budget', $expiresAt, 10);
 
-        $this->assertSame(500, $result['accepted_count']);
-        $this->assertCount(500, $result['responses']);
+        $this->assertSame(3, $result['accepted_count']);
+        $this->assertCount(3, $result['responses']);
+        $this->assertSame('accepted', $result['responses'][0]['status'] ?? null);
+
+        Http::assertSentCount(4);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
+        foreach ($tokens as $token) {
+            Http::assertSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/v1/projects/project-id/messages:send'
+                && data_get($request->data(), 'message.token') === $token);
+        }
+
+        Carbon::setTestNow();
+    }
+
+    public function test_fcm_http_client_sends_topic_to_supported_http_v1_endpoint(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-01 00:00:00'));
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        PushCredential::query()->delete();
+        $keyResource = openssl_pkey_new([
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'private_key_bits' => 2048,
+        ]);
+        $privateKey = '';
+        openssl_pkey_export($keyResource, $privateKey);
+
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => $privateKey,
+        ]);
+        Cache::flush();
+
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'token'], 200),
+            'https://fcm.googleapis.com/v1/projects/project-id/messages:send' => Http::response(['name' => 'projects/project-id/messages/topic-all-users'], 200),
+            'https://fcm.googleapis.com/batch' => Http::response(['error' => 'batch endpoint forbidden'], 418),
+        ]);
+
+        $message = PushMessage::create($this->buildPayload([
+            'fcm_options' => [
+                'data' => [
+                    'custom' => 'topic-value',
+                ],
+            ],
+        ]));
+
+        $expiresAt = Carbon::now()->addMinutes(12);
+        $client = $this->app->make(FcmHttpV1Client::class);
+        $result = $client->sendTopic($message, 'all-users', 'instance-topic', $expiresAt, 12);
+
+        $this->assertSame(1, $result['accepted_count']);
+        $this->assertCount(1, $result['responses']);
         $this->assertSame('accepted', $result['responses'][0]['status'] ?? null);
 
         Http::assertSentCount(2);
-        Http::assertSent(function ($request) use ($tokens) {
-            if ($request->url() !== 'https://fcm.googleapis.com/batch') {
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/batch');
+        Http::assertSent(function ($request) use ($expiresAt) {
+            if ($request->url() !== 'https://fcm.googleapis.com/v1/projects/project-id/messages:send') {
                 return false;
             }
 
@@ -3414,37 +3992,41 @@ class PushMessageFlowTest extends TestCase
                 return false;
             }
 
-            return substr_count($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1') === count($tokens);
+            return str_contains($body, '"topic":"all-users"')
+                && ! str_contains($body, '"token":')
+                && str_contains($body, '"custom":"topic-value"')
+                && str_contains($body, '"ttl":"720s"')
+                && str_contains($body, '"TTL":"720"')
+                && str_contains($body, '"apns-expiration":"'.(string) $expiresAt->getTimestamp().'"')
+                && ! str_contains($body, 'multipart/mixed')
+                && ! str_contains($body, 'POST /v1/projects/project-id/messages:send HTTP/1.1');
         });
 
         Carbon::setTestNow();
     }
 
-    public function test_explicit_user_audience_within_batch_limit_uses_single_push_device_query(): void
+    public function test_single_direct_user_within_batch_limit_uses_single_push_device_query(): void
     {
-        $userIds = [];
-        for ($index = 0; $index < 205; $index++) {
-            $user = $this->userService->create($this->account, [
-                'name' => sprintf('Query Budget User %03d', $index),
-                'email' => sprintf('query-budget-user-%03d@example.org', $index),
-                'password' => 'Secret!234',
-            ], (string) $this->operatorRole->_id);
+        $user = $this->userService->create($this->account, [
+            'name' => 'Query Budget User',
+            'email' => 'query-budget-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
+        for ($index = 0; $index < 205; $index++) {
             $this->seedPushDevice($user, [
                 'device_id' => sprintf('query-budget-device-%03d', $index),
                 'platform' => 'android',
                 'push_token' => sprintf('query-budget-token-%03d', $index),
                 'is_active' => true,
             ]);
-
-            $userIds[] = (string) $user->_id;
         }
 
         $resolver = $this->app->make(PushRecipientResolver::class);
         $message = new PushMessage([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => $userIds,
+                'user_ids' => [(string) $user->_id],
             ],
         ]);
 
@@ -3455,31 +4037,28 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame(1, $queryCount);
     }
 
-    public function test_explicit_user_audience_above_batch_limit_uses_one_push_device_query_per_batch_window(): void
+    public function test_single_direct_user_above_batch_limit_uses_one_push_device_query_per_batch_window(): void
     {
-        $userIds = [];
-        for ($index = 0; $index < 501; $index++) {
-            $user = $this->userService->create($this->account, [
-                'name' => sprintf('Query Budget Spill User %03d', $index),
-                'email' => sprintf('query-budget-spill-user-%03d@example.org', $index),
-                'password' => 'Secret!234',
-            ], (string) $this->operatorRole->_id);
+        $user = $this->userService->create($this->account, [
+            'name' => 'Query Budget Spill User',
+            'email' => 'query-budget-spill-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
 
+        for ($index = 0; $index < 501; $index++) {
             $this->seedPushDevice($user, [
                 'device_id' => sprintf('query-budget-spill-device-%03d', $index),
                 'platform' => 'android',
                 'push_token' => sprintf('query-budget-spill-token-%03d', $index),
                 'is_active' => true,
             ]);
-
-            $userIds[] = (string) $user->_id;
         }
 
         $resolver = $this->app->make(PushRecipientResolver::class);
         $message = new PushMessage([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => $userIds,
+                'user_ids' => [(string) $user->_id],
             ],
         ]);
 
@@ -3495,18 +4074,18 @@ class PushMessageFlowTest extends TestCase
         $this->app->bind(PushPlanPolicyContract::class, static function () {
             return new class implements PushPlanPolicyContract, PushPlanPolicyDecisionContract
             {
-                public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
+                public function canSend(string $accountId, PushMessage $message, int $requestedUnits): bool
                 {
                     return false;
                 }
 
-                public function quotaDecision(string $accountId, PushMessage $message, int $audienceSize): array
+                public function quotaDecision(string $accountId, PushMessage $message, int $requestedUnits): array
                 {
                     return [
                         'allowed' => false,
                         'limit' => 10,
                         'current_used' => 10,
-                        'requested' => $audienceSize,
+                        'requested' => $requestedUnits,
                         'remaining_after' => 0,
                         'period' => 'monthly',
                         'reason' => 'quota_exceeded',
@@ -3517,9 +4096,17 @@ class PushMessageFlowTest extends TestCase
 
         Sanctum::actingAs($this->operator, ['push-messages:send']);
 
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Blocked Quota Favorite Profile',
+            'is_active' => true,
+        ]);
+
         $response = $this->getJson(sprintf(
-            'api/v1/accounts/%s/push/quota-check?audience_size=5',
-            $this->account->slug
+            'api/v1/accounts/%s/push/quota-check?audience[type]=favorite_account_profile&audience[account_profile_id]=%s',
+            $this->account->slug,
+            (string) $profile->_id
         ));
 
         $response->assertOk();
@@ -3527,9 +4114,49 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('reason', 'quota_exceeded');
     }
 
-    public function test_transactional_send_accepts_email_target(): void
+    public function test_transactional_send_uses_persisted_direct_recipient_without_request_target(): void
     {
         $this->actingAsOperator();
+
+        $foreignAccount = Account::query()->create([
+            'name' => 'Cross Scope Push Account',
+            'document' => 'DOC-CROSS-SCOPE-PUSH',
+        ]);
+
+        $sendCalls = [];
+        $this->app->bind(FcmClientContract::class, function () use (&$sendCalls) {
+            return new class($sendCalls) implements FcmClientContract
+            {
+                /**
+                 * @param  array<int, array{tokens:array<int,string>,message_id:string}>  $sendCalls
+                 */
+                public function __construct(private array &$sendCalls) {}
+
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    $this->sendCalls[] = [
+                        'tokens' => array_values($tokens),
+                        'message_id' => (string) $message->_id,
+                    ];
+
+                    return [
+                        'accepted_count' => count($tokens),
+                        'message_instance_id' => $messageInstanceId,
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'accepted',
+                            'provider_message_id' => 'txn-'.$token,
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
+        PushDeliveryLog::query()->delete();
 
         $payload = $this->buildPayload([
             'type' => 'transactional',
@@ -3548,19 +4175,75 @@ class PushMessageFlowTest extends TestCase
             'device_id' => 'device-1',
             'push_token' => 'token-1',
         ]);
-
-        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
-            'email' => 'push-operator@example.org',
-            'dry_run' => true,
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'foreign-account-device',
+            'push_token' => 'foreign-account-token',
+            'account_ids' => [(string) $foreignAccount->_id],
         ]);
+
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', []);
 
         $send->assertOk();
         $send->assertJsonPath('ok', true);
+        $send->assertJsonPath('recipient_user_id', (string) $this->operator->_id);
+        $send->assertJsonPath('delivery_topology', 'individual_direct');
+        $send->assertJsonPath('delivery_status', 'accepted');
+        $send->assertJsonMissingPath('queued');
+
+        $this->assertSame([
+            [
+                'tokens' => ['token-1'],
+                'message_id' => $messageId,
+            ],
+        ], $sendCalls);
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame('individual_direct', (string) $log->delivery_topology);
+        $this->assertSame('token', (string) $log->target_type);
     }
 
-    public function test_transactional_send_accepts_user_id_target(): void
+    public function test_transactional_send_honors_device_filter_for_persisted_direct_recipient(): void
     {
         $this->actingAsOperator();
+
+        $foreignAccount = Account::query()->create([
+            'name' => 'Device Filter Foreign Account',
+            'document' => 'DOC-DEVICE-FILTER-PUSH',
+        ]);
+
+        $sendCalls = [];
+        $this->app->bind(FcmClientContract::class, function () use (&$sendCalls) {
+            return new class($sendCalls) implements FcmClientContract
+            {
+                /**
+                 * @param  array<int, array{tokens:array<int,string>,message_id:string}>  $sendCalls
+                 */
+                public function __construct(private array &$sendCalls) {}
+
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    $this->sendCalls[] = [
+                        'tokens' => array_values($tokens),
+                        'message_id' => (string) $message->_id,
+                    ];
+
+                    return [
+                        'accepted_count' => count($tokens),
+                        'message_instance_id' => $messageInstanceId,
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'accepted',
+                            'provider_message_id' => 'txn-'.$token,
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
 
         $payload = $this->buildPayload([
             'type' => 'transactional',
@@ -3579,14 +4262,62 @@ class PushMessageFlowTest extends TestCase
             'device_id' => 'device-1',
             'push_token' => 'token-1',
         ]);
-
-        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
-            'user_id' => (string) $this->operator->_id,
-            'dry_run' => true,
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'foreign-device',
+            'push_token' => 'foreign-token',
+            'account_ids' => [(string) $foreignAccount->_id],
         ]);
 
+        $foreignSend = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
+            'device_id' => 'foreign-device',
+        ]);
+        $foreignSend->assertStatus(422);
+        $foreignSend->assertJsonPath('reason', 'no_tokens');
+
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
+            'device_id' => 'device-1',
+        ]);
         $send->assertOk();
         $send->assertJsonPath('ok', true);
+        $send->assertJsonPath('delivery_topology', 'individual_direct');
+        $send->assertJsonPath('delivery_status', 'accepted');
+        $send->assertJsonMissingPath('queued');
+        $this->assertSame([
+            [
+                'tokens' => ['token-1'],
+                'message_id' => $messageId,
+            ],
+        ], $sendCalls);
+    }
+
+    public function test_transactional_send_rejects_legacy_user_id_and_email_chooser_inputs(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'type' => 'transactional',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson($this->baseUrl, $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
+            'dry_run' => true,
+            'user_id' => Str::uuid()->toString(),
+            'email' => 'legacy-send@example.org',
+        ]);
+
+        $send->assertStatus(422);
+        $send->assertJsonValidationErrors([
+            'user_id',
+            'email',
+        ]);
     }
 
     public function test_register_updates_device_token_and_reactivates(): void
@@ -3647,6 +4378,95 @@ class PushMessageFlowTest extends TestCase
         $this->assertFalse((bool) $device1->is_active);
         $this->assertNotNull($device1->invalidated_at);
         $this->assertTrue((bool) $device2->is_active);
+    }
+
+    public function test_push_topics_repair_command_reprojects_active_tokens(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevices($user, [
+            [
+                'device_id' => 'repair-active-device',
+                'platform' => 'android',
+                'push_token' => 'repair-active-token',
+                'is_active' => true,
+            ],
+            [
+                'device_id' => 'repair-inactive-device',
+                'platform' => 'ios',
+                'push_token' => 'repair-inactive-token',
+                'is_active' => false,
+                'invalidated_at' => new UTCDateTime,
+            ],
+        ]);
+
+        $exitCode = Artisan::call('push:topics:repair', [
+            'tenant_slug' => 'tenant-zeta',
+        ]);
+
+        $this->assertSame(0, $exitCode);
+        $this->resolvePrimaryPushTenant()->makeCurrent();
+        $this->assertSame([['repair-active-token']], $transport->unsubscribeAll);
+        $this->assertContains([
+            'topic' => $this->app->make(PushChannelNamingService::class)->allUsersTopic(),
+            'tokens' => ['repair-active-token'],
+        ], $transport->subscriptions);
+        $this->assertNotContains(['repair-inactive-token'], $transport->unsubscribeAll);
+    }
+
+    public function test_push_topics_repair_groups_tokens_by_user_per_chunk(): void
+    {
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevices($user, [
+            [
+                'device_id' => 'repair-group-device-1',
+                'platform' => 'android',
+                'push_token' => 'repair-group-token-1',
+                'is_active' => true,
+            ],
+            [
+                'device_id' => 'repair-group-device-2',
+                'platform' => 'ios',
+                'push_token' => 'repair-group-token-2',
+                'is_active' => true,
+            ],
+        ]);
+
+        $memberships = $this->getMockBuilder(PushTopicMembershipService::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['syncTokensForUser'])
+            ->getMock();
+        $memberships->expects($this->once())
+            ->method('syncTokensForUser')
+            ->with(
+                (string) $user->_id,
+                $this->callback(static function (array $tokens): bool {
+                    sort($tokens);
+
+                    return $tokens === ['repair-group-token-1', 'repair-group-token-2'];
+                })
+            );
+
+        $this->app->instance(PushTopicMembershipService::class, $memberships);
+
+        $exitCode = Artisan::call('push:topics:repair', [
+            'tenant_slug' => (string) $tenant->slug,
+            '--chunk' => 200,
+        ]);
+
+        $this->assertSame(0, $exitCode);
     }
 
     public function test_recipient_resolver_skips_inactive_tokens(): void
@@ -3724,7 +4544,10 @@ class PushMessageFlowTest extends TestCase
             }
         };
 
-        $resolver = new PushRecipientResolver($gateway);
+        $resolver = new PushRecipientResolver(
+            $gateway,
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+        );
 
         $message = new PushMessage([
             'audience' => [
@@ -3743,16 +4566,8 @@ class PushMessageFlowTest extends TestCase
         $this->assertSame([500], $gateway->seenBatchSizes);
     }
 
-    public function test_recipient_resolver_account_scope_excludes_foreign_account_users_even_when_ids_are_explicit(): void
+    public function test_recipient_resolver_account_scope_excludes_foreign_direct_user_even_when_id_is_explicit(): void
     {
-        $target = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
-        $this->seedPushDevice($target, [
-            'device_id' => 'target-account-device',
-            'platform' => 'android',
-            'push_token' => 'target-account-token',
-            'is_active' => true,
-        ]);
-
         $foreignAccount = Account::query()->create([
             'name' => 'Foreign Push Account',
             'document' => 'DOC-FOREIGN-PUSH',
@@ -3801,56 +4616,91 @@ class PushMessageFlowTest extends TestCase
             }
         };
 
-        $resolver = new PushRecipientResolver($gateway);
+        $resolver = new PushRecipientResolver(
+            $gateway,
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+        );
 
         $message = new PushMessage([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => [
-                    (string) $target->_id,
-                    (string) $foreignUser->_id,
-                ],
+                'user_ids' => [(string) $foreignUser->_id],
             ],
         ]);
 
         $result = $resolver->resolveTokensWithUsers($message, 'account', (string) $this->account->_id);
 
-        $this->assertSame(['target-account-token'], $result['tokens']);
-        $this->assertSame(['target-account-token' => (string) $target->_id], $result['token_user_map']);
+        $this->assertSame([], $result['tokens']);
+        $this->assertSame([], $result['token_user_map']);
         $this->assertSame(1, $gateway->chunkTargetsByUserIdsCalls);
         $this->assertSame(0, $gateway->chunkAllTargetsCalls);
         $this->assertSame((string) $this->account->_id, $gateway->receivedAccountId);
-        $this->assertEqualsCanonicalizing(
-            [(string) $target->_id, (string) $foreignUser->_id],
-            $gateway->seenUserIds
-        );
+        $this->assertSame([(string) $foreignUser->_id], $gateway->seenUserIds);
     }
 
-    public function test_recipient_resolver_large_explicit_audience_stays_on_query_based_id_path(): void
+    public function test_recipient_resolver_rejects_multi_user_direct_audience_at_helper_boundary(): void
     {
-        $targetUserIds = [];
+        $other = $this->userService->create($this->account, [
+            'name' => 'Other Direct Push User',
+            'email' => 'other-direct-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+
+        $gateway = new class extends PushUserGatewayAdapter
+        {
+            public int $chunkTargetsByUserIdsCalls = 0;
+
+            public function chunkActivePushTargetsByUserIds(?string $accountId, array $userIds, int $chunkSize, callable $callback): void
+            {
+                $this->chunkTargetsByUserIdsCalls++;
+
+                parent::chunkActivePushTargetsByUserIds($accountId, $userIds, $chunkSize, $callback);
+            }
+        };
+
+        $resolver = new PushRecipientResolver(
+            $gateway,
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+        );
+
+        $message = new PushMessage([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id, (string) $other->_id],
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        try {
+            $resolver->resolveTokensWithUsers($message, 'account', (string) $this->account->_id);
+        } finally {
+            $this->assertSame(0, $gateway->chunkTargetsByUserIdsCalls);
+        }
+    }
+
+    public function test_recipient_resolver_single_direct_user_stays_on_query_based_id_path(): void
+    {
+        $target = $this->userService->create($this->account, [
+            'name' => 'Large Direct Audience User',
+            'email' => 'large-direct-audience-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+
         $expectedTokens = [];
         $expectedTokenUserMap = [];
 
         for ($index = 0; $index < 205; $index++) {
-            $user = $this->userService->create($this->account, [
-                'name' => sprintf('Large Audience User %03d', $index),
-                'email' => sprintf('large-audience-user-%03d@example.org', $index),
-                'password' => 'Secret!234',
-            ], (string) $this->operatorRole->_id);
-
             $token = sprintf('large-audience-token-%03d', $index);
-            $this->seedPushDevice($user, [
+            $this->seedPushDevice($target, [
                 'device_id' => sprintf('large-audience-device-%03d', $index),
                 'platform' => 'android',
                 'push_token' => $token,
                 'is_active' => true,
             ]);
 
-            $userId = (string) $user->_id;
-            $targetUserIds[] = $userId;
             $expectedTokens[] = $token;
-            $expectedTokenUserMap[$token] = $userId;
+            $expectedTokenUserMap[$token] = (string) $target->_id;
         }
 
         $gateway = new class extends PushUserGatewayAdapter
@@ -3889,12 +4739,15 @@ class PushMessageFlowTest extends TestCase
             }
         };
 
-        $resolver = new PushRecipientResolver($gateway);
+        $resolver = new PushRecipientResolver(
+            $gateway,
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+        );
 
         $message = new PushMessage([
             'audience' => [
                 'type' => 'users',
-                'user_ids' => $targetUserIds,
+                'user_ids' => [(string) $target->_id],
             ],
         ]);
 
@@ -3958,6 +4811,16 @@ class PushMessageFlowTest extends TestCase
 
     public function test_removing_last_account_access_deactivates_push_devices(): void
     {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
         $user = $this->userService->create($this->account, [
             'name' => 'Removable Push User',
             'email' => 'removable-push-user@example.org',
@@ -3979,9 +4842,494 @@ class PushMessageFlowTest extends TestCase
 
         $this->assertFalse((bool) $device->is_active);
         $this->assertNotNull($device->invalidated_at);
+        $this->assertSame([['removable-token']], $transport->unsubscribeAll);
     }
 
-    public function test_recipient_resolver_returns_empty_for_unmaterialized_event_audience(): void
+    public function test_detaching_last_account_access_deactivates_and_unsubscribes_push_devices(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $user = $this->userService->create($this->account, [
+            'name' => 'Detachable Push User',
+            'email' => 'detachable-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+        $this->seedPushDevice($user, [
+            'device_id' => 'detachable-device',
+            'platform' => 'android',
+            'push_token' => 'detachable-token',
+            'is_active' => true,
+        ]);
+
+        $this->app->make(AccountManagementService::class)->detachUser(
+            $this->account,
+            $user->fresh(),
+            $this->operatorRole->fresh()
+        );
+
+        $device = PushDevice::query()
+            ->where('account_user_id', (string) $user->_id)
+            ->where('device_id', 'detachable-device')
+            ->firstOrFail();
+
+        $this->assertFalse((bool) $device->is_active);
+        $this->assertNotNull($device->invalidated_at);
+        $this->assertSame([['detachable-token']], $transport->unsubscribeAll);
+    }
+
+    public function test_stale_favorite_subscribe_job_reconciles_current_truth_and_unsubscribes(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Replay Favorite Profile',
+            'is_active' => true,
+        ]);
+
+        $this->seedPushDevice($user, [
+            'device_id' => 'favorite-replay-device',
+            'platform' => 'android',
+            'push_token' => 'favorite-replay-token',
+            'is_active' => true,
+        ]);
+
+        FavoriteEdge::query()->create([
+            'owner_user_id' => (string) $user->_id,
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+            'target_id' => (string) $profile->_id,
+            'favorited_at' => Carbon::now(),
+        ]);
+        FavoriteEdge::query()
+            ->where('owner_user_id', (string) $user->_id)
+            ->where('target_id', (string) $profile->_id)
+            ->delete();
+
+        SyncFavoriteAccountProfileTopicMembershipJob::dispatchSync(
+            tenantSlug: $this->resolvePrimaryPushTenant()->slug,
+            userId: (string) $user->_id,
+            accountProfileId: (string) $profile->_id,
+        );
+
+        $topic = $this->app->make(PushChannelNamingService::class)
+            ->favoriteAccountProfileTopic((string) $profile->_id);
+
+        $this->assertSame([], $transport->subscriptions);
+        $this->assertSame([
+            [
+                'topic' => $topic,
+                'tokens' => ['favorite-replay-token'],
+            ],
+        ], $transport->unsubscriptions);
+    }
+
+    public function test_stale_event_subscribe_job_reconciles_current_truth_and_unsubscribes(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($user, [
+            'device_id' => 'event-replay-device',
+            'platform' => 'android',
+            'push_token' => 'event-replay-token',
+            'is_active' => true,
+        ]);
+
+        $event = Event::query()->create([
+            'title' => 'Replay Confirmed Event',
+            'account_context_ids' => [(string) $this->account->_id],
+        ]);
+
+        /** @var AttendanceCommitmentService $attendance */
+        $attendance = $this->app->make(AttendanceCommitmentService::class);
+        $attendance->confirm((string) $user->_id, (string) $event->_id, 'occ-replay');
+        $attendance->unconfirm((string) $user->_id, (string) $event->_id, 'occ-replay');
+
+        $transport->subscriptions = [];
+        $transport->unsubscriptions = [];
+        $transport->unsubscribeAll = [];
+
+        SyncEventConfirmedTopicMembershipJob::dispatchSync(
+            tenantSlug: $this->resolvePrimaryPushTenant()->slug,
+            userId: (string) $user->_id,
+            eventId: (string) $event->_id,
+        );
+
+        $topic = $this->app->make(PushChannelNamingService::class)
+            ->confirmedEventTopic((string) $event->_id);
+
+        $this->assertSame([], $transport->subscriptions);
+        $this->assertSame([
+            [
+                'topic' => $topic,
+                'tokens' => ['event-replay-token'],
+            ],
+        ], $transport->unsubscriptions);
+    }
+
+    public function test_sync_user_favorite_profile_membership_uses_exact_truth_lookup(): void
+    {
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($user, [
+            'device_id' => 'favorite-exact-lookup-device',
+            'platform' => 'android',
+            'push_token' => 'favorite-exact-lookup-token',
+            'is_active' => true,
+        ]);
+
+        $transport = $this->createMock(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class);
+        $transport->expects($this->once())
+            ->method('subscribe')
+            ->with('favorite-topic', ['favorite-exact-lookup-token']);
+
+        $projection = $this->getMockBuilder(PushUserTopicProjectionService::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['userHasFavoriteAccountProfile', 'favoriteProfileTopicsForUserId'])
+            ->getMock();
+        $projection->expects($this->once())
+            ->method('userHasFavoriteAccountProfile')
+            ->with((string) $user->_id, 'favorite-profile-id')
+            ->willReturn(true);
+        $projection->expects($this->never())
+            ->method('favoriteProfileTopicsForUserId');
+
+        $naming = $this->createMock(PushChannelNamingService::class);
+        $naming->expects($this->once())
+            ->method('favoriteAccountProfileTopic')
+            ->with('favorite-profile-id')
+            ->willReturn('favorite-topic');
+
+        $settings = $this->createMock(PushSettingsKernelBridge::class);
+        $settings->method('resolvedPushConfig')->willReturn(['enabled' => true]);
+        $settings->method('currentFirebaseConfig')->willReturn(['project_id' => 'tenant-zeta']);
+        $settings->method('hasRequiredFirebaseConfig')->willReturn(true);
+
+        $credentials = $this->createMock(PushCredentialService::class);
+        $credentials->method('current')->willReturn(new PushCredential());
+
+        $service = new PushTopicMembershipService(
+            transport: $transport,
+            projection: $projection,
+            naming: $naming,
+            pushSettings: $settings,
+            credentials: $credentials,
+        );
+
+        $service->syncUserFavoriteProfileMembership((string) $user->_id, 'favorite-profile-id');
+    }
+
+    public function test_sync_user_confirmed_event_membership_uses_exact_truth_lookup(): void
+    {
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($user, [
+            'device_id' => 'event-exact-lookup-device',
+            'platform' => 'android',
+            'push_token' => 'event-exact-lookup-token',
+            'is_active' => true,
+        ]);
+
+        $transport = $this->createMock(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class);
+        $transport->expects($this->once())
+            ->method('subscribe')
+            ->with('event-topic', ['event-exact-lookup-token']);
+
+        $projection = $this->getMockBuilder(PushUserTopicProjectionService::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['userHasConfirmedEvent', 'confirmedEventTopicsForUserId'])
+            ->getMock();
+        $projection->expects($this->once())
+            ->method('userHasConfirmedEvent')
+            ->with((string) $user->_id, 'event-id')
+            ->willReturn(true);
+        $projection->expects($this->never())
+            ->method('confirmedEventTopicsForUserId');
+
+        $naming = $this->createMock(PushChannelNamingService::class);
+        $naming->expects($this->once())
+            ->method('confirmedEventTopic')
+            ->with('event-id')
+            ->willReturn('event-topic');
+
+        $settings = $this->createMock(PushSettingsKernelBridge::class);
+        $settings->method('resolvedPushConfig')->willReturn(['enabled' => true]);
+        $settings->method('currentFirebaseConfig')->willReturn(['project_id' => 'tenant-zeta']);
+        $settings->method('hasRequiredFirebaseConfig')->willReturn(true);
+
+        $credentials = $this->createMock(PushCredentialService::class);
+        $credentials->method('current')->willReturn(new PushCredential());
+
+        $service = new PushTopicMembershipService(
+            transport: $transport,
+            projection: $projection,
+            naming: $naming,
+            pushSettings: $settings,
+            credentials: $credentials,
+        );
+
+        $service->syncUserConfirmedEventMembership((string) $user->_id, 'event-id');
+    }
+
+    public function test_event_confirmed_eligibility_uses_exact_truth_lookup(): void
+    {
+        $attendance = $this->getMockBuilder(AttendanceCommitmentService::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['hasConfirmedEvent', 'confirmedEventIds'])
+            ->getMock();
+        $attendance->expects($this->once())
+            ->method('hasConfirmedEvent')
+            ->with((string) $this->operator->_id, 'event-id')
+            ->willReturn(true);
+        $attendance->expects($this->never())
+            ->method('confirmedEventIds');
+
+        $service = new PushAudienceEligibilityService($attendance);
+
+        $eligible = $service->isEligible(
+            user: $this->operator,
+            message: new PushMessage(),
+            audience: [
+                'type' => 'event_confirmed',
+                'event_id' => 'event-id',
+            ],
+        );
+
+        $this->assertTrue($eligible);
+    }
+
+    public function test_push_device_registered_event_reconciles_topics_for_post_write_flow(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'post-write-device',
+            'platform' => 'android',
+            'push_token' => 'post-write-token',
+            'is_active' => true,
+        ]);
+
+        event(new PushDeviceRegistered((string) $this->operator->_id, 'post-write-token'));
+
+        $this->assertSame([['post-write-token']], $transport->unsubscribeAll);
+        $this->assertSame([
+            [
+                'topic' => $this->app->make(PushChannelNamingService::class)->allUsersTopic(),
+                'tokens' => ['post-write-token'],
+            ],
+        ], $transport->subscriptions);
+    }
+
+    public function test_push_device_registered_event_noops_without_tenant_context(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $this->resolvePrimaryPushTenant()->makeCurrent();
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'no-tenant-device',
+            'platform' => 'android',
+            'push_token' => 'no-tenant-token',
+            'is_active' => true,
+        ]);
+
+        Tenant::forgetCurrent();
+        event(new PushDeviceRegistered((string) $this->operator->_id, 'no-tenant-token'));
+
+        $this->assertSame([], $transport->unsubscribeAll);
+        $this->assertSame([], $transport->subscriptions);
+
+        $this->resolvePrimaryPushTenant()->makeCurrent();
+    }
+
+    public function test_favorite_added_event_subscribes_profile_topic_for_post_write_flow(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($user, [
+            'device_id' => 'favorite-after-write-device',
+            'platform' => 'android',
+            'push_token' => 'favorite-after-write-token',
+            'is_active' => true,
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Favorite After Write Profile',
+            'is_active' => true,
+        ]);
+
+        FavoriteEdge::query()->create([
+            'owner_user_id' => (string) $user->_id,
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+            'target_id' => (string) $profile->_id,
+            'favorited_at' => Carbon::now(),
+        ]);
+
+        event(new FavoriteAdded(
+            ownerUserId: (string) $user->_id,
+            registryKey: 'account_profile',
+            targetType: 'account_profile',
+            targetId: (string) $profile->_id,
+        ));
+
+        $this->assertSame([
+            [
+                'topic' => $this->app->make(PushChannelNamingService::class)
+                    ->favoriteAccountProfileTopic((string) $profile->_id),
+                'tokens' => ['favorite-after-write-token'],
+            ],
+        ], $transport->subscriptions);
+        $this->assertSame([], $transport->unsubscriptions);
+    }
+
+    public function test_occurrence_attendance_confirmed_event_subscribes_confirmed_event_topic_for_post_write_flow(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+        $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
+        $this->seedPushDevice($user, [
+            'device_id' => 'attendance-after-write-device',
+            'platform' => 'android',
+            'push_token' => 'attendance-after-write-token',
+            'is_active' => true,
+        ]);
+
+        $event = Event::query()->create([
+            'title' => 'Attendance After Write Event',
+            'account_context_ids' => [(string) $this->account->_id],
+        ]);
+
+        $this->app->make(AttendanceCommitmentService::class)->confirm(
+            (string) $user->_id,
+            (string) $event->_id,
+            'attendance-after-write-occurrence'
+        );
+
+        $this->assertSame([
+            [
+                'topic' => $this->app->make(PushChannelNamingService::class)
+                    ->confirmedEventTopic((string) $event->_id),
+                'tokens' => ['attendance-after-write-token'],
+            ],
+        ], $transport->subscriptions);
+        $this->assertSame([], $transport->unsubscriptions);
+    }
+
+    public function test_reconcile_push_token_topics_job_uses_explicit_tenant_slug_instead_of_ambient_context(): void
+    {
+        TenantPushSettings::query()->delete();
+        TenantPushSettings::create($this->buildTenantSettingsPayload([
+            'push' => [
+                'enabled' => true,
+            ],
+        ]));
+
+        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
+
+        $primaryTenant = $this->resolvePrimaryPushTenant();
+        $primaryTenant->makeCurrent();
+
+        $user = $this->userService->create($this->account, [
+            'name' => 'Tenant Isolation Push User',
+            'email' => 'tenant-isolation-push-user@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+        $this->seedPushDevice($user, [
+            'device_id' => 'tenant-isolation-device',
+            'platform' => 'android',
+            'push_token' => 'tenant-isolation-token',
+            'is_active' => true,
+        ]);
+
+        $naming = $this->app->make(PushChannelNamingService::class);
+        $primaryTopic = $naming->allUsersTopic();
+        [$secondaryTenant] = $this->seedSecondaryTenantContext();
+
+        $secondaryTopic = $this->app->make(PushChannelNamingService::class)->allUsersTopic();
+
+        ReconcilePushTokenTopicsJob::dispatchSync(
+            tenantSlug: (string) $primaryTenant->slug,
+            userId: (string) $user->_id,
+            pushToken: 'tenant-isolation-token',
+        );
+
+        $this->assertNotSame($primaryTopic, $secondaryTopic);
+        $this->assertSame((string) $secondaryTenant->slug, (string) Tenant::current()?->slug);
+        $this->assertSame([['tenant-isolation-token']], $transport->unsubscribeAll);
+        $this->assertSame([
+            [
+                'topic' => $primaryTopic,
+                'tokens' => ['tenant-isolation-token'],
+            ],
+        ], $transport->subscriptions);
+    }
+
+    public function test_recipient_resolver_fails_closed_for_unmaterialized_event_audience(): void
     {
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
         $this->seedPushDevice($user, [
@@ -4012,7 +5360,10 @@ class PushMessageFlowTest extends TestCase
             }
         };
 
-        $resolver = new PushRecipientResolver($gateway);
+        $resolver = new PushRecipientResolver(
+            $gateway,
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+        );
 
         $message = new PushMessage([
             'audience' => [
@@ -4021,24 +5372,26 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
 
-        $result = $resolver->resolveTokensWithUsers($message, 'tenant', null);
-
-        $this->assertSame([], $result['tokens']);
-        $this->assertSame([], $result['token_user_map']);
-        $this->assertSame(0, $gateway->chunkTargetsByUserIdsCalls);
-        $this->assertSame(0, $gateway->chunkAllTargetsCalls);
+        try {
+            $resolver->resolveTokensWithUsers($message, 'tenant', null);
+            $this->fail('Expected semantic audience materialization to fail closed.');
+        } catch (ValidationException) {
+            $this->assertSame(0, $gateway->chunkTargetsByUserIdsCalls);
+            $this->assertSame(0, $gateway->chunkAllTargetsCalls);
+        }
     }
 
-    public function test_explicit_user_audience_source_keeps_push_device_keyset_materialization_guardrail(): void
+    public function test_direct_recipient_source_keeps_push_device_keyset_materialization_guardrail(): void
     {
         $resolverSource = $this->readSource('packages/belluga/belluga_push_handler/src/Services/PushRecipientResolver.php');
         $gatewaySource = $this->readSource('app/Integration/Push/PushUserGatewayAdapter.php');
 
-        $this->assertStringContainsString("if (\$audienceType === 'users')", $resolverSource);
+        $this->assertStringContainsString('directRecipientUserId($message)', $resolverSource);
+        $this->assertStringContainsString('Explicit recipient materialization is only allowed for individual direct delivery.', $resolverSource);
         $this->assertStringContainsString('chunkActivePushTargetsByUserIds(', $resolverSource);
         $this->assertStringContainsString('streamResolvedTargetBatches', $resolverSource);
-        $this->assertStringNotContainsString('isEligible($user, $message', $this->extractExplicitAudienceResolverSource($resolverSource));
-        $this->assertStringNotContainsString('activePushTokens($user)', $this->extractExplicitAudienceResolverSource($resolverSource));
+        $this->assertStringNotContainsString("if (\$audienceType === 'users')", $resolverSource);
+        $this->assertStringNotContainsString('chunkActivePushTargets(', $resolverSource);
 
         $this->assertStringContainsString("options(['batchSize' => \$chunkSize])", $gatewaySource);
         $this->assertStringContainsString("orderBy('_id')", $gatewaySource);
@@ -4251,10 +5604,9 @@ class PushMessageFlowTest extends TestCase
             'platform' => 'android',
         ]);
 
-        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
-            'user_id' => (string) $this->operator->_id,
-        ]);
-        $send->assertOk();
+        $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send');
+        $send->assertStatus(422);
+        $send->assertJsonPath('reason', 'delivery_failed');
 
         $device = PushDevice::query()
             ->where('account_user_id', (string) $this->operator->_id)
@@ -4262,12 +5614,78 @@ class PushMessageFlowTest extends TestCase
             ->firstOrFail();
         $this->assertFalse((bool) $device->is_active);
 
+        $message = PushMessage::query()->findOrFail($messageId);
+        $this->assertSame(0, $message->metrics['accepted_count'] ?? null);
+        $this->assertSame(0, $message->metrics['sent_count'] ?? null);
+        $this->assertNotSame('sent', $message->status);
+        $this->assertNull($message->sent_at);
+
         $retry = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
-            'user_id' => (string) $this->operator->_id,
             'dry_run' => true,
         ]);
         $retry->assertStatus(422);
         $retry->assertJsonPath('reason', 'no_tokens');
+    }
+
+    public function test_tenant_transactional_send_returns_delivery_failed_when_provider_accepts_none(): void
+    {
+        Sanctum::actingAs($this->operator, [
+            'tenant-push-messages:create',
+            'tenant-push-messages:send',
+        ]);
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract
+            {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    return [
+                        'accepted_count' => 0,
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'failed',
+                            'error_code' => 'UNAVAILABLE',
+                            'error_message' => 'Provider unavailable.',
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
+
+        $payload = $this->buildPayload([
+            'scope' => 'tenant',
+            'type' => 'transactional',
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $create = $this->postJson('api/v1/push/messages', $payload);
+        $create->assertCreated();
+
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'tenant-device-1',
+            'push_token' => 'tenant-token-1',
+        ]);
+
+        $send = $this->postJson('api/v1/push/messages/'.$messageId.'/send');
+
+        $send->assertStatus(422);
+        $send->assertJsonPath('reason', 'delivery_failed');
+
+        $message = PushMessage::query()->findOrFail($messageId);
+        $this->assertSame(0, $message->metrics['accepted_count'] ?? null);
+        $this->assertSame(0, $message->metrics['sent_count'] ?? null);
+        $this->assertNotSame('sent', $message->status);
+        $this->assertNull($message->sent_at);
     }
 
     public function test_transactional_send_denied_when_eligibility_fails(): void
@@ -4302,7 +5720,6 @@ class PushMessageFlowTest extends TestCase
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
         $send = $this->postJson($this->baseUrl.'/'.$messageId.'/send', [
-            'email' => 'push-operator@example.org',
             'dry_run' => true,
         ]);
 
@@ -4333,7 +5750,6 @@ class PushMessageFlowTest extends TestCase
         Sanctum::actingAs($this->operator, ['tenant-push-messages:send']);
 
         $send = $this->postJson('api/v1/push/messages/'.$messageId.'/send', [
-            'user_id' => (string) $this->operator->_id,
             'dry_run' => true,
         ]);
 
@@ -4441,7 +5857,8 @@ class PushMessageFlowTest extends TestCase
             'type' => 'invite_received',
             'active' => true,
             'audience' => [
-                'type' => 'all',
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
             ],
             'delivery' => [],
             'payload_template' => [
@@ -4615,7 +6032,7 @@ class PushMessageFlowTest extends TestCase
         return PushDevice::query()->create([
             'tenant_id' => (string) (Tenant::current()?->_id ?? Tenant::current()?->id ?? ''),
             'account_user_id' => (string) $user->_id,
-            'account_ids' => $user->getAccessToIds(),
+            'account_ids' => $attributes['account_ids'] ?? $user->getAccessToIds(),
             'device_id' => $attributes['device_id'] ?? 'device-'.Str::random(6),
             'platform' => $attributes['platform'] ?? 'android',
             'push_token' => $attributes['push_token'] ?? 'token-'.Str::random(12),
@@ -4635,33 +6052,6 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
-    /**
-     * @param  array<int, string>  $tokens
-     */
-    private function fakeBatchResponseBody(array $tokens): string
-    {
-        $boundary = 'fcm_batch_boundary';
-        $parts = [];
-
-        foreach (array_values($tokens) as $index => $token) {
-            $parts[] = implode("\r\n", [
-                "--{$boundary}",
-                'Content-Type: application/http',
-                "Content-ID: <item-{$index}>",
-                '',
-                'HTTP/1.1 200 OK',
-                'Content-Type: application/json; charset=UTF-8',
-                '',
-                json_encode(['name' => 'msg-'.$token], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                '',
-            ]);
-        }
-
-        $parts[] = "--{$boundary}--";
-
-        return implode("\r\n", $parts)."\r\n";
-    }
-
     private function countTenantQueries(callable $callback): int
     {
         $connection = DB::connection('tenant');
@@ -4677,19 +6067,74 @@ class PushMessageFlowTest extends TestCase
         }
     }
 
-    private function extractExplicitAudienceResolverSource(string $resolverSource): string
+    /**
+     * @param  array<int, string>  $topics
+     */
+    private function bindTopicOnlyTransportSpy(array &$topics, int $acceptedCount = 1, string $status = 'accepted'): void
     {
-        $start = strpos($resolverSource, "if (\$audienceType === 'users') {");
-        if ($start === false) {
-            throw new \RuntimeException('Unable to locate explicit users audience branch.');
-        }
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract
+            {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    throw new \RuntimeException('Direct FCM transport must not execute for shared topic delivery tests.');
+                }
+            };
+        });
 
-        $end = strpos($resolverSource, '// Semantic audiences must be materialized into explicit user IDs before', $start);
-        if ($end === false) {
-            throw new \RuntimeException('Unable to isolate explicit users audience branch.');
-        }
+        $this->app->bind(FcmTopicSenderContract::class, function () use (&$topics, $acceptedCount, $status) {
+            return new class($topics, $acceptedCount, $status) implements FcmTopicSenderContract
+            {
+                /**
+                 * @var array<int, string>
+                 */
+                private array $topics;
 
-        return substr($resolverSource, $start, $end - $start);
+                /**
+                 * @param  array<int, string>  $topics
+                 */
+                public function __construct(
+                    array &$topics,
+                    private readonly int $acceptedCount,
+                    private readonly string $status,
+                )
+                {
+                    $this->topics = &$topics;
+                }
+
+                public function sendTopic(
+                    PushMessage $message,
+                    string $topic,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    $this->topics[] = $topic;
+
+                    return [
+                        'accepted_count' => $this->acceptedCount,
+                        'responses' => [[
+                            'topic' => $topic,
+                            'status' => $this->status,
+                            'provider_message_id' => 'topic-'.$topic,
+                        ]],
+                    ];
+                }
+            };
+        });
+    }
+
+    private function readPrivateProperty(object $object, string $property): mixed
+    {
+        $reflection = new \ReflectionProperty($object, $property);
+        $reflection->setAccessible(true);
+
+        return $reflection->getValue($object);
     }
 
     /**

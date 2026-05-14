@@ -9,7 +9,7 @@ return [
         'default' => 60 * 24 * 7,
     ],
     'fcm' => [
-        'max_batch_size' => 500,
+        'direct_send_chunk_size' => 500,
         'max_ttl_days' => 28,
     ],
 ];

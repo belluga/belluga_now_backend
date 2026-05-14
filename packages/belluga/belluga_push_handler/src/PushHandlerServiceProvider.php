@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Belluga\PushHandler;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\FcmTopicSenderContract;
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Belluga\PushHandler\Contracts\PushChannelAuthorizationContract;
+use Belluga\PushHandler\Contracts\PushChannelTargetResolverContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushSettingsMutationContract;
 use Belluga\PushHandler\Contracts\PushSettingsStoreContract;
@@ -44,6 +47,10 @@ class PushHandlerServiceProvider extends ServiceProvider
             $this->app->bind(FcmClientContract::class, FcmHttpV1Client::class);
         }
 
+        if (! $this->app->bound(FcmTopicSenderContract::class)) {
+            $this->app->bind(FcmTopicSenderContract::class, FcmHttpV1Client::class);
+        }
+
         if (! $this->app->bound(PushTopicTransportContract::class)) {
             $this->app->bind(PushTopicTransportContract::class, KreaitTopicTransportClient::class);
         }
@@ -54,6 +61,8 @@ class PushHandlerServiceProvider extends ServiceProvider
         $this->ensureHostBinding(PushTelemetryEmitterContract::class);
         $this->ensureHostBinding(PushSettingsStoreContract::class);
         $this->ensureHostBinding(PushSettingsMutationContract::class);
+        $this->ensureHostBinding(PushChannelAuthorizationContract::class);
+        $this->ensureHostBinding(PushChannelTargetResolverContract::class);
     }
 
     private function ensureHostBinding(string $abstract): void

@@ -7,6 +7,7 @@ namespace App\Application\Branding;
 use App\Application\Media\CanonicalImageMediaService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use App\Application\Tenants\TenantDomainResolverService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -15,6 +16,7 @@ class BrandingManifestService
     public function __construct(
         private readonly CanonicalImageMediaService $canonicalImageMediaService,
         private readonly BrandingAssetDefinitionFactory $brandingAssetDefinitionFactory,
+        private readonly TenantDomainResolverService $tenantDomainResolverService,
     ) {}
 
     /**
@@ -22,7 +24,7 @@ class BrandingManifestService
      */
     public function buildManifest(string $host): array
     {
-        $tenant = Tenant::current();
+        $tenant = $this->resolveTenantForHost($host);
 
         $manifest = $tenant !== null
             ? $this->buildTenantManifest($tenant)
@@ -50,29 +52,29 @@ class BrandingManifestService
         return $manifest;
     }
 
-    public function resolveLogoSetting(string $parameter): ?string
+    public function resolveLogoSetting(string $parameter, ?string $host = null): ?string
     {
         $landlordBranding = Landlord::singleton()->branding_data;
-        $tenantBranding = Tenant::current()?->branding_data ?? [];
+        $tenantBranding = $this->resolveTenantForHost($host)?->branding_data ?? [];
 
         $tenantValue = $tenantBranding['logo_settings'][$parameter] ?? null;
 
         return $tenantValue ?: ($landlordBranding['logo_settings'][$parameter] ?? null);
     }
 
-    public function resolvePwaIcon(string $parameter): ?string
+    public function resolvePwaIcon(string $parameter, ?string $host = null): ?string
     {
         $landlordBranding = Landlord::singleton()->branding_data;
-        $tenantBranding = Tenant::current()?->branding_data ?? [];
+        $tenantBranding = $this->resolveTenantForHost($host)?->branding_data ?? [];
 
         $tenantValue = $tenantBranding['pwa_icon'][$parameter] ?? null;
 
         return $tenantValue ?: ($landlordBranding['pwa_icon'][$parameter] ?? null);
     }
 
-    public function resolveFaviconAsset(): ?string
+    public function resolveFaviconAsset(?string $host = null): ?string
     {
-        $tenantBranding = Tenant::current()?->branding_data ?? [];
+        $tenantBranding = $this->resolveTenantForHost($host)?->branding_data ?? [];
         $landlordBranding = Landlord::singleton()->branding_data ?? [];
 
         return $this->resolveFaviconAssetFromBranding($tenantBranding)
@@ -81,14 +83,16 @@ class BrandingManifestService
 
     public function resolveStoragePath(?string $uri): ?string
     {
+        return $this->resolveStoragePathForHost($uri);
+    }
+
+    public function resolveStoragePathForHost(?string $uri, ?string $host = null): ?string
+    {
         if (! $uri) {
             return null;
         }
 
-        $tenant = Tenant::current();
-        $brandables = $tenant instanceof Tenant
-            ? [$tenant, Landlord::singleton()]
-            : [Landlord::singleton()];
+        $brandables = $this->resolveBrandablesForHost($host);
 
         foreach ($brandables as $brandable) {
             foreach ($this->brandingAssetDefinitionFactory->definitions($brandable) as $definition) {
@@ -109,9 +113,9 @@ class BrandingManifestService
         return $storagePath === $urlPath ? null : $storagePath;
     }
 
-    public function assetResponse(?string $path)
+    public function assetResponse(?string $path, ?string $host = null)
     {
-        $localPath = $this->resolveStoragePath($path);
+        $localPath = $this->resolveStoragePathForHost($path, $host);
 
         if (! $this->hasUsableAssetPath($localPath)) {
             return response('', 404);
@@ -215,5 +219,54 @@ class BrandingManifestService
         }
 
         return $disk->size($path) > 0;
+    }
+
+    /**
+     * @return array<int, Landlord|Tenant>
+     */
+    private function resolveBrandablesForHost(?string $host): array
+    {
+        $tenant = $this->resolveTenantForHost($host);
+
+        return $tenant instanceof Tenant
+            ? [$tenant, Landlord::singleton()]
+            : [Landlord::singleton()];
+    }
+
+    private function resolveTenantForHost(?string $host): ?Tenant
+    {
+        $normalizedHost = $this->normalizeHost($host);
+        $currentTenant = Tenant::current();
+
+        if ($normalizedHost === null) {
+            return $currentTenant;
+        }
+
+        $landlordHost = $this->normalizeHost((string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: config('app.url')));
+        if ($landlordHost !== null && $normalizedHost === $landlordHost) {
+            return null;
+        }
+
+        if ($landlordHost !== null) {
+            $subdomainSuffix = '.'.$landlordHost;
+            if (str_ends_with($normalizedHost, $subdomainSuffix)) {
+                $subdomain = substr($normalizedHost, 0, -strlen($subdomainSuffix));
+                if (is_string($subdomain) && $subdomain !== '' && ! str_contains($subdomain, '.')) {
+                    $tenant = Tenant::query()->where('subdomain', $subdomain)->first();
+                    if ($tenant instanceof Tenant) {
+                        return $tenant;
+                    }
+                }
+            }
+        }
+
+        return $this->tenantDomainResolverService->findTenantByDomain($normalizedHost) ?? $currentTenant;
+    }
+
+    private function normalizeHost(?string $host): ?string
+    {
+        $normalized = Str::lower(trim((string) $host));
+
+        return $normalized === '' ? null : $normalized;
     }
 }

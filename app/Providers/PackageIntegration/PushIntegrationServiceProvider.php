@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers\PackageIntegration;
 
 use App\Application\Push\PushAudienceEligibilityService;
+use App\Application\Push\PushChannelAuthorizationService;
+use App\Application\Push\PushChannelTargetResolverService;
 use App\Integration\Push\PushAccountContextAdapter;
 use App\Integration\Push\PushSettingsMutationAdapter;
 use App\Integration\Push\PushSettingsNamespaceRegistrar;
@@ -14,6 +16,8 @@ use App\Integration\Push\PushTenantContextAdapter;
 use App\Integration\Push\PushUserGatewayAdapter;
 use Belluga\PushHandler\Contracts\PushAccountContextContract;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Belluga\PushHandler\Contracts\PushChannelAuthorizationContract;
+use Belluga\PushHandler\Contracts\PushChannelTargetResolverContract;
 use Belluga\PushHandler\Contracts\PushSettingsMutationContract;
 use Belluga\PushHandler\Contracts\PushSettingsStoreContract;
 use Belluga\PushHandler\Contracts\PushTelemetryEmitterContract;
@@ -29,6 +33,16 @@ class PushIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             PushAudienceEligibilityContract::class,
             PushAudienceEligibilityService::class
+        );
+
+        $this->app->bind(
+            PushChannelAuthorizationContract::class,
+            PushChannelAuthorizationService::class
+        );
+
+        $this->app->bind(
+            PushChannelTargetResolverContract::class,
+            PushChannelTargetResolverService::class
         );
 
         $this->app->bind(

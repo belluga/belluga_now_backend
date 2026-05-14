@@ -7,11 +7,13 @@ namespace Belluga\PushHandler\Services;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Validation\ValidationException;
 
 class PushRecipientResolver
 {
     public function __construct(
-        private readonly PushUserGatewayContract $users
+        private readonly PushUserGatewayContract $users,
+        private readonly PushAudienceTopologyClassifier $audienceTopology,
     ) {}
 
     /**
@@ -36,7 +38,7 @@ class PushRecipientResolver
             $message,
             $scope,
             $accountId,
-            $this->defaultBatchSize(),
+            $this->defaultChunkSize(),
             function (array $batch) use (&$tokens, &$tokenUserMap): void {
                 foreach ($batch['tokens'] as $token) {
                     $tokens[$token] = true;
@@ -56,22 +58,9 @@ class PushRecipientResolver
 
     public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
     {
-        $audience = $message->audience ?? [];
-        $audienceType = is_string($audience['type'] ?? null) ? $audience['type'] : 'all';
-        $scopedAccountId = $scope === 'account' ? $accountId : null;
+        [$scopedAccountId, $userId] = $this->directRecipientScope($message, $scope, $accountId);
 
-        if ($audienceType === 'users') {
-            return $this->users->countActivePushTargetsByUserIds(
-                $scopedAccountId,
-                is_array($audience['user_ids'] ?? null) ? $audience['user_ids'] : []
-            );
-        }
-
-        if ($audienceType === 'all') {
-            return $this->users->countActivePushTargets($scopedAccountId);
-        }
-
-        return 0;
+        return $this->users->countActivePushTargetsByUserIds($scopedAccountId, [$userId]);
     }
 
     /**
@@ -84,34 +73,11 @@ class PushRecipientResolver
         int $batchSize,
         callable $callback
     ): void {
-        $audience = $message->audience ?? [];
-        $audienceType = is_string($audience['type'] ?? null) ? $audience['type'] : 'all';
-        $scopedAccountId = $scope === 'account' ? $accountId : null;
+        [$scopedAccountId, $userId] = $this->directRecipientScope($message, $scope, $accountId);
 
-        if ($audienceType === 'users') {
-            $this->users->chunkActivePushTargetsByUserIds(
-                $scopedAccountId,
-                is_array($audience['user_ids'] ?? null) ? $audience['user_ids'] : [],
-                $batchSize,
-                function (array $targets) use ($callback): void {
-                    $payload = $this->buildBatchPayload($targets);
-                    if ($payload['tokens'] !== []) {
-                        $callback($payload);
-                    }
-                }
-            );
-
-            return;
-        }
-
-        // Semantic audiences must be materialized into explicit user IDs before
-        // entering the generic push delivery pipeline.
-        if ($audienceType !== 'all') {
-            return;
-        }
-
-        $this->users->chunkActivePushTargets(
+        $this->users->chunkActivePushTargetsByUserIds(
             $scopedAccountId,
+            [$userId],
             $batchSize,
             function (array $targets) use ($callback): void {
                 $payload = $this->buildBatchPayload($targets);
@@ -120,6 +86,16 @@ class PushRecipientResolver
                 }
             }
         );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function resolveDirectTokens(PushMessage $message, string $scope, ?string $accountId, ?string $deviceId = null): array
+    {
+        [$scopedAccountId, $userId] = $this->directRecipientScope($message, $scope, $accountId);
+
+        return $this->users->activePushTokensForRecipient($scopedAccountId, $userId, $deviceId);
     }
 
     /**
@@ -156,10 +132,26 @@ class PushRecipientResolver
         ];
     }
 
-    private function defaultBatchSize(): int
+    private function defaultChunkSize(): int
     {
-        $batchSize = (int) config('belluga_push_handler.fcm.max_batch_size', 500);
+        $chunkSize = (int) config('belluga_push_handler.fcm.direct_send_chunk_size', 500);
 
-        return $batchSize > 0 ? $batchSize : 500;
+        return $chunkSize > 0 ? $chunkSize : 500;
+    }
+
+    /**
+     * @return array{0:?string,1:string}
+     */
+    private function directRecipientScope(PushMessage $message, string $scope, ?string $accountId): array
+    {
+        $scopedAccountId = $scope === 'account' ? $accountId : null;
+        $userId = $this->audienceTopology->directRecipientUserId($message);
+        if ($userId !== null && $userId !== '') {
+            return [$scopedAccountId, $userId];
+        }
+
+        throw ValidationException::withMessages([
+            'audience.type' => 'Explicit recipient materialization is only allowed for individual direct delivery.',
+        ]);
     }
 }

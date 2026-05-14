@@ -5,18 +5,16 @@ declare(strict_types=1);
 namespace Belluga\PushHandler\Services;
 
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Contracts\FcmTopicSenderContract;
 use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
-class FcmHttpV1Client implements FcmClientContract
+class FcmHttpV1Client implements FcmClientContract, FcmTopicSenderContract
 {
-    private const BATCH_ENDPOINT = 'https://fcm.googleapis.com/batch';
-
     public function __construct(
         private readonly PushCredentialService $credentialService
     ) {}
@@ -27,13 +25,66 @@ class FcmHttpV1Client implements FcmClientContract
      */
     public function send(PushMessage $message, array $tokens, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
     {
+        [$accessToken, $endpoint] = $this->bootstrapTransport();
+        if ($accessToken === null || $endpoint === null) {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
+
+        $basePayload = $this->buildPayload($message, $messageInstanceId, $expiresAt);
+        $responses = [];
+        $accepted = 0;
+
+        foreach ($tokens as $token) {
+            $entry = $this->sendTarget($accessToken, $endpoint, $basePayload, 'token', $token);
+            if (($entry['status'] ?? null) === 'accepted') {
+                $accepted++;
+            }
+
+            $responses[] = $entry;
+        }
+
+        return [
+            'accepted_count' => $accepted,
+            'responses' => $responses,
+        ];
+    }
+
+    /**
+     * @return array{accepted_count:int, responses: array<int, array<string, mixed>>}
+     */
+    public function sendTopic(PushMessage $message, string $topic, string $messageInstanceId, Carbon $expiresAt, int $ttlMinutes): array
+    {
+        [$accessToken, $endpoint] = $this->bootstrapTransport();
+        if ($accessToken === null || $endpoint === null) {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
+
+        $topic = trim($topic);
+        if ($topic === '') {
+            return ['accepted_count' => 0, 'responses' => []];
+        }
+
+        $basePayload = $this->buildPayload($message, $messageInstanceId, $expiresAt);
+        $entry = $this->sendTarget($accessToken, $endpoint, $basePayload, 'topic', $topic);
+
+        return [
+            'accepted_count' => ($entry['status'] ?? null) === 'accepted' ? 1 : 0,
+            'responses' => [$entry],
+        ];
+    }
+
+    /**
+     * @return array{0:?string,1:?string}
+     */
+    private function bootstrapTransport(): array
+    {
         try {
             $credentials = $this->credentialService->current();
         } catch (MultiplePushCredentialsException $exception) {
-            return ['accepted_count' => 0, 'responses' => []];
+            return [null, null];
         }
         if (! $credentials) {
-            return ['accepted_count' => 0, 'responses' => []];
+            return [null, null];
         }
 
         $accessToken = $this->accessToken(
@@ -43,34 +94,12 @@ class FcmHttpV1Client implements FcmClientContract
         );
 
         if ($accessToken === null) {
-            return ['accepted_count' => 0, 'responses' => []];
-        }
-
-        $endpoint = sprintf('https://fcm.googleapis.com/v1/projects/%s/messages:send', $credentials->project_id);
-        $basePayload = $this->buildPayload($message, $messageInstanceId, $expiresAt);
-
-        $responses = [];
-        $accepted = 0;
-        $batchSize = (int) config('belluga_push_handler.fcm.max_batch_size', 500);
-        if ($batchSize <= 0) {
-            $batchSize = 500;
-        }
-
-        foreach (array_chunk($tokens, $batchSize) as $chunk) {
-            $batchResponses = $this->sendBatchChunk($accessToken, $endpoint, $basePayload, $chunk);
-
-            foreach ($batchResponses as $entry) {
-                if (($entry['status'] ?? null) === 'accepted') {
-                    $accepted++;
-                }
-
-                $responses[] = $entry;
-            }
+            return [null, null];
         }
 
         return [
-            'accepted_count' => $accepted,
-            'responses' => $responses,
+            $accessToken,
+            sprintf('https://fcm.googleapis.com/v1/projects/%s/messages:send', $credentials->project_id),
         ];
     }
 
@@ -160,7 +189,6 @@ class FcmHttpV1Client implements FcmClientContract
         }
 
         $signed = openssl_sign($signingInput, $signature, $privateKeyResource, OPENSSL_ALGO_SHA256);
-        openssl_free_key($privateKeyResource);
 
         if (! $signed) {
             return null;
@@ -177,221 +205,48 @@ class FcmHttpV1Client implements FcmClientContract
     }
 
     /**
-     * @param  array<int, string>  $tokens
      * @param  array<string, mixed>  $basePayload
-     * @return array<int, array<string, mixed>>
+     * @return array<string, mixed>
      */
-    private function sendBatchChunk(string $accessToken, string $endpoint, array $basePayload, array $tokens): array
-    {
-        $boundary = 'batch_'.bin2hex(random_bytes(12));
-        $requestPath = $this->requestPath($endpoint);
-        $body = $this->buildBatchBody($requestPath, $basePayload, $tokens, $boundary);
+    private function sendTarget(
+        string $accessToken,
+        string $endpoint,
+        array $basePayload,
+        string $targetField,
+        string $targetValue
+    ): array {
+        $payload = $basePayload;
+        $payload[$targetField] = $targetValue;
 
         try {
             $response = Http::withToken($accessToken)
-                ->withHeaders([
-                    'Content-Type' => "multipart/mixed; boundary={$boundary}",
-                    'Accept' => 'multipart/mixed',
-                ])
-                ->send('POST', self::BATCH_ENDPOINT, [
-                    'body' => $body,
+                ->acceptJson()
+                ->asJson()
+                ->post($endpoint, [
+                    'message' => $payload,
                 ]);
         } catch (ConnectionException $exception) {
-            return array_map(static fn (string $token): array => [
-                'token' => $token,
+            return [
+                $targetField => $targetValue,
                 'status' => 'failed',
                 'error_code' => 'connection_error',
                 'error_message' => $exception->getMessage(),
-            ], $tokens);
-        }
-
-        if (! $response->successful()) {
-            return array_map(static fn (string $token): array => [
-                'token' => $token,
-                'status' => 'failed',
-                'error_code' => (string) $response->status(),
-                'error_message' => $response->body(),
-            ], $tokens);
-        }
-
-        return $this->parseBatchResponse($response, $tokens);
-    }
-
-    private function requestPath(string $endpoint): string
-    {
-        $parts = parse_url($endpoint);
-        $path = $parts['path'] ?? '';
-        $query = $parts['query'] ?? null;
-
-        return $query ? $path.'?'.$query : $path;
-    }
-
-    /**
-     * @param  array<string, mixed>  $basePayload
-     * @param  array<int, string>  $tokens
-     */
-    private function buildBatchBody(string $requestPath, array $basePayload, array $tokens, string $boundary): string
-    {
-        $parts = [];
-
-        foreach ($tokens as $index => $token) {
-            $payload = $basePayload;
-            $payload['token'] = $token;
-
-            $parts[] = implode("\r\n", [
-                "--{$boundary}",
-                'Content-Type: application/http',
-                "Content-ID: <item-{$index}>",
-                '',
-                "POST {$requestPath} HTTP/1.1",
-                'Content-Type: application/json; charset=UTF-8',
-                'Accept: application/json',
-                '',
-                json_encode(['message' => $payload], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                '',
-            ]);
-        }
-
-        $parts[] = "--{$boundary}--";
-
-        return implode("\r\n", $parts)."\r\n";
-    }
-
-    /**
-     * @param  array<int, string>  $tokens
-     * @return array<int, array<string, mixed>>
-     */
-    private function parseBatchResponse(Response $response, array $tokens): array
-    {
-        $contentType = $this->stringHeader($response, 'Content-Type');
-        $boundary = $this->extractBoundary($contentType);
-
-        if ($boundary === null) {
-            return array_map(static fn (string $token): array => [
-                'token' => $token,
-                'status' => 'failed',
-                'error_code' => 'invalid_batch_response',
-                'error_message' => 'FCM batch response did not expose a multipart boundary.',
-            ], $tokens);
-        }
-
-        $resolved = [];
-        $segments = explode('--'.$boundary, $response->body());
-        foreach ($segments as $segment) {
-            $segment = ltrim($segment, "\r\n");
-            $segment = rtrim($segment, "\r\n");
-            if ($segment === '' || $segment === '--') {
-                continue;
-            }
-
-            [$partHeadersRaw, $partBodyRaw] = array_pad(preg_split("/\r\n\r\n/", $segment, 2), 2, '');
-            $contentId = $this->extractContentId($partHeadersRaw);
-            $tokenIndex = $this->extractTokenIndex($contentId);
-            if ($tokenIndex === null || ! array_key_exists($tokenIndex, $tokens)) {
-                continue;
-            }
-
-            [$statusLine, $nestedBody] = $this->extractNestedHttpResponse($partBodyRaw);
-            $statusCode = $this->extractStatusCode($statusLine);
-            $decoded = json_decode($nestedBody, true);
-            $token = $tokens[$tokenIndex];
-
-            if ($statusCode >= 200 && $statusCode < 300) {
-                $resolved[$tokenIndex] = [
-                    'token' => $token,
-                    'status' => 'accepted',
-                    'provider_message_id' => (string) (($decoded['name'] ?? '') ?: ''),
-                ];
-
-                continue;
-            }
-
-            $resolved[$tokenIndex] = [
-                'token' => $token,
-                'status' => 'failed',
-                'error_code' => (string) (($decoded['error']['status'] ?? '') ?: $statusCode),
-                'error_message' => (string) (($decoded['error']['message'] ?? '') ?: $nestedBody),
             ];
         }
 
-        foreach ($tokens as $index => $token) {
-            if (isset($resolved[$index])) {
-                continue;
-            }
-
-            $resolved[$index] = [
-                'token' => $token,
-                'status' => 'failed',
-                'error_code' => 'missing_batch_part',
-                'error_message' => 'No batch response part was returned for token.',
+        if ($response->successful()) {
+            return [
+                $targetField => $targetValue,
+                'status' => 'accepted',
+                'provider_message_id' => (string) (($response->json('name') ?? '') ?: ''),
             ];
         }
 
-        ksort($resolved);
-
-        return array_values($resolved);
-    }
-
-    private function stringHeader(Response $response, string $name): string
-    {
-        $header = $response->header($name);
-
-        if (is_array($header)) {
-            return (string) ($header[0] ?? '');
-        }
-
-        return is_string($header) ? $header : '';
-    }
-
-    private function extractBoundary(string $contentType): ?string
-    {
-        if (! preg_match('/boundary="?([^";]+)"?/i', $contentType, $matches)) {
-            return null;
-        }
-
-        return trim((string) ($matches[1] ?? ''));
-    }
-
-    private function extractContentId(string $headers): ?string
-    {
-        if (! preg_match('/^Content-ID:\s*(.+)$/im', $headers, $matches)) {
-            return null;
-        }
-
-        return trim((string) ($matches[1] ?? ''));
-    }
-
-    private function extractTokenIndex(?string $contentId): ?int
-    {
-        if (! is_string($contentId) || $contentId === '') {
-            return null;
-        }
-
-        if (! preg_match('/item-(\d+)/', $contentId, $matches)) {
-            return null;
-        }
-
-        return (int) $matches[1];
-    }
-
-    /**
-     * @return array{0:string,1:string}
-     */
-    private function extractNestedHttpResponse(string $partBody): array
-    {
-        $partBody = ltrim($partBody, "\r\n");
-        [$statusAndHeaders, $nestedBody] = array_pad(preg_split("/\r\n\r\n/", $partBody, 2), 2, '');
-        [$statusLine] = preg_split("/\r\n/", $statusAndHeaders, 2);
-
-        return [trim((string) $statusLine), trim($nestedBody)];
-    }
-
-    private function extractStatusCode(string $statusLine): int
-    {
-        if (! preg_match('/\s(\d{3})\s/', $statusLine.' ', $matches)) {
-            return 0;
-        }
-
-        return (int) $matches[1];
+        return [
+            $targetField => $targetValue,
+            'status' => 'failed',
+            'error_code' => (string) (($response->json('error.status') ?? '') ?: $response->status()),
+            'error_message' => (string) (($response->json('error.message') ?? '') ?: $response->body()),
+        ];
     }
 }
