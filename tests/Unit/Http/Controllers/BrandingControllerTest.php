@@ -38,7 +38,8 @@ class BrandingControllerTest extends TestCase
                 $deepLinkAssociationService
             );
 
-            $response = $controller->getFavicon();
+            $request = Request::create('https://tenant-sigma.test/favicon.ico', 'GET');
+            $response = $controller->getFavicon($request);
 
             $this->assertSame(200, $response->getStatusCode());
             $this->assertSame('image/png', $response->headers->get('Content-Type'));

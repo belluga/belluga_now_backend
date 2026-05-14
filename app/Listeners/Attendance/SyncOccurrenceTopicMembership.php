@@ -4,25 +4,32 @@ declare(strict_types=1);
 
 namespace App\Listeners\Attendance;
 
-use App\Application\Push\PushTopicMembershipService;
 use App\Domain\Events\Events\OccurrenceAttendanceCanceled;
 use App\Domain\Events\Events\OccurrenceAttendanceConfirmed;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use App\Jobs\Push\SyncEventConfirmedTopicMembershipJob;
+use App\Models\Landlord\Tenant;
 
-final class SyncOccurrenceTopicMembership implements ShouldQueue
+final class SyncOccurrenceTopicMembership
 {
-    public function __construct(
-        private readonly PushTopicMembershipService $memberships,
-    ) {}
-
     public function handle(OccurrenceAttendanceConfirmed|OccurrenceAttendanceCanceled $event): void
     {
-        if ($event instanceof OccurrenceAttendanceConfirmed) {
-            $this->memberships->subscribeUserToConfirmedOccurrence($event->userId, $event->occurrenceId);
-
+        $tenantSlug = $this->currentTenantSlug();
+        if ($tenantSlug === null) {
             return;
         }
 
-        $this->memberships->unsubscribeUserFromConfirmedOccurrence($event->userId, $event->occurrenceId);
+        SyncEventConfirmedTopicMembershipJob::dispatch(
+            tenantSlug: $tenantSlug,
+            userId: $event->userId,
+            eventId: $event->eventId,
+        );
+    }
+
+    private function currentTenantSlug(): ?string
+    {
+        $tenant = Tenant::current();
+        $slug = trim((string) ($tenant?->slug ?? ''));
+
+        return $slug === '' ? null : $slug;
     }
 }

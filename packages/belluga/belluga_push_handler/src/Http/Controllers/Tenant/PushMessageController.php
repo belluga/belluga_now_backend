@@ -91,8 +91,7 @@ class PushMessageController
             }
         }
 
-        $message->fill($payload);
-        $message->save();
+        $message = $this->service->update($message, 'tenant', null, $payload);
 
         return response()->json(['data' => $message]);
     }

@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Application\Push;
 
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
+use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Services\PushCredentialService;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
-use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 
 class PushTopicMembershipService
 {
@@ -22,15 +22,30 @@ class PushTopicMembershipService
 
     public function syncTokenForUser(string $userId, string $pushToken): void
     {
-        $pushToken = trim($pushToken);
-        if ($pushToken === '' || ! $this->isRuntimeReady()) {
+        $this->syncTokensForUser($userId, [$pushToken]);
+    }
+
+    /**
+     * @param  array<int, string>  $pushTokens
+     */
+    public function syncTokensForUser(string $userId, array $pushTokens): void
+    {
+        $userId = trim($userId);
+        $tokens = collect($pushTokens)
+            ->map(static fn (mixed $token): string => trim((string) $token))
+            ->filter(static fn (string $token): bool => $token !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($userId === '' || $tokens === [] || ! $this->isRuntimeReady()) {
             return;
         }
 
-        $this->transport->unsubscribeFromAll([$pushToken]);
+        $this->transport->unsubscribeFromAll($tokens);
 
         foreach ($this->projection->topicsForUserId($userId) as $topic) {
-            $this->transport->subscribe($topic, [$pushToken]);
+            $this->transport->subscribe($topic, $tokens);
         }
     }
 
@@ -46,66 +61,36 @@ class PushTopicMembershipService
         $this->transport->unsubscribeFromAll($tokens);
     }
 
-    public function subscribeUserToFavoriteProfile(string $userId, string $accountProfileId): void
+    public function syncUserFavoriteProfileMembership(string $userId, string $accountProfileId): void
     {
         $topic = $this->naming->favoriteAccountProfileTopic($accountProfileId);
-        if ($topic === '' || ! $this->isRuntimeReady()) {
+        if ($topic === '') {
             return;
         }
 
-        $tokens = $this->activeTokensForUserId($userId);
-        if ($tokens === []) {
+        if ($this->projection->userHasFavoriteAccountProfile($userId, $accountProfileId)) {
+            $this->subscribeUserTokensToTopic($userId, $topic);
+
             return;
         }
 
-        $this->transport->subscribe($topic, $tokens);
+        $this->unsubscribeUserTokensFromTopic($userId, $topic);
     }
-
-    public function unsubscribeUserFromFavoriteProfile(string $userId, string $accountProfileId): void
+    public function syncUserConfirmedEventMembership(string $userId, string $eventId): void
     {
-        $topic = $this->naming->favoriteAccountProfileTopic($accountProfileId);
-        if ($topic === '' || ! $this->isRuntimeReady()) {
+        $topic = $this->naming->confirmedEventTopic($eventId);
+        if ($topic === '') {
             return;
         }
 
-        $tokens = $this->activeTokensForUserId($userId);
-        if ($tokens === []) {
+        if ($this->projection->userHasConfirmedEvent($userId, $eventId)) {
+            $this->subscribeUserTokensToTopic($userId, $topic);
+
             return;
         }
 
-        $this->transport->unsubscribe($topic, $tokens);
+        $this->unsubscribeUserTokensFromTopic($userId, $topic);
     }
-
-    public function subscribeUserToConfirmedOccurrence(string $userId, string $occurrenceId): void
-    {
-        $topic = $this->naming->confirmedOccurrenceTopic($occurrenceId);
-        if ($topic === '' || ! $this->isRuntimeReady()) {
-            return;
-        }
-
-        $tokens = $this->activeTokensForUserId($userId);
-        if ($tokens === []) {
-            return;
-        }
-
-        $this->transport->subscribe($topic, $tokens);
-    }
-
-    public function unsubscribeUserFromConfirmedOccurrence(string $userId, string $occurrenceId): void
-    {
-        $topic = $this->naming->confirmedOccurrenceTopic($occurrenceId);
-        if ($topic === '' || ! $this->isRuntimeReady()) {
-            return;
-        }
-
-        $tokens = $this->activeTokensForUserId($userId);
-        if ($tokens === []) {
-            return;
-        }
-
-        $this->transport->unsubscribe($topic, $tokens);
-    }
-
     /**
      * @return array<int, string>
      */
@@ -125,6 +110,36 @@ class PushTopicMembershipService
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function subscribeUserTokensToTopic(string $userId, string $topic): void
+    {
+        $topic = trim($topic);
+        if ($topic === '' || ! $this->isRuntimeReady()) {
+            return;
+        }
+
+        $tokens = $this->activeTokensForUserId($userId);
+        if ($tokens === []) {
+            return;
+        }
+
+        $this->transport->subscribe($topic, $tokens);
+    }
+
+    private function unsubscribeUserTokensFromTopic(string $userId, string $topic): void
+    {
+        $topic = trim($topic);
+        if ($topic === '' || ! $this->isRuntimeReady()) {
+            return;
+        }
+
+        $tokens = $this->activeTokensForUserId($userId);
+        if ($tokens === []) {
+            return;
+        }
+
+        $this->transport->unsubscribe($topic, $tokens);
     }
 
     private function isRuntimeReady(): bool

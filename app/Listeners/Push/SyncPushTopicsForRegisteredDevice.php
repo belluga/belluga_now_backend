@@ -4,18 +4,31 @@ declare(strict_types=1);
 
 namespace App\Listeners\Push;
 
-use App\Application\Push\PushTopicMembershipService;
+use App\Jobs\Push\ReconcilePushTokenTopicsJob;
+use App\Models\Landlord\Tenant;
 use Belluga\PushHandler\Domain\Events\PushDeviceRegistered;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
-final class SyncPushTopicsForRegisteredDevice implements ShouldQueue
+final class SyncPushTopicsForRegisteredDevice
 {
-    public function __construct(
-        private readonly PushTopicMembershipService $memberships,
-    ) {}
-
     public function handle(PushDeviceRegistered $event): void
     {
-        $this->memberships->syncTokenForUser($event->userId, $event->pushToken);
+        $tenantSlug = $this->currentTenantSlug();
+        if ($tenantSlug === null) {
+            return;
+        }
+
+        ReconcilePushTokenTopicsJob::dispatch(
+            tenantSlug: $tenantSlug,
+            userId: $event->userId,
+            pushToken: $event->pushToken,
+        );
+    }
+
+    private function currentTenantSlug(): ?string
+    {
+        $tenant = Tenant::current();
+        $slug = trim((string) ($tenant?->slug ?? ''));
+
+        return $slug === '' ? null : $slug;
     }
 }

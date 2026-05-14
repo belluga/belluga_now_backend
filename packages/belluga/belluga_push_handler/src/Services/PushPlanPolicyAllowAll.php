@@ -10,18 +10,18 @@ use Belluga\PushHandler\Models\Tenants\PushMessage;
 
 class PushPlanPolicyAllowAll implements PushPlanPolicyContract, PushPlanPolicyDecisionContract
 {
-    public function canSend(string $accountId, PushMessage $message, int $audienceSize): bool
+    public function canSend(string $accountId, PushMessage $message, int $requestedUnits): bool
     {
         return true;
     }
 
-    public function quotaDecision(string $accountId, PushMessage $message, int $audienceSize): array
+    public function quotaDecision(string $accountId, PushMessage $message, int $requestedUnits): array
     {
         return [
             'allowed' => true,
             'limit' => null,
             'current_used' => null,
-            'requested' => $audienceSize,
+            'requested' => $requestedUnits,
             'remaining_after' => null,
             'period' => null,
             'reason' => null,

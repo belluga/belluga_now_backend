@@ -24,14 +24,14 @@ class PushMessageAudienceService
         return $this->eligibilityContract->isEligible($user, $message, $audience, $context);
     }
 
-    public function audienceSize(PushMessage $message): int
+    public function requestedUnits(PushMessage $message): int
     {
         $audience = $message->audience ?? [];
 
-        if (($audience['type'] ?? null) === 'users') {
-            return count($audience['user_ids'] ?? []);
-        }
-
-        return 0;
+        return match ($audience['type'] ?? null) {
+            'users' => count($audience['user_ids'] ?? []),
+            'all_users', 'favorite_account_profile', 'event', 'event_confirmed' => 1,
+            default => 0,
+        };
     }
 }

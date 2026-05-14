@@ -28,13 +28,18 @@ class PushTenantContextAdapter implements PushTenantContextContract
      */
     public function runForTenantSlug(string $tenantSlug, callable $callback): mixed
     {
+        $previousTenant = Tenant::current();
         $tenant = Tenant::query()->where('slug', $tenantSlug)->firstOrFail();
         $tenant->makeCurrent();
 
         try {
             return $callback();
         } finally {
-            $tenant->forgetCurrent();
+            if ($previousTenant instanceof Tenant) {
+                $previousTenant->makeCurrent();
+            } else {
+                $tenant->forgetCurrent();
+            }
         }
     }
 }
