@@ -148,6 +148,66 @@ class InvitesFlowTest extends TestCaseTenant
         $feedResponse->assertJsonPath('invites.0.message', 'Come with us');
     }
 
+    public function test_feed_expires_finished_invites_before_returning_projections(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $sendResponse = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+        ]);
+
+        $sendResponse->assertOk();
+        $inviteId = (string) $sendResponse->json('created.0.invite_id');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $groupKey = (string) $this->event->_id.'::'.$occurrenceId;
+        $endedAt = Carbon::now()->subHour();
+        $startedAt = $endedAt->copy()->subHours(3);
+
+        $event = $this->event->fresh();
+        $event->date_time_start = $startedAt;
+        $event->date_time_end = $endedAt;
+        $event->save();
+
+        $occurrence = EventOccurrence::query()
+            ->where('_id', $occurrenceId)
+            ->firstOrFail();
+        $occurrence->starts_at = $startedAt;
+        $occurrence->ends_at = $endedAt;
+        $occurrence->effective_ends_at = $endedAt;
+        $occurrence->save();
+
+        InviteEdge::query()
+            ->where('_id', $inviteId)
+            ->update([
+                'expires_at' => null,
+                'event_date' => $startedAt,
+            ]);
+        InviteFeedProjection::query()
+            ->where('receiver_user_id', (string) $this->receiver->_id)
+            ->where('group_key', $groupKey)
+            ->update([
+                'event_date' => $startedAt,
+            ]);
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $feedResponse = $this->getJson("{$this->base_api_tenant}invites");
+        $feedResponse->assertOk();
+        $this->assertSame([], $feedResponse->json('invites'));
+
+        $invite = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($invite);
+        $this->assertSame('expired', (string) $invite->status);
+
+        $this->assertFalse(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', (string) $this->receiver->_id)
+                ->where('group_key', $groupKey)
+                ->exists(),
+        );
+    }
+
     public function test_send_invite_authors_and_dispatches_invite_push_when_runtime_is_ready(): void
     {
         Bus::fake();
@@ -336,6 +396,39 @@ class InvitesFlowTest extends TestCaseTenant
         $streamedContent = $response->streamedContent();
         $this->assertStringContainsString('after-query-cursor', $streamedContent);
         $this->assertStringNotContainsString('before-query-cursor', $streamedContent);
+    }
+
+    public function test_invite_stream_without_cursor_does_not_replay_historical_outbox_events(): void
+    {
+        $plainTextToken = $this->app
+            ->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser($this->receiver, 'Invite stream token', ['*'])
+            ->plainTextToken;
+
+        InviteOutboxEvent::query()->create([
+            'topic' => 'invites.receiver.'.$this->receiver->getKey(),
+            'receiver_user_id' => (string) $this->receiver->getKey(),
+            'payload' => [
+                'type' => 'invite.upsert',
+                'marker' => 'historical-backlog-event',
+            ],
+            'dedupe_key' => 'historical-backlog-event',
+            'available_at' => Carbon::now()->subMinute(),
+        ]);
+
+        $response = $this->get(
+            "{$this->base_api_tenant}invites/stream?access_token={$plainTextToken}",
+            [
+                'Accept' => 'text/event-stream',
+            ]
+        );
+
+        $response->assertOk();
+        $this->assertStringStartsWith(
+            'text/event-stream',
+            (string) $response->headers->get('Content-Type')
+        );
+        $this->assertStringNotContainsString('historical-backlog-event', $response->streamedContent());
     }
 
     public function test_send_invite_to_multiple_recipients_updates_created_count_and_metrics(): void

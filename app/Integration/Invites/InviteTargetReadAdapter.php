@@ -62,6 +62,7 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
             'id' => (string) $occurrence->_id,
             'starts_at' => $occurrence->starts_at,
             'ends_at' => $occurrence->ends_at,
+            'effective_ends_at' => $occurrence->effective_ends_at,
             'is_event_published' => (bool) ($occurrence->is_event_published ?? false),
             'attributes' => $this->normalizeArray($occurrence->getAttributes()),
         ];

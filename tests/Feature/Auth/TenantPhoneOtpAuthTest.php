@@ -15,6 +15,8 @@ use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Invites\Application\Contacts\ContactImportService;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -360,6 +362,58 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $inviteables->assertOk();
         $inviteables->assertJsonPath('items.0.user_id', (string) $target->_id);
         $inviteables->assertJsonPath('items.0.inviteable_reasons.0', 'contact_match');
+    }
+
+    public function test_phone_otp_verification_accepts_real_generated_webhook_code_for_existing_user_merge_flow(): void
+    {
+        $this->configureOtpWebhook('https://integrations.example/otp');
+        $anonymous = $this->issueAnonymousIdentity('phone-otp-real-code-existing-user');
+        $existingUser = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Existing Phone OTP User',
+            'phones' => ['+5527999990432'],
+            'credentials' => [],
+        ]);
+
+        $deliveredPayload = null;
+        $deliveredCode = null;
+
+        Http::fake(function (Request $request) use (&$deliveredPayload, &$deliveredCode) {
+            $deliveredPayload = $request->data();
+            $deliveredCode = $deliveredPayload['code'] ?? null;
+
+            return Http::response(['ok' => true], 200);
+        });
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0432',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        Http::assertSentCount(1);
+        $this->assertIsArray($deliveredPayload);
+        $this->assertSame('phone_otp.challenge', $deliveredPayload['type'] ?? null);
+        $this->assertSame('whatsapp', $deliveredPayload['channel'] ?? null);
+        $this->assertSame('+5527999990432', $deliveredPayload['phone'] ?? null);
+        $this->assertSame($challenge->json('data.challenge_id'), $deliveredPayload['challenge_id'] ?? null);
+        $this->assertMatchesRegularExpression('/^\d{6}$/', (string) $deliveredCode);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990432',
+            'code' => $deliveredCode,
+            'device_name' => 'android-release-smoke',
+            'anonymous_user_ids' => [$anonymous['user_id']],
+        ]);
+
+        $verify->assertStatus(200);
+        $verify->assertJsonPath('data.user_id', (string) $existingUser->_id);
+        $verify->assertJsonPath('data.identity_state', 'registered');
+        $this->assertNotEmpty($verify->json('data.token'));
+
+        $existingUser->refresh();
+        $this->assertContains($anonymous['user_id'], $existingUser->merged_source_ids);
     }
 
     public function test_phone_otp_verification_for_multi_account_user_issues_unbound_public_token(): void

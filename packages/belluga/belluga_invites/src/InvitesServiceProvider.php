@@ -7,6 +7,7 @@ namespace Belluga\Invites;
 use Belluga\Invites\Application\Async\InviteOutboxEmitter;
 use Belluga\Invites\Application\Contacts\ContactImportService;
 use Belluga\Invites\Application\Feed\InviteFeedQueryService;
+use Belluga\Invites\Application\Feed\InviteExpiryService;
 use Belluga\Invites\Application\Feed\InviteProjectionService;
 use Belluga\Invites\Application\Feed\PrincipalSocialMetricsService;
 use Belluga\Invites\Application\Mutations\InviteCommandIdempotencyService;
@@ -36,6 +37,7 @@ class InvitesServiceProvider extends ServiceProvider
         $this->app->singleton(InviteQuotaCounterService::class);
         $this->app->singleton(PrincipalSocialMetricsService::class);
         $this->app->singleton(InviteProjectionService::class);
+        $this->app->singleton(InviteExpiryService::class);
         $this->app->singleton(InvitePreviewPayloadFactory::class);
         $this->app->singleton(InviteTargetResolverService::class);
         $this->app->singleton(InviteFeedQueryService::class);
