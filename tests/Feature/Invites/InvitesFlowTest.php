@@ -208,7 +208,7 @@ class InvitesFlowTest extends TestCaseTenant
         );
     }
 
-    public function test_feed_expires_invites_when_target_occurrence_is_missing_even_if_parent_event_is_future(): void
+    public function test_feed_expires_invites_when_target_occurrence_is_missing_even_with_stored_future_expiry(): void
     {
         Sanctum::actingAs($this->sender, ['*']);
         $sendResponse = $this->postJson("{$this->base_api_tenant}invites", [
@@ -237,7 +237,7 @@ class InvitesFlowTest extends TestCaseTenant
         InviteEdge::query()
             ->where('_id', $inviteId)
             ->update([
-                'expires_at' => null,
+                'expires_at' => $futureEnd,
                 'event_date' => $futureStart,
             ]);
         InviteFeedProjection::query()
