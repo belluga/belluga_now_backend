@@ -14,6 +14,7 @@ use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
+use Belluga\Invites\Application\Feed\InviteExpiryService;
 use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
@@ -492,6 +493,15 @@ Schedule::call(static function (): void {
     });
 })
     ->name('events:map_pois:refresh_expired')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();
+
+Schedule::call(static function (): void {
+    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
+        app(InviteExpiryService::class)->expireStaleTargetsForCurrentTenant();
+    });
+})
+    ->name('invites:expire_finished_occurrences')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 

@@ -38,7 +38,7 @@ class InviteRealtimeStreamService
     private function parseSince(?string $lastEventId): ?Carbon
     {
         if ($lastEventId === null || trim($lastEventId) === '') {
-            return Carbon::createFromTimestamp(0);
+            return null;
         }
 
         try {

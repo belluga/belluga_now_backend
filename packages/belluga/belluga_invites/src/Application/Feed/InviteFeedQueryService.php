@@ -14,6 +14,7 @@ class InviteFeedQueryService
 
     public function __construct(
         private readonly InviteProjectionService $projectionService,
+        private readonly InviteExpiryService $inviteExpiry,
         private readonly InviteRuntimeSettingsService $runtimeSettings,
     ) {}
 
@@ -22,6 +23,8 @@ class InviteFeedQueryService
      */
     public function fetchForUser(string $userId, int $page = 1, int $pageSize = self::DEFAULT_PAGE_SIZE): array
     {
+        $this->inviteExpiry->expireStaleReceiverTargets($userId);
+
         $normalizedPage = max(1, $page);
         $normalizedPageSize = max(1, min($pageSize, 50));
         $skip = ($normalizedPage - 1) * $normalizedPageSize;
