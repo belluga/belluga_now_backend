@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Tenants;
 
+use App\Application\Environment\TenantEnvironmentSnapshotService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -198,6 +201,51 @@ class TenantBrandingControllerTest extends TestCaseTenant
 
         $mediaResponse->assertOk();
         $mediaResponse->assertHeader('Content-Type', 'image/jpeg');
+    }
+
+    public function test_update_refreshes_environment_snapshot_synchronously_when_stale_snapshot_exists(): void
+    {
+        Storage::fake('public');
+
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        $brandingData = is_array($tenant->branding_data) ? $tenant->branding_data : [];
+        $brandingData['public_web_metadata']['default_image'] = '';
+        $tenant->branding_data = $brandingData;
+        $tenant->save();
+
+        app(TenantEnvironmentSnapshotService::class)->repair(
+            $tenant,
+            'test_seed_stale_snapshot',
+            ['case' => 'branding_default_image_runtime_refresh'],
+        );
+
+        Queue::fake();
+
+        $staleEnvironment = $this->withoutHeader('X-App-Domain')
+            ->getJson("{$this->base_api_tenant}environment");
+        $staleEnvironment->assertOk();
+        $staleDefaultImage = (string) $staleEnvironment->json('public_web_metadata.default_image');
+        $this->assertSame('', $staleDefaultImage);
+
+        $response = $this->withHeaders($this->headers)
+            ->post($this->baseUrl, [
+                'public_web_metadata' => [
+                    'default_image' => UploadedFile::fake()->image('default-image.jpg', 1200, 630),
+                ],
+            ]);
+
+        $response->assertOk();
+        $resolvedUrl = (string) $response->json('branding_data.public_web_metadata.default_image');
+        $this->assertNotSame('', $resolvedUrl);
+
+        Queue::assertPushed(RebuildTenantEnvironmentSnapshotJob::class);
+
+        $environment = $this->withoutHeader('X-App-Domain')
+            ->getJson("{$this->base_api_tenant}environment");
+
+        $environment->assertOk();
+        $environment->assertJsonPath('public_web_metadata.default_image', $resolvedUrl);
     }
 
     public function test_canonical_branding_media_route_serves_legacy_public_web_image(): void

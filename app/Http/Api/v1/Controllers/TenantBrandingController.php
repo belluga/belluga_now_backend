@@ -3,6 +3,7 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Branding\BrandingPublicWebMediaService;
+use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
@@ -17,6 +18,7 @@ class TenantBrandingController
     public function __construct(
         private readonly TenantBrandingManagementService $brandingService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
+        private readonly TenantEnvironmentSnapshotService $tenantEnvironmentSnapshotService,
         private readonly TelemetryEmitter $telemetry
     ) {}
 
@@ -47,6 +49,15 @@ class TenantBrandingController
             $validated,
             $uploadedLogos,
             $pwaVariants
+        );
+
+        $this->tenantEnvironmentSnapshotService->repair(
+            $tenant->fresh() ?? $tenant,
+            'tenant_branding_updated_sync',
+            [
+                'trigger' => 'tenant_branding_update',
+                'changed_fields' => array_keys($validated),
+            ],
         );
 
         $user = $request->user();

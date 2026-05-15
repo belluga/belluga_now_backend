@@ -23,6 +23,7 @@ class RecurringBackgroundGuardrailsTest extends TestCase
         $this->assertContains('events:async:monitor', $eventSummaries);
         $this->assertContains('map_pois:cleanup_orphaned', $eventSummaries);
         $this->assertContains('events:map_pois:refresh_expired', $eventSummaries);
+        $this->assertContains('invites:expire_finished_occurrences', $eventSummaries);
         $this->assertContains('api-security:abuse-signals:prune', $eventSummaries);
         $this->assertNotContains(
             'events:occurrences:reconcile',

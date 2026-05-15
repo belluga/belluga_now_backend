@@ -24,6 +24,7 @@ interface InviteTargetReadContract
      *     id:string,
      *     starts_at:mixed,
      *     ends_at:mixed,
+     *     effective_ends_at:mixed,
      *     is_event_published:bool,
      *     attributes:array<string,mixed>
      * }|null
