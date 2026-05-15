@@ -124,24 +124,26 @@ class InviteExpiryService
 
     private function resolveTargetExpiry(InviteEdge $edge): ?Carbon
     {
-        if ($edge->expires_at instanceof Carbon) {
-            return $edge->expires_at;
-        }
-
         $occurrence = $this->targetRead->findOccurrenceForEvent(
             (string) $edge->event_id,
             (string) $edge->occurrence_id,
         );
-        if (is_array($occurrence)) {
-            if (! (bool) ($occurrence['is_event_published'] ?? false)) {
-                return Carbon::now();
-            }
+        if (! is_array($occurrence)) {
+            return Carbon::now();
+        }
 
-            $occurrenceExpiry = $this->normalizeCarbon($occurrence['effective_ends_at'] ?? null)
-                ?? $this->normalizeCarbon($occurrence['ends_at'] ?? null);
-            if ($occurrenceExpiry instanceof Carbon) {
-                return $occurrenceExpiry;
-            }
+        if (! (bool) ($occurrence['is_event_published'] ?? false)) {
+            return Carbon::now();
+        }
+
+        $occurrenceExpiry = $this->normalizeCarbon($occurrence['effective_ends_at'] ?? null)
+            ?? $this->normalizeCarbon($occurrence['ends_at'] ?? null);
+        if ($occurrenceExpiry instanceof Carbon) {
+            return $occurrenceExpiry;
+        }
+
+        if ($edge->expires_at instanceof Carbon) {
+            return $edge->expires_at;
         }
 
         $event = $this->targetRead->findEventByIdOrSlug((string) $edge->event_id);
