@@ -132,16 +132,18 @@ class InviteExpiryService
             (string) $edge->event_id,
             (string) $edge->occurrence_id,
         );
-        if (is_array($occurrence)) {
-            if (! (bool) ($occurrence['is_event_published'] ?? false)) {
-                return Carbon::now();
-            }
+        if (! is_array($occurrence)) {
+            return Carbon::now();
+        }
 
-            $occurrenceExpiry = $this->normalizeCarbon($occurrence['effective_ends_at'] ?? null)
-                ?? $this->normalizeCarbon($occurrence['ends_at'] ?? null);
-            if ($occurrenceExpiry instanceof Carbon) {
-                return $occurrenceExpiry;
-            }
+        if (! (bool) ($occurrence['is_event_published'] ?? false)) {
+            return Carbon::now();
+        }
+
+        $occurrenceExpiry = $this->normalizeCarbon($occurrence['effective_ends_at'] ?? null)
+            ?? $this->normalizeCarbon($occurrence['ends_at'] ?? null);
+        if ($occurrenceExpiry instanceof Carbon) {
+            return $occurrenceExpiry;
         }
 
         $event = $this->targetRead->findEventByIdOrSlug((string) $edge->event_id);

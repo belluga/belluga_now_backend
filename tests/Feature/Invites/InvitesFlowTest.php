@@ -208,6 +208,62 @@ class InvitesFlowTest extends TestCaseTenant
         );
     }
 
+    public function test_feed_expires_invites_when_target_occurrence_is_missing_even_if_parent_event_is_future(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $sendResponse = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+        ]);
+
+        $sendResponse->assertOk();
+        $inviteId = (string) $sendResponse->json('created.0.invite_id');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $groupKey = (string) $this->event->_id.'::'.$occurrenceId;
+        $futureStart = Carbon::now()->addDays(2);
+        $futureEnd = $futureStart->copy()->addHours(3);
+
+        $event = $this->event->fresh();
+        $event->date_time_start = $futureStart;
+        $event->date_time_end = $futureEnd;
+        $event->save();
+
+        EventOccurrence::query()
+            ->where('_id', $occurrenceId)
+            ->delete();
+
+        InviteEdge::query()
+            ->where('_id', $inviteId)
+            ->update([
+                'expires_at' => null,
+                'event_date' => $futureStart,
+            ]);
+        InviteFeedProjection::query()
+            ->where('receiver_user_id', (string) $this->receiver->_id)
+            ->where('group_key', $groupKey)
+            ->update([
+                'event_date' => $futureStart,
+            ]);
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $feedResponse = $this->getJson("{$this->base_api_tenant}invites");
+        $feedResponse->assertOk();
+        $this->assertSame([], $feedResponse->json('invites'));
+
+        $invite = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($invite);
+        $this->assertSame('expired', (string) $invite->status);
+
+        $this->assertFalse(
+            InviteFeedProjection::query()
+                ->where('receiver_user_id', (string) $this->receiver->_id)
+                ->where('group_key', $groupKey)
+                ->exists(),
+        );
+    }
+
     public function test_send_invite_authors_and_dispatches_invite_push_when_runtime_is_ready(): void
     {
         Bus::fake();
