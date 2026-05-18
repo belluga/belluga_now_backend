@@ -262,12 +262,19 @@ class Tenant extends BaseTenant
                 $tenant->generateSlug();
             }
 
-            $tenant->database = 'tenant_'.str_replace('-', '_', $tenant->slug);
+            $tenant->database = static::tenantDatabasePrefix().str_replace('-', '_', $tenant->slug);
         });
 
         static::created(function (Tenant $tenant) {
             $tenant->createDatabase();
         });
+    }
+
+    public static function tenantDatabasePrefix(): string
+    {
+        $prefix = trim((string) config('database.tenant_database_prefix', 'tenant_'));
+
+        return $prefix !== '' ? $prefix : 'tenant_';
     }
 
     protected function createDatabase(): void
