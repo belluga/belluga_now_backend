@@ -11,6 +11,7 @@ use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Landlord\TenantRoleTemplate;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -114,10 +115,31 @@ class TenantLifecycleServiceTest extends TestCase
         $this->assertInstanceOf(Tenant::class, $tenant);
         $this->assertInstanceOf(TenantRoleTemplate::class, $role);
         $this->assertSame('Delta Stores', $tenant->name);
+        $this->assertSame(
+            Tenant::tenantDatabasePrefix().str_replace('-', '_', $tenant->slug),
+            $tenant->database
+        );
         $this->assertSame('*', $role->permissions[0] ?? null);
 
         $this->operator->refresh();
         $this->assertContains((string) $tenant->_id, $this->operator->getAccessToIds());
+    }
+
+    public function test_create_uses_configured_tenant_database_prefix(): void
+    {
+        $originalPrefix = (string) config('database.tenant_database_prefix', 'tenant_');
+        Config::set('database.tenant_database_prefix', 'prestage_tenant_');
+
+        try {
+            $tenant = $this->service->create($this->makeTenantPayload('Pre Stage Tenant'), $this->operator)['tenant'];
+
+            $this->assertSame(
+                'prestage_tenant_'.str_replace('-', '_', $tenant->slug),
+                $tenant->database
+            );
+        } finally {
+            Config::set('database.tenant_database_prefix', $originalPrefix);
+        }
     }
 
     public function test_create_does_not_persist_implicit_fallback_domain(): void

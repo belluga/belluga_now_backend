@@ -18,6 +18,8 @@ return [
 
     'default' => env('DB_CONNECTION', 'mongodb'),
 
+    'tenant_database_prefix' => env('TENANT_DATABASE_PREFIX', 'tenant_'),
+
     /*
     |--------------------------------------------------------------------------
     | Database Connections
