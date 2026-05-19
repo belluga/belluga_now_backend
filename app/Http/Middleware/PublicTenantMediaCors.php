@@ -26,6 +26,12 @@ final class PublicTenantMediaCors
         'map-filters/',
         'branding-public-web/',
         'api/v1/media/',
+        'logo-light.png',
+        'logo-dark.png',
+        'icon-light.png',
+        'icon-dark.png',
+        'favicon.ico',
+        'icon/',
     ];
 
     public function __construct(
@@ -45,7 +51,10 @@ final class PublicTenantMediaCors
 
         $tenant = $this->resolveRequestTenant($request);
         $isAllowedTenantOrigin = $tenant instanceof Tenant
-            && $this->isTenantOrigin($tenant, $origin['host']);
+            && (
+                $this->isTenantOrigin($tenant, $origin['host'])
+                || $this->isLandlordRootOrigin($origin['host'])
+            );
 
         if ($isAllowedTenantOrigin && $request->isMethod('OPTIONS')) {
             return $this->withCorsHeaders(response('', 204), $origin['value'], preflight: true);
@@ -124,6 +133,16 @@ final class PublicTenantMediaCors
     private function isTenantOrigin(Tenant $tenant, string $originHost): bool
     {
         return in_array($originHost, $this->tenantAllowedHosts($tenant), true);
+    }
+
+    private function isLandlordRootOrigin(string $originHost): bool
+    {
+        $configuredRoot = $this->configuredRootHost();
+        if ($configuredRoot === null) {
+            return false;
+        }
+
+        return $originHost === $configuredRoot;
     }
 
     /**
