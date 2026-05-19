@@ -82,7 +82,7 @@ jobs:
           echo "target_repo=${DOCKER_SYNC_TARGET_REPO}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch lane promotion request
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         env:
           HEAD_BRANCH: ${{ steps.lane.outputs.head }}
           BASE_BRANCH: ${{ steps.lane.outputs.base }}
