@@ -45,6 +45,31 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
         $this->assertCorsResponse($response, "https://{$customDomain}");
     }
 
+    public function test_public_media_allows_origin_from_landlord_root_host(): void
+    {
+        $tenant = $this->currentTenant();
+        $profile = $this->createProfile();
+
+        $response = $this->withHeaders([
+            'Origin' => "https://{$this->host}",
+        ])->get($this->tenantUrl($tenant, "account-profiles/{$profile->getKey()}/avatar"));
+
+        $response->assertStatus(404);
+        $this->assertCorsResponse($response, "https://{$this->host}");
+    }
+
+    public function test_tenant_branding_asset_allows_origin_from_landlord_root_host(): void
+    {
+        $tenant = $this->currentTenant();
+
+        $response = $this->withHeaders([
+            'Origin' => "https://{$this->host}",
+        ])->get($this->tenantUrl($tenant, 'logo-dark.png'));
+
+        $response->assertSuccessful();
+        $this->assertCorsResponse($response, "https://{$this->host}");
+    }
+
     public function test_public_media_preflight_is_scoped_to_tenant_domain_set(): void
     {
         $tenant = $this->currentTenant();
