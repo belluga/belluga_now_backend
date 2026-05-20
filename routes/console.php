@@ -4,9 +4,12 @@ use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\LandlordUsers\LandlordPasswordCredentialBackfillService;
+use App\Application\LandlordUsers\LandlordUserAccessService;
+use App\Application\Profiles\LandlordProfileService;
 use App\Application\Push\PushTopicMembershipService;
 use App\Application\Security\ApiAbuseSignalRecorder;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
@@ -161,6 +164,53 @@ Artisan::command('landlord:password-credentials:repair {--dry-run}', function ()
 
     return 0;
 })->purpose('Inspect or repair landlord users so password credentials are canonical and legacy landlord password fields are removed.');
+
+Artisan::command('landlord:password:set {email} {password}', function (
+    LandlordProfileService $profiles,
+    LandlordUserAccessService $accessService,
+) {
+    $email = strtolower(trim((string) $this->argument('email')));
+    $password = (string) $this->argument('password');
+
+    if ($email === '') {
+        $this->error('Provide a non-empty landlord email.');
+
+        return 1;
+    }
+
+    if ($password === '') {
+        $this->error('Provide a non-empty password.');
+
+        return 1;
+    }
+
+    $user = LandlordUser::query()
+        ->where('emails', 'all', [$email])
+        ->first();
+
+    if (! $user instanceof LandlordUser) {
+        $this->error("Landlord user not found for email [{$email}].");
+
+        return 1;
+    }
+
+    $profiles->updatePassword($user, $password);
+    $revoked = $accessService->revokeTokens($user);
+    $freshUser = $user->fresh();
+
+    $this->line(json_encode([
+        'user_id' => (string) ($freshUser?->getKey() ?? $user->getKey()),
+        'emails' => $freshUser?->emails ?? $user->emails ?? [],
+        'revoked_tokens' => $revoked,
+        'password_credentials' => collect($freshUser?->credentials ?? [])
+            ->where('provider', 'password')
+            ->pluck('subject')
+            ->values()
+            ->all(),
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+    return 0;
+})->purpose('Set the canonical landlord password for a landlord email and revoke existing sessions.');
 
 Artisan::command('events:occurrences:repair {tenant_slug?} {--all}', function () {
     /** @var EventOccurrenceReconciliationService $service */
