@@ -7,7 +7,6 @@ namespace Tests\Feature\Auth;
 use App\Application\Auth\LandlordAuthenticationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\PersonalAccessToken;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -37,12 +36,11 @@ class LandlordPasswordSetCommandTest extends TestCase
 
         $this->assertSame(1, PersonalAccessToken::query()->count());
 
-        $exitCode = Artisan::call('landlord:password:set', [
+        $this->artisan('landlord:password:set', [
             'email' => 'admin@example.org',
-            'password' => 'Another!234',
-        ]);
-
-        $this->assertSame(0, $exitCode);
+        ])
+            ->expectsQuestion('Landlord password', 'Another!234')
+            ->assertExitCode(0);
         $this->assertSame(0, PersonalAccessToken::query()->count());
 
         $freshUser = $user->fresh();
@@ -64,16 +62,11 @@ class LandlordPasswordSetCommandTest extends TestCase
     {
         $this->refreshLandlordAndTenantDatabases();
 
-        $exitCode = Artisan::call('landlord:password:set', [
+        $this->artisan('landlord:password:set', [
             'email' => 'missing@example.org',
-            'password' => 'Another!234',
-        ]);
-
-        $this->assertSame(1, $exitCode);
-        $this->assertStringContainsString(
-            'Landlord user not found for email [missing@example.org].',
-            Artisan::output()
-        );
+        ])
+            ->expectsOutput('Landlord user not found for email [missing@example.org].')
+            ->assertExitCode(1);
     }
 
     private function assertPasswordCredentialMatches(LandlordUser $user, string $subject, string $password): void

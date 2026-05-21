@@ -242,6 +242,10 @@ class SendPushMessageJob implements ShouldQueue, TenantAware
         string $reason,
         array $context = [],
     ): void {
+        if ($message->status === 'sent' || $message->sent_at !== null) {
+            return;
+        }
+
         $delivery = is_array($message->delivery ?? null) ? $message->delivery : [];
         $delivery['last_terminal_state'] = [
             'status' => $status,
