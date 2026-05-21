@@ -290,17 +290,26 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('invite_received', (string) $message->type);
         $this->assertSame([(string) $this->receiver->_id], $message->audience['user_ids'] ?? []);
         $this->assertSame('invite_received', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame('invite_received', data_get($message->fcm_options, 'data.push_type'));
+        $this->assertSame('ic_notification_invite', data_get($message->fcm_options, 'android.notification.icon'));
+        $this->assertNotEmpty(data_get($message->fcm_options, 'notification.image'));
+        $this->assertSame(
+            data_get($message->fcm_options, 'notification.image'),
+            data_get($message->fcm_options, 'android.notification.image'),
+        );
+        $this->assertSame(
+            data_get($message->fcm_options, 'notification.image'),
+            data_get($message->fcm_options, 'data.event_image_url'),
+        );
+        $this->assertSame('Sender User', data_get($message->fcm_options, 'data.inviter_name'));
+        $this->assertNull(data_get($message->payload_template, 'layoutType'));
         $this->assertSame(
             (string) $this->event->_id,
-            data_get($message->payload_template, 'invite.target_ref.event_id'),
+            data_get($message->fcm_options, 'data.event_id'),
         );
         $this->assertSame(
             $this->firstOccurrenceId($this->event),
-            data_get($message->payload_template, 'invite.target_ref.occurrence_id'),
-        );
-        $this->assertSame(
-            'Sender User',
-            data_get($message->payload_template, 'invite.inviter_candidates.0.display_name'),
+            data_get($message->fcm_options, 'data.occurrence_id'),
         );
 
         Bus::assertDispatched(SendPushMessageJob::class);
@@ -540,14 +549,16 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('invite_accepted', (string) $message->type);
         $this->assertSame([(string) $this->sender->_id], $message->audience['user_ids'] ?? []);
         $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.push_type'));
+        $this->assertSame((string) $this->receiver->_id, data_get($message->fcm_options, 'data.accepted_by_user_id'));
         $this->assertSame(
-            (string) $this->receiver->_id,
-            data_get($message->payload_template, 'accepted_by.user_id'),
+            $this->accountProfileIdFor($this->receiver),
+            data_get($message->fcm_options, 'data.accepted_by_account_profile_id'),
         );
-        $this->assertSame(
-            'Receiver User',
-            data_get($message->payload_template, 'accepted_by.display_name'),
-        );
+        $this->assertSame('Receiver User', data_get($message->fcm_options, 'data.accepted_by_display_name'));
+        $this->assertSame('ic_notification_invite', data_get($message->fcm_options, 'android.notification.icon'));
+        $this->assertNotEmpty(data_get($message->fcm_options, 'notification.image'));
+        $this->assertNull(data_get($message->payload_template, 'layoutType'));
 
         Bus::assertDispatched(SendPushMessageJob::class);
     }
