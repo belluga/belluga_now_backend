@@ -59,6 +59,7 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
                 invitePayload: $invitePayload,
                 notification: $notification,
                 pushType: 'invite_received',
+                extraData: [],
             ),
         ]);
     }
@@ -96,6 +97,7 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
                 invitePayload: $invitePayload,
                 notification: $notification,
                 pushType: 'invite_accepted',
+                extraData: $this->acceptedByFcmData($edge),
             ),
         ]);
     }
@@ -177,6 +179,7 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
         array $invitePayload,
         array $notification,
         string $pushType,
+        array $extraData,
     ): array {
         $eventImageUrl = trim((string) ($invitePayload['event_image_url'] ?? ''));
 
@@ -199,6 +202,7 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
                 'event_image_url' => $eventImageUrl,
                 'inviter_name' => trim((string) ($invitePayload['inviter_name'] ?? '')),
                 'inviter_avatar_url' => trim((string) ($invitePayload['inviter_avatar_url'] ?? '')),
+                ...$extraData,
             ],
         ];
 
@@ -235,6 +239,29 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
             'title' => $title,
             'body' => $body,
             'receiver_name' => $receiverName,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     accepted_by_user_id:string,
+     *     accepted_by_account_profile_id:string,
+     *     accepted_by_display_name:string,
+     *     accepted_by_avatar_url:string
+     * }
+     */
+    private function acceptedByFcmData(InviteEdge $edge): array
+    {
+        $receiverAccountProfileId = trim((string) ($edge->receiver_account_profile_id ?? ''));
+        $resolved = $receiverAccountProfileId === ''
+            ? null
+            : $this->identities->resolveAccountProfileRecipient($receiverAccountProfileId);
+
+        return [
+            'accepted_by_user_id' => trim((string) ($edge->receiver_user_id ?? '')),
+            'accepted_by_account_profile_id' => $receiverAccountProfileId,
+            'accepted_by_display_name' => trim((string) ($resolved['display_name'] ?? '')),
+            'accepted_by_avatar_url' => trim((string) ($resolved['avatar_url'] ?? '')),
         ];
     }
 

@@ -550,6 +550,12 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame([(string) $this->sender->_id], $message->audience['user_ids'] ?? []);
         $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.event'));
         $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.push_type'));
+        $this->assertSame((string) $this->receiver->_id, data_get($message->fcm_options, 'data.accepted_by_user_id'));
+        $this->assertSame(
+            $this->accountProfileIdFor($this->receiver),
+            data_get($message->fcm_options, 'data.accepted_by_account_profile_id'),
+        );
+        $this->assertSame('Receiver User', data_get($message->fcm_options, 'data.accepted_by_display_name'));
         $this->assertSame('ic_notification_invite', data_get($message->fcm_options, 'android.notification.icon'));
         $this->assertNotEmpty(data_get($message->fcm_options, 'notification.image'));
         $this->assertNull(data_get($message->payload_template, 'layoutType'));
