@@ -3557,8 +3557,275 @@ class PushMessageFlowTest extends TestCase
         $message->refresh();
         $this->assertSame(0, data_get($message->metrics ?? [], 'accepted_count', 0));
         $this->assertSame(0, data_get($message->metrics ?? [], 'sent_count', 0));
-        $this->assertNotSame('sent', $message->status);
+        $this->assertSame('failed', $message->status);
         $this->assertNull($message->sent_at);
+        $this->assertSame('delivery_failed', data_get($message->delivery, 'last_terminal_state.reason'));
+        $this->assertSame('individual_direct', data_get($message->delivery, 'last_terminal_state.context.delivery_topology'));
+        $this->assertCount(2, PushDeliveryLog::query()->get());
+    }
+
+    public function test_send_job_marks_direct_delivery_failed_when_no_targets_resolve(): void
+    {
+        PushDeliveryLog::query()->delete();
+
+        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
+            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver
+            {
+                public function __construct() {}
+
+                public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
+                {
+                    return 0;
+                }
+
+                public function streamResolvedTargetBatches(
+                    PushMessage $message,
+                    string $scope,
+                    ?string $accountId,
+                    int $batchSize,
+                    callable $callback
+                ): void {}
+
+                public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [];
+                }
+
+                public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [
+                        'tokens' => [],
+                        'token_user_map' => [],
+                    ];
+                }
+            };
+        });
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+        $this->assertSame('failed', $message->status);
+        $this->assertNull($message->sent_at);
+        $this->assertSame('no_targets', data_get($message->delivery, 'last_terminal_state.reason'));
+        $this->assertSame(0, data_get($message->delivery, 'last_terminal_state.context.requested_units'));
+        $this->assertCount(0, PushDeliveryLog::query()->get());
+    }
+
+    public function test_send_job_preserves_sent_state_when_retry_lands_in_terminal_failure(): void
+    {
+        PushDeliveryLog::query()->delete();
+
+        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
+            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver
+            {
+                public function __construct() {}
+
+                public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
+                {
+                    return 0;
+                }
+
+                public function streamResolvedTargetBatches(
+                    PushMessage $message,
+                    string $scope,
+                    ?string $accountId,
+                    int $batchSize,
+                    callable $callback
+                ): void {}
+
+                public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [];
+                }
+
+                public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [
+                        'tokens' => [],
+                        'token_user_map' => [],
+                    ];
+                }
+            };
+        });
+
+        $sentAt = Carbon::parse('2026-05-20T19:00:00Z');
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+            'status' => 'sent',
+            'sent_at' => $sentAt,
+            'metrics' => [
+                'accepted_count' => 1,
+                'sent_count' => 1,
+            ],
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+        $this->assertSame('sent', $message->status);
+        $this->assertNotNull($message->sent_at);
+        $this->assertSame($sentAt->toISOString(), $message->sent_at?->toISOString());
+        $this->assertNull(data_get($message->delivery, 'last_terminal_state'));
+        $this->assertSame(1, data_get($message->metrics, 'accepted_count'));
+        $this->assertSame(1, data_get($message->metrics, 'sent_count'));
+        $this->assertCount(0, PushDeliveryLog::query()->get());
+    }
+
+    public function test_send_job_invalidates_not_found_tokens_for_async_direct_delivery(): void
+    {
+        $secondaryUser = $this->userService->create($this->account, [
+            'name' => 'Push Secondary Recipient',
+            'email' => 'push-secondary@example.org',
+            'password' => 'Secret!234',
+        ], (string) $this->operatorRole->_id);
+
+        $this->seedPushDevice($this->operator, [
+            'device_id' => 'device-1',
+            'platform' => 'android',
+            'push_token' => 'token-1',
+        ]);
+        $this->seedPushDevice($secondaryUser, [
+            'device_id' => 'device-2',
+            'platform' => 'android',
+            'push_token' => 'token-2',
+        ]);
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract
+            {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    return [
+                        'accepted_count' => 0,
+                        'responses' => [
+                            [
+                                'token' => 'token-1',
+                                'status' => 'failed',
+                                'error_code' => 'NOT_FOUND',
+                                'error_message' => 'Requested entity was not found.',
+                            ],
+                            [
+                                'token' => 'token-2',
+                                'status' => 'failed',
+                                'error_code' => 'UNAVAILABLE',
+                                'error_message' => 'Provider unavailable.',
+                            ],
+                        ],
+                    ];
+                }
+            };
+        });
+
+        $operatorUserId = (string) $this->operator->_id;
+        $secondaryUserId = (string) $secondaryUser->_id;
+        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () use ($operatorUserId, $secondaryUserId) {
+            return new class($operatorUserId, $secondaryUserId) extends \Belluga\PushHandler\Services\PushRecipientResolver
+            {
+                public function __construct(
+                    private readonly string $operatorUserId,
+                    private readonly string $secondaryUserId,
+                ) {}
+
+                public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
+                {
+                    return 2;
+                }
+
+                public function streamResolvedTargetBatches(
+                    PushMessage $message,
+                    string $scope,
+                    ?string $accountId,
+                    int $batchSize,
+                    callable $callback
+                ): void {
+                    $callback([
+                        'tokens' => ['token-1', 'token-2'],
+                        'token_user_map' => [
+                            'token-1' => $this->operatorUserId,
+                            'token-2' => $this->secondaryUserId,
+                        ],
+                    ]);
+                }
+
+                public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return ['token-1', 'token-2'];
+                }
+
+                public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [
+                        'tokens' => ['token-1', 'token-2'],
+                        'token_user_map' => [
+                            'token-1' => $this->operatorUserId,
+                            'token-2' => $this->secondaryUserId,
+                        ],
+                    ];
+                }
+            };
+        });
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushUserGatewayContract::class),
+            $this->app->make(PushDeviceService::class),
+        );
+
+        $message->refresh();
+        $this->assertSame('failed', $message->status);
+        $this->assertSame('delivery_failed', data_get($message->delivery, 'last_terminal_state.reason'));
+
+        $invalidatedDevice = PushDevice::query()
+            ->where('account_user_id', $operatorUserId)
+            ->where('device_id', 'device-1')
+            ->firstOrFail();
+        $healthyDevice = PushDevice::query()
+            ->where('account_user_id', $secondaryUserId)
+            ->where('device_id', 'device-2')
+            ->firstOrFail();
+
+        $this->assertFalse((bool) $invalidatedDevice->is_active);
+        $this->assertNotNull($invalidatedDevice->invalidated_at);
+        $this->assertTrue((bool) $healthyDevice->is_active);
     }
 
     public function test_send_job_delivers_shared_all_users_audience_via_topic(): void
@@ -3723,8 +3990,10 @@ class PushMessageFlowTest extends TestCase
         ], $topics);
         $this->assertSame(0, data_get($message->metrics ?? [], 'accepted_count', 0));
         $this->assertSame(0, data_get($message->metrics ?? [], 'sent_count', 0));
-        $this->assertNotSame('sent', $message->status);
+        $this->assertSame('failed', $message->status);
         $this->assertNull($message->sent_at);
+        $this->assertSame('delivery_failed', data_get($message->delivery, 'last_terminal_state.reason'));
+        $this->assertSame('channel_topic', data_get($message->delivery, 'last_terminal_state.context.delivery_topology'));
     }
 
     public function test_fcm_http_client_builds_payload_with_overrides(): void
