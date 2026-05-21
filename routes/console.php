@@ -165,21 +165,14 @@ Artisan::command('landlord:password-credentials:repair {--dry-run}', function ()
     return 0;
 })->purpose('Inspect or repair landlord users so password credentials are canonical and legacy landlord password fields are removed.');
 
-Artisan::command('landlord:password:set {email} {password}', function (
+Artisan::command('landlord:password:set {email}', function (
     LandlordProfileService $profiles,
     LandlordUserAccessService $accessService,
 ) {
     $email = strtolower(trim((string) $this->argument('email')));
-    $password = (string) $this->argument('password');
 
     if ($email === '') {
         $this->error('Provide a non-empty landlord email.');
-
-        return 1;
-    }
-
-    if ($password === '') {
-        $this->error('Provide a non-empty password.');
 
         return 1;
     }
@@ -190,6 +183,13 @@ Artisan::command('landlord:password:set {email} {password}', function (
 
     if (! $user instanceof LandlordUser) {
         $this->error("Landlord user not found for email [{$email}].");
+
+        return 1;
+    }
+
+    $password = (string) $this->secret('Landlord password');
+    if ($password === '') {
+        $this->error('Provide a non-empty password.');
 
         return 1;
     }

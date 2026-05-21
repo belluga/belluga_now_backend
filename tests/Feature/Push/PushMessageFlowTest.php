@@ -3624,6 +3624,76 @@ class PushMessageFlowTest extends TestCase
         $this->assertCount(0, PushDeliveryLog::query()->get());
     }
 
+    public function test_send_job_preserves_sent_state_when_retry_lands_in_terminal_failure(): void
+    {
+        PushDeliveryLog::query()->delete();
+
+        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
+            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver
+            {
+                public function __construct() {}
+
+                public function countTargets(PushMessage $message, string $scope, ?string $accountId): int
+                {
+                    return 0;
+                }
+
+                public function streamResolvedTargetBatches(
+                    PushMessage $message,
+                    string $scope,
+                    ?string $accountId,
+                    int $batchSize,
+                    callable $callback
+                ): void {}
+
+                public function resolveTokens(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [];
+                }
+
+                public function resolveTokensWithUsers(PushMessage $message, string $scope, ?string $accountId): array
+                {
+                    return [
+                        'tokens' => [],
+                        'token_user_map' => [],
+                    ];
+                }
+            };
+        });
+
+        $sentAt = Carbon::parse('2026-05-20T19:00:00Z');
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'partner_id' => (string) $this->account->_id,
+            'status' => 'sent',
+            'sent_at' => $sentAt,
+            'metrics' => [
+                'accepted_count' => 1,
+                'sent_count' => 1,
+            ],
+        ]));
+
+        $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
+        $job->handle(
+            $this->app->make(PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+        $this->assertSame('sent', $message->status);
+        $this->assertNotNull($message->sent_at);
+        $this->assertSame($sentAt->toISOString(), $message->sent_at?->toISOString());
+        $this->assertNull(data_get($message->delivery, 'last_terminal_state'));
+        $this->assertSame(1, data_get($message->metrics, 'accepted_count'));
+        $this->assertSame(1, data_get($message->metrics, 'sent_count'));
+        $this->assertCount(0, PushDeliveryLog::query()->get());
+    }
+
     public function test_send_job_invalidates_not_found_tokens_for_async_direct_delivery(): void
     {
         $secondaryUser = $this->userService->create($this->account, [
