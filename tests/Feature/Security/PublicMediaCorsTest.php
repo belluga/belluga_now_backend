@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Security;
 
 use App\Models\Landlord\Domains;
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -43,6 +44,32 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
 
         $response->assertStatus(404);
         $this->assertCorsResponse($response, "https://{$customDomain}");
+    }
+
+    public function test_public_media_allows_origin_from_landlord_root_host(): void
+    {
+        $tenant = $this->currentTenant();
+        $profile = $this->createProfile();
+
+        $response = $this->withHeaders([
+            'Origin' => "https://{$this->host}",
+        ])->get($this->tenantUrl($tenant, "account-profiles/{$profile->getKey()}/avatar"));
+
+        $response->assertStatus(404);
+        $this->assertCorsResponse($response, "https://{$this->host}");
+    }
+
+    public function test_tenant_branding_asset_allows_origin_from_landlord_root_host(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->clearDarkLogoUris($tenant);
+
+        $response = $this->withHeaders([
+            'Origin' => "https://{$this->host}",
+        ])->get($this->tenantUrl($tenant, 'logo-dark.png'));
+
+        $response->assertStatus(404);
+        $this->assertCorsResponse($response, "https://{$this->host}");
     }
 
     public function test_public_media_preflight_is_scoped_to_tenant_domain_set(): void
@@ -160,6 +187,20 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
             'display_name' => 'Public Media CORS Probe',
             'is_active' => true,
         ]);
+    }
+
+    private function clearDarkLogoUris(Tenant $tenant): void
+    {
+        $tenantBranding = is_array($tenant->branding_data) ? $tenant->branding_data : [];
+        $tenantBranding['logo_settings']['dark_logo_uri'] = '';
+        $tenant->branding_data = $tenantBranding;
+        $tenant->save();
+
+        $landlord = Landlord::singleton();
+        $landlordBranding = is_array($landlord->branding_data) ? $landlord->branding_data : [];
+        $landlordBranding['logo_settings']['dark_logo_uri'] = '';
+        $landlord->branding_data = $landlordBranding;
+        $landlord->save();
     }
 
     private function assertCorsResponse(

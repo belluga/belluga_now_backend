@@ -27,11 +27,14 @@ use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
+use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
+use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -287,20 +290,170 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('invite_received', (string) $message->type);
         $this->assertSame([(string) $this->receiver->_id], $message->audience['user_ids'] ?? []);
         $this->assertSame('invite_received', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame('invite_received', data_get($message->fcm_options, 'data.push_type'));
+        $this->assertSame('ic_notification_invite', data_get($message->fcm_options, 'android.notification.icon'));
+        $this->assertNotEmpty(data_get($message->fcm_options, 'notification.image'));
+        $this->assertSame(
+            data_get($message->fcm_options, 'notification.image'),
+            data_get($message->fcm_options, 'android.notification.image'),
+        );
+        $this->assertSame(
+            data_get($message->fcm_options, 'notification.image'),
+            data_get($message->fcm_options, 'data.event_image_url'),
+        );
+        $this->assertSame('Sender User', data_get($message->fcm_options, 'data.inviter_name'));
+        $this->assertNull(data_get($message->payload_template, 'layoutType'));
         $this->assertSame(
             (string) $this->event->_id,
-            data_get($message->payload_template, 'invite.target_ref.event_id'),
+            data_get($message->fcm_options, 'data.event_id'),
         );
         $this->assertSame(
             $this->firstOccurrenceId($this->event),
-            data_get($message->payload_template, 'invite.target_ref.occurrence_id'),
-        );
-        $this->assertSame(
-            'Sender User',
-            data_get($message->payload_template, 'invite.inviter_candidates.0.display_name'),
+            data_get($message->fcm_options, 'data.occurrence_id'),
         );
 
         Bus::assertDispatched(SendPushMessageJob::class);
+    }
+
+    public function test_send_invite_job_delivers_authored_invite_push_and_marks_message_sent(): void
+    {
+        Bus::fake();
+        PushDeliveryLog::query()->delete();
+        $this->seedPushRuntimeReady();
+        $this->registerActivePushToken($this->receiver, 'receiver-push-token');
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract
+            {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    \Carbon\Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    return [
+                        'accepted_count' => count($tokens),
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'accepted',
+                            'provider_message_id' => 'provider-'.$token,
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+            'message' => 'Come with us',
+        ]);
+
+        $response->assertOk();
+
+        $message = PushMessage::query()->firstOrFail();
+        $job = new SendPushMessageJob((string) $message->_id, 'tenant', null);
+        $job->handle(
+            $this->app->make(\Belluga\PushHandler\Services\PushDeliveryService::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushPlanPolicyContract::class),
+            $this->app->make(\Belluga\PushHandler\Services\PushAudienceTopologyClassifier::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelAuthorizationContract::class),
+            $this->app->make(\Belluga\PushHandler\Contracts\PushChannelTargetResolverContract::class),
+        );
+
+        $message->refresh();
+        $this->assertSame('sent', (string) $message->status);
+        $this->assertNotNull($message->sent_at);
+        $this->assertSame(1, data_get($message->metrics, 'accepted_count'));
+        $this->assertSame(1, data_get($message->metrics, 'sent_count'));
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame((string) $message->_id, (string) $log->push_message_id);
+        $this->assertSame('accepted', (string) $log->status);
+        $this->assertSame('individual_direct', (string) $log->delivery_topology);
+    }
+
+    public function test_send_invite_queue_runtime_processes_authored_push_job_and_materializes_delivery_log(): void
+    {
+        PushDeliveryLog::query()->delete();
+        $this->seedPushRuntimeReady();
+        $this->registerActivePushToken($this->receiver, 'receiver-push-token');
+        $this->useMongoQueueRuntimeForTest();
+
+        $this->app->bind(FcmClientContract::class, static function () {
+            return new class implements FcmClientContract
+            {
+                public function send(
+                    PushMessage $message,
+                    array $tokens,
+                    string $messageInstanceId,
+                    \Carbon\Carbon $expiresAt,
+                    int $ttlMinutes
+                ): array {
+                    return [
+                        'accepted_count' => count($tokens),
+                        'responses' => array_map(static fn (string $token): array => [
+                            'token' => $token,
+                            'status' => 'accepted',
+                            'provider_message_id' => 'provider-'.$token,
+                        ], $tokens),
+                    ];
+                }
+            };
+        });
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+            'message' => 'Come with us',
+        ]);
+
+        $response->assertOk();
+
+        $message = PushMessage::query()->firstOrFail();
+        $this->assertSame('scheduled', (string) $message->status);
+        $this->assertGreaterThan(0, $this->queueJobCount());
+
+        Tenant::current()?->forgetCurrent();
+
+        $maxIterations = 5;
+        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+            $exitCode = Artisan::call('queue:work', [
+                '--once' => true,
+                '--queue' => 'default',
+            ]);
+            $this->assertSame(0, $exitCode);
+
+            $this->makeCanonicalTenantCurrent($this->tenant);
+            $message->refresh();
+
+            if ((string) $message->status !== 'scheduled') {
+                break;
+            }
+
+            Tenant::current()?->forgetCurrent();
+        }
+
+        $this->makeCanonicalTenantCurrent($this->tenant);
+        $message->refresh();
+
+        $this->assertSame('sent', (string) $message->status);
+        $this->assertNotNull($message->sent_at);
+        $this->assertSame(1, data_get($message->metrics, 'accepted_count'));
+        $this->assertSame(1, data_get($message->metrics, 'sent_count'));
+
+        $log = PushDeliveryLog::query()->firstOrFail();
+        $this->assertSame((string) $message->_id, (string) $log->push_message_id);
+        $this->assertSame('accepted', (string) $log->status);
+        $this->assertSame('individual_direct', (string) $log->delivery_topology);
     }
 
     public function test_send_invite_skips_invite_push_authoring_when_runtime_prerequisites_are_missing(): void
@@ -396,14 +549,16 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('invite_accepted', (string) $message->type);
         $this->assertSame([(string) $this->sender->_id], $message->audience['user_ids'] ?? []);
         $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame('invite_accepted', data_get($message->fcm_options, 'data.push_type'));
+        $this->assertSame((string) $this->receiver->_id, data_get($message->fcm_options, 'data.accepted_by_user_id'));
         $this->assertSame(
-            (string) $this->receiver->_id,
-            data_get($message->payload_template, 'accepted_by.user_id'),
+            $this->accountProfileIdFor($this->receiver),
+            data_get($message->fcm_options, 'data.accepted_by_account_profile_id'),
         );
-        $this->assertSame(
-            'Receiver User',
-            data_get($message->payload_template, 'accepted_by.display_name'),
-        );
+        $this->assertSame('Receiver User', data_get($message->fcm_options, 'data.accepted_by_display_name'));
+        $this->assertSame('ic_notification_invite', data_get($message->fcm_options, 'android.notification.icon'));
+        $this->assertNotEmpty(data_get($message->fcm_options, 'notification.image'));
+        $this->assertNull(data_get($message->payload_template, 'layoutType'));
 
         Bus::assertDispatched(SendPushMessageJob::class);
     }
@@ -1926,6 +2081,30 @@ class InvitesFlowTest extends TestCaseTenant
         $envelope = $property->getValue($job);
 
         return $envelope;
+    }
+
+    private function useMongoQueueRuntimeForTest(): void
+    {
+        config([
+            'queue.default' => 'mongodb',
+            'queue.connections.mongodb.connection' => 'mongodb',
+            'queue.connections.mongodb.collection' => 'jobs',
+            'queue.connections.mongodb.queue' => 'default',
+            'queue.failed.driver' => 'null',
+        ]);
+
+        app('db')
+            ->connection('mongodb')
+            ->table('jobs')
+            ->delete();
+    }
+
+    private function queueJobCount(): int
+    {
+        return (int) app('db')
+            ->connection('mongodb')
+            ->table('jobs')
+            ->count();
     }
 
     private function initializeSystem(): void

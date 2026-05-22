@@ -55,34 +55,12 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
                 'user_ids' => [$receiverUserId],
             ],
             'delivery' => [],
-            'payload_template' => [
-                'layoutType' => 'fullScreen',
-                'closeBehavior' => 'after_action',
-                'title' => $notification['title'],
-                'body' => $notification['body'],
-                'steps' => [[
-                    'slug' => 'invite-received',
-                    'type' => 'copy',
-                    'title' => $notification['title'],
-                    'body' => $notification['body'],
-                ]],
-                'buttons' => [],
-                'invite' => $invitePayload,
-                'invites' => [$invitePayload],
-            ],
-            'fcm_options' => [
-                'notification' => [
-                    'title' => $notification['title'],
-                    'body' => $notification['body'],
-                ],
-                'data' => [
-                    'event' => 'invite_received',
-                    'invite_id' => (string) ($invitePayload['id'] ?? ''),
-                    'event_id' => (string) ($invitePayload['event_id'] ?? ''),
-                    'occurrence_id' => (string) ($invitePayload['occurrence_id'] ?? ''),
-                    'push_type' => 'invite_received',
-                ],
-            ],
+            'fcm_options' => $this->inviteFcmOptions(
+                invitePayload: $invitePayload,
+                notification: $notification,
+                pushType: 'invite_received',
+                extraData: [],
+            ),
         ]);
     }
 
@@ -115,39 +93,12 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
                 'user_ids' => [$senderUserId],
             ],
             'delivery' => [],
-            'payload_template' => [
-                'layoutType' => 'fullScreen',
-                'closeBehavior' => 'after_action',
-                'title' => $notification['title'],
-                'body' => $notification['body'],
-                'steps' => [[
-                    'slug' => 'invite-accepted',
-                    'type' => 'copy',
-                    'title' => $notification['title'],
-                    'body' => $notification['body'],
-                ]],
-                'buttons' => [],
-                'invite' => $invitePayload,
-                'invites' => [$invitePayload],
-                'accepted_by' => [
-                    'user_id' => trim((string) $edge->receiver_user_id),
-                    'display_name' => $notification['receiver_name'],
-                    'account_profile_id' => trim((string) $edge->receiver_account_profile_id),
-                ],
-            ],
-            'fcm_options' => [
-                'notification' => [
-                    'title' => $notification['title'],
-                    'body' => $notification['body'],
-                ],
-                'data' => [
-                    'event' => 'invite_accepted',
-                    'invite_id' => (string) ($invitePayload['id'] ?? ''),
-                    'event_id' => (string) ($invitePayload['event_id'] ?? ''),
-                    'occurrence_id' => (string) ($invitePayload['occurrence_id'] ?? ''),
-                    'push_type' => 'invite_accepted',
-                ],
-            ],
+            'fcm_options' => $this->inviteFcmOptions(
+                invitePayload: $invitePayload,
+                notification: $notification,
+                pushType: 'invite_accepted',
+                extraData: $this->acceptedByFcmData($edge),
+            ),
         ]);
     }
 
@@ -221,6 +172,50 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
 
     /**
      * @param  array<string, mixed>  $invitePayload
+     * @param  array{title:string,body:string}  $notification
+     * @return array<string, mixed>
+     */
+    private function inviteFcmOptions(
+        array $invitePayload,
+        array $notification,
+        string $pushType,
+        array $extraData,
+    ): array {
+        $eventImageUrl = trim((string) ($invitePayload['event_image_url'] ?? ''));
+
+        $options = [
+            'notification' => [
+                'title' => $notification['title'],
+                'body' => $notification['body'],
+            ],
+            'android' => [
+                'notification' => [
+                    'icon' => 'ic_notification_invite',
+                ],
+            ],
+            'data' => [
+                'event' => $pushType,
+                'invite_id' => trim((string) ($invitePayload['id'] ?? '')),
+                'event_id' => trim((string) ($invitePayload['event_id'] ?? '')),
+                'occurrence_id' => trim((string) ($invitePayload['occurrence_id'] ?? '')),
+                'push_type' => $pushType,
+                'event_image_url' => $eventImageUrl,
+                'inviter_name' => trim((string) ($invitePayload['inviter_name'] ?? '')),
+                'inviter_avatar_url' => trim((string) ($invitePayload['inviter_avatar_url'] ?? '')),
+                ...$extraData,
+            ],
+        ];
+
+        if ($eventImageUrl !== '') {
+            $options['notification']['image'] = $eventImageUrl;
+            $options['android']['notification']['image'] = $eventImageUrl;
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param  array<string, mixed>  $invitePayload
      * @return array{title:string,body:string,receiver_name:string}
      */
     private function acceptedNotificationCopy(InviteEdge $edge, array $invitePayload): array
@@ -244,6 +239,29 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
             'title' => $title,
             'body' => $body,
             'receiver_name' => $receiverName,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     accepted_by_user_id:string,
+     *     accepted_by_account_profile_id:string,
+     *     accepted_by_display_name:string,
+     *     accepted_by_avatar_url:string
+     * }
+     */
+    private function acceptedByFcmData(InviteEdge $edge): array
+    {
+        $receiverAccountProfileId = trim((string) ($edge->receiver_account_profile_id ?? ''));
+        $resolved = $receiverAccountProfileId === ''
+            ? null
+            : $this->identities->resolveAccountProfileRecipient($receiverAccountProfileId);
+
+        return [
+            'accepted_by_user_id' => trim((string) ($edge->receiver_user_id ?? '')),
+            'accepted_by_account_profile_id' => $receiverAccountProfileId,
+            'accepted_by_display_name' => trim((string) ($resolved['display_name'] ?? '')),
+            'accepted_by_avatar_url' => trim((string) ($resolved['avatar_url'] ?? '')),
         ];
     }
 
