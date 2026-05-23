@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
+use App\Application\Push\InvitePushDeliveryService;
 use App\Integration\Invites\InviteAttendanceGatewayAdapter;
 use App\Integration\Invites\InviteIdentityGatewayAdapter;
+use App\Integration\Invites\InviteRecipientProfileProjectionAdapter;
 use App\Integration\Invites\InviteTargetReadAdapter;
 use App\Integration\Invites\InviteTelemetryEmitterAdapter;
-use App\Application\Push\InvitePushDeliveryService;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InvitePushDeliveryContract;
+use Belluga\Invites\Contracts\InviteRecipientProfileProjectionContract;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Illuminate\Support\ServiceProvider;
@@ -43,6 +45,11 @@ class InvitesIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             InviteTargetReadContract::class,
             InviteTargetReadAdapter::class
+        );
+
+        $this->app->bind(
+            InviteRecipientProfileProjectionContract::class,
+            InviteRecipientProfileProjectionAdapter::class
         );
     }
 }

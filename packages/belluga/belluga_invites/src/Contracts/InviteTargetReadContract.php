@@ -14,6 +14,7 @@ interface InviteTargetReadContract
      *     date_time_start:mixed,
      *     date_time_end:mixed,
      *     publication:mixed,
+     *     event_image_url:?string,
      *     attributes:array<string,mixed>
      * }|null
      */
@@ -30,6 +31,19 @@ interface InviteTargetReadContract
      * }|null
      */
     public function findOccurrenceForEvent(string $eventId, string $occurrenceRef): ?array;
+
+    /**
+     * @return array{
+     *     id:string,
+     *     event_id:string,
+     *     starts_at:mixed,
+     *     ends_at:mixed,
+     *     effective_ends_at:mixed,
+     *     is_event_published:bool,
+     *     attributes:array<string,mixed>
+     * }|null
+     */
+    public function findOccurrenceByIdOrSlug(string $occurrenceRef): ?array;
 
     /**
      * @param  positive-int  $limit
