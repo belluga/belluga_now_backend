@@ -63,4 +63,12 @@ interface InviteIdentityGatewayContract
      * }>
      */
     public function matchImportedContacts(array $contacts, mixed $ownerUser, ?string $saltVersion): array;
+
+    public function refreshInviteablePeopleForUser(mixed $ownerUser): void;
+
+    /**
+     * @param  array<int, array{type:string,hash:string}>  $contacts
+     * @param  array<string, array<string, mixed>>  $matches
+     */
+    public function refreshInviteablePeopleForImportedContacts(mixed $ownerUser, array $contacts, array $matches): void;
 }

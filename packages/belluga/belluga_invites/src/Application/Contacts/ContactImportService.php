@@ -86,6 +86,7 @@ class ContactImportService
             ContactHashDirectory::raw(
                 fn ($collection) => $collection->bulkWrite($operations, ['ordered' => false])
             );
+            $this->identityGateway->refreshInviteablePeopleForImportedContacts($user, $contacts, $matches);
         }
 
         return [
