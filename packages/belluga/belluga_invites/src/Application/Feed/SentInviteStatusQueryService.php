@@ -15,6 +15,10 @@ final class SentInviteStatusQueryService
 {
     private const int MAX_ITEMS = 200;
 
+    private const int DEFAULT_SUMMARY_PREVIEW_LIMIT = 5;
+
+    private const int MAX_SUMMARY_PREVIEW_LIMIT = 10;
+
     /**
      * @var array<int, string>
      */
@@ -54,12 +58,7 @@ final class SentInviteStatusQueryService
         $target = $this->resolveTarget($occurrenceRef, $eventRef);
         $recipientFilter = $this->recipientFilter($query['recipient_account_profile_ids'] ?? null);
 
-        $inviteQuery = InviteEdge::query()
-            ->where('event_id', $target['event_id'])
-            ->where('occurrence_id', $target['occurrence_id'])
-            ->where('issued_by_user_id', $userId)
-            ->where('inviter_principal.kind', 'user')
-            ->where('inviter_principal.principal_id', $userId)
+        $inviteQuery = $this->baseInviteQuery($target, $userId)
             ->orderBy('created_at', 'desc')
             ->orderBy('_id', 'desc')
             ->limit(self::MAX_ITEMS + 1);
@@ -79,30 +78,16 @@ final class SentInviteStatusQueryService
             ->all();
         $profilesById = $this->recipientProfiles->profilesByIds($profileIds);
 
-        $summary = [
-            'pending' => 0,
-            'accepted' => 0,
-            'declined' => 0,
-            'terminal_hidden' => 0,
-        ];
         $items = [];
 
         foreach ($slice as $edge) {
-            $item = $this->edgePayload($edge, $profilesById);
-            $bucket = (string) $item['counts_bucket'];
-            if (array_key_exists($bucket, $summary)) {
-                $summary[$bucket]++;
-            } elseif ($item['ui_visibility'] === 'hidden') {
-                $summary['terminal_hidden']++;
-            }
-            $items[] = $item;
+            $items[] = $this->edgePayload($edge, $profilesById);
         }
 
         return [
             'data' => [
                 'event_id' => $target['event_id'],
                 'occurrence_id' => $target['occurrence_id'],
-                'summary' => $summary,
                 'items' => $items,
             ],
             'metadata' => [
@@ -111,6 +96,116 @@ final class SentInviteStatusQueryService
                 'next_cursor' => null,
             ],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    public function fetchSummary(mixed $user, array $query, string $requestId): array
+    {
+        $userId = $this->userId($user);
+        if ($userId === null) {
+            throw new InviteDomainException('auth_required', 401);
+        }
+
+        $this->rejectClientControlledInviterIdentity($query);
+
+        $occurrenceRef = trim((string) ($query['occurrence_id'] ?? ''));
+        $eventRef = trim((string) ($query['event_id'] ?? ''));
+        if ($occurrenceRef === '') {
+            throw new InviteDomainException('occurrence_id_required', 422, 'occurrence_id is required.');
+        }
+
+        $target = $this->resolveTarget($occurrenceRef, $eventRef);
+        $previewLimit = $this->previewLimit($query['preview_limit'] ?? null);
+        $baseQuery = $this->baseInviteQuery($target, $userId);
+
+        $pending = (clone $baseQuery)
+            ->whereIn('status', ['pending', 'viewed'])
+            ->count();
+        $accepted = (clone $baseQuery)
+            ->where('status', 'accepted')
+            ->count();
+        $declined = (clone $baseQuery)
+            ->where('status', 'declined')
+            ->count();
+        $terminalHidden = (clone $baseQuery)
+            ->whereNotIn('status', ['pending', 'viewed', 'accepted', 'declined'])
+            ->count();
+        $totalSent = (clone $baseQuery)->count();
+
+        $previewEdges = (clone $baseQuery)
+            ->orderBy('created_at', 'desc')
+            ->orderBy('_id', 'desc')
+            ->limit($previewLimit)
+            ->get();
+
+        return [
+            'data' => [
+                'event_id' => $target['event_id'],
+                'occurrence_id' => $target['occurrence_id'],
+                'summary' => [
+                    'pending' => $pending,
+                    'accepted' => $accepted,
+                    'declined' => $declined,
+                    'terminal_hidden' => $terminalHidden,
+                    'total_visible' => $pending + $accepted + $declined,
+                    'total_sent' => $totalSent,
+                ],
+                'preview' => $this->itemsFromEdges($previewEdges),
+            ],
+            'metadata' => [
+                'request_id' => $requestId,
+                'preview_limit' => $previewLimit,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     * @param  array<int, string>  $recipientAccountProfileIds
+     * @return array<string, array<string, mixed>>
+     */
+    public function statusMapForRecipients(mixed $user, array $query, array $recipientAccountProfileIds): array
+    {
+        $userId = $this->userId($user);
+        if ($userId === null) {
+            throw new InviteDomainException('auth_required', 401);
+        }
+
+        $this->rejectClientControlledInviterIdentity($query);
+
+        $occurrenceRef = trim((string) ($query['occurrence_id'] ?? ''));
+        $eventRef = trim((string) ($query['event_id'] ?? ''));
+        if ($occurrenceRef === '') {
+            throw new InviteDomainException('occurrence_id_required', 422, 'occurrence_id is required.');
+        }
+
+        $recipientFilter = $this->recipientFilter($recipientAccountProfileIds);
+        if ($recipientFilter === []) {
+            return [];
+        }
+
+        $target = $this->resolveTarget($occurrenceRef, $eventRef);
+        $edges = $this->baseInviteQuery($target, $userId)
+            ->whereIn('receiver_account_profile_id', $recipientFilter)
+            ->orderBy('created_at', 'desc')
+            ->orderBy('_id', 'desc')
+            ->limit(count($recipientFilter) * 2)
+            ->get();
+
+        $items = $this->itemsFromEdges($edges);
+        $byProfileId = [];
+        foreach ($items as $item) {
+            $profileId = trim((string) ($item['receiver_account_profile_id'] ?? ''));
+            if ($profileId === '' || array_key_exists($profileId, $byProfileId)) {
+                continue;
+            }
+            $byProfileId[$profileId] = $item;
+        }
+
+        return $byProfileId;
     }
 
     /**
@@ -198,6 +293,47 @@ final class SentInviteStatusQueryService
             static fn (mixed $value): string => trim((string) $value),
             $values,
         ))));
+    }
+
+    /**
+     * @param  array{event_id:string,occurrence_id:string}  $target
+     */
+    private function baseInviteQuery(array $target, string $userId): mixed
+    {
+        return InviteEdge::query()
+            ->where('event_id', $target['event_id'])
+            ->where('occurrence_id', $target['occurrence_id'])
+            ->where('issued_by_user_id', $userId)
+            ->where('inviter_principal.kind', 'user')
+            ->where('inviter_principal.principal_id', $userId);
+    }
+
+    private function previewLimit(mixed $raw): int
+    {
+        $value = is_numeric($raw) ? (int) $raw : self::DEFAULT_SUMMARY_PREVIEW_LIMIT;
+
+        return max(1, min(self::MAX_SUMMARY_PREVIEW_LIMIT, $value));
+    }
+
+    /**
+     * @param  iterable<int, InviteEdge>  $edges
+     * @return array<int, array<string, mixed>>
+     */
+    private function itemsFromEdges(iterable $edges): array
+    {
+        $edgeList = collect($edges)->values();
+        $profileIds = $edgeList
+            ->map(static fn (InviteEdge $edge): string => trim((string) ($edge->receiver_account_profile_id ?? '')))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $profilesById = $this->recipientProfiles->profilesByIds($profileIds);
+
+        return $edgeList
+            ->map(fn (InviteEdge $edge): array => $this->edgePayload($edge, $profilesById))
+            ->values()
+            ->all();
     }
 
     /**

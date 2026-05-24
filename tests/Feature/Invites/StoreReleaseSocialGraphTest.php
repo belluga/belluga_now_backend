@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Social\InviteablePeopleService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -236,6 +237,162 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             $response->json('items.0.inviteable_reasons'),
         );
         $response->assertJsonPath('items.0.profile_exposure_level', 'full_profile');
+    }
+
+    public function test_inviteable_contacts_include_sent_status_actionability_for_selected_occurrence(): void
+    {
+        $viewer = $this->createReleaseUser('Status Viewer', '+55 27 99999-1201');
+        $target = $this->createReleaseUser('Status Contact', '+55 27 99999-1202');
+        $targetProfile = $this->personalProfileFor($target);
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991202')],
+            ],
+        ])->assertOk();
+
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($event),
+            'recipients' => [
+                ['receiver_account_profile_id' => (string) $targetProfile->_id],
+            ],
+        ])->assertOk()->json('created.0.invite_id');
+
+        DB::connection('tenant')->flushQueryLog();
+        DB::connection('tenant')->enableQueryLog();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=1&page_size=50"
+        );
+
+        $response->assertOk();
+        $items = collect($response->json('items'))->keyBy('receiver_account_profile_id');
+        $this->assertArrayHasKey((string) $targetProfile->_id, $items);
+
+        $status = $items[(string) $targetProfile->_id]['sent_invite_status'] ?? null;
+        $this->assertIsArray($status);
+        $this->assertSame($inviteId, $status['invite_id'] ?? null);
+        $this->assertSame('pending', $status['status'] ?? null);
+        $this->assertSame('visible', $status['ui_visibility'] ?? null);
+        $this->assertSame('pending', $status['counts_bucket'] ?? null);
+        $this->assertTrue((bool) ($status['blocks_reinvite'] ?? false));
+
+        $inviteQueries = collect(DB::connection('tenant')->getQueryLog())->filter(
+            static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'invite_edges')
+        );
+        $this->assertLessThanOrEqual(1, $inviteQueries->count(), 'Inviteable row status must be enriched with one bounded invite_edges lookup.');
+    }
+
+    public function test_inviteable_contacts_sent_status_is_bounded_to_current_page(): void
+    {
+        $viewer = $this->createReleaseUser('Paged Viewer', '+55 27 99999-1211');
+        $alpha = $this->createReleaseUser('Alpha Contact', '+55 27 99999-1212');
+        $beta = $this->createReleaseUser('Beta Contact', '+55 27 99999-1213');
+        $alphaProfile = $this->personalProfileFor($alpha);
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991212')],
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991213')],
+            ],
+        ])->assertOk();
+
+        $initialSecondPage = $this->getJson(
+            "{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=2&page_size=1"
+        );
+        $initialSecondPage->assertOk();
+        $initialSecondPage->assertJsonCount(1, 'items');
+        $secondPageProfileId = (string) $initialSecondPage->json('items.0.receiver_account_profile_id');
+        $this->assertNotSame('', $secondPageProfileId);
+
+        $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $secondPageProfileId],
+            ],
+        ])->assertOk();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=1&page_size=1"
+        );
+
+        $response->assertOk();
+        $response->assertJsonCount(1, 'items');
+        $response->assertJsonPath('items.0.receiver_account_profile_id', (string) $alphaProfile->_id);
+        $response->assertJsonPath('items.0.sent_invite_status', null);
+        $response->assertJsonPath('metadata.page', 1);
+        $response->assertJsonPath('metadata.page_size', 1);
+        $response->assertJsonPath('metadata.has_more', true);
+
+        $secondPage = $this->getJson(
+            "{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=2&page_size=1"
+        );
+
+        $secondPage->assertOk();
+        $secondPage->assertJsonCount(1, 'items');
+        $secondPage->assertJsonPath('items.0.receiver_account_profile_id', $secondPageProfileId);
+        $this->assertSame('pending', $secondPage->json('items.0.sent_invite_status.status'));
+        $this->assertSame(
+            $secondPage->json('items.0.receiver_account_profile_id'),
+            $secondPage->json('items.0.sent_invite_status.receiver_account_profile_id'),
+        );
+        $secondPage->assertJsonPath('metadata.page', 2);
+        $secondPage->assertJsonPath('metadata.has_more', false);
+    }
+
+    public function test_inviteable_contacts_occurrence_context_uses_bounded_page_service(): void
+    {
+        $viewer = $this->createReleaseUser('Page Service Viewer', '+55 27 99999-1221');
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+
+        $service = new class extends InviteablePeopleService
+        {
+            public int $pageCalls = 0;
+
+            public int $fullCalls = 0;
+
+            public ?int $lastPage = null;
+
+            public ?int $lastPageSize = null;
+
+            public function inviteableItemsFor(AccountUser $viewer, ?int $sourceRowLimit = null): array
+            {
+                $this->fullCalls++;
+
+                return [];
+            }
+
+            public function inviteablePageFor(AccountUser $viewer, int $page, int $pageSize): array
+            {
+                $this->pageCalls++;
+                $this->lastPage = $page;
+                $this->lastPageSize = $pageSize;
+
+                return [
+                    'items' => [],
+                    'has_more' => false,
+                ];
+            }
+        };
+        $this->app->instance(InviteablePeopleService::class, $service);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $response = $this->getJson(
+            "{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=3&page_size=20"
+        );
+
+        $response->assertOk();
+        $this->assertSame(1, $service->pageCalls);
+        $this->assertSame(0, $service->fullCalls);
+        $this->assertSame(3, $service->lastPage);
+        $this->assertSame(20, $service->lastPageSize);
     }
 
     public function test_inviteable_contacts_exclude_the_authenticated_user(): void

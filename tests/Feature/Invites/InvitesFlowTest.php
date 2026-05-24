@@ -1600,10 +1600,7 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertOk();
         $response->assertJsonPath('data.event_id', (string) $this->event->_id);
         $response->assertJsonPath('data.occurrence_id', $occurrenceId);
-        $response->assertJsonPath('data.summary.pending', 1);
-        $response->assertJsonPath('data.summary.accepted', 1);
-        $response->assertJsonPath('data.summary.declined', 0);
-        $response->assertJsonPath('data.summary.terminal_hidden', 0);
+        $this->assertNull($response->json('data.summary'));
         $response->assertJsonPath('metadata.truncated', false);
         $this->assertIsString($response->json('metadata.request_id'));
 
@@ -1772,10 +1769,7 @@ class InvitesFlowTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}");
 
         $response->assertOk();
-        $response->assertJsonPath('data.summary.pending', 0);
-        $response->assertJsonPath('data.summary.accepted', 0);
-        $response->assertJsonPath('data.summary.declined', 1);
-        $response->assertJsonPath('data.summary.terminal_hidden', 1);
+        $this->assertNull($response->json('data.summary'));
 
         $items = collect($response->json('data.items'))->keyBy('invite_id');
         $this->assertSame('declined', $items[$declinedInviteId]['status'] ?? null);
@@ -1847,6 +1841,66 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertStringContainsString("'event_id' => 1", $migrationSource);
         $this->assertStringContainsString("'occurrence_id' => 1", $migrationSource);
         $this->assertStringContainsString("'created_at' => -1", $migrationSource);
+    }
+
+    public function test_sent_invite_summary_returns_exact_counts_over_more_than_200_sent_invites(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $now = Carbon::now();
+
+        for ($index = 0; $index < 205; $index++) {
+            InviteEdge::query()->create([
+                'event_id' => (string) $this->event->_id,
+                'occurrence_id' => $occurrenceId,
+                'receiver_user_id' => (string) new \MongoDB\BSON\ObjectId,
+                'receiver_account_profile_id' => (string) new \MongoDB\BSON\ObjectId,
+                'inviter_principal' => [
+                    'kind' => 'user',
+                    'principal_id' => (string) $this->sender->_id,
+                ],
+                'issued_by_user_id' => (string) $this->sender->_id,
+                'status' => $index < 203 ? 'pending' : 'accepted',
+                'credited_acceptance' => $index >= 203,
+                'source' => 'direct_invite',
+                'created_at' => $now->copy()->subSeconds($index),
+                'updated_at' => $now->copy()->subSeconds($index),
+                'accepted_at' => $index >= 203 ? $now->copy()->subSeconds($index) : null,
+            ]);
+        }
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->getJson(
+            "{$this->base_api_tenant}invites/sent-summary?occurrence_id={$occurrenceId}&event_id={$this->event->_id}&preview_limit=5"
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.event_id', (string) $this->event->_id);
+        $response->assertJsonPath('data.occurrence_id', $occurrenceId);
+        $response->assertJsonPath('data.summary.pending', 203);
+        $response->assertJsonPath('data.summary.accepted', 2);
+        $response->assertJsonPath('data.summary.declined', 0);
+        $response->assertJsonPath('data.summary.terminal_hidden', 0);
+        $response->assertJsonPath('data.summary.total_visible', 205);
+        $response->assertJsonPath('data.summary.total_sent', 205);
+        $response->assertJsonCount(5, 'data.preview');
+        $response->assertJsonPath('metadata.preview_limit', 5);
+        $this->assertIsString($response->json('metadata.request_id'));
+    }
+
+    public function test_sent_invite_summary_rejects_event_only_and_occurrence_event_mismatch_requests(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $anotherEvent = $this->createEvent();
+
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $eventOnlyResponse = $this->getJson("{$this->base_api_tenant}invites/sent-summary?event_id={$this->event->_id}");
+        $eventOnlyResponse->assertStatus(422);
+        $eventOnlyResponse->assertJsonPath('error.code', 'occurrence_id_required');
+
+        $mismatchResponse = $this->getJson("{$this->base_api_tenant}invites/sent-summary?occurrence_id={$occurrenceId}&event_id={$anotherEvent->_id}");
+        $mismatchResponse->assertStatus(422);
+        $mismatchResponse->assertJsonPath('error.code', 'occurrence_event_mismatch');
     }
 
     public function test_accepting_invite_supersedes_only_same_occurrence_candidates(): void

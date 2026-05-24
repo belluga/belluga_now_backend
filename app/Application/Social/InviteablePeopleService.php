@@ -21,19 +21,20 @@ class InviteablePeopleService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function inviteableItemsFor(AccountUser $viewer): array
+    public function inviteableItemsFor(AccountUser $viewer, ?int $sourceRowLimit = null): array
     {
         $viewerId = $this->userId($viewer);
         if ($viewerId === '') {
             return [];
         }
+        $sourceLimit = $this->sourceRowLimit($sourceRowLimit);
 
         $contactDirectories = ContactHashDirectory::query()
             ->where('importing_user_id', $viewerId)
             ->whereNotNull('matched_user_id')
             ->where('matched_user_id', '!=', '')
             ->orderBy('_id')
-            ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
+            ->limit($sourceLimit)
             ->get();
 
         $outboundFavorites = FavoriteEdge::query()
@@ -42,7 +43,7 @@ class InviteablePeopleService
             ->where('target_type', self::TARGET_TYPE)
             ->orderBy('favorited_at', 'desc')
             ->orderBy('_id')
-            ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
+            ->limit($sourceLimit)
             ->get();
 
         $matchedUserIds = $contactDirectories
@@ -72,7 +73,7 @@ class InviteablePeopleService
                 ->where('target_id', (string) $viewerProfile->_id)
                 ->orderBy('favorited_at', 'desc')
                 ->orderBy('_id')
-                ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
+                ->limit($sourceLimit)
                 ->get();
         }
 
@@ -209,6 +210,28 @@ class InviteablePeopleService
         });
 
         return array_values($items);
+    }
+
+    /**
+     * @return array{items:array<int, array<string, mixed>>,has_more:bool}
+     */
+    public function inviteablePageFor(AccountUser $viewer, int $page, int $pageSize): array
+    {
+        $offset = max(0, ($page - 1) * $pageSize);
+        $neededRows = $offset + $pageSize + 1;
+        $items = $this->inviteableItemsFor($viewer, $neededRows);
+
+        return [
+            'items' => array_slice($items, $offset, $pageSize),
+            'has_more' => count($items) > ($offset + $pageSize),
+        ];
+    }
+
+    private function sourceRowLimit(?int $requested): int
+    {
+        $limit = $requested ?? self::MAX_INVITEABLE_SOURCE_ROWS;
+
+        return max(1, min(self::MAX_INVITEABLE_SOURCE_ROWS, $limit));
     }
 
     /**
