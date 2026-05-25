@@ -14,7 +14,6 @@ use App\Integration\Invites\InviteTelemetryEmitterAdapter;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
-use Belluga\Favorites\Domain\Events\FavoriteAdded;
 use Belluga\Favorites\Domain\Events\FavoriteRemoved;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
@@ -63,15 +62,6 @@ class InvitesIntegrationServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        Event::listen(
-            FavoriteAdded::class,
-            fn (FavoriteAdded $event): null => $this->refreshInviteablesForFavorite(
-                ownerUserId: $event->ownerUserId,
-                registryKey: $event->registryKey,
-                targetType: $event->targetType,
-                targetId: $event->targetId,
-            )
-        );
         Event::listen(
             FavoriteRemoved::class,
             fn (FavoriteRemoved $event): null => $this->refreshInviteablesForFavorite(

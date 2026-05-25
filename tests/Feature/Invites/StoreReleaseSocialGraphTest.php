@@ -18,6 +18,7 @@ use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Favorites\Application\Favorites\FavoritesCommandService;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteCommandIdempotency;
@@ -31,6 +32,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -76,6 +78,13 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ->deleteMany([]);
 
         $this->makePersonalProfilesInviteable();
+    }
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+
+        parent::tearDown();
     }
 
     public function test_contact_import_returns_profile_scoped_inviteable_match_and_respects_discoverability(): void
@@ -694,6 +703,37 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $groups->assertOk();
         $groups->assertJsonPath('data.0.name', 'Rolê');
         $this->assertSame([], $groups->json('data.0.recipient_account_profile_ids'));
+    }
+
+    public function test_favorite_command_refreshes_inviteables_once_per_mutation(): void
+    {
+        $owner = $this->createReleaseUser('Favorite Projection Owner', '+55 27 99999-2052');
+        $target = $this->createReleaseUser('Favorite Projection Target', '+55 27 99999-2053');
+        $targetProfile = $this->personalProfileFor($target);
+
+        $projection = Mockery::mock(InviteablePeopleProjectionService::class);
+        $projection
+            ->shouldReceive('refreshImpactedByFavorite')
+            ->twice()
+            ->with((string) $owner->_id, (string) $targetProfile->_id)
+            ->andReturnNull();
+        $this->app->instance(InviteablePeopleProjectionService::class, $projection);
+
+        $service = $this->app->make(FavoritesCommandService::class);
+        $service->favorite(
+            ownerUserId: (string) $owner->_id,
+            targetId: (string) $targetProfile->_id,
+            registryKey: 'account_profile',
+            targetType: 'account_profile',
+        );
+        $service->unfavorite(
+            ownerUserId: (string) $owner->_id,
+            targetId: (string) $targetProfile->_id,
+            registryKey: 'account_profile',
+            targetType: 'account_profile',
+        );
+
+        $this->addToAssertionCount(1);
     }
 
     public function test_contact_groups_preserve_inviteable_members_beyond_first_inviteables_page(): void
