@@ -607,15 +607,24 @@ class InviteablePeopleService
      */
     public function inviteableProfileIdSetFor(AccountUser $viewer): array
     {
-        $set = [];
-        foreach ($this->inviteableItemsFor($viewer, self::MAX_PAGE_SIZE) as $item) {
-            $profileId = trim((string) ($item['receiver_account_profile_id'] ?? ''));
-            if ($profileId !== '') {
-                $set[$profileId] = true;
-            }
+        $viewerId = $this->userId($viewer);
+        if ($viewerId === '') {
+            return [];
         }
 
-        return $set;
+        return InviteablePeopleProjection::query()
+            ->where('owner_user_id', $viewerId)
+            ->where('is_inviteable', true)
+            ->get(['receiver_account_profile_id'])
+            ->pluck('receiver_account_profile_id')
+            ->reduce(static function (array $set, mixed $value): array {
+                $profileId = trim((string) $value);
+                if ($profileId !== '') {
+                    $set[$profileId] = true;
+                }
+
+                return $set;
+            }, []);
     }
 
     /**

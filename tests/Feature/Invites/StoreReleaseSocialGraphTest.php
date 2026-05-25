@@ -696,6 +696,51 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $this->assertSame([], $groups->json('data.0.recipient_account_profile_ids'));
     }
 
+    public function test_contact_groups_preserve_inviteable_members_beyond_first_inviteables_page(): void
+    {
+        $owner = $this->createReleaseUser('Large Group Owner', '+55 27 99999-2051');
+        $lastProfileId = null;
+        $now = Carbon::now();
+
+        for ($index = 0; $index < 101; $index++) {
+            $profileId = (string) new \MongoDB\BSON\ObjectId;
+            $lastProfileId = $profileId;
+
+            InviteablePeopleProjection::query()->create([
+                'owner_user_id' => (string) $owner->_id,
+                'receiver_user_id' => (string) new \MongoDB\BSON\ObjectId,
+                'receiver_account_profile_id' => $profileId,
+                'display_name' => sprintf('Inviteable %03d', $index),
+                'avatar_url' => null,
+                'cover_url' => null,
+                'profile_type' => 'personal',
+                'profile_exposure_level' => 'aggregate_only',
+                'inviteable_reasons' => ['contact_match'],
+                'source_tags' => ['contact_match'],
+                'is_inviteable' => true,
+                'contact_hash' => null,
+                'contact_type' => null,
+                'sort_name' => sprintf('inviteable %03d', $index),
+                'materialized_at' => $now,
+            ]);
+        }
+
+        Sanctum::actingAs($owner, ['*']);
+        $create = $this->postJson("{$this->base_api_tenant}contact-groups", [
+            'name' => 'Lista grande',
+            'recipient_account_profile_ids' => [$lastProfileId],
+        ]);
+
+        $create->assertCreated();
+        $this->assertSame([$lastProfileId], $create->json('data.recipient_account_profile_ids'));
+        $this->assertSame(
+            [$lastProfileId],
+            $this->getJson("{$this->base_api_tenant}contact-groups")
+                ->assertOk()
+                ->json('data.0.recipient_account_profile_ids')
+        );
+    }
+
     public function test_contact_group_crud_is_owner_private_and_validated(): void
     {
         $owner = $this->createReleaseUser('Private Group Owner', '+55 27 99999-2101');

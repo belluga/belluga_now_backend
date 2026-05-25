@@ -1618,6 +1618,49 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertNotEmpty($items[$acceptedInviteId]['responded_at'] ?? null);
     }
 
+    public function test_sent_invite_reads_include_account_profile_principal_invites_issued_by_authenticated_user(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $senderProfile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Sender Profile Principal',
+            'created_by' => (string) $this->sender->_id,
+            'created_by_type' => 'tenant',
+            'updated_by' => (string) $this->sender->_id,
+            'updated_by_type' => 'tenant',
+            'is_active' => true,
+        ]);
+        $senderProfileId = (string) $senderProfile->_id;
+        $receiverProfileId = $this->accountProfileIdFor($this->receiver);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'account_profile_id' => $senderProfileId,
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $receiverProfileId],
+            ],
+        ])->assertOk()->json('created.0.invite_id');
+
+        $edge = InviteEdge::query()->find($inviteId);
+        $this->assertSame('account_profile', data_get($edge?->inviter_principal, 'kind'));
+        $this->assertSame($senderProfileId, data_get($edge?->inviter_principal, 'principal_id'));
+        $this->assertSame((string) $this->sender->_id, (string) $edge?->issued_by_user_id);
+
+        $statuses = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}");
+        $statuses->assertOk();
+        $statuses->assertJsonCount(1, 'data.items');
+        $statuses->assertJsonPath('data.items.0.invite_id', $inviteId);
+        $statuses->assertJsonPath('data.items.0.receiver_account_profile_id', $receiverProfileId);
+
+        $summary = $this->getJson("{$this->base_api_tenant}invites/sent-summary?occurrence_id={$occurrenceId}");
+        $summary->assertOk();
+        $summary->assertJsonPath('data.summary.pending', 1);
+        $summary->assertJsonPath('data.summary.total_sent', 1);
+        $summary->assertJsonPath('data.preview.0.invite_id', $inviteId);
+    }
+
     public function test_sent_invite_statuses_are_scoped_to_authenticated_inviter(): void
     {
         $secondInviter = $this->createAccountUser('Second Status Inviter');

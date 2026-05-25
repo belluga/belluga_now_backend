@@ -303,9 +303,7 @@ final class SentInviteStatusQueryService
         return InviteEdge::query()
             ->where('event_id', $target['event_id'])
             ->where('occurrence_id', $target['occurrence_id'])
-            ->where('issued_by_user_id', $userId)
-            ->where('inviter_principal.kind', 'user')
-            ->where('inviter_principal.principal_id', $userId);
+            ->where('issued_by_user_id', $userId);
     }
 
     private function previewLimit(mixed $raw): int
