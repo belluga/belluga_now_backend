@@ -23,16 +23,19 @@ final class MeResource
         $userId = (string) $user->_id;
         $inviteMetrics = self::resolveInviteMetrics($userId);
         $personalProfile = self::resolvePersonalProfile($userId);
-        $socialScore = is_array($user->social_score) ? $user->social_score : SocialScoreDefaults::payload();
-        $counters = is_array($user->counters)
-            ? $user->counters
-            : [
-                'pending_invites' => 0,
-                'confirmed_events' => 0,
-                'favorites' => 0,
-            ];
+        $socialScore = [
+            ...SocialScoreDefaults::payload(),
+            ...(is_array($user->social_score) ? $user->social_score : []),
+        ];
+        $counters = [
+            'pending_invites' => 0,
+            'confirmed_events' => 0,
+            'favorites' => 0,
+            ...(is_array($user->counters) ? $user->counters : []),
+        ];
 
         if ($inviteMetrics instanceof PrincipalSocialMetric) {
+            $socialScore['invites_sent'] = (int) $inviteMetrics->invites_sent;
             $socialScore['invites_accepted'] = (int) $inviteMetrics->credited_invite_acceptances;
             $counters['pending_invites'] = (int) $inviteMetrics->pending_invites_received;
         }

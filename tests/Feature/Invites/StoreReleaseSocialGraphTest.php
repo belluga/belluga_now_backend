@@ -8,6 +8,8 @@ use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Social\InviteablePeopleProjectionService;
+use App\Application\Social\InviteablePeopleService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -21,6 +23,7 @@ use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteCommandIdempotency;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
+use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
@@ -63,6 +66,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         InviteCommandIdempotency::query()->delete();
         InviteShareCode::query()->delete();
         ContactHashDirectory::query()->delete();
+        InviteablePeopleProjection::query()->delete();
         PrincipalSocialMetric::query()->delete();
         FavoriteEdge::query()->delete();
         Event::query()->delete();
@@ -238,6 +242,154 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $response->assertJsonPath('items.0.profile_exposure_level', 'full_profile');
     }
 
+    public function test_sent_status_overlay_returns_actionability_for_selected_occurrence(): void
+    {
+        $viewer = $this->createReleaseUser('Status Viewer', '+55 27 99999-1201');
+        $target = $this->createReleaseUser('Status Contact', '+55 27 99999-1202');
+        $targetProfile = $this->personalProfileFor($target);
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991202')],
+            ],
+        ])->assertOk();
+
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($event),
+            'recipients' => [
+                ['receiver_account_profile_id' => (string) $targetProfile->_id],
+            ],
+        ])->assertOk()->json('created.0.invite_id');
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}&event_id={$event->_id}&recipient_account_profile_ids[]={$targetProfile->_id}"
+        );
+
+        $response->assertOk();
+        $items = collect($response->json('data.items'))->keyBy('receiver_account_profile_id');
+        $this->assertArrayHasKey((string) $targetProfile->_id, $items);
+
+        $status = $items[(string) $targetProfile->_id] ?? null;
+        $this->assertIsArray($status);
+        $this->assertSame($inviteId, $status['invite_id'] ?? null);
+        $this->assertSame('pending', $status['status'] ?? null);
+        $this->assertSame('visible', $status['ui_visibility'] ?? null);
+        $this->assertSame('pending', $status['counts_bucket'] ?? null);
+        $this->assertTrue((bool) ($status['blocks_reinvite'] ?? false));
+    }
+
+    public function test_inviteable_contacts_pagination_does_not_inline_occurrence_status(): void
+    {
+        $viewer = $this->createReleaseUser('Paged Viewer', '+55 27 99999-1211');
+        $alpha = $this->createReleaseUser('Alpha Contact', '+55 27 99999-1212');
+        $beta = $this->createReleaseUser('Beta Contact', '+55 27 99999-1213');
+        $alphaProfile = $this->personalProfileFor($alpha);
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991212')],
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991213')],
+            ],
+        ])->assertOk();
+
+        $initialSecondPage = $this->getJson("{$this->base_api_tenant}contacts/inviteables?page=2&page_size=1");
+        $initialSecondPage->assertOk();
+        $initialSecondPage->assertJsonCount(1, 'items');
+        $secondPageProfileId = (string) $initialSecondPage->json('items.0.receiver_account_profile_id');
+        $this->assertNotSame('', $secondPageProfileId);
+
+        $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($event),
+            'recipients' => [
+                ['receiver_account_profile_id' => $secondPageProfileId],
+            ],
+        ])->assertOk();
+
+        $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=1&page_size=1");
+
+        $response->assertOk();
+        $response->assertJsonCount(1, 'items');
+        $response->assertJsonPath('items.0.receiver_account_profile_id', (string) $alphaProfile->_id);
+        $this->assertArrayNotHasKey('sent_invite_status', $response->json('items.0'));
+        $response->assertJsonPath('metadata.page', 1);
+        $response->assertJsonPath('metadata.page_size', 1);
+        $response->assertJsonPath('metadata.has_more', true);
+
+        $secondPage = $this->getJson("{$this->base_api_tenant}contacts/inviteables?occurrence_id={$occurrenceId}&event_id={$event->_id}&page=2&page_size=1");
+
+        $secondPage->assertOk();
+        $secondPage->assertJsonCount(1, 'items');
+        $secondPage->assertJsonPath('items.0.receiver_account_profile_id', $secondPageProfileId);
+        $this->assertArrayNotHasKey('sent_invite_status', $secondPage->json('items.0'));
+        $secondPage->assertJsonPath('metadata.page', 2);
+        $secondPage->assertJsonPath('metadata.has_more', false);
+
+        $statusResponse = $this->getJson(
+            "{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}&event_id={$event->_id}&recipient_account_profile_ids[]={$secondPageProfileId}"
+        );
+        $statusResponse->assertOk();
+        $statusResponse->assertJsonPath('data.items.0.status', 'pending');
+    }
+
+    public function test_inviteable_contacts_paged_query_uses_bounded_page_service(): void
+    {
+        $viewer = $this->createReleaseUser('Page Service Viewer', '+55 27 99999-1221');
+
+        $service = new class extends InviteablePeopleService
+        {
+            public int $pageCalls = 0;
+
+            public int $fullCalls = 0;
+
+            public ?int $lastPage = null;
+
+            public ?int $lastPageSize = null;
+
+            public function inviteableItemsFor(AccountUser $viewer, int $limit = self::DEFAULT_PAGE_SIZE): array
+            {
+                $this->fullCalls++;
+
+                return [];
+            }
+
+            public function inviteablePageFor(AccountUser $viewer, int $page, int $pageSize): array
+            {
+                $this->pageCalls++;
+                $this->lastPage = $page;
+                $this->lastPageSize = $pageSize;
+
+                return [
+                    'items' => [],
+                    'has_more' => false,
+                ];
+            }
+        };
+        $this->app->instance(InviteablePeopleService::class, $service);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $defaultResponse = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+
+        $defaultResponse->assertOk();
+        $this->assertSame(1, $service->pageCalls);
+        $this->assertSame(0, $service->fullCalls);
+        $this->assertSame(1, $service->lastPage);
+        $this->assertSame(InviteablePeopleService::DEFAULT_PAGE_SIZE, $service->lastPageSize);
+
+        $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables?page=3&page_size=20");
+
+        $response->assertOk();
+        $this->assertSame(2, $service->pageCalls);
+        $this->assertSame(0, $service->fullCalls);
+        $this->assertSame(3, $service->lastPage);
+        $this->assertSame(20, $service->lastPageSize);
+    }
+
     public function test_inviteable_contacts_exclude_the_authenticated_user(): void
     {
         $viewer = $this->createReleaseUser('Self Viewer', '+55 27 99999-1011');
@@ -288,6 +440,8 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             'updated_at' => Carbon::now(),
         ]);
 
+        app(InviteablePeopleProjectionService::class)->refreshForUser($viewer);
+
         Sanctum::actingAs($viewer, ['*']);
         $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
 
@@ -296,6 +450,215 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             (string) $targetProfile->_id,
             collect($response->json('items'))->pluck('receiver_account_profile_id')->all(),
         );
+    }
+
+    public function test_inviteable_contacts_get_reads_projection_only_without_contact_hash_recomposition(): void
+    {
+        $viewer = $this->createReleaseUser('Projection Reader Viewer', '+55 27 99999-1111');
+        $projectedTarget = $this->createReleaseUser('Projected Target', '+55 27 99999-1112');
+        $sourceOnlyTarget = $this->createReleaseUser('Source Only Target', '+55 27 99999-1113');
+        $projectedProfile = $this->personalProfileFor($projectedTarget);
+        $sourceOnlyProfile = $this->personalProfileFor($sourceOnlyTarget);
+
+        InviteablePeopleProjection::query()->create([
+            'owner_user_id' => (string) $viewer->_id,
+            'receiver_user_id' => (string) $projectedTarget->_id,
+            'receiver_account_profile_id' => (string) $projectedProfile->_id,
+            'display_name' => 'Projected Target',
+            'avatar_url' => null,
+            'cover_url' => null,
+            'profile_type' => 'personal',
+            'profile_exposure_level' => 'capped_profile',
+            'inviteable_reasons' => ['contact_match'],
+            'source_tags' => ['contact_match'],
+            'is_inviteable' => true,
+            'contact_hash' => hash('sha256', '5527999991112'),
+            'contact_type' => 'phone',
+            'sort_name' => 'projected target',
+            'materialized_at' => Carbon::now(),
+        ]);
+        ContactHashDirectory::query()->create([
+            'importing_user_id' => (string) $viewer->_id,
+            'contact_hash' => hash('sha256', '5527999991113'),
+            'matched_user_id' => (string) $sourceOnlyTarget->_id,
+            'type' => 'phone',
+            'salt_version' => 'v1',
+            'created_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
+        ]);
+
+        Sanctum::actingAs($viewer, ['*']);
+        DB::connection('tenant')->flushQueryLog();
+        DB::connection('tenant')->enableQueryLog();
+
+        $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+
+        $response->assertOk();
+        $this->assertSame(
+            [(string) $projectedProfile->_id],
+            collect($response->json('items'))->pluck('receiver_account_profile_id')->all(),
+        );
+        $this->assertNotContains(
+            (string) $sourceOnlyProfile->_id,
+            collect($response->json('items'))->pluck('receiver_account_profile_id')->all(),
+        );
+
+        $queryLog = json_encode(DB::connection('tenant')->getQueryLog(), JSON_UNESCAPED_SLASHES);
+        $this->assertStringContainsString('inviteable_people_projection', $queryLog);
+        $this->assertStringNotContainsString('contact_hash_directory', $queryLog);
+        $this->assertStringNotContainsString('favorite_edges', $queryLog);
+        $this->assertStringNotContainsString('email_hashes', $queryLog);
+        $this->assertStringNotContainsString('phone_hashes', $queryLog);
+    }
+
+    public function test_contact_import_materializes_inviteable_projection_for_owner(): void
+    {
+        $viewer = $this->createReleaseUser('Projection Import Viewer', '+55 27 99999-1121');
+        $target = $this->createReleaseUser('Projection Import Target', '+55 27 99999-1122');
+        $targetProfile = $this->personalProfileFor($target);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991122')],
+            ],
+        ])->assertOk();
+
+        $this->assertTrue(
+            InviteablePeopleProjection::query()
+                ->where('owner_user_id', (string) $viewer->_id)
+                ->where('receiver_account_profile_id', (string) $targetProfile->_id)
+                ->exists(),
+        );
+
+        $this->getJson("{$this->base_api_tenant}contacts/inviteables")
+            ->assertOk()
+            ->assertJsonPath('items.0.receiver_account_profile_id', (string) $targetProfile->_id);
+    }
+
+    public function test_contact_import_materialization_is_bounded_to_imported_profiles(): void
+    {
+        $viewer = $this->createReleaseUser('Bounded Import Viewer', '+55 27 99999-1161');
+        $target = $this->createReleaseUser('Bounded Import Target', '+55 27 99999-1162');
+        $targetProfile = $this->personalProfileFor($target);
+
+        $this->app->instance(InviteablePeopleService::class, new class extends InviteablePeopleService
+        {
+            public function sourceInviteableItemsFor(AccountUser $viewer, ?int $sourceRowLimit = null): array
+            {
+                throw new \RuntimeException('Full owner inviteables source recomposition is forbidden during contact import.');
+            }
+        });
+
+        for ($index = 0; $index < 1200; $index++) {
+            ContactHashDirectory::query()->create([
+                'importing_user_id' => (string) $viewer->_id,
+                'contact_hash' => hash('sha256', 'bounded-import-existing-'.$index),
+                'matched_user_id' => null,
+                'type' => 'phone',
+                'salt_version' => 'v1',
+                'imported_at' => Carbon::now()->subMinute(),
+                'last_seen_at' => Carbon::now()->subMinute(),
+                'created_at' => Carbon::now()->subMinute(),
+                'updated_at' => Carbon::now()->subMinute(),
+            ]);
+        }
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                [
+                    'type' => 'phone',
+                    'hash' => hash('sha256', '5527999991162'),
+                ],
+            ],
+        ])->assertOk();
+
+        $projectionRows = InviteablePeopleProjection::query()
+            ->where('owner_user_id', (string) $viewer->_id)
+            ->where('receiver_account_profile_id', (string) $targetProfile->_id)
+            ->get();
+
+        $this->assertCount(1, $projectionRows);
+        $this->assertContains('contact_match', $projectionRows->first()->inviteable_reasons ?? []);
+    }
+
+    public function test_favorite_materialization_is_idempotent_and_updates_projection(): void
+    {
+        $viewer = $this->createReleaseUser('Projection Favorite Viewer', '+55 27 99999-1131');
+        $target = $this->createReleaseUser('Projection Favorite Target', '+55 27 99999-1132');
+        $targetProfile = $this->personalProfileFor($target);
+
+        $this->favorite($viewer, $targetProfile);
+        $this->favorite($viewer, $targetProfile);
+
+        $projectionRows = InviteablePeopleProjection::query()
+            ->where('owner_user_id', (string) $viewer->_id)
+            ->where('receiver_account_profile_id', (string) $targetProfile->_id)
+            ->get();
+
+        $this->assertCount(1, $projectionRows);
+        $this->assertContains('favorite_by_you', $projectionRows->first()->inviteable_reasons ?? []);
+    }
+
+    public function test_profile_discoverability_revocation_prunes_projection_without_get_fallback(): void
+    {
+        $viewer = $this->createReleaseUser('Projection Privacy Viewer', '+55 27 99999-1141');
+        $target = $this->createReleaseUser('Projection Privacy Target', '+55 27 99999-1142');
+        $targetProfile = $this->personalProfileFor($target);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'phone', 'hash' => hash('sha256', '5527999991142')],
+            ],
+        ])->assertOk();
+        $this->assertTrue(InviteablePeopleProjection::query()
+            ->where('owner_user_id', (string) $viewer->_id)
+            ->where('receiver_account_profile_id', (string) $targetProfile->_id)
+            ->exists());
+
+        $targetProfile->discoverable_by_contacts = false;
+        $targetProfile->save();
+
+        $this->assertFalse(InviteablePeopleProjection::query()
+            ->where('owner_user_id', (string) $viewer->_id)
+            ->where('receiver_account_profile_id', (string) $targetProfile->_id)
+            ->exists());
+
+        $this->getJson("{$this->base_api_tenant}contacts/inviteables")
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+    }
+
+    public function test_projection_backfill_is_explicit_and_recovers_existing_matched_contacts(): void
+    {
+        $viewer = $this->createReleaseUser('Projection Backfill Viewer', '+55 27 99999-1151');
+        $target = $this->createReleaseUser('Projection Backfill Target', '+55 27 99999-1152');
+        $targetProfile = $this->personalProfileFor($target);
+
+        ContactHashDirectory::query()->create([
+            'importing_user_id' => (string) $viewer->_id,
+            'contact_hash' => hash('sha256', '5527999991152'),
+            'matched_user_id' => (string) $target->_id,
+            'type' => 'phone',
+            'salt_version' => 'v1',
+            'created_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
+        ]);
+
+        Sanctum::actingAs($viewer, ['*']);
+        $this->getJson("{$this->base_api_tenant}contacts/inviteables")
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
+
+        $summary = app(InviteablePeopleProjectionService::class)->backfillAllUsers();
+
+        $this->assertGreaterThanOrEqual(1, $summary['processed']);
+        $this->assertTrue(InviteablePeopleProjection::query()
+            ->where('owner_user_id', (string) $viewer->_id)
+            ->where('receiver_account_profile_id', (string) $targetProfile->_id)
+            ->exists());
     }
 
     public function test_contact_groups_dedupe_members_and_prune_recipients_that_cease_to_be_inviteable(): void
@@ -331,6 +694,51 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $groups->assertOk();
         $groups->assertJsonPath('data.0.name', 'Rolê');
         $this->assertSame([], $groups->json('data.0.recipient_account_profile_ids'));
+    }
+
+    public function test_contact_groups_preserve_inviteable_members_beyond_first_inviteables_page(): void
+    {
+        $owner = $this->createReleaseUser('Large Group Owner', '+55 27 99999-2051');
+        $lastProfileId = null;
+        $now = Carbon::now();
+
+        for ($index = 0; $index < 101; $index++) {
+            $profileId = (string) new \MongoDB\BSON\ObjectId;
+            $lastProfileId = $profileId;
+
+            InviteablePeopleProjection::query()->create([
+                'owner_user_id' => (string) $owner->_id,
+                'receiver_user_id' => (string) new \MongoDB\BSON\ObjectId,
+                'receiver_account_profile_id' => $profileId,
+                'display_name' => sprintf('Inviteable %03d', $index),
+                'avatar_url' => null,
+                'cover_url' => null,
+                'profile_type' => 'personal',
+                'profile_exposure_level' => 'aggregate_only',
+                'inviteable_reasons' => ['contact_match'],
+                'source_tags' => ['contact_match'],
+                'is_inviteable' => true,
+                'contact_hash' => null,
+                'contact_type' => null,
+                'sort_name' => sprintf('inviteable %03d', $index),
+                'materialized_at' => $now,
+            ]);
+        }
+
+        Sanctum::actingAs($owner, ['*']);
+        $create = $this->postJson("{$this->base_api_tenant}contact-groups", [
+            'name' => 'Lista grande',
+            'recipient_account_profile_ids' => [$lastProfileId],
+        ]);
+
+        $create->assertCreated();
+        $this->assertSame([$lastProfileId], $create->json('data.recipient_account_profile_ids'));
+        $this->assertSame(
+            [$lastProfileId],
+            $this->getJson("{$this->base_api_tenant}contact-groups")
+                ->assertOk()
+                ->json('data.0.recipient_account_profile_ids')
+        );
     }
 
     public function test_contact_group_crud_is_owner_private_and_validated(): void

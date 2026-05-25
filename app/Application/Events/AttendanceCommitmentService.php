@@ -7,15 +7,16 @@ namespace App\Application\Events;
 use App\Domain\Events\Events\OccurrenceAttendanceCanceled;
 use App\Domain\Events\Events\OccurrenceAttendanceConfirmed;
 use App\Models\Tenants\AttendanceCommitment;
+use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Invites\Application\Mutations\InviteMutationService;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
-use MongoDB\BSON\UTCDateTime;
+use RuntimeException;
 
 class AttendanceCommitmentService
 {
     public function __construct(
         private readonly InviteMutationService $inviteMutationService,
+        private readonly EventTransactionRunner $transactions,
     ) {}
 
     /**
@@ -70,54 +71,43 @@ class AttendanceCommitmentService
 
     public function confirm(string $userId, string $eventId, string $occurrenceId): AttendanceCommitment
     {
-        $now = Carbon::now();
-        $timestamp = new UTCDateTime((int) $now->getTimestampMs());
+        $this->inviteMutationService->prepareReceiverForDirectConfirmation($userId);
 
-        DB::connection('tenant')
-            ->getMongoDB()
-            ->selectCollection('attendance_commitments')
-            ->updateOne(
-                [
+        /** @var AttendanceCommitment $commitment */
+        $commitment = $this->transactions->run(function () use ($userId, $eventId, $occurrenceId): AttendanceCommitment {
+            $now = Carbon::now();
+
+            $commitment = $this->findByScope($userId, $eventId, $occurrenceId)
+                ?? new AttendanceCommitment([
                     'user_id' => $userId,
                     'event_id' => $eventId,
                     'occurrence_id' => $occurrenceId,
-                ],
-                [
-                    '$set' => [
-                        'kind' => 'free_confirmation',
-                        'status' => 'active',
-                        'source' => 'direct',
-                        'confirmed_at' => $timestamp,
-                        'canceled_at' => null,
-                        'updated_at' => $timestamp,
-                    ],
-                    '$setOnInsert' => [
-                        'user_id' => $userId,
-                        'event_id' => $eventId,
-                        'occurrence_id' => $occurrenceId,
-                        'created_at' => $timestamp,
-                    ],
-                ],
-                ['upsert' => true],
+                ]);
+            $commitment->fill([
+                'kind' => 'free_confirmation',
+                'status' => 'active',
+                'source' => 'direct',
+                'confirmed_at' => $now,
+                'canceled_at' => null,
+            ]);
+            $commitment->save();
+            $commitment = $commitment->fresh();
+            if (! $commitment instanceof AttendanceCommitment) {
+                throw new RuntimeException('Attendance confirmation could not be reloaded after write.');
+            }
+
+            $this->inviteMutationService->supersedePendingInvitesForDirectConfirmation(
+                userId: $userId,
+                eventId: $eventId,
+                occurrenceId: $occurrenceId,
             );
 
-        /** @var AttendanceCommitment $commitment */
-        $commitment = $this->findByScope($userId, $eventId, $occurrenceId)
-            ?? new AttendanceCommitment([
-                'user_id' => $userId,
-                'event_id' => $eventId,
-                'occurrence_id' => $occurrenceId,
-            ]);
-
-        $this->inviteMutationService->supersedePendingInvitesForDirectConfirmation(
-            userId: $userId,
-            eventId: $eventId,
-            occurrenceId: $occurrenceId,
-        );
+            return $commitment;
+        });
 
         event(new OccurrenceAttendanceConfirmed($userId, $eventId, $occurrenceId));
 
-        return $commitment->fresh();
+        return $commitment->fresh() ?? $commitment;
     }
 
     public function unconfirm(string $userId, string $eventId, string $occurrenceId): ?AttendanceCommitment
