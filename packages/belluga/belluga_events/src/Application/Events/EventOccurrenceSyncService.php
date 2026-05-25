@@ -430,6 +430,22 @@ class EventOccurrenceSyncService
         ]);
     }
 
+    public function mirrorThumbFromEvent(Event $event, ?Carbon $now = null): int
+    {
+        $eventId = (string) $event->_id;
+        if (trim($eventId) === '') {
+            return 0;
+        }
+
+        $now ??= Carbon::now();
+
+        return EventOccurrence::query()->where('event_id', $eventId)->update([
+            'thumb' => $this->normalizeArray($event->thumb ?? null),
+            'updated_from_event_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
     public function softDeleteByEventId(string $eventId, mixed $deletedAt = null): void
     {
         $now = $this->toCarbon($deletedAt) ?? Carbon::now();
