@@ -18,6 +18,7 @@ use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Support\InviteDomainException;
 use Illuminate\Support\Carbon;
+use RuntimeException;
 use Throwable;
 
 class InviteMutationService
@@ -187,8 +188,7 @@ class InviteMutationService
         string $inviteId,
         ?string $idempotencyKey = null,
         ?string $shareCode = null,
-    ): array
-    {
+    ): array {
         return $this->idempotencyService->runWithReplay(
             command: 'invite.accept',
             actorUserId: $userId,
@@ -213,7 +213,7 @@ class InviteMutationService
 
         $receiverAccountProfileId = $this->recipientAccountProfileIdForUserId($userId);
         if ($receiverAccountProfileId === null) {
-            return [];
+            throw new RuntimeException('Receiver account profile is required before direct confirmation invite supersession.');
         }
 
         $supersededIds = $this->supersedePendingInvites(
@@ -228,6 +228,16 @@ class InviteMutationService
         }
 
         return $supersededIds;
+    }
+
+    public function prepareReceiverForDirectConfirmation(string $userId): string
+    {
+        $receiverAccountProfileId = $this->recipientAccountProfileIdForUserId($userId);
+        if ($receiverAccountProfileId === null) {
+            throw new RuntimeException('Receiver account profile is required before direct confirmation.');
+        }
+
+        return $receiverAccountProfileId;
     }
 
     /**

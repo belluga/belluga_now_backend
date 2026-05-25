@@ -6,10 +6,11 @@ namespace Belluga\Invites;
 
 use Belluga\Invites\Application\Async\InviteOutboxEmitter;
 use Belluga\Invites\Application\Contacts\ContactImportService;
-use Belluga\Invites\Application\Feed\InviteFeedQueryService;
 use Belluga\Invites\Application\Feed\InviteExpiryService;
+use Belluga\Invites\Application\Feed\InviteFeedQueryService;
 use Belluga\Invites\Application\Feed\InviteProjectionService;
 use Belluga\Invites\Application\Feed\PrincipalSocialMetricsService;
+use Belluga\Invites\Application\Feed\SentInviteStatusQueryService;
 use Belluga\Invites\Application\Mutations\InviteCommandIdempotencyService;
 use Belluga\Invites\Application\Mutations\InviteMutationService;
 use Belluga\Invites\Application\Mutations\InviteShareService;
@@ -22,6 +23,7 @@ use Belluga\Invites\Application\Transactions\InviteTransactionRunner;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InvitePushDeliveryContract;
+use Belluga\Invites\Contracts\InviteRecipientProfileProjectionContract;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
 use Belluga\Invites\Contracts\InviteTelemetryEmitterContract;
 use Illuminate\Support\ServiceProvider;
@@ -41,6 +43,7 @@ class InvitesServiceProvider extends ServiceProvider
         $this->app->singleton(InvitePreviewPayloadFactory::class);
         $this->app->singleton(InviteTargetResolverService::class);
         $this->app->singleton(InviteFeedQueryService::class);
+        $this->app->singleton(SentInviteStatusQueryService::class);
         $this->app->singleton(InviteCommandIdempotencyService::class);
         $this->app->singleton(InviteMutationService::class);
         $this->app->singleton(InviteShareService::class);
@@ -52,6 +55,7 @@ class InvitesServiceProvider extends ServiceProvider
         $this->ensureHostBinding(InviteAttendanceGatewayContract::class);
         $this->ensureHostBinding(InviteTelemetryEmitterContract::class);
         $this->ensureHostBinding(InviteTargetReadContract::class);
+        $this->ensureHostBinding(InviteRecipientProfileProjectionContract::class);
     }
 
     public function boot(): void

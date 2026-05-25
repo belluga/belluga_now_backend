@@ -10,6 +10,7 @@ use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MapPoiCapabilityHandler;
+use Belluga\Events\Contracts\AccountProfileHeroImageResolverContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAsyncQueueMetricsProviderContract;
@@ -48,6 +49,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->ensureHostBinding(EventTaxonomyValidationContract::class);
         $this->ensureHostBinding(EventTaxonomySnapshotResolverContract::class);
         $this->ensureHostBinding(EventTypeResolverContract::class);
+        $this->ensureHostBinding(AccountProfileHeroImageResolverContract::class);
         $this->ensureHostBinding(EventProfileResolverContract::class);
         $this->ensureHostBinding(EventAccountResolverContract::class);
         $this->ensureHostBinding(EventAttendanceReadContract::class);

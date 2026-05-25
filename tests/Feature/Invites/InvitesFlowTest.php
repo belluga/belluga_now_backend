@@ -13,8 +13,8 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
-use App\Models\Tenants\TenantSettings;
 use App\Models\Tenants\TenantProfileType;
+use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -26,8 +26,8 @@ use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
 use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
-use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Contracts\FcmClientContract;
+use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
@@ -36,6 +36,7 @@ use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -292,7 +293,7 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame('invite_received', data_get($message->fcm_options, 'data.event'));
         $this->assertSame('invite_received', data_get($message->fcm_options, 'data.push_type'));
         $this->assertSame('ic_notification_invite', data_get($message->fcm_options, 'android.notification.icon'));
-        $this->assertNotEmpty(data_get($message->fcm_options, 'notification.image'));
+        $this->assertSame('https://example.org/thumb.jpg', data_get($message->fcm_options, 'notification.image'));
         $this->assertSame(
             data_get($message->fcm_options, 'notification.image'),
             data_get($message->fcm_options, 'android.notification.image'),
@@ -1570,6 +1571,465 @@ class InvitesFlowTest extends TestCaseTenant
         );
     }
 
+    public function test_authenticated_inviter_can_fetch_pending_and_accepted_sent_invites_for_occurrence(): void
+    {
+        $secondReceiver = $this->createAccountUser('Second Accepted Receiver');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $pendingInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+        ])->json('created.0.invite_id');
+        $acceptedInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($secondReceiver)],
+            ],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($secondReceiver, ['*']);
+        $this->postJson("{$this->base_api_tenant}invites/{$acceptedInviteId}/accept", [])
+            ->assertOk();
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}&event_id={$this->event->_id}");
+
+        $response->assertOk();
+        $response->assertJsonPath('data.event_id', (string) $this->event->_id);
+        $response->assertJsonPath('data.occurrence_id', $occurrenceId);
+        $this->assertNull($response->json('data.summary'));
+        $response->assertJsonPath('metadata.truncated', false);
+        $this->assertIsString($response->json('metadata.request_id'));
+
+        $items = collect($response->json('data.items'))->keyBy('invite_id');
+        $this->assertSame('pending', $items[$pendingInviteId]['status'] ?? null);
+        $this->assertSame('accepted', $items[$acceptedInviteId]['status'] ?? null);
+        $this->assertSame('visible', $items[$pendingInviteId]['ui_visibility'] ?? null);
+        $this->assertSame('visible', $items[$acceptedInviteId]['ui_visibility'] ?? null);
+        $this->assertSame('account_profile:'.$this->accountProfileIdFor($this->receiver), $items[$pendingInviteId]['recipient_key'] ?? null);
+        $this->assertSame($this->accountProfileIdFor($this->receiver), $items[$pendingInviteId]['receiver_account_profile_id'] ?? null);
+        $this->assertSame((string) $this->receiver->_id, $items[$pendingInviteId]['receiver_user_id'] ?? null);
+        $this->assertSame('Receiver User', $items[$pendingInviteId]['display_name'] ?? null);
+        $this->assertNotEmpty($items[$pendingInviteId]['sent_at'] ?? null);
+        $this->assertNull($items[$pendingInviteId]['responded_at'] ?? null);
+        $this->assertNotEmpty($items[$acceptedInviteId]['responded_at'] ?? null);
+    }
+
+    public function test_sent_invite_reads_include_account_profile_principal_invites_issued_by_authenticated_user(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $senderProfile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Sender Profile Principal',
+            'created_by' => (string) $this->sender->_id,
+            'created_by_type' => 'tenant',
+            'updated_by' => (string) $this->sender->_id,
+            'updated_by_type' => 'tenant',
+            'is_active' => true,
+        ]);
+        $senderProfileId = (string) $senderProfile->_id;
+        $receiverProfileId = $this->accountProfileIdFor($this->receiver);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'account_profile_id' => $senderProfileId,
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $receiverProfileId],
+            ],
+        ])->assertOk()->json('created.0.invite_id');
+
+        $edge = InviteEdge::query()->find($inviteId);
+        $this->assertSame('account_profile', data_get($edge?->inviter_principal, 'kind'));
+        $this->assertSame($senderProfileId, data_get($edge?->inviter_principal, 'principal_id'));
+        $this->assertSame((string) $this->sender->_id, (string) $edge?->issued_by_user_id);
+
+        $statuses = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}");
+        $statuses->assertOk();
+        $statuses->assertJsonCount(1, 'data.items');
+        $statuses->assertJsonPath('data.items.0.invite_id', $inviteId);
+        $statuses->assertJsonPath('data.items.0.receiver_account_profile_id', $receiverProfileId);
+
+        $summary = $this->getJson("{$this->base_api_tenant}invites/sent-summary?occurrence_id={$occurrenceId}");
+        $summary->assertOk();
+        $summary->assertJsonPath('data.summary.pending', 1);
+        $summary->assertJsonPath('data.summary.total_sent', 1);
+        $summary->assertJsonPath('data.preview.0.invite_id', $inviteId);
+    }
+
+    public function test_sent_invite_statuses_are_scoped_to_authenticated_inviter(): void
+    {
+        $secondInviter = $this->createAccountUser('Second Status Inviter');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $receiverAccountProfileId = $this->accountProfileIdFor($this->receiver);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $senderInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $receiverAccountProfileId],
+            ],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($secondInviter, ['*']);
+        $secondInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $receiverAccountProfileId],
+            ],
+        ])->assertOk()->json('created.0.invite_id');
+
+        $senderInvite = InviteEdge::query()->find($senderInviteId);
+        $secondInvite = InviteEdge::query()->find($secondInviteId);
+        $this->assertSame('pending', (string) $senderInvite?->status);
+        $this->assertSame('pending', (string) $secondInvite?->status);
+        $this->assertNull($senderInvite?->supersession_reason);
+        $this->assertNull($secondInvite?->supersession_reason);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}");
+
+        $response->assertOk();
+        $response->assertJsonCount(1, 'data.items');
+        $response->assertJsonPath('data.items.0.invite_id', $senderInviteId);
+        $response->assertJsonPath('data.items.0.receiver_account_profile_id', $receiverAccountProfileId);
+    }
+
+    public function test_sent_invite_statuses_reject_cross_tenant_account_token(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser($this->sender, 'sent-status-primary-token', ['*'])
+            ->plainTextToken;
+        $headers = [
+            'Authorization' => "Bearer {$token}",
+            'Content-Type' => 'application/json',
+        ];
+
+        $this->json(
+            method: 'post',
+            uri: "{$this->base_api_tenant}invites",
+            data: [
+                'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+                'recipients' => [
+                    ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+                ],
+            ],
+            headers: $headers,
+        )->assertOk();
+
+        $primaryResponse = $this->json(
+            method: 'get',
+            uri: "{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}",
+            headers: $headers,
+        );
+        $primaryResponse->assertOk();
+        $primaryResponse->assertJsonCount(1, 'data.items');
+
+        $secondaryTenant = $this->ensureCanonicalTenantExists($this->landlord->tenant_secondary);
+        $secondaryHost = "{$secondaryTenant->subdomain}.{$this->host}";
+        $crossTenantResponse = $this->json(
+            method: 'get',
+            uri: "http://{$secondaryHost}/api/v1/invites/sent-statuses?occurrence_id={$occurrenceId}",
+            headers: $headers,
+        );
+
+        $this->assertContains($crossTenantResponse->status(), [401, 403]);
+        $this->assertNull($crossTenantResponse->json('data'));
+    }
+
+    public function test_sent_invite_statuses_reject_client_controlled_inviter_identity(): void
+    {
+        $secondInviter = $this->createAccountUser('Rejected Client Inviter');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->getJson(
+            "{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}&inviter_id={$secondInviter->_id}&issued_by_user_id={$secondInviter->_id}"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('error.code', 'client_inviter_identity_forbidden');
+    }
+
+    public function test_sent_invite_statuses_reject_event_only_and_occurrence_event_mismatch_requests(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $anotherEvent = $this->createEvent();
+
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $eventOnlyResponse = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?event_id={$this->event->_id}");
+        $eventOnlyResponse->assertStatus(422);
+        $eventOnlyResponse->assertJsonPath('error.code', 'occurrence_id_required');
+
+        $mismatchResponse = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}&event_id={$anotherEvent->_id}");
+        $mismatchResponse->assertStatus(422);
+        $mismatchResponse->assertJsonPath('error.code', 'occurrence_event_mismatch');
+    }
+
+    public function test_sent_invite_statuses_include_declined_and_hidden_superseded_actionability(): void
+    {
+        $secondInviter = $this->createAccountUser('Winner Inviter');
+        $declinedReceiver = $this->createAccountUser('Declined Receiver');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $supersededInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+        ])->json('created.0.invite_id');
+        $declinedInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($declinedReceiver)],
+            ],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($secondInviter, ['*']);
+        $winningInviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+            'recipients' => [
+                ['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)],
+            ],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $this->postJson("{$this->base_api_tenant}invites/{$winningInviteId}/accept", [])
+            ->assertOk();
+
+        Sanctum::actingAs($declinedReceiver, ['*']);
+        $this->postJson("{$this->base_api_tenant}invites/{$declinedInviteId}/decline", [])
+            ->assertOk();
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?occurrence_id={$occurrenceId}");
+
+        $response->assertOk();
+        $this->assertNull($response->json('data.summary'));
+
+        $items = collect($response->json('data.items'))->keyBy('invite_id');
+        $this->assertSame('declined', $items[$declinedInviteId]['status'] ?? null);
+        $this->assertSame('visible', $items[$declinedInviteId]['ui_visibility'] ?? null);
+        $this->assertTrue((bool) ($items[$declinedInviteId]['blocks_reinvite'] ?? false));
+        $this->assertSame('declined', $items[$declinedInviteId]['counts_bucket'] ?? null);
+        $this->assertNotEmpty($items[$declinedInviteId]['responded_at'] ?? null);
+
+        $this->assertSame('superseded', $items[$supersededInviteId]['status'] ?? null);
+        $this->assertSame('hidden', $items[$supersededInviteId]['ui_visibility'] ?? null);
+        $this->assertTrue((bool) ($items[$supersededInviteId]['blocks_reinvite'] ?? false));
+        $this->assertSame('none', $items[$supersededInviteId]['counts_bucket'] ?? null);
+        $this->assertSame('other_invite_credited', $items[$supersededInviteId]['supersession_reason'] ?? null);
+    }
+
+    public function test_sent_invite_statuses_use_bounded_direct_lookup_without_recipient_n_plus_one(): void
+    {
+        $secondReceiver = $this->createAccountUser('N Plus One Receiver');
+        $thirdReceiver = $this->createAccountUser('Third Status Receiver');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $profileIds = [
+            $this->accountProfileIdFor($this->receiver),
+            $this->accountProfileIdFor($secondReceiver),
+            $this->accountProfileIdFor($thirdReceiver),
+        ];
+
+        Sanctum::actingAs($this->sender, ['*']);
+        foreach ($profileIds as $profileId) {
+            $this->postJson("{$this->base_api_tenant}invites", [
+                'target_ref' => $this->targetRefForOccurrence($this->event, $occurrenceId),
+                'recipients' => [
+                    ['receiver_account_profile_id' => $profileId],
+                ],
+            ])->assertOk();
+        }
+
+        DB::connection('tenant')->flushQueryLog();
+        DB::connection('tenant')->enableQueryLog();
+
+        $query = http_build_query([
+            'occurrence_id' => $occurrenceId,
+            'recipient_account_profile_ids' => $profileIds,
+        ]);
+        $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?{$query}");
+
+        $response->assertOk();
+        $response->assertJsonCount(3, 'data.items');
+
+        $queries = collect(DB::connection('tenant')->getQueryLog());
+        $profileQueries = $queries->filter(
+            static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'account_profiles')
+        );
+        $inviteQueries = $queries->filter(
+            static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'invite_edges')
+        );
+
+        $this->assertLessThanOrEqual(1, $profileQueries->count(), 'Recipient profiles must be projected in one bulk lookup.');
+        $this->assertGreaterThanOrEqual(1, $inviteQueries->count(), 'Sent-status lookup must query invite_edges directly.');
+        $this->assertTrue(
+            $inviteQueries->contains(static fn (array $queryLog): bool => str_contains(json_encode($queryLog), $occurrenceId)),
+            'Sent-status invite_edges query must be occurrence-scoped.',
+        );
+
+        $findSentStatusIndex = static fn () => collect(DB::connection('tenant')->getCollection('invite_edges')->listIndexes())
+            ->first(static fn ($index): bool => (string) ($index['name'] ?? '') === 'idx_invite_edges_sent_status_inviter_occurrence');
+        $normalizeIndexKeys = static fn ($index): array => json_decode(json_encode($index['key'] ?? []), true);
+        $expectedRebuiltIndexKeys = [
+            'issued_by_user_id' => 1,
+            'event_id' => 1,
+            'occurrence_id' => 1,
+            'created_at' => -1,
+            '_id' => -1,
+        ];
+        $expectedPreviousIndexKeys = [
+            'issued_by_user_id' => 1,
+            'event_id' => 1,
+            'occurrence_id' => 1,
+            'inviter_principal.kind' => 1,
+            'inviter_principal.principal_id' => 1,
+            'created_at' => -1,
+            '_id' => -1,
+        ];
+
+        $sentStatusIndex = $findSentStatusIndex();
+        $this->assertNotNull($sentStatusIndex, 'Sent-status lookup must have a dedicated occurrence-scoped index.');
+        $this->assertSame(
+            $expectedRebuiltIndexKeys,
+            $normalizeIndexKeys($sentStatusIndex),
+            'Sent-status index must keep equality filters before deterministic sort keys.'
+        );
+
+        $migrationSource = (string) file_get_contents(
+            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php')
+        );
+        $this->assertStringContainsString('idx_invite_edges_sent_status_inviter_occurrence', $migrationSource);
+        $this->assertStringContainsString("'issued_by_user_id' => 1", $migrationSource);
+        $this->assertStringContainsString("'event_id' => 1", $migrationSource);
+        $this->assertStringContainsString("'occurrence_id' => 1", $migrationSource);
+        $this->assertStringContainsString("'created_at' => -1", $migrationSource);
+
+        $rebuildMigrationSource = (string) file_get_contents(
+            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php')
+        );
+        $expectedIndexOrder = [
+            "'issued_by_user_id' => 1",
+            "'event_id' => 1",
+            "'occurrence_id' => 1",
+            "'created_at' => -1",
+            "'_id' => -1",
+        ];
+        $previousPosition = -1;
+
+        foreach ($expectedIndexOrder as $expectedIndexFragment) {
+            $position = strpos($rebuildMigrationSource, $expectedIndexFragment);
+
+            $this->assertNotFalse($position, "Corrected sent-status index is missing {$expectedIndexFragment}.");
+            $this->assertGreaterThan(
+                $previousPosition,
+                $position,
+                "Corrected sent-status index must keep {$expectedIndexFragment} after the previous key."
+            );
+            $previousPosition = $position;
+        }
+
+        $this->assertStringContainsString(
+            "'inviter_principal.kind' => 1",
+            $rebuildMigrationSource,
+            'Rollback must restore the previous sent-status index shape.'
+        );
+
+        $rebuildMigration = require base_path(
+            'packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php'
+        );
+
+        try {
+            $rebuildMigration->down();
+            $rolledBackSentStatusIndex = $findSentStatusIndex();
+
+            $this->assertNotNull($rolledBackSentStatusIndex, 'Rollback must restore the previous sent-status index.');
+            $this->assertSame(
+                $expectedPreviousIndexKeys,
+                $normalizeIndexKeys($rolledBackSentStatusIndex),
+                'Rollback must restore the exact previous sent-status index key order.'
+            );
+        } finally {
+            $rebuildMigration->up();
+        }
+
+        $rebuiltSentStatusIndex = $findSentStatusIndex();
+        $this->assertNotNull($rebuiltSentStatusIndex, 'Reapplying the migration must restore the corrected sent-status index.');
+        $this->assertSame(
+            $expectedRebuiltIndexKeys,
+            $normalizeIndexKeys($rebuiltSentStatusIndex),
+            'Reapplying the migration must restore the corrected sent-status index key order.'
+        );
+    }
+
+    public function test_sent_invite_summary_returns_exact_counts_over_more_than_200_sent_invites(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $now = Carbon::now();
+
+        for ($index = 0; $index < 205; $index++) {
+            InviteEdge::query()->create([
+                'event_id' => (string) $this->event->_id,
+                'occurrence_id' => $occurrenceId,
+                'receiver_user_id' => (string) new \MongoDB\BSON\ObjectId,
+                'receiver_account_profile_id' => (string) new \MongoDB\BSON\ObjectId,
+                'inviter_principal' => [
+                    'kind' => 'user',
+                    'principal_id' => (string) $this->sender->_id,
+                ],
+                'issued_by_user_id' => (string) $this->sender->_id,
+                'status' => $index < 203 ? 'pending' : 'accepted',
+                'credited_acceptance' => $index >= 203,
+                'source' => 'direct_invite',
+                'created_at' => $now->copy()->subSeconds($index),
+                'updated_at' => $now->copy()->subSeconds($index),
+                'accepted_at' => $index >= 203 ? $now->copy()->subSeconds($index) : null,
+            ]);
+        }
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $response = $this->getJson(
+            "{$this->base_api_tenant}invites/sent-summary?occurrence_id={$occurrenceId}&event_id={$this->event->_id}&preview_limit=5"
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.event_id', (string) $this->event->_id);
+        $response->assertJsonPath('data.occurrence_id', $occurrenceId);
+        $response->assertJsonPath('data.summary.pending', 203);
+        $response->assertJsonPath('data.summary.accepted', 2);
+        $response->assertJsonPath('data.summary.declined', 0);
+        $response->assertJsonPath('data.summary.terminal_hidden', 0);
+        $response->assertJsonPath('data.summary.total_visible', 205);
+        $response->assertJsonPath('data.summary.total_sent', 205);
+        $response->assertJsonCount(5, 'data.preview');
+        $response->assertJsonPath('metadata.preview_limit', 5);
+        $this->assertIsString($response->json('metadata.request_id'));
+    }
+
+    public function test_sent_invite_summary_rejects_event_only_and_occurrence_event_mismatch_requests(): void
+    {
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        $anotherEvent = $this->createEvent();
+
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $eventOnlyResponse = $this->getJson("{$this->base_api_tenant}invites/sent-summary?event_id={$this->event->_id}");
+        $eventOnlyResponse->assertStatus(422);
+        $eventOnlyResponse->assertJsonPath('error.code', 'occurrence_id_required');
+
+        $mismatchResponse = $this->getJson("{$this->base_api_tenant}invites/sent-summary?occurrence_id={$occurrenceId}&event_id={$anotherEvent->_id}");
+        $mismatchResponse->assertStatus(422);
+        $mismatchResponse->assertJsonPath('error.code', 'occurrence_event_mismatch');
+    }
+
     public function test_accepting_invite_supersedes_only_same_occurrence_candidates(): void
     {
         $event = $this->createEventWithOccurrences();
@@ -2013,7 +2473,10 @@ class InvitesFlowTest extends TestCaseTenant
                 'hero_image_url' => 'https://example.org/hero.jpg',
             ],
             'thumb' => [
-                'url' => 'https://example.org/thumb.jpg',
+                'type' => 'image',
+                'data' => [
+                    'url' => 'https://example.org/thumb.jpg',
+                ],
             ],
             'date_time_start' => $now->copy()->addDay(),
             'date_time_end' => $now->copy()->addDay()->addHours(4),

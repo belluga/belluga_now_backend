@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integration\Invites;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Social\InviteablePeopleProjectionService;
 use App\Application\Social\InviteablePeopleService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
@@ -16,6 +17,7 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
 {
     public function __construct(
         private readonly InviteablePeopleService $inviteablePeople,
+        private readonly InviteablePeopleProjectionService $inviteablePeopleProjection,
         private readonly AccountProfileBootstrapService $profileBootstrapper,
     ) {}
 
@@ -155,6 +157,20 @@ class InviteIdentityGatewayAdapter implements InviteIdentityGatewayContract
         return $this->inviteablePeople->contactMatchPayloadsFor(
             $accountUser,
             array_values($candidateMatches),
+        );
+    }
+
+    public function refreshInviteablePeopleForUser(mixed $ownerUser): void
+    {
+        $this->inviteablePeopleProjection->refreshForUser($this->requireAccountUser($ownerUser));
+    }
+
+    public function refreshInviteablePeopleForImportedContacts(mixed $ownerUser, array $contacts, array $matches): void
+    {
+        $this->inviteablePeopleProjection->refreshImportedContactsForUser(
+            $this->requireAccountUser($ownerUser),
+            $contacts,
+            $matches,
         );
     }
 

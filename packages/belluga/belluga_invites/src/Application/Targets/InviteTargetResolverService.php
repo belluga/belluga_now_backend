@@ -73,8 +73,6 @@ class InviteTargetResolverService
         $occurrencePayload = $occurrence ? $this->normalizeArray($occurrence['attributes'] ?? []) : [];
         $location = $this->resolveLocationLabel($eventPayload);
         $hostName = $this->resolveHostName($eventPayload);
-        $thumb = $this->normalizeArray($eventPayload['thumb'] ?? []);
-        $venue = $this->normalizeArray($eventPayload['venue'] ?? []);
 
         return [
             'target_ref' => [
@@ -85,7 +83,7 @@ class InviteTargetResolverService
                 'event_name' => (string) ($event['title'] ?? ''),
                 'event_slug' => (string) ($event['slug'] ?? ''),
                 'event_date' => $eventDate,
-                'event_image_url' => $this->resolveImageUrl($thumb, $venue),
+                'event_image_url' => $this->normalizeOptionalString($event['event_image_url'] ?? null),
                 'location' => $location,
                 'host_name' => $hostName,
                 'tags' => array_values(array_map('strval', $this->normalizeArray($eventPayload['tags'] ?? []))),
@@ -192,18 +190,14 @@ class InviteTargetResolverService
         return 'Belluga';
     }
 
-    /**
-     * @param  array<string, mixed>  $thumb
-     * @param  array<string, mixed>  $venue
-     */
-    private function resolveImageUrl(array $thumb, array $venue): ?string
+    private function normalizeOptionalString(mixed $value): ?string
     {
-        foreach ([$thumb['url'] ?? null, $thumb['uri'] ?? null, $venue['hero_image_url'] ?? null, $venue['logo_url'] ?? null] as $candidate) {
-            if (is_string($candidate) && trim($candidate) !== '') {
-                return trim($candidate);
-            }
+        if (! is_string($value)) {
+            return null;
         }
 
-        return null;
+        $normalized = trim($value);
+
+        return $normalized !== '' ? $normalized : null;
     }
 }

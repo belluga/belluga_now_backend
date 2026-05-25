@@ -8,6 +8,7 @@ use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Application\Profiles\LandlordProfileService;
 use App\Application\Push\PushTopicMembershipService;
 use App\Application\Security\ApiAbuseSignalRecorder;
+use App\Application\Social\InviteablePeopleProjectionService;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
@@ -124,6 +125,52 @@ Artisan::command('tenant:environment-snapshot:repair {tenant_slug?} {--all} {--r
 
     return 0;
 })->purpose('Synchronously rebuild tenant environment snapshots for one tenant or for every tenant.');
+
+Artisan::command('invites:inviteable-people-projection:backfill {tenant_slug?} {--all} {--limit=}', function () {
+    /** @var InviteablePeopleProjectionService $service */
+    $service = app(InviteablePeopleProjectionService::class);
+    $limitValue = $this->option('limit');
+    $limit = is_numeric($limitValue) ? max(1, (int) $limitValue) : null;
+
+    if ($this->option('all')) {
+        $tenants = Tenant::query()->get();
+    } else {
+        $tenantSlug = trim((string) $this->argument('tenant_slug'));
+        if ($tenantSlug === '') {
+            $this->error('Provide {tenant_slug} or use --all.');
+
+            return 1;
+        }
+
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant instanceof Tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+        $tenants = collect([$tenant]);
+    }
+
+    foreach ($tenants as $tenant) {
+        if (! $tenant instanceof Tenant) {
+            continue;
+        }
+
+        $tenant->makeCurrent();
+
+        try {
+            $summary = $service->backfillAllUsers($limit);
+            $this->line(json_encode([
+                'tenant_slug' => (string) $tenant->slug,
+                ...$summary,
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        } finally {
+            $tenant->forgetCurrent();
+        }
+    }
+
+    return 0;
+})->purpose('Backfill inviteable_people_projection for one tenant or every tenant before projection-only reads.');
 
 Artisan::command('api-security:abuse-signals:prune', function () {
     $result = app(ApiAbuseSignalRecorder::class)->pruneExpired();

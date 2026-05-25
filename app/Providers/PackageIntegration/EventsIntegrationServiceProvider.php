@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
+use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
@@ -21,6 +22,7 @@ use App\Integration\Events\TenantRadiusSettingsAdapter;
 use App\Listeners\Events\SyncMapPoiOnEventCreated;
 use App\Listeners\Events\SyncMapPoiOnEventDeleted;
 use App\Listeners\Events\SyncMapPoiOnEventUpdated;
+use Belluga\Events\Contracts\AccountProfileHeroImageResolverContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
@@ -60,6 +62,11 @@ class EventsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             EventTypeResolverContract::class,
             EventTypeResolverAdapter::class
+        );
+
+        $this->app->bind(
+            AccountProfileHeroImageResolverContract::class,
+            AccountProfileHeroImageResolver::class
         );
 
         $this->app->bind(

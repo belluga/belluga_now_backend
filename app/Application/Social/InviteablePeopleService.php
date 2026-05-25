@@ -9,9 +9,14 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
+use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 
 class InviteablePeopleService
 {
+    public const int DEFAULT_PAGE_SIZE = 50;
+
+    public const int MAX_PAGE_SIZE = 100;
+
     private const string REGISTRY_KEY = 'account_profile';
 
     private const string TARGET_TYPE = 'account_profile';
@@ -21,29 +26,59 @@ class InviteablePeopleService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function inviteableItemsFor(AccountUser $viewer): array
+    public function inviteableItemsFor(AccountUser $viewer, int $limit = self::DEFAULT_PAGE_SIZE): array
     {
         $viewerId = $this->userId($viewer);
         if ($viewerId === '') {
             return [];
         }
 
-        $contactDirectories = ContactHashDirectory::query()
+        $query = InviteablePeopleProjection::query()
+            ->where('owner_user_id', $viewerId)
+            ->where('is_inviteable', true)
+            ->orderBy('sort_name')
+            ->orderBy('receiver_account_profile_id');
+
+        $query->limit(max(1, min(self::MAX_PAGE_SIZE, $limit)));
+
+        return $query
+            ->get()
+            ->map(fn (InviteablePeopleProjection $projection): array => $this->projectionPayload($projection))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function sourceInviteableItemsFor(AccountUser $viewer, ?int $sourceRowLimit = null): array
+    {
+        $viewerId = $this->userId($viewer);
+        if ($viewerId === '') {
+            return [];
+        }
+        $sourceLimit = $this->sourceRowLimit($sourceRowLimit);
+
+        $contactDirectoryQuery = ContactHashDirectory::query()
             ->where('importing_user_id', $viewerId)
             ->whereNotNull('matched_user_id')
             ->where('matched_user_id', '!=', '')
-            ->orderBy('_id')
-            ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
-            ->get();
+            ->orderBy('_id');
+        if ($sourceLimit !== null) {
+            $contactDirectoryQuery->limit($sourceLimit);
+        }
+        $contactDirectories = $contactDirectoryQuery->get();
 
-        $outboundFavorites = FavoriteEdge::query()
+        $outboundFavoriteQuery = FavoriteEdge::query()
             ->where('owner_user_id', $viewerId)
             ->where('registry_key', self::REGISTRY_KEY)
             ->where('target_type', self::TARGET_TYPE)
             ->orderBy('favorited_at', 'desc')
-            ->orderBy('_id')
-            ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
-            ->get();
+            ->orderBy('_id');
+        if ($sourceLimit !== null) {
+            $outboundFavoriteQuery->limit($sourceLimit);
+        }
+        $outboundFavorites = $outboundFavoriteQuery->get();
 
         $matchedUserIds = $contactDirectories
             ->map(fn (ContactHashDirectory $directory): string => trim((string) ($directory->matched_user_id ?? '')))
@@ -66,14 +101,16 @@ class InviteablePeopleService
 
         $inboundFavorites = collect();
         if ($viewerProfile instanceof AccountProfile) {
-            $inboundFavorites = FavoriteEdge::query()
+            $inboundFavoriteQuery = FavoriteEdge::query()
                 ->where('registry_key', self::REGISTRY_KEY)
                 ->where('target_type', self::TARGET_TYPE)
                 ->where('target_id', (string) $viewerProfile->_id)
                 ->orderBy('favorited_at', 'desc')
-                ->orderBy('_id')
-                ->limit(self::MAX_INVITEABLE_SOURCE_ROWS)
-                ->get();
+                ->orderBy('_id');
+            if ($sourceLimit !== null) {
+                $inboundFavoriteQuery->limit($sourceLimit);
+            }
+            $inboundFavorites = $inboundFavoriteQuery->get();
         }
 
         $inboundOwnerUserIds = $inboundFavorites
@@ -209,6 +246,183 @@ class InviteablePeopleService
         });
 
         return array_values($items);
+    }
+
+    /**
+     * Rebuild one owner/profile projection candidate from source relations.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function sourceInviteableItemForProfile(AccountUser $viewer, AccountProfile|string $targetProfile): ?array
+    {
+        $viewerId = $this->userId($viewer);
+        if ($viewerId === '') {
+            return null;
+        }
+
+        if (! $targetProfile instanceof AccountProfile) {
+            $profileId = trim($targetProfile);
+            if ($profileId === '') {
+                return null;
+            }
+
+            /** @var AccountProfile|null $targetProfile */
+            $targetProfile = AccountProfile::query()
+                ->where('_id', $profileId)
+                ->where('deleted_at', null)
+                ->first();
+        }
+
+        if (! $targetProfile instanceof AccountProfile) {
+            return null;
+        }
+
+        $viewerProfile = $this->personalProfileForUserId($viewerId);
+        $targetUser = $this->profileOwner($targetProfile);
+        if ($this->isSelfTarget($viewer, $viewerProfile, $targetUser, $targetProfile)) {
+            return null;
+        }
+
+        $capabilitiesByType = $this->capabilitiesByProfileType(array_values(array_filter(
+            [$viewerProfile, $targetProfile],
+            static fn (mixed $profile): bool => $profile instanceof AccountProfile,
+        )));
+        if (! $this->profileIsInviteable($targetProfile, $capabilitiesByType)) {
+            return null;
+        }
+
+        $targetUserId = $targetUser instanceof AccountUser ? $this->userId($targetUser) : '';
+        $targetUserIsActive = $targetUser instanceof AccountUser && $targetUser->isActive();
+        $reasons = [];
+        $contactHash = null;
+        $contactType = null;
+
+        if ($targetUserIsActive && $targetUserId !== '') {
+            /** @var ContactHashDirectory|null $contactMatch */
+            $contactMatch = ContactHashDirectory::query()
+                ->where('importing_user_id', $viewerId)
+                ->where('matched_user_id', $targetUserId)
+                ->whereNotNull('matched_user_id')
+                ->orderBy('last_seen_at', 'desc')
+                ->orderBy('_id', 'desc')
+                ->first();
+
+            if ($contactMatch instanceof ContactHashDirectory && $this->profileIsDiscoverableByContacts($targetProfile)) {
+                $reasons[] = 'contact_match';
+                $contactHash = $this->nullableString($contactMatch->contact_hash);
+                $contactType = $this->nullableString($contactMatch->type);
+            }
+        }
+
+        if (FavoriteEdge::query()
+            ->where('owner_user_id', $viewerId)
+            ->where('registry_key', self::REGISTRY_KEY)
+            ->where('target_type', self::TARGET_TYPE)
+            ->where('target_id', (string) $targetProfile->_id)
+            ->exists()) {
+            $reasons[] = 'favorite_by_you';
+        }
+
+        if ($targetUserIsActive && $targetUserId !== '' && $viewerProfile instanceof AccountProfile && FavoriteEdge::query()
+            ->where('owner_user_id', $targetUserId)
+            ->where('registry_key', self::REGISTRY_KEY)
+            ->where('target_type', self::TARGET_TYPE)
+            ->where('target_id', (string) $viewerProfile->_id)
+            ->exists()) {
+            $reasons[] = 'favorited_you';
+        }
+
+        $reasons = array_values(array_unique($reasons));
+        if (
+            in_array('favorite_by_you', $reasons, true)
+            && in_array('favorited_you', $reasons, true)
+            && ! in_array('friend', $reasons, true)
+        ) {
+            $reasons[] = 'friend';
+        }
+
+        if ($reasons === []) {
+            return null;
+        }
+
+        $payload = $this->itemPayload(
+            viewerProfile: $viewerProfile,
+            targetUser: $targetUserIsActive ? $targetUser : null,
+            targetProfile: $targetProfile,
+            reasons: $reasons,
+            contactHash: $contactHash,
+            contactType: $contactType,
+        );
+        $payload['profile_exposure_level'] = $this->exposureLevel(
+            viewerProfile: $viewerProfile,
+            targetProfile: $targetProfile,
+            reasons: $reasons,
+        );
+        unset($payload['_target_profile']);
+
+        return $payload;
+    }
+
+    /**
+     * @return array{items:array<int, array<string, mixed>>,has_more:bool}
+     */
+    public function inviteablePageFor(AccountUser $viewer, int $page, int $pageSize): array
+    {
+        $offset = max(0, ($page - 1) * $pageSize);
+        $viewerId = $this->userId($viewer);
+        if ($viewerId === '') {
+            return [
+                'items' => [],
+                'has_more' => false,
+            ];
+        }
+
+        $rows = InviteablePeopleProjection::query()
+            ->where('owner_user_id', $viewerId)
+            ->where('is_inviteable', true)
+            ->orderBy('sort_name')
+            ->orderBy('receiver_account_profile_id')
+            ->skip($offset)
+            ->limit($pageSize + 1)
+            ->get()
+            ->map(fn (InviteablePeopleProjection $projection): array => $this->projectionPayload($projection))
+            ->values()
+            ->all();
+
+        return [
+            'items' => array_slice($rows, 0, $pageSize),
+            'has_more' => count($rows) > $pageSize,
+        ];
+    }
+
+    private function sourceRowLimit(?int $requested): ?int
+    {
+        if ($requested === null) {
+            return null;
+        }
+
+        return max(1, min(self::MAX_INVITEABLE_SOURCE_ROWS, $requested));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function projectionPayload(InviteablePeopleProjection $projection): array
+    {
+        return [
+            'user_id' => $this->nullableString($projection->receiver_user_id),
+            'receiver_account_profile_id' => (string) ($projection->receiver_account_profile_id ?? ''),
+            'display_name' => (string) ($projection->display_name ?? ''),
+            'avatar_url' => $this->nullableString($projection->avatar_url),
+            'cover_url' => $this->nullableString($projection->cover_url),
+            'profile_type' => (string) ($projection->profile_type ?? ''),
+            'profile_exposure_level' => (string) ($projection->profile_exposure_level ?? 'aggregate_only'),
+            'inviteable_reasons' => is_array($projection->inviteable_reasons) ? array_values(array_map('strval', $projection->inviteable_reasons)) : [],
+            'source_tags' => is_array($projection->source_tags) ? array_values(array_map('strval', $projection->source_tags)) : [],
+            'is_inviteable' => (bool) ($projection->is_inviteable ?? true),
+            'contact_hash' => $this->nullableString($projection->contact_hash),
+            'contact_type' => $this->nullableString($projection->contact_type),
+        ];
     }
 
     /**
@@ -393,15 +607,24 @@ class InviteablePeopleService
      */
     public function inviteableProfileIdSetFor(AccountUser $viewer): array
     {
-        $set = [];
-        foreach ($this->inviteableItemsFor($viewer) as $item) {
-            $profileId = trim((string) ($item['receiver_account_profile_id'] ?? ''));
-            if ($profileId !== '') {
-                $set[$profileId] = true;
-            }
+        $viewerId = $this->userId($viewer);
+        if ($viewerId === '') {
+            return [];
         }
 
-        return $set;
+        return InviteablePeopleProjection::query()
+            ->where('owner_user_id', $viewerId)
+            ->where('is_inviteable', true)
+            ->get(['receiver_account_profile_id'])
+            ->pluck('receiver_account_profile_id')
+            ->reduce(static function (array $set, mixed $value): array {
+                $profileId = trim((string) $value);
+                if ($profileId !== '') {
+                    $set[$profileId] = true;
+                }
+
+                return $set;
+            }, []);
     }
 
     /**

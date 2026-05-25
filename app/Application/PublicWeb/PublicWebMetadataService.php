@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace App\Application\PublicWeb;
 
 use App\Application\AccountProfiles\AccountProfileFormatterService;
+use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
 use App\Application\AccountProfiles\AccountProfileQueryService;
-use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Branding\BrandingManifestService;
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\StaticAssets\StaticAssetQueryService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
+use Belluga\Events\Application\Events\EventHeroImageResolver;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Invites\Application\Mutations\InviteShareService;
@@ -25,7 +27,9 @@ class PublicWebMetadataService
         private readonly BrandingManifestService $brandingManifestService,
         private readonly AccountProfileQueryService $accountProfileQueryService,
         private readonly AccountProfileFormatterService $accountProfileFormatterService,
+        private readonly AccountProfileHeroImageResolver $accountProfileHeroImages,
         private readonly EventQueryService $eventQueryService,
+        private readonly EventHeroImageResolver $eventHeroImages,
         private readonly StaticAssetQueryService $staticAssetQueryService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
         private readonly InviteShareService $inviteShareService,
@@ -95,8 +99,10 @@ class PublicWebMetadataService
             ?: $metadata['description']
         );
         $metadata['image'] = $this->resolveImageUrl([
-            $payload['cover_url'] ?? null,
-            $payload['avatar_url'] ?? null,
+            $this->accountProfileHeroImages->resolveFromPayload(
+                $payload,
+                allowTypeVisualFallback: true
+            ),
             $metadata['image'],
         ]);
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/parceiro/'.trim((string) ($payload['slug'] ?? $slug)));
@@ -135,11 +141,7 @@ class PublicWebMetadataService
             ?: $metadata['description']
         );
         $metadata['image'] = $this->resolveImageUrl([
-            data_get($payload, 'thumb.data.url'),
-            $this->firstProfileImage($payload['linked_account_profiles'] ?? []),
-            $this->firstProfileImage($payload['artists'] ?? []),
-            data_get($payload, 'venue.cover_url'),
-            data_get($payload, 'venue.avatar_url'),
+            $this->eventHeroImages->resolveFromPayload($payload),
             $metadata['image'],
         ]);
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/agenda/evento/'.trim((string) ($payload['slug'] ?? $slug)));
@@ -393,6 +395,7 @@ class PublicWebMetadataService
     private function sanitizeText(string $value): string
     {
         $stripped = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
         return trim((string) preg_replace('/\s+/u', ' ', $stripped));
     }
 
@@ -523,30 +526,6 @@ class PublicWebMetadataService
             'ico' => 'image/vnd.microsoft.icon',
             default => '',
         };
-    }
-
-    /**
-     * @param  array<int, mixed>  $profiles
-     */
-    private function firstProfileImage(array $profiles): ?string
-    {
-        foreach ($profiles as $profile) {
-            if (! is_array($profile)) {
-                continue;
-            }
-
-            $cover = trim((string) ($profile['cover_url'] ?? ''));
-            if ($cover !== '') {
-                return $cover;
-            }
-
-            $avatar = trim((string) ($profile['avatar_url'] ?? ''));
-            if ($avatar !== '') {
-                return $avatar;
-            }
-        }
-
-        return null;
     }
 
     /**
