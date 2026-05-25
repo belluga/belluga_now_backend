@@ -1876,6 +1876,34 @@ class InvitesFlowTest extends TestCaseTenant
             'Sent-status invite_edges query must be occurrence-scoped.',
         );
 
+        $findSentStatusIndex = static fn () => collect(DB::connection('tenant')->getCollection('invite_edges')->listIndexes())
+            ->first(static fn ($index): bool => (string) ($index['name'] ?? '') === 'idx_invite_edges_sent_status_inviter_occurrence');
+        $normalizeIndexKeys = static fn ($index): array => json_decode(json_encode($index['key'] ?? []), true);
+        $expectedRebuiltIndexKeys = [
+            'issued_by_user_id' => 1,
+            'event_id' => 1,
+            'occurrence_id' => 1,
+            'created_at' => -1,
+            '_id' => -1,
+        ];
+        $expectedPreviousIndexKeys = [
+            'issued_by_user_id' => 1,
+            'event_id' => 1,
+            'occurrence_id' => 1,
+            'inviter_principal.kind' => 1,
+            'inviter_principal.principal_id' => 1,
+            'created_at' => -1,
+            '_id' => -1,
+        ];
+
+        $sentStatusIndex = $findSentStatusIndex();
+        $this->assertNotNull($sentStatusIndex, 'Sent-status lookup must have a dedicated occurrence-scoped index.');
+        $this->assertSame(
+            $expectedRebuiltIndexKeys,
+            $normalizeIndexKeys($sentStatusIndex),
+            'Sent-status index must keep equality filters before deterministic sort keys.'
+        );
+
         $migrationSource = (string) file_get_contents(
             base_path('packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php')
         );
@@ -1884,6 +1912,62 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertStringContainsString("'event_id' => 1", $migrationSource);
         $this->assertStringContainsString("'occurrence_id' => 1", $migrationSource);
         $this->assertStringContainsString("'created_at' => -1", $migrationSource);
+
+        $rebuildMigrationSource = (string) file_get_contents(
+            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php')
+        );
+        $expectedIndexOrder = [
+            "'issued_by_user_id' => 1",
+            "'event_id' => 1",
+            "'occurrence_id' => 1",
+            "'created_at' => -1",
+            "'_id' => -1",
+        ];
+        $previousPosition = -1;
+
+        foreach ($expectedIndexOrder as $expectedIndexFragment) {
+            $position = strpos($rebuildMigrationSource, $expectedIndexFragment);
+
+            $this->assertNotFalse($position, "Corrected sent-status index is missing {$expectedIndexFragment}.");
+            $this->assertGreaterThan(
+                $previousPosition,
+                $position,
+                "Corrected sent-status index must keep {$expectedIndexFragment} after the previous key."
+            );
+            $previousPosition = $position;
+        }
+
+        $this->assertStringContainsString(
+            "'inviter_principal.kind' => 1",
+            $rebuildMigrationSource,
+            'Rollback must restore the previous sent-status index shape.'
+        );
+
+        $rebuildMigration = require base_path(
+            'packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php'
+        );
+
+        try {
+            $rebuildMigration->down();
+            $rolledBackSentStatusIndex = $findSentStatusIndex();
+
+            $this->assertNotNull($rolledBackSentStatusIndex, 'Rollback must restore the previous sent-status index.');
+            $this->assertSame(
+                $expectedPreviousIndexKeys,
+                $normalizeIndexKeys($rolledBackSentStatusIndex),
+                'Rollback must restore the exact previous sent-status index key order.'
+            );
+        } finally {
+            $rebuildMigration->up();
+        }
+
+        $rebuiltSentStatusIndex = $findSentStatusIndex();
+        $this->assertNotNull($rebuiltSentStatusIndex, 'Reapplying the migration must restore the corrected sent-status index.');
+        $this->assertSame(
+            $expectedRebuiltIndexKeys,
+            $normalizeIndexKeys($rebuiltSentStatusIndex),
+            'Reapplying the migration must restore the corrected sent-status index key order.'
+        );
     }
 
     public function test_sent_invite_summary_returns_exact_counts_over_more_than_200_sent_invites(): void
