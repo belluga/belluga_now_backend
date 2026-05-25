@@ -18,6 +18,7 @@ class EventMediaService
 
     public function __construct(
         private readonly EventTenantContextContract $tenantContext,
+        private readonly EventOccurrenceSyncService $occurrenceSyncService,
     ) {}
 
     /**
@@ -57,6 +58,7 @@ class EventMediaService
             $event->fill($updates);
             $event->save();
             $event->refresh();
+            $this->occurrenceSyncService->mirrorThumbFromEvent($event);
         }
 
         return $updates;

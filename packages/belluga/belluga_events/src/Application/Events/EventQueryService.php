@@ -415,6 +415,9 @@ class EventQueryService
         $payload = $this->formatEvent($selectedOccurrence, $userId);
         $payload['event_id'] = (string) $event->_id;
         $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
+        $payload['thumb'] = $this->normalizeThumbPayload(
+            $this->normalizeArray($event->thumb ?? null)
+        );
         $payload['occurrences'] = $this->resolveEventOccurrences($event, $selectedOccurrenceId, $preloadedOccurrences);
         $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
             $this->resolveLinkedAccountProfiles(
