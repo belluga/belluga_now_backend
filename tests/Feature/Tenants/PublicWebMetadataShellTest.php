@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Tenants;
 
-use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountProfile;
-use App\Models\Landlord\Tenant;
-use App\Models\Tenants\StaticAsset;
-use App\Models\Tenants\TenantProfileType;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use Belluga\Events\Models\Tenants\Event;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\StaticAsset;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventQueryService;
+use Belluga\Events\Models\Tenants\Event;
 use Belluga\Invites\Application\Mutations\InviteShareService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -136,7 +136,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/parceiro/casa-marracini">', false);
     }
 
-    public function test_event_public_route_injects_event_metadata_with_artist_cover_fallback(): void
+    public function test_event_public_route_injects_event_metadata_with_event_party_profile_cover_fallback(): void
     {
         $tenantOrigin = rtrim($this->base_tenant_url, '/');
         $this->applyPublicWebMetadata([
@@ -232,6 +232,56 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/linked-cover.png">', false);
         $response->assertDontSee('artist-cover.png', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-linked">', false);
+    }
+
+    public function test_event_public_route_ignores_legacy_artists_projection_for_event_image_resolution(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $this->applyPublicWebMetadata([
+            'default_title' => 'Fallback tenant title',
+            'default_description' => 'Fallback tenant description.',
+            'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+
+        $event = new Event([
+            'slug' => 'festival-no-artists',
+        ]);
+
+        $eventQueryService = Mockery::mock(EventQueryService::class);
+        $eventQueryService->shouldReceive('findByIdOrSlug')
+            ->with('festival-no-artists')
+            ->andReturn($event);
+        $eventQueryService->shouldReceive('assertPublicVisible')
+            ->with($event)
+            ->andReturnNull();
+        $eventQueryService->shouldReceive('formatEvent')
+            ->with($event)
+            ->andReturn([
+                'slug' => 'festival-no-artists',
+                'title' => 'Festival No Artists',
+                'content' => 'Show sem fallback legado de artists.',
+                'thumb' => null,
+                'linked_account_profiles' => [],
+                'artists' => [
+                    [
+                        'cover_url' => 'https://tenant.example/media/artist-cover.png',
+                        'avatar_url' => 'https://tenant.example/media/artist-avatar.png',
+                    ],
+                ],
+                'venue' => [
+                    'cover_url' => 'https://tenant.example/media/venue-cover.png',
+                    'avatar_url' => 'https://tenant.example/media/venue-avatar.png',
+                ],
+            ]);
+
+        $this->app->instance(EventQueryService::class, $eventQueryService);
+
+        $response = $this->get("{$this->base_tenant_url}agenda/evento/{$event->slug}");
+
+        $response->assertOk();
+        $response->assertSee('<meta property="og:image" content="https://tenant.example/media/venue-cover.png">', false);
+        $response->assertDontSee('artist-cover.png', false);
+        $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-no-artists">', false);
     }
 
     public function test_unknown_public_route_uses_default_metadata_fallback(): void

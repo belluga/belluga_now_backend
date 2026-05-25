@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Invites;
 
+use Belluga\Events\Application\Events\EventHeroImageResolver;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
@@ -11,6 +12,10 @@ use MongoDB\BSON\ObjectId;
 
 class InviteTargetReadAdapter implements InviteTargetReadContract
 {
+    public function __construct(
+        private readonly EventHeroImageResolver $eventHeroImages,
+    ) {}
+
     public function findEventByIdOrSlug(string $eventRef): ?array
     {
         $event = null;
@@ -28,6 +33,8 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
             return null;
         }
 
+        $attributes = $this->normalizeArray($event->getAttributes());
+
         return [
             'id' => (string) $event->_id,
             'slug' => (string) ($event->slug ?? ''),
@@ -35,7 +42,8 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
             'date_time_start' => $event->date_time_start,
             'date_time_end' => $event->date_time_end,
             'publication' => $event->publication,
-            'attributes' => $this->normalizeArray($event->getAttributes()),
+            'event_image_url' => $this->eventHeroImages->resolveFromPayload($attributes),
+            'attributes' => $attributes,
         ];
     }
 
@@ -60,6 +68,36 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
 
         return [
             'id' => (string) $occurrence->_id,
+            'event_id' => (string) ($occurrence->event_id ?? ''),
+            'starts_at' => $occurrence->starts_at,
+            'ends_at' => $occurrence->ends_at,
+            'effective_ends_at' => $occurrence->effective_ends_at,
+            'is_event_published' => (bool) ($occurrence->is_event_published ?? false),
+            'attributes' => $this->normalizeArray($occurrence->getAttributes()),
+        ];
+    }
+
+    public function findOccurrenceByIdOrSlug(string $occurrenceRef): ?array
+    {
+        $occurrence = null;
+
+        if ($this->looksLikeObjectId($occurrenceRef)) {
+            /** @var EventOccurrence|null $occurrence */
+            $occurrence = EventOccurrence::query()->where('_id', new ObjectId($occurrenceRef))->first();
+        }
+
+        if (! $occurrence) {
+            /** @var EventOccurrence|null $occurrence */
+            $occurrence = EventOccurrence::query()->where('occurrence_slug', $occurrenceRef)->first();
+        }
+
+        if (! $occurrence) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $occurrence->_id,
+            'event_id' => (string) ($occurrence->event_id ?? ''),
             'starts_at' => $occurrence->starts_at,
             'ends_at' => $occurrence->ends_at,
             'effective_ends_at' => $occurrence->effective_ends_at,

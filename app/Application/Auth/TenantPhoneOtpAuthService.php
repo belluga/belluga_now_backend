@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Auth;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Social\InviteablePeopleProjectionService;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
@@ -34,6 +35,7 @@ class TenantPhoneOtpAuthService
         private readonly AnonymousIdentityMerger $identityMerger,
         private readonly AccountProfileBootstrapService $profileBootstrapper,
         private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
+        private readonly InviteablePeopleProjectionService $inviteablePeopleProjection,
     ) {}
 
     /**
@@ -294,6 +296,9 @@ class TenantPhoneOtpAuthService
                 ],
                 'updated_at' => Carbon::now(),
             ]);
+
+        $this->inviteablePeopleProjection->refreshForUser($user);
+        $this->inviteablePeopleProjection->refreshOwnersForContactHashes('phone', $phoneHashes);
     }
 
     /**
