@@ -315,6 +315,57 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->get("{$this->base_tenant_url}events/{$eventId}/cover")->assertOk();
     }
 
+    public function test_public_event_detail_occurrence_uses_event_cover_after_create_upload(): void
+    {
+        Storage::fake('public');
+        $this->venue->cover_url = 'https://example.org/venue-cover.jpg';
+        $this->venue->hero_image_url = 'https://example.org/venue-hero.jpg';
+        $this->venue->save();
+
+        $created = $this->post(
+            $this->accountEventsBase,
+            array_merge($this->makeEventPayload(), [
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ]),
+        );
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $detail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$occurrence->_id}");
+
+        $detail->assertStatus(200);
+        $thumbUrl = (string) $detail->json('data.thumb.data.url');
+        $this->assertNotSame('', $thumbUrl);
+        $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+        $this->assertNotSame($detail->json('data.venue.cover_url'), $thumbUrl);
+    }
+
+    public function test_public_event_detail_occurrence_uses_parent_event_cover_when_occurrence_thumb_is_stale(): void
+    {
+        Storage::fake('public');
+
+        $created = $this->post(
+            $this->accountEventsBase,
+            array_merge($this->makeEventPayload(), [
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ]),
+        );
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrence->forceFill(['thumb' => null])->save();
+
+        $detail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$occurrence->_id}");
+
+        $detail->assertStatus(200);
+        $detail->assertJsonPath('data.occurrence_id', (string) $occurrence->_id);
+        $this->assertStringContainsString(
+            "/api/v1/media/events/{$eventId}/cover",
+            (string) $detail->json('data.thumb.data.url')
+        );
+    }
+
     public function test_event_update_stores_cover_upload_and_exposes_media_url(): void
     {
         Storage::fake('public');
@@ -362,6 +413,35 @@ class EventCrudControllerTest extends TestCaseTenant
         $coverPaths = collect(Storage::disk('public')->allFiles())
             ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
         $this->assertTrue($coverPaths->isEmpty());
+    }
+
+    public function test_event_update_remove_cover_clears_occurrence_detail_thumb(): void
+    {
+        Storage::fake('public');
+
+        $created = $this->post(
+            $this->accountEventsBase,
+            array_merge($this->makeEventPayload(), [
+                'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
+            ]),
+        );
+        $created->assertStatus(201);
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrence->forceFill(['thumb' => $created->json('data.thumb')])->save();
+
+        $response = $this->patchJson(
+            "{$this->accountEventsBase}/{$eventId}",
+            ['remove_cover' => true],
+        );
+
+        $response->assertStatus(200);
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertNull(data_get($freshOccurrence, 'thumb.data.url'));
+
+        $detail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$freshOccurrence->_id}");
+        $detail->assertStatus(200);
+        $this->assertNull($detail->json('data.thumb'));
     }
 
     public function test_event_create_rejects_unknown_event_type_id(): void
