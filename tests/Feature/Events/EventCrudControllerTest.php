@@ -4495,6 +4495,22 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->values()
                 ->all()
         );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            collect($firstItem['event_parties'] ?? [])
+                ->pluck('party_ref_id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $guestArtist->_id],
+            collect($secondItem['event_parties'] ?? [])
+                ->pluck('party_ref_id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
         $this->assertFalse(
             collect($firstItem['linked_account_profiles'] ?? [])
                 ->pluck('id')
