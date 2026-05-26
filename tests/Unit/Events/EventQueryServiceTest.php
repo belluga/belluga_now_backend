@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Events;
 
+use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
+use Belluga\Events\Application\Events\EventHeroImageResolver;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
@@ -63,6 +65,7 @@ class EventQueryServiceTest extends TestCase
             Mockery::mock(EventCapabilitySettingsContract::class),
             Mockery::mock(EventAttendanceReadContract::class),
             Mockery::mock(EventTaxonomySnapshotResolverContract::class),
+            new EventHeroImageResolver(new AccountProfileHeroImageResolver),
         );
     }
 }

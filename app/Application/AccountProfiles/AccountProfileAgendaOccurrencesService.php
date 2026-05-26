@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
+use App\Support\Validation\InputConstraints;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
@@ -47,13 +48,13 @@ class AccountProfileAgendaOccurrencesService
                 ]);
             });
 
-        return $query
+        $occurrences = $query
             ->orderBy('starts_at')
             ->orderBy('_id')
-            ->cursor()
-            ->map(fn (EventOccurrence $occurrence): array => $this->eventQueryService->formatEvent($occurrence))
-            ->values()
-            ->all();
+            ->limit(InputConstraints::PUBLIC_PAGE_SIZE_MAX)
+            ->get();
+
+        return $this->eventQueryService->formatEvents($occurrences);
     }
 
     private function profileHasAgendaCapability(AccountProfile $profile): bool

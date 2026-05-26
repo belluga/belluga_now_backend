@@ -165,6 +165,162 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame('', (string) ($upcomingItem['occurrence_id'] ?? ''));
     }
 
+    public function test_agenda_single_occurrence_stale_thumb_returns_parent_event_cover_as_canonical_image(): void
+    {
+        $eventCoverUrl = 'https://example.org/single-event-cover.jpg';
+        $venueCoverUrl = 'https://example.org/single-venue-cover.jpg';
+        $event = $this->createEvent($this->canonicalImageEventOverrides(
+            title: 'Single Canonical Cover',
+            eventCoverUrl: $eventCoverUrl,
+            venueCoverUrl: $venueCoverUrl,
+            profileCoverUrl: 'https://example.org/single-profile-cover.jpg',
+            profileAvatarUrl: 'https://example.org/single-profile-avatar.jpg',
+        ));
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $occurrence->forceFill(['thumb' => null])->save();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?occurrence_ids[]={$occurrence->_id}&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame($eventCoverUrl, data_get($items, '0.thumb.data.url'));
+        $this->assertSame($eventCoverUrl, data_get($items, '0.hero_image_url'));
+        $this->assertSame($venueCoverUrl, data_get($items, '0.venue.cover_url'));
+        $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
+    }
+
+    public function test_agenda_multi_occurrence_stale_thumb_returns_parent_event_cover_as_canonical_image(): void
+    {
+        $now = Carbon::now();
+        $eventCoverUrl = 'https://example.org/multi-event-cover.jpg';
+        $venueCoverUrl = 'https://example.org/multi-venue-cover.jpg';
+        $event = $this->createEvent($this->canonicalImageEventOverrides(
+            title: 'Multi Canonical Cover',
+            eventCoverUrl: $eventCoverUrl,
+            venueCoverUrl: $venueCoverUrl,
+            profileCoverUrl: 'https://example.org/multi-profile-cover.jpg',
+            profileAvatarUrl: 'https://example.org/multi-profile-avatar.jpg',
+        ));
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event->fresh(), [
+            [
+                'date_time_start' => $now->copy()->addDays(1),
+                'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2),
+                'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+            ],
+        ]);
+
+        $selectedOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->get()
+            ->last();
+        $this->assertNotNull($selectedOccurrence);
+        $selectedOccurrence->forceFill(['thumb' => null])->save();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?occurrence_ids[]={$selectedOccurrence->_id}&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame((string) $selectedOccurrence->_id, (string) data_get($items, '0.occurrence_id'));
+        $this->assertSame($eventCoverUrl, data_get($items, '0.thumb.data.url'));
+        $this->assertSame($eventCoverUrl, data_get($items, '0.hero_image_url'));
+        $this->assertSame($venueCoverUrl, data_get($items, '0.venue.cover_url'));
+        $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
+    }
+
+    public function test_agenda_single_occurrence_uses_parent_linked_profile_cover_before_venue_when_event_cover_is_missing(): void
+    {
+        $profileCoverUrl = 'https://example.org/single-parent-profile-cover.jpg';
+        $venueCoverUrl = 'https://example.org/single-parent-venue-cover.jpg';
+        $event = $this->createEvent($this->canonicalImageEventOverrides(
+            title: 'Single Parent Profile Cover',
+            eventCoverUrl: null,
+            venueCoverUrl: $venueCoverUrl,
+            profileCoverUrl: $profileCoverUrl,
+            profileAvatarUrl: 'https://example.org/single-parent-profile-avatar.jpg',
+        ));
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $occurrence->forceFill([
+            'thumb' => null,
+            'event_parties' => [],
+        ])->save();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?occurrence_ids[]={$occurrence->_id}&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertNull(data_get($items, '0.thumb'));
+        $this->assertSame($profileCoverUrl, data_get($items, '0.hero_image_url'));
+        $this->assertSame($venueCoverUrl, data_get($items, '0.venue.cover_url'));
+        $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
+    }
+
+    public function test_agenda_multi_occurrence_uses_parent_linked_profile_avatar_before_venue_when_cover_candidates_are_missing(): void
+    {
+        $now = Carbon::now();
+        $profileAvatarUrl = 'https://example.org/multi-parent-profile-avatar.jpg';
+        $venueCoverUrl = 'https://example.org/multi-parent-venue-cover.jpg';
+        $event = $this->createEvent($this->canonicalImageEventOverrides(
+            title: 'Multi Parent Profile Avatar',
+            eventCoverUrl: null,
+            venueCoverUrl: $venueCoverUrl,
+            profileCoverUrl: null,
+            profileAvatarUrl: $profileAvatarUrl,
+        ));
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event->fresh(), [
+            [
+                'date_time_start' => $now->copy()->addDays(1),
+                'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2),
+                'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+            ],
+        ]);
+
+        $selectedOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->get()
+            ->last();
+        $this->assertNotNull($selectedOccurrence);
+        $selectedOccurrence->forceFill([
+            'thumb' => null,
+            'event_parties' => [],
+        ])->save();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?occurrence_ids[]={$selectedOccurrence->_id}&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $items = $response->json('items');
+        $this->assertCount(1, $items);
+        $this->assertSame((string) $selectedOccurrence->_id, (string) data_get($items, '0.occurrence_id'));
+        $this->assertNull(data_get($items, '0.thumb'));
+        $this->assertSame($profileAvatarUrl, data_get($items, '0.hero_image_url'));
+        $this->assertSame($venueCoverUrl, data_get($items, '0.venue.cover_url'));
+        $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
+    }
+
     public function test_agenda_live_now_only_returns_only_current_occurrences_with_artists(): void
     {
         $now = Carbon::now();
@@ -1387,6 +1543,56 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
 
         return $event->fresh();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function canonicalImageEventOverrides(
+        string $title,
+        ?string $eventCoverUrl,
+        ?string $venueCoverUrl,
+        ?string $profileCoverUrl,
+        ?string $profileAvatarUrl,
+    ): array {
+        return [
+            'title' => $title,
+            'thumb' => $eventCoverUrl === null ? null : [
+                'type' => 'image',
+                'data' => [
+                    'url' => $eventCoverUrl,
+                ],
+            ],
+            'venue' => [
+                'id' => 'venue-canonical-image',
+                'display_name' => 'Canonical Venue',
+                'slug' => 'canonical-venue',
+                'profile_type' => 'venue',
+                'tagline' => 'Venue fallback must not win while event cover exists',
+                'cover_url' => $venueCoverUrl,
+                'hero_image_url' => 'https://example.org/canonical-venue-hero.jpg',
+                'avatar_url' => 'https://example.org/canonical-venue-avatar.jpg',
+                'logo_url' => 'https://example.org/canonical-venue-logo.jpg',
+                'taxonomy_terms' => [],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => 'canonical-profile-1',
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Canonical Profile',
+                        'slug' => 'canonical-profile',
+                        'profile_type' => 'artist',
+                        'avatar_url' => $profileAvatarUrl,
+                        'cover_url' => $profileCoverUrl,
+                        'highlight' => false,
+                        'genres' => [],
+                        'taxonomy_terms' => [],
+                    ],
+                ],
+            ],
+        ];
     }
 
     private function createActiveAttendanceCommitment(string $eventId, string $occurrenceId): void
