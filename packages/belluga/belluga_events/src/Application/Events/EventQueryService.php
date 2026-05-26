@@ -1265,8 +1265,10 @@ class EventQueryService
                     : ($event->thumb ?? null)
             )
         );
-        $eventPartiesSource = $parentEvent !== null && $isOccurrence ? $parentEvent : $event;
-        $eventParties = $this->normalizeEventParties($eventPartiesSource->event_parties ?? []);
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
+            $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
+        }
         $artists = $includeArtists
             ? $this->resolveArtistsReadProjection($eventParties)
             : [];
