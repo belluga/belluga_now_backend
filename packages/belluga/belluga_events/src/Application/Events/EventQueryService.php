@@ -42,6 +42,7 @@ class EventQueryService
         private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
         private readonly EventAttendanceReadContract $eventAttendanceRead,
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
+        private readonly EventHeroImageResolver $eventHeroImages,
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
@@ -69,7 +70,7 @@ class EventQueryService
         $pageSlice = array_slice($raw, 0, $pageSize);
 
         return [
-            'items' => array_map(fn ($event) => $this->formatEvent($event, $userId), $pageSlice),
+            'items' => $this->formatEvents($pageSlice, $userId),
             'has_more' => $hasMore,
         ];
     }
@@ -412,7 +413,7 @@ class EventQueryService
         }
 
         $selectedOccurrenceId = (string) $selectedOccurrence->_id;
-        $payload = $this->formatEvent($selectedOccurrence, $userId);
+        $payload = $this->formatEvent($selectedOccurrence, $userId, true, $event);
         $payload['event_id'] = (string) $event->_id;
         $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
         $payload['thumb'] = $this->normalizeThumbPayload(
@@ -431,7 +432,7 @@ class EventQueryService
             );
         }
 
-        return $payload;
+        return $this->withCanonicalHeroImage($payload);
     }
 
     /**
@@ -1219,13 +1220,38 @@ class EventQueryService
     }
 
     /**
+     * @param  iterable<int, mixed>  $events
+     * @return array<int, array<string, mixed>>
+     */
+    public function formatEvents(
+        iterable $events,
+        ?string $userId = null,
+        bool $includeArtists = true
+    ): array {
+        $items = is_array($events) ? array_values($events) : iterator_to_array($events, false);
+        $parentEventsById = $this->loadParentEventsForOccurrences($items);
+
+        return array_values(array_map(
+            fn (mixed $event): array => $this->formatEvent(
+                $event,
+                $userId,
+                $includeArtists,
+                $this->resolveParentEventContext($event, $parentEventsById)
+            ),
+            $items
+        ));
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function formatEvent(
         mixed $event,
         ?string $userId = null,
-        bool $includeArtists = true
+        bool $includeArtists = true,
+        ?Event $parentEvent = null
     ): array {
+        $isOccurrence = $this->isOccurrencePayload($event);
         $type = $this->normalizeArray($event->type ?? null);
         $location = $this->normalizeArray($event->location ?? []);
         $placeRef = $this->normalizePlaceRefPayload(
@@ -1233,9 +1259,16 @@ class EventQueryService
         );
         $venue = $this->normalizeArray($event->venue ?? null);
         $thumb = $this->normalizeThumbPayload(
-            $this->normalizeArray($event->thumb ?? null)
+            $this->normalizeArray(
+                $parentEvent !== null && $isOccurrence
+                    ? ($parentEvent->thumb ?? null)
+                    : ($event->thumb ?? null)
+            )
         );
         $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
+            $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
+        }
         $artists = $includeArtists
             ? $this->resolveArtistsReadProjection($eventParties)
             : [];
@@ -1272,11 +1305,13 @@ class EventQueryService
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+        if ($parentEvent !== null && $isOccurrence) {
+            $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
+        }
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
 
-        $isOccurrence = isset($event->event_id) && (string) $event->event_id !== '';
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
         $occurrenceId = $isOccurrence && isset($event->_id) ? (string) $event->_id : null;
         $startAt = $isOccurrence
@@ -1328,7 +1363,7 @@ class EventQueryService
             $payload['artists'] = $artists;
         }
 
-        return $payload;
+        return $this->withCanonicalHeroImage($payload);
     }
 
     /**
@@ -1532,6 +1567,53 @@ class EventQueryService
             ->get()
             ->groupBy(static fn (EventOccurrence $occurrence): string => (string) ($occurrence->event_id ?? ''))
             ->all();
+    }
+
+    /**
+     * @param  array<int, mixed>  $events
+     * @return array<string, Event>
+     */
+    private function loadParentEventsForOccurrences(array $events): array
+    {
+        $eventIds = array_values(array_filter(array_unique(array_map(
+            fn (mixed $event): string => $this->parentEventIdForOccurrence($event) ?? '',
+            $events
+        ))));
+
+        if ($eventIds === []) {
+            return [];
+        }
+
+        return Event::query()
+            ->whereIn('_id', $this->buildEventIdCandidates($eventIds))
+            ->get()
+            ->keyBy(static fn (Event $event): string => isset($event->_id) ? (string) $event->_id : '')
+            ->all();
+    }
+
+    /**
+     * @param  array<string, Event>  $parentEventsById
+     */
+    private function resolveParentEventContext(mixed $event, array $parentEventsById): ?Event
+    {
+        $eventId = $this->parentEventIdForOccurrence($event);
+        if ($eventId === null) {
+            return null;
+        }
+
+        return $parentEventsById[$eventId] ?? null;
+    }
+
+    private function isOccurrencePayload(mixed $event): bool
+    {
+        return $this->parentEventIdForOccurrence($event) !== null;
+    }
+
+    private function parentEventIdForOccurrence(mixed $event): ?string
+    {
+        $eventId = trim((string) ($event->event_id ?? ''));
+
+        return $eventId === '' ? null : $eventId;
     }
 
     /**
@@ -2234,6 +2316,17 @@ class EventQueryService
             $payload['type'] = $type;
         }
         $payload['data'] = ['url' => $url];
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function withCanonicalHeroImage(array $payload): array
+    {
+        $payload['hero_image_url'] = $this->eventHeroImages->resolveFromPayload($payload);
 
         return $payload;
     }
