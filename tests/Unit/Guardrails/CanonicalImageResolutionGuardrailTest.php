@@ -61,6 +61,40 @@ class CanonicalImageResolutionGuardrailTest extends TestCase
         );
     }
 
+    public function test_public_event_image_payload_providers_delegate_to_event_hero_image_resolver(): void
+    {
+        $requiredDelegates = [
+            'packages/belluga/belluga_events/src/Application/Events/EventQueryService.php',
+            'app/Application/PublicWeb/PublicWebMetadataService.php',
+            'app/Integration/Invites/InviteTargetReadAdapter.php',
+        ];
+
+        $violations = [];
+        foreach ($requiredDelegates as $relativePath) {
+            $contents = file_get_contents($this->repositoryRoot.DIRECTORY_SEPARATOR.$relativePath);
+            if (! is_string($contents)) {
+                $violations[] = "{$relativePath}:missing";
+
+                continue;
+            }
+
+            if (
+                ! str_contains($contents, 'EventHeroImageResolver')
+                || ! str_contains($contents, '->resolveFromPayload(')
+            ) {
+                $violations[] = $relativePath;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $violations,
+            "Public Event image providers must delegate image selection to EventHeroImageResolver.\n"
+            ."Do not expose Event image URLs from EventQueryService, metadata, or invite adapters without the canonical resolver.\n"
+            .implode("\n", $violations)
+        );
+    }
+
     /**
      * @param  array<int, string>  $violations
      */

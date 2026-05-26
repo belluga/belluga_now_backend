@@ -360,10 +360,9 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $detail->assertStatus(200);
         $detail->assertJsonPath('data.occurrence_id', (string) $occurrence->_id);
-        $this->assertStringContainsString(
-            "/api/v1/media/events/{$eventId}/cover",
-            (string) $detail->json('data.thumb.data.url')
-        );
+        $thumbUrl = (string) $detail->json('data.thumb.data.url');
+        $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+        $this->assertSame($thumbUrl, (string) $detail->json('data.hero_image_url'));
     }
 
     public function test_event_update_stores_cover_upload_and_exposes_media_url(): void

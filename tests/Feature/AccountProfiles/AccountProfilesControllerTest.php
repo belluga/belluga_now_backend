@@ -569,9 +569,40 @@ class AccountProfilesControllerTest extends TestCaseTenant
             startsAt: Carbon::now()->addDay(),
             endsAt: Carbon::now()->addDay()->addHours(2),
         );
+        $eventCoverUrl = 'https://example.org/account-profile-agenda-event-cover.jpg';
+        $venueCoverUrl = 'https://example.org/account-profile-agenda-venue-cover.jpg';
+        $futureEvent->forceFill([
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => $eventCoverUrl,
+                ],
+            ],
+            'venue' => [
+                'id' => (string) $profile->_id,
+                'display_name' => $profile->display_name,
+                'tagline' => 'Tag',
+                'hero_image_url' => 'https://example.org/account-profile-agenda-venue-hero.jpg',
+                'cover_url' => $venueCoverUrl,
+                'logo_url' => null,
+                'taxonomy_terms' => [],
+            ],
+        ])->save();
         $firstFutureOccurrence = EventOccurrence::query()
             ->where('event_id', (string) $futureEvent->_id)
             ->firstOrFail();
+        $firstFutureOccurrence->forceFill([
+            'thumb' => null,
+            'venue' => [
+                'id' => (string) $profile->_id,
+                'display_name' => $profile->display_name,
+                'tagline' => 'Tag',
+                'hero_image_url' => 'https://example.org/account-profile-agenda-venue-hero.jpg',
+                'cover_url' => $venueCoverUrl,
+                'logo_url' => null,
+                'taxonomy_terms' => [],
+            ],
+        ])->save();
         $secondFutureOccurrence = $firstFutureOccurrence->replicate();
         $secondFutureOccurrence->occurrence_slug = 'future-venue-event-occ-2';
         $secondFutureOccurrence->starts_at = Carbon::now()->addDays(2);
@@ -613,8 +644,59 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonCount(2, 'data.agenda_occurrences');
         $response->assertJsonPath('data.agenda_occurrences.0.event_id', (string) $futureEvent->_id);
         $response->assertJsonPath('data.agenda_occurrences.0.title', 'Future Venue Event');
+        $response->assertJsonPath('data.agenda_occurrences.0.thumb.data.url', $eventCoverUrl);
+        $response->assertJsonPath('data.agenda_occurrences.0.hero_image_url', $eventCoverUrl);
+        $response->assertJsonPath('data.agenda_occurrences.0.venue.cover_url', $venueCoverUrl);
         $response->assertJsonPath('data.agenda_occurrences.1.event_id', (string) $futureEvent->_id);
         $response->assertJsonPath('data.agenda_occurrences.1.title', 'Future Venue Event');
+        $this->assertNotSame(
+            $response->json('data.agenda_occurrences.0.venue.cover_url'),
+            $response->json('data.agenda_occurrences.0.hero_image_url')
+        );
+    }
+
+    public function test_public_account_profile_show_by_slug_caps_agenda_occurrences_to_public_page_size(): void
+    {
+        Queue::fake();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, []);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Capped Agenda Venue',
+            'slug' => 'capped-agenda-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $event = $this->createAgendaEventForAccountProfile(
+            $profile,
+            title: 'Capped Venue Event',
+            startsAt: Carbon::now()->addDay(),
+            endsAt: Carbon::now()->addDay()->addHours(2),
+        );
+        $firstOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+
+        for ($index = 2; $index <= InputConstraints::PUBLIC_PAGE_SIZE_MAX + 1; $index++) {
+            $occurrence = $firstOccurrence->replicate();
+            $occurrence->occurrence_slug = "capped-venue-event-occ-{$index}";
+            $occurrence->starts_at = Carbon::now()->addDays($index + 1);
+            $occurrence->ends_at = Carbon::now()->addDays($index + 1)->addHours(2);
+            $occurrence->effective_ends_at = Carbon::now()->addDays($index + 1)->addHours(2);
+            $occurrence->unset('occurrence_index');
+            $occurrence->save();
+        }
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/capped-agenda-venue"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(InputConstraints::PUBLIC_PAGE_SIZE_MAX, 'data.agenda_occurrences');
     }
 
     public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_artist_occurrences(): void
