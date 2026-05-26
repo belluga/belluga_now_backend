@@ -1303,6 +1303,9 @@ class EventQueryService
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+        if ($parentEvent !== null && $isOccurrence) {
+            $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
+        }
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
