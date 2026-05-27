@@ -217,6 +217,42 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         $this->assertNull(data_get($stored->location_preference, 'fixed_reference'));
     }
 
+    public function test_route_reference_point_policy_preserves_nullable_boolean_values(): void
+    {
+        $user = $this->createRegisteredUser();
+        Sanctum::actingAs($user, ['account-users:view']);
+
+        foreach ([null, true, false] as $value) {
+            $response = $this->putJson(
+                "{$this->base_api_tenant}profile/proximity-preferences",
+                [
+                    'max_distance_meters' => 30000,
+                    'use_reference_point_for_routes' => $value,
+                    'location_preference' => [
+                        'mode' => 'live_device_location',
+                        'fixed_reference' => null,
+                    ],
+                ],
+            );
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('data.use_reference_point_for_routes', $value);
+
+            $getResponse = $this->getJson(
+                "{$this->base_api_tenant}profile/proximity-preferences",
+            );
+
+            $getResponse->assertStatus(200);
+            $getResponse->assertJsonPath('data.use_reference_point_for_routes', $value);
+
+            $stored = ProximityPreference::query()
+                ->where('owner_user_id', (string) $user->_id)
+                ->firstOrFail();
+
+            $this->assertSame($value, $stored->use_reference_point_for_routes);
+        }
+    }
+
     public function test_entity_reference_resolves_disabled_when_source_type_loses_poi_prerequisite(): void
     {
         $user = $this->createRegisteredUser();

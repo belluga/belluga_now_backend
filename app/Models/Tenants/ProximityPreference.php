@@ -18,10 +18,12 @@ class ProximityPreference extends Model
     protected $fillable = [
         'owner_user_id',
         'max_distance_meters',
+        'use_reference_point_for_routes',
         'location_preference',
     ];
 
     protected $casts = [
         'max_distance_meters' => 'integer',
+        'use_reference_point_for_routes' => 'boolean',
     ];
 }

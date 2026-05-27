@@ -29,6 +29,7 @@ class ProximityPreferenceService
     /**
      * @param  array{
      *     max_distance_meters:int,
+     *     use_reference_point_for_routes?:?bool,
      *     location_preference:array{
      *         mode:string,
      *         fixed_reference:?array{
@@ -57,6 +58,7 @@ class ProximityPreferenceService
     /**
      * @return array{
      *     max_distance_meters:int,
+     *     use_reference_point_for_routes:?bool,
      *     location_preference:array{
      *         mode:string,
      *         fixed_reference:?array{
@@ -79,6 +81,9 @@ class ProximityPreferenceService
 
         return [
             'max_distance_meters' => (int) $preference->max_distance_meters,
+            'use_reference_point_for_routes' => $this->nullableBool(
+                $preference->use_reference_point_for_routes ?? null,
+            ),
             'location_preference' => [
                 'mode' => (string) data_get($preference->location_preference, 'mode', 'live_device_location'),
                 'fixed_reference' => is_array($fixedReference)
@@ -91,6 +96,7 @@ class ProximityPreferenceService
     /**
      * @param  array{
      *     max_distance_meters:int,
+     *     use_reference_point_for_routes?:?bool,
      *     location_preference:array{
      *         mode:string,
      *         fixed_reference:?array{
@@ -105,6 +111,7 @@ class ProximityPreferenceService
      * }  $payload
      * @return array{
      *     max_distance_meters:int,
+     *     use_reference_point_for_routes:?bool,
      *     location_preference:array{
      *         mode:string,
      *         fixed_reference:?array{
@@ -127,6 +134,9 @@ class ProximityPreferenceService
 
         return [
             'max_distance_meters' => (int) ($payload['max_distance_meters'] ?? 0),
+            'use_reference_point_for_routes' => $this->nullableBool(
+                $payload['use_reference_point_for_routes'] ?? null,
+            ),
             'location_preference' => [
                 'mode' => $mode,
                 'fixed_reference' => $fixedReference,
@@ -293,5 +303,14 @@ class ProximityPreferenceService
         $trimmed = trim($value);
 
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function nullableBool(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return null;
     }
 }
