@@ -20,6 +20,7 @@ class AccountProfileManagementService
         private readonly AccountProfileRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
+        private readonly AccountProfileNestedGroupService $nestedGroupService,
     ) {}
 
     /**
@@ -74,6 +75,12 @@ class AccountProfileManagementService
         } elseif (array_key_exists('taxonomy_terms', $payload)) {
             $payload['taxonomy_terms'] = [];
             $payload['taxonomy_terms_flat'] = [];
+        }
+
+        if (array_key_exists('nested_profile_groups', $payload)) {
+            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
+                $payload['nested_profile_groups']
+            );
         }
 
         try {
@@ -147,6 +154,13 @@ class AccountProfileManagementService
 
         if (array_key_exists('location', $attributes)) {
             $attributes['location'] = $this->formatLocation($attributes['location']);
+        }
+
+        if (array_key_exists('nested_profile_groups', $attributes)) {
+            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
+                $attributes['nested_profile_groups'],
+                (string) $profile->getKey()
+            );
         }
 
         try {

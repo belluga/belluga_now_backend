@@ -2130,6 +2130,200 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['slug']);
     }
 
+    public function test_account_profile_update_persists_nested_profile_groups_in_order(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Parent Venue',
+            'slug' => 'nested-parent-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $partnerA = $this->createNestedProfileFixture('Nested Partner A', 'nested-partner-a');
+        $partnerB = $this->createNestedProfileFixture('Nested Partner B', 'nested-partner-b');
+        $sponsor = $this->createNestedProfileFixture('Nested Sponsor', 'nested-sponsor');
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'patrocinadores',
+                        'label' => 'Patrocinadores',
+                        'order' => 1,
+                        'account_profile_ids' => [(string) $sponsor->_id],
+                    ],
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'order' => 0,
+                        'account_profile_ids' => [
+                            (string) $partnerB->_id,
+                            (string) $partnerA->_id,
+                        ],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_ids.0', (string) $partnerB->_id);
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_ids.1', (string) $partnerA->_id);
+        $response->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
+
+        $readback = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            $this->getHeaders()
+        );
+
+        $readback->assertStatus(200);
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
+    }
+
+    public function test_account_profile_update_rejects_invalid_nested_profile_group_members(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Invalid Parent',
+            'slug' => 'nested-invalid-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $partner = $this->createNestedProfileFixture('Nested Duplicate', 'nested-duplicate');
+
+        $duplicate = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [
+                            (string) $partner->_id,
+                            (string) $partner->_id,
+                        ],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $duplicate->assertStatus(422);
+
+        $selfLink = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'equipe',
+                        'label' => 'Equipe',
+                        'account_profile_ids' => [(string) $parent->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $selfLink->assertStatus(422);
+    }
+
+    public function test_account_profile_update_rejects_nested_profile_group_limits(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Limit Parent',
+            'slug' => 'nested-limit-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $groups = [];
+        for ($index = 0; $index <= InputConstraints::ACCOUNT_PROFILE_NESTED_GROUPS_MAX; $index++) {
+            $groups[] = [
+                'id' => "grupo-{$index}",
+                'label' => "Grupo {$index}",
+                'account_profile_ids' => [],
+            ];
+        }
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            ['nested_profile_groups' => $groups],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+    }
+
+    public function test_public_account_profile_detail_projects_nested_groups_and_hides_empty_groups(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Public Parent',
+            'slug' => 'nested-public-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $partnerA = $this->createNestedProfileFixture('Public Partner A', 'public-partner-a');
+        $partnerB = $this->createNestedProfileFixture('Public Partner B', 'public-partner-b');
+        $privatePartner = $this->createNestedProfileFixture(
+            'Private Partner',
+            'private-partner',
+            ['visibility' => 'private']
+        );
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'vazio',
+                        'label' => 'Vazio',
+                        'order' => 0,
+                        'account_profile_ids' => [],
+                    ],
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'order' => 1,
+                        'account_profile_ids' => [
+                            (string) $partnerB->_id,
+                            (string) $partnerA->_id,
+                        ],
+                    ],
+                    [
+                        'id' => 'privados',
+                        'label' => 'Privados',
+                        'order' => 2,
+                        'account_profile_ids' => [(string) $privatePartner->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        )->assertStatus(200);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles/nested-public-parent");
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data.nested_profile_groups');
+        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.id', (string) $partnerB->_id);
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.id', (string) $partnerA->_id);
+        $this->assertSame(
+            ['public-partner-b', 'public-partner-a'],
+            collect($response->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
+        );
+    }
+
     public function test_account_profile_index_filters_by_account(): void
     {
         $otherAccount = Account::create([
@@ -2158,6 +2352,26 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $items = collect($response->json('data'));
         $this->assertTrue($items->every(fn (array $item): bool => $item['account_id'] === (string) $this->account->_id));
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    private function createNestedProfileFixture(string $name, string $slug, array $overrides = []): AccountProfile
+    {
+        $account = Account::create([
+            'name' => "{$name} Account",
+            'document' => 'DOC-'.strtoupper(str_replace('-', '_', $slug)).'-'.uniqid('', true),
+        ]);
+
+        return AccountProfile::create(array_merge([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'venue',
+            'display_name' => $name,
+            'slug' => $slug,
+            'is_active' => true,
+            'visibility' => 'public',
+        ], $overrides))->fresh();
     }
 
     private function initializeSystem(): void

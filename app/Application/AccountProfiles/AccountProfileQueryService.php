@@ -838,7 +838,10 @@ class AccountProfileQueryService extends AbstractQueryService
 
     protected function baseSearchableFields(): array
     {
-        return (new AccountProfile)->getFillable();
+        return array_values(array_diff(
+            (new AccountProfile)->getFillable(),
+            ['nested_profile_groups']
+        ));
     }
 
     protected function stringFields(): array

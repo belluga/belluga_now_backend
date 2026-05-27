@@ -16,6 +16,12 @@ final class InputConstraints
 
     public const ACCOUNT_PROFILE_RICH_TEXT_MAX_BYTES = 102400;
 
+    public const ACCOUNT_PROFILE_NESTED_GROUPS_MAX = 12;
+
+    public const ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX = 50;
+
+    public const ACCOUNT_PROFILE_NESTED_GROUP_KEY_MAX = 64;
+
     public const EMAIL_MAX = 255;
 
     public const EMAIL_ARRAY_MAX = 10;

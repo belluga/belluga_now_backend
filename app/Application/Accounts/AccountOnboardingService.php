@@ -58,6 +58,7 @@ class AccountOnboardingService
                     'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
                     'bio' => $payload['bio'] ?? null,
                     'content' => $payload['content'] ?? null,
+                    'nested_profile_groups' => $payload['nested_profile_groups'] ?? [],
                     'created_by' => $payload['created_by'] ?? null,
                     'created_by_type' => $payload['created_by_type'] ?? null,
                     'updated_by' => $payload['updated_by'] ?? null,
