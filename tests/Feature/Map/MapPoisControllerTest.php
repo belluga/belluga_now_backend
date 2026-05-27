@@ -854,6 +854,44 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
     }
 
+    public function test_map_filters_exposes_configured_visual_when_marker_override_is_off(): void
+    {
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'poi_time_window_days' => [
+                    'past' => 0,
+                    'future' => 0,
+                ],
+                'filters' => [
+                    [
+                        'key' => 'events',
+                        'label' => 'Eventos',
+                        'override_marker' => false,
+                        'marker_override' => [
+                            'mode' => 'icon',
+                            'icon' => 'music',
+                            'color' => '#C6141F',
+                            'icon_color' => '#FFFFFF',
+                        ],
+                        'query' => [
+                            'source' => 'event',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('categories.0.key', 'events');
+        $response->assertJsonPath('categories.0.override_marker', false);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
+        $response->assertJsonPath('categories.0.marker_override.color', '#C6141F');
+        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
+    }
+
     public function test_map_filters_normalize_bson_marker_override_image_uri(): void
     {
         $location = $this->point(-40.0, -20.0);
