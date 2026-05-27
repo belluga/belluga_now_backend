@@ -25,6 +25,7 @@ class ProfileProximityPreferencesUpsertRequest extends FormRequest
 
         return [
             'max_distance_meters' => ['required', 'integer', 'min:1'],
+            'use_reference_point_for_routes' => ['nullable', 'boolean'],
             'location_preference' => ['required', 'array'],
             'location_preference.mode' => [
                 'required',
