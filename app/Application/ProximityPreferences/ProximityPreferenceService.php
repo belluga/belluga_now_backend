@@ -4,11 +4,21 @@ declare(strict_types=1);
 
 namespace App\Application\ProximityPreferences;
 
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\ProximityPreference;
+use App\Models\Tenants\TenantProfileType;
 
 class ProximityPreferenceService
 {
+    private const REFERENCE_STATUS_ACTIVE = 'active';
+    private const REFERENCE_STATUS_DISABLED = 'disabled';
+    private const REFERENCE_REASON_ELIGIBLE = 'eligible';
+    private const REFERENCE_REASON_MANUAL_COORDINATE = 'manual_coordinate';
+    private const REFERENCE_REASON_SOURCE_CAPABILITY_DISABLED = 'source_capability_disabled';
+    private const CAPABILITY_POI_ENABLED = 'is_poi_enabled';
+    private const CAPABILITY_REFERENCE_LOCATION_ENABLED = 'is_reference_location_enabled';
+
     public function findForUser(AccountUser $user): ?ProximityPreference
     {
         return ProximityPreference::query()
@@ -55,7 +65,10 @@ class ProximityPreferenceService
      *             label:?string,
      *             entity_namespace:?string,
      *             entity_type:?string,
-     *             entity_id:?string
+     *             entity_id:?string,
+     *             reference_status:string,
+     *             reference_status_reason:string,
+     *             blocked_capability_key:?string
      *         }
      *     }
      * }
@@ -69,17 +82,7 @@ class ProximityPreferenceService
             'location_preference' => [
                 'mode' => (string) data_get($preference->location_preference, 'mode', 'live_device_location'),
                 'fixed_reference' => is_array($fixedReference)
-                    ? [
-                        'source_kind' => (string) ($fixedReference['source_kind'] ?? 'manual_coordinate'),
-                        'coordinate' => [
-                            'lat' => (float) data_get($fixedReference, 'coordinate.lat'),
-                            'lng' => (float) data_get($fixedReference, 'coordinate.lng'),
-                        ],
-                        'label' => $this->nullableString($fixedReference['label'] ?? null),
-                        'entity_namespace' => $this->nullableString($fixedReference['entity_namespace'] ?? null),
-                        'entity_type' => $this->nullableString($fixedReference['entity_type'] ?? null),
-                        'entity_id' => $this->nullableString($fixedReference['entity_id'] ?? null),
-                    ]
+                    ? $this->resolveFixedReferencePayload($fixedReference)
                     : null,
             ],
         ];
@@ -156,6 +159,128 @@ class ProximityPreferenceService
             'entity_namespace' => $this->nullableString($fixedReference['entity_namespace'] ?? null),
             'entity_type' => $this->nullableString($fixedReference['entity_type'] ?? null),
             'entity_id' => $this->nullableString($fixedReference['entity_id'] ?? null),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $fixedReference
+     * @return array{
+     *     source_kind:string,
+     *     coordinate:array{lat:float,lng:float},
+     *     label:?string,
+     *     entity_namespace:?string,
+     *     entity_type:?string,
+     *     entity_id:?string,
+     *     reference_status:string,
+     *     reference_status_reason:string,
+     *     blocked_capability_key:?string
+     * }
+     */
+    private function resolveFixedReferencePayload(array $fixedReference): array
+    {
+        $payload = [
+            'source_kind' => (string) ($fixedReference['source_kind'] ?? 'manual_coordinate'),
+            'coordinate' => [
+                'lat' => (float) data_get($fixedReference, 'coordinate.lat'),
+                'lng' => (float) data_get($fixedReference, 'coordinate.lng'),
+            ],
+            'label' => $this->nullableString($fixedReference['label'] ?? null),
+            'entity_namespace' => $this->nullableString($fixedReference['entity_namespace'] ?? null),
+            'entity_type' => $this->nullableString($fixedReference['entity_type'] ?? null),
+            'entity_id' => $this->nullableString($fixedReference['entity_id'] ?? null),
+        ];
+
+        $resolution = $this->resolveReferenceStatus($payload);
+
+        return [
+            ...$payload,
+            'reference_status' => $resolution['status'],
+            'reference_status_reason' => $resolution['reason'],
+            'blocked_capability_key' => $resolution['blocked_capability_key'],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $fixedReference
+     * @return array{status:string,reason:string,blocked_capability_key:?string}
+     */
+    private function resolveReferenceStatus(array $fixedReference): array
+    {
+        if (($fixedReference['source_kind'] ?? null) !== 'entity_reference') {
+            return $this->activeReference(self::REFERENCE_REASON_MANUAL_COORDINATE);
+        }
+
+        if (($fixedReference['entity_namespace'] ?? null) === 'account_profile') {
+            return $this->resolveAccountProfileReferenceStatus($fixedReference);
+        }
+
+        return $this->activeReference(self::REFERENCE_REASON_ELIGIBLE);
+    }
+
+    /**
+     * @param  array<string, mixed>  $fixedReference
+     * @return array{status:string,reason:string,blocked_capability_key:?string}
+     */
+    private function resolveAccountProfileReferenceStatus(array $fixedReference): array
+    {
+        $profileType = $this->nullableString($fixedReference['entity_type'] ?? null);
+        $entityId = $this->nullableString($fixedReference['entity_id'] ?? null);
+
+        if ($entityId !== null) {
+            $profile = AccountProfile::query()->find($entityId);
+            if ($profile instanceof AccountProfile) {
+                $currentProfileType = $this->nullableString($profile->profile_type ?? null);
+                if ($currentProfileType !== null) {
+                    $profileType = $currentProfileType;
+                }
+            }
+        }
+
+        $capabilities = [];
+        if ($profileType !== null) {
+            $type = TenantProfileType::query()
+                ->where('type', $profileType)
+                ->first();
+            $capabilities = is_array($type?->capabilities ?? null)
+                ? $type->capabilities
+                : [];
+        }
+
+        $isPoiEnabled = (bool) ($capabilities[self::CAPABILITY_POI_ENABLED] ?? false);
+        $isReferenceLocationEnabled = (bool) ($capabilities[self::CAPABILITY_REFERENCE_LOCATION_ENABLED] ?? false);
+
+        if (! $isPoiEnabled) {
+            return $this->disabledReference(self::CAPABILITY_POI_ENABLED);
+        }
+
+        if (! $isReferenceLocationEnabled) {
+            return $this->disabledReference(self::CAPABILITY_REFERENCE_LOCATION_ENABLED);
+        }
+
+        return $this->activeReference(self::REFERENCE_REASON_ELIGIBLE);
+    }
+
+    /**
+     * @return array{status:string,reason:string,blocked_capability_key:null}
+     */
+    private function activeReference(string $reason): array
+    {
+        return [
+            'status' => self::REFERENCE_STATUS_ACTIVE,
+            'reason' => $reason,
+            'blocked_capability_key' => null,
+        ];
+    }
+
+    /**
+     * @return array{status:string,reason:string,blocked_capability_key:string}
+     */
+    private function disabledReference(string $blockedCapabilityKey): array
+    {
+        return [
+            'status' => self::REFERENCE_STATUS_DISABLED,
+            'reason' => self::REFERENCE_REASON_SOURCE_CAPABILITY_DISABLED,
+            'blocked_capability_key' => $blockedCapabilityKey,
         ];
     }
 

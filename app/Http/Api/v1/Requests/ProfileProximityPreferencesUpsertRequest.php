@@ -20,6 +20,8 @@ class ProfileProximityPreferencesUpsertRequest extends FormRequest
     public function rules(): array
     {
         $requiresFixedReference = fn (): bool => $this->input('location_preference.mode') === 'fixed_reference';
+        $requiresEntityReference = fn (): bool => $requiresFixedReference()
+            && $this->input('location_preference.fixed_reference.source_kind') === 'entity_reference';
 
         return [
             'max_distance_meters' => ['required', 'integer', 'min:1'],
@@ -56,9 +58,24 @@ class ProfileProximityPreferencesUpsertRequest extends FormRequest
                 'between:-180,180',
             ],
             'location_preference.fixed_reference.label' => ['nullable', 'string', 'max:160'],
-            'location_preference.fixed_reference.entity_namespace' => ['nullable', 'string', 'max:80'],
-            'location_preference.fixed_reference.entity_type' => ['nullable', 'string', 'max:80'],
-            'location_preference.fixed_reference.entity_id' => ['nullable', 'string', 'max:120'],
+            'location_preference.fixed_reference.entity_namespace' => [
+                Rule::requiredIf($requiresEntityReference),
+                'nullable',
+                'string',
+                'max:80',
+            ],
+            'location_preference.fixed_reference.entity_type' => [
+                Rule::requiredIf($requiresEntityReference),
+                'nullable',
+                'string',
+                'max:80',
+            ],
+            'location_preference.fixed_reference.entity_id' => [
+                Rule::requiredIf($requiresEntityReference),
+                'nullable',
+                'string',
+                'max:120',
+            ],
         ];
     }
 }
