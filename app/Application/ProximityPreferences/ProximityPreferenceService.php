@@ -38,7 +38,8 @@ class ProximityPreferenceService
      *             label?:?string,
      *             entity_namespace?:?string,
      *             entity_type?:?string,
-     *             entity_id?:?string
+     *             entity_id?:?string,
+     *             entity_slug?:?string
      *         }
      *     }
      * }  $payload
@@ -68,6 +69,7 @@ class ProximityPreferenceService
      *             entity_namespace:?string,
      *             entity_type:?string,
      *             entity_id:?string,
+     *             entity_slug:?string,
      *             reference_status:string,
      *             reference_status_reason:string,
      *             blocked_capability_key:?string
@@ -105,7 +107,8 @@ class ProximityPreferenceService
      *             label?:?string,
      *             entity_namespace?:?string,
      *             entity_type?:?string,
-     *             entity_id?:?string
+     *             entity_id?:?string,
+     *             entity_slug?:?string
      *         }
      *     }
      * }  $payload
@@ -120,7 +123,8 @@ class ProximityPreferenceService
      *             label:?string,
      *             entity_namespace:?string,
      *             entity_type:?string,
-     *             entity_id:?string
+     *             entity_id:?string,
+     *             entity_slug:?string
      *         }
      *     }
      * }
@@ -152,7 +156,8 @@ class ProximityPreferenceService
      *     label:?string,
      *     entity_namespace:?string,
      *     entity_type:?string,
-     *     entity_id:?string
+     *     entity_id:?string,
+     *     entity_slug:?string
      * }
      */
     private function normalizeFixedReference(mixed $fixedReference): array
@@ -169,6 +174,7 @@ class ProximityPreferenceService
             'entity_namespace' => $this->nullableString($fixedReference['entity_namespace'] ?? null),
             'entity_type' => $this->nullableString($fixedReference['entity_type'] ?? null),
             'entity_id' => $this->nullableString($fixedReference['entity_id'] ?? null),
+            'entity_slug' => $this->nullableString($fixedReference['entity_slug'] ?? null),
         ];
     }
 
@@ -181,6 +187,7 @@ class ProximityPreferenceService
      *     entity_namespace:?string,
      *     entity_type:?string,
      *     entity_id:?string,
+     *     entity_slug:?string,
      *     reference_status:string,
      *     reference_status_reason:string,
      *     blocked_capability_key:?string
@@ -198,6 +205,7 @@ class ProximityPreferenceService
             'entity_namespace' => $this->nullableString($fixedReference['entity_namespace'] ?? null),
             'entity_type' => $this->nullableString($fixedReference['entity_type'] ?? null),
             'entity_id' => $this->nullableString($fixedReference['entity_id'] ?? null),
+            'entity_slug' => $this->nullableString($fixedReference['entity_slug'] ?? null),
         ];
 
         $resolution = $this->resolveReferenceStatus($payload);

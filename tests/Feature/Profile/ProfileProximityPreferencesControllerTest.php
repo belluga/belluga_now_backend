@@ -275,6 +275,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'hotel',
             'display_name' => 'Hotel Base',
+            'slug' => 'hotel-base',
             'visibility' => 'public',
             'is_active' => true,
             'is_verified' => true,
@@ -298,6 +299,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
                     'entity_namespace' => 'account_profile',
                     'entity_type' => 'hotel',
                     'entity_id' => (string) $profile->_id,
+                    'entity_slug' => 'hotel-base',
                 ],
             ],
         ];
@@ -346,6 +348,10 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             (string) $profile->_id,
         );
         $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_slug',
+            'hotel-base',
+        );
+        $getResponse->assertJsonPath(
             'data.location_preference.fixed_reference.coordinate.lat',
             -20.6736,
         );
@@ -385,6 +391,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'hotel',
             'display_name' => 'Hotel Base',
+            'slug' => 'hotel-base-ref',
             'visibility' => 'public',
             'is_active' => true,
             'is_verified' => true,
@@ -408,6 +415,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
                     'entity_namespace' => 'account_profile',
                     'entity_type' => 'hotel',
                     'entity_id' => (string) $profile->_id,
+                    'entity_slug' => 'hotel-base-ref',
                 ],
             ],
         ];
@@ -454,6 +462,10 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         $getResponse->assertJsonPath(
             'data.location_preference.fixed_reference.entity_id',
             (string) $profile->_id,
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_slug',
+            'hotel-base-ref',
         );
         $getResponse->assertJsonPath(
             'data.location_preference.fixed_reference.coordinate.lat',

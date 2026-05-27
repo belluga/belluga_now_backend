@@ -77,6 +77,11 @@ class ProfileProximityPreferencesUpsertRequest extends FormRequest
                 'string',
                 'max:120',
             ],
+            'location_preference.fixed_reference.entity_slug' => [
+                'nullable',
+                'string',
+                'max:160',
+            ],
         ];
     }
 }

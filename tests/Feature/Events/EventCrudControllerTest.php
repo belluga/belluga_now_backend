@@ -4225,6 +4225,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
         $response->assertJsonPath('data.programming_items.0.place_ref.id', (string) $this->venue->_id);
         $response->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
+        $response->assertJsonPath('data.programming_items.0.location_profile.location.type', 'Point');
+        $response->assertJsonPath('data.programming_items.0.location_profile.location.coordinates.0', -40);
+        $response->assertJsonPath('data.programming_items.0.location_profile.location.coordinates.1', -20);
 
         $staleResponse = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence=000000000000000000000000");
         $staleResponse->assertStatus(200);

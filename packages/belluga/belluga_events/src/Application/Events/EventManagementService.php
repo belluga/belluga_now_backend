@@ -994,7 +994,12 @@ class EventManagementService
                     $field => ['Programming location physical host must belong to the target account context.'],
                 ]);
             }
-            $profilesById[$profileId] = $this->normalizeArray($resolved[$profileId]['venue'] ?? []);
+            $venue = $this->normalizeArray($resolved[$profileId]['venue'] ?? []);
+            $location = $this->normalizeArray($resolved[$profileId]['location'] ?? []);
+            if ($location !== []) {
+                $venue['location'] = $location;
+            }
+            $profilesById[$profileId] = $venue;
         }
 
         return $profilesById;
