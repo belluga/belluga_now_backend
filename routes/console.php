@@ -1,6 +1,7 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\LandlordUsers\LandlordPasswordCredentialBackfillService;
@@ -53,6 +54,48 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 
     return 0;
 })->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+
+Artisan::command('accounts:missing-profiles:repair {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
+    if (! app()->environment(['local', 'testing'])) {
+        $this->error('accounts:missing-profiles:repair is local-only by default.');
+
+        return 1;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug === '') {
+        $this->error('Provide an explicit tenant_slug.');
+
+        return 1;
+    }
+
+    $execute = (bool) $this->option('execute');
+    $expectedConfirmation = "repair-missing-profiles:{$tenantSlug}";
+    if ($execute && trim((string) $this->option('confirm')) !== $expectedConfirmation) {
+        $this->error("Execute mode requires --confirm={$expectedConfirmation}.");
+
+        return 1;
+    }
+
+    $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+    if (! $tenant instanceof Tenant) {
+        $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+        return 1;
+    }
+
+    $chunkSize = max(1, min((int) $this->option('chunk'), 500));
+    $tenant->makeCurrent();
+
+    try {
+        $summary = app(AccountMissingProfileRepairService::class)->run($execute, $chunkSize);
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    } finally {
+        $tenant->forgetCurrent();
+    }
+
+    return 0;
+})->purpose('Dry-run or repair local tenant accounts that have no active account profile.');
 
 Artisan::command('tenant:environment-snapshot:repair {tenant_slug?} {--all} {--reason=manual_repair}', function () {
     /** @var TenantEnvironmentSnapshotService $service */

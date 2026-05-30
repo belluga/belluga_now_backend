@@ -279,6 +279,17 @@ class AccountProfileQueryService extends AbstractQueryService
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
     {
         $query = $onlyTrashed ? AccountProfile::onlyTrashed() : AccountProfile::query();
+
+        return $this->findFromQueryOrFail($query, $profileId);
+    }
+
+    public function findWithTrashedOrFail(string $profileId): AccountProfile
+    {
+        return $this->findFromQueryOrFail(AccountProfile::withTrashed(), $profileId);
+    }
+
+    private function findFromQueryOrFail(Builder $query, string $profileId): AccountProfile
+    {
         $profile = $query->find($profileId);
 
         if (! $profile) {
