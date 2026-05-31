@@ -113,6 +113,11 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
                 continue;
             }
 
+            $markerOverride = $this->normalizeDocument($normalized['marker_override'] ?? null);
+            if ($markerOverride === []) {
+                $markerOverride = $this->canonicalFilterVisual($normalized);
+            }
+
             $canonical[] = [
                 'key' => $key,
                 'label' => $label,
@@ -120,8 +125,8 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
                     ? ['image_uri' => $this->normalizeOptionalString($normalized['image_uri'] ?? null)]
                     : []),
                 'override_marker' => (bool) ($normalized['override_marker'] ?? false),
-                ...($this->normalizeDocument($normalized['marker_override'] ?? null) !== []
-                    ? ['marker_override' => $this->normalizeDocument($normalized['marker_override'] ?? null)]
+                ...($markerOverride !== []
+                    ? ['marker_override' => $markerOverride]
                     : []),
                 'query' => $this->canonicalMapFilterQuery(
                     $this->normalizeDocument($normalized['query'] ?? null)
@@ -130,6 +135,32 @@ class MapPoiSettingsAdapter implements MapPoiSettingsContract
         }
 
         return $canonical;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filter
+     * @return array<string, string>
+     */
+    private function canonicalFilterVisual(array $filter): array
+    {
+        $icon = $this->normalizeOptionalString($filter['icon'] ?? ($filter['icon_key'] ?? null));
+        $color = strtoupper($this->normalizeOptionalString($filter['color'] ?? ($filter['color_hex'] ?? null)) ?? '');
+        $iconColor = strtoupper($this->normalizeOptionalString($filter['icon_color'] ?? null) ?? '#FFFFFF');
+
+        if (
+            $icon === null
+            || preg_match('/^#[0-9A-F]{6}$/', $color) !== 1
+            || preg_match('/^#[0-9A-F]{6}$/', $iconColor) !== 1
+        ) {
+            return [];
+        }
+
+        return [
+            'mode' => 'icon',
+            'icon' => $icon,
+            'color' => $color,
+            'icon_color' => $iconColor,
+        ];
     }
 
     /**

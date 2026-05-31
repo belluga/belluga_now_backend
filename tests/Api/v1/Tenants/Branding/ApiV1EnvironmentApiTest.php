@@ -170,14 +170,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         app()->instance(
             TenantEnvironmentPayloadFactory::class,
-            new class(
-                app(TelemetrySettingsKernelBridge::class),
-                app(TenantPublicAuthMethodResolver::class),
-                app(PushSettingsKernelBridge::class),
-                app(AccountProfileRegistryService::class),
-                app(BrandingManifestService::class),
-                app(BrandingPublicWebMediaService::class),
-            ) extends TenantEnvironmentPayloadFactory
+            new class(app(TelemetrySettingsKernelBridge::class), app(TenantPublicAuthMethodResolver::class), app(PushSettingsKernelBridge::class), app(AccountProfileRegistryService::class), app(BrandingManifestService::class), app(BrandingPublicWebMediaService::class)) extends TenantEnvironmentPayloadFactory
             {
                 public function buildSnapshotSource(Tenant $tenant): array
                 {
@@ -747,6 +740,70 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             'settings.map_ui.filters.0.image_uri',
             'https://tenant-alpha.test/storage/map-filters/event.png'
         );
+    }
+
+    public function test_environment_api_exposes_canonical_public_map_filters_over_legacy_map_ui_filters(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        AppTenantSettings::query()->delete();
+        AppTenantSettings::create([
+            'map_ui' => [
+                'default_origin' => [
+                    'lat' => -20.671339,
+                    'lng' => -40.495395,
+                    'label' => 'Praia do Morro',
+                ],
+                'filters' => [
+                    [
+                        'key' => 'legacy',
+                        'label' => 'Legacy',
+                        'marker_override' => [
+                            'mode' => 'icon',
+                            'icon' => 'store',
+                            'color' => '#111111',
+                            'icon_color' => '#EEEEEE',
+                        ],
+                    ],
+                ],
+            ],
+            'discovery_filters' => [
+                'surfaces' => [
+                    'public_map.primary' => [
+                        'filters' => [
+                            [
+                                'key' => 'profiles',
+                                'target' => 'map_poi',
+                                'label' => 'Perfis Configurados',
+                                'icon' => 'storefront',
+                                'color' => '#0F766E',
+                                'override_marker' => false,
+                                'query' => [
+                                    'entities' => ['account_profile'],
+                                    'types_by_entity' => [
+                                        'account_profile' => ['restaurant'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('settings.map_ui.default_origin.label', 'Praia do Morro');
+        $response->assertJsonPath('settings.map_ui.filters.0.key', 'profiles');
+        $response->assertJsonPath('settings.map_ui.filters.0.label', 'Perfis Configurados');
+        $response->assertJsonPath('settings.map_ui.filters.0.override_marker', false);
+        $response->assertJsonPath('settings.map_ui.filters.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('settings.map_ui.filters.0.marker_override.icon', 'storefront');
+        $response->assertJsonPath('settings.map_ui.filters.0.marker_override.color', '#0F766E');
+        $response->assertJsonPath('settings.map_ui.filters.0.query.source', 'account_profile');
+        $response->assertJsonPath('settings.map_ui.filters.0.query.types.0', 'restaurant');
     }
 
     public function test_environment_api_exposes_publication_app_links_from_settings(): void
