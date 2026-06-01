@@ -47,6 +47,7 @@ class AccountProfileTypeStoreRequest extends FormRequest
             'capabilities.has_avatar' => ['sometimes', 'boolean'],
             'capabilities.has_cover' => ['sometimes', 'boolean'],
             'capabilities.has_events' => ['sometimes', 'boolean'],
+            'capabilities.has_nested_profile_groups' => ['sometimes', 'boolean'],
         ];
     }
 }

@@ -82,6 +82,10 @@ class AccountProfileManagementService
         }
 
         if (array_key_exists('nested_profile_groups', $payload)) {
+            $this->assertNestedProfileGroupsAllowed(
+                $profileType,
+                $payload['nested_profile_groups']
+            );
             $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
                 $payload['nested_profile_groups']
             );
@@ -161,6 +165,10 @@ class AccountProfileManagementService
         }
 
         if (array_key_exists('nested_profile_groups', $attributes)) {
+            $this->assertNestedProfileGroupsAllowed(
+                $profileType,
+                $attributes['nested_profile_groups']
+            );
             $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
                 $attributes['nested_profile_groups'],
                 (string) $profile->getKey()
@@ -220,6 +228,41 @@ class AccountProfileManagementService
         });
 
         $this->queueMapPoiDeleteAfterCommit($profileId);
+    }
+
+    private function assertNestedProfileGroupsAllowed(string $profileType, mixed $rawGroups): void
+    {
+        if ($this->registryService->hasNestedProfileGroups($profileType)) {
+            return;
+        }
+
+        if ($this->nestedProfileGroupsPayloadIsEmpty($rawGroups)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'nested_profile_groups' => ['Nested profile groups are not enabled for this profile type.'],
+        ]);
+    }
+
+    private function nestedProfileGroupsPayloadIsEmpty(mixed $rawGroups): bool
+    {
+        if (! is_array($rawGroups)) {
+            return true;
+        }
+
+        foreach ($rawGroups as $rawGroup) {
+            if (! is_array($rawGroup)) {
+                continue;
+            }
+            $label = trim((string) ($rawGroup['label'] ?? ''));
+            $memberIds = $rawGroup['account_profile_ids'] ?? $rawGroup['profile_ids'] ?? [];
+            if ($label !== '' || (is_array($memberIds) && $memberIds !== [])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function assertProfileMayBeSoftDeleted(AccountProfile $profile): void

@@ -15,6 +15,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistryManagementService
 {
@@ -78,9 +80,7 @@ class AccountProfileRegistryManagementService
         }
 
         $entry = $this->mergeEntry($model, $payload, $nextType);
-        $currentCapabilities = is_array($model->capabilities ?? null)
-            ? $model->capabilities
-            : [];
+        $currentCapabilities = $this->arrayFrom($model->capabilities ?? []);
         $currentPoiEnabled = (bool) ($currentCapabilities['is_poi_enabled'] ?? false);
         $nextCapabilities = is_array($entry['capabilities'] ?? null)
             ? $entry['capabilities']
@@ -215,7 +215,7 @@ class AccountProfileRegistryManagementService
     private function mergeEntry(TenantProfileType $existing, array $payload, string $resolvedType): array
     {
         $capabilities = $payload['capabilities'] ?? [];
-        $currentCapabilities = $existing->capabilities ?? [];
+        $currentCapabilities = $this->arrayFrom($existing->capabilities ?? []);
         $visual = $this->resolveIncomingVisual($payload, $existing->visual ?? $existing->poi_visual ?? null);
         $labels = $this->normalizeLabels($payload, $existing);
 
@@ -228,7 +228,7 @@ class AccountProfileRegistryManagementService
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities, is_array($currentCapabilities) ? $currentCapabilities : []),
+            'capabilities' => $this->normalizeCapabilities($capabilities, $currentCapabilities),
         ];
     }
 
@@ -276,6 +276,9 @@ class AccountProfileRegistryManagementService
             'has_events' => array_key_exists('has_events', $capabilities)
                 ? (bool) $capabilities['has_events']
                 : (bool) ($currentCapabilities['has_events'] ?? false),
+            'has_nested_profile_groups' => array_key_exists('has_nested_profile_groups', $capabilities)
+                ? (bool) $capabilities['has_nested_profile_groups']
+                : (bool) ($currentCapabilities['has_nested_profile_groups'] ?? false),
         ];
     }
 
@@ -321,7 +324,7 @@ class AccountProfileRegistryManagementService
     {
         $visual = $this->resolvePayloadVisual($model, $baseUrl);
         $labels = $this->normalizeLabels([], $model);
-        $capabilities = is_array($model->capabilities ?? null) ? $model->capabilities : [];
+        $capabilities = $this->arrayFrom($model->capabilities ?? []);
 
         return [
             'type' => (string) $model->type,
@@ -337,6 +340,26 @@ class AccountProfileRegistryManagementService
             'poi_visual' => $visual,
             'capabilities' => $this->normalizeCapabilities($capabilities, $capabilities),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function arrayFrom(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        return [];
     }
 
     /**

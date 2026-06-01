@@ -95,6 +95,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
+                'has_nested_profile_groups' => true,
             ],
         ]);
 
@@ -2261,6 +2262,47 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
+    public function test_account_profile_update_rejects_nested_profile_groups_when_type_capability_is_disabled(): void
+    {
+        TenantProfileType::create([
+            'type' => 'plain',
+            'label' => 'Plain',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => false,
+                'is_poi_enabled' => false,
+                'has_nested_profile_groups' => false,
+            ],
+        ]);
+
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'plain',
+            'display_name' => 'Nested Disabled Parent',
+            'slug' => 'nested-disabled-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $partner = $this->createNestedProfileFixture('Disabled Partner', 'disabled-partner');
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [(string) $partner->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+    }
+
     public function test_public_account_profile_detail_projects_nested_groups_and_hides_empty_groups(): void
     {
         $parent = AccountProfile::create([
@@ -2322,6 +2364,45 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['public-partner-b', 'public-partner-a'],
             collect($response->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
         );
+    }
+
+    public function test_public_account_profile_detail_hides_nested_groups_when_type_capability_is_disabled(): void
+    {
+        $venueType = TenantProfileType::query()
+            ->where('type', 'venue')
+            ->firstOrFail();
+        $venueType->capabilities = [
+            'is_favoritable' => true,
+            'is_poi_enabled' => true,
+            'has_events' => true,
+            'has_nested_profile_groups' => false,
+        ];
+        $venueType->save();
+        $partner = $this->createNestedProfileFixture('Hidden Public Partner', 'hidden-public-partner');
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Hidden Nested Public Parent',
+            'slug' => 'hidden-nested-public-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [
+                [
+                    'id' => 'parceiros',
+                    'label' => 'Parceiros',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $partner->_id],
+                ],
+            ],
+        ])->fresh();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/{$parent->slug}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(0, 'data.nested_profile_groups');
     }
 
     public function test_account_profile_index_filters_by_account(): void

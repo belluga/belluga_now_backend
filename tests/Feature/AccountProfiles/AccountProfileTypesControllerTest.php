@@ -108,7 +108,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profile_types",
             [
-                'type' => 'venue',
+                'type' => 'venue-create',
                 'label' => 'Venue',
                 'labels' => [
                     'singular' => 'Venue',
@@ -125,18 +125,20 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'is_reference_location_enabled' => true,
+                    'has_nested_profile_groups' => true,
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.type', 'venue');
+        $response->assertJsonPath('data.type', 'venue-create');
         $response->assertJsonPath('data.label', 'Venue');
         $response->assertJsonPath('data.labels.singular', 'Venue');
         $response->assertJsonPath('data.labels.plural', 'Venues');
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', true);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
@@ -358,6 +360,47 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.type', 'restaurante');
         $response->assertJsonPath('data.label', 'Restaurante Atualizado');
+    }
+
+    public function test_profile_type_update_preserves_existing_capabilities_when_toggling_nested_groups(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => ['cuisine'],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => true,
+                'has_events' => true,
+                'has_nested_profile_groups' => false,
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue",
+            [
+                'capabilities' => [
+                    'has_nested_profile_groups' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.capabilities.is_favoritable', true);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable', true);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
+        $response->assertJsonPath('data.capabilities.has_events', true);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+
+        $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_poi_enabled'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_events'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
     }
 
     public function test_profile_type_map_poi_projection_impact_returns_projection_count(): void

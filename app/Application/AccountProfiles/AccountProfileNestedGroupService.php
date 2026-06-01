@@ -11,6 +11,8 @@ use App\Support\Validation\InputConstraints;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 
 class AccountProfileNestedGroupService
 {
@@ -160,6 +162,10 @@ class AccountProfileNestedGroupService
      */
     public function formatForPublicDetail(AccountProfile $parentProfile, string $baseUrl): array
     {
+        if (! $this->parentProfileTypeAllowsNestedGroups($parentProfile)) {
+            return [];
+        }
+
         $groups = $this->formatForRead($parentProfile->nested_profile_groups ?? []);
         if ($groups === []) {
             return [];
@@ -197,6 +203,41 @@ class AccountProfileNestedGroupService
         }
 
         return $publicGroups;
+    }
+
+    private function parentProfileTypeAllowsNestedGroups(AccountProfile $parentProfile): bool
+    {
+        $profileType = trim((string) ($parentProfile->profile_type ?? ''));
+        if ($profileType === '') {
+            return false;
+        }
+
+        $type = TenantProfileType::query()
+            ->where('type', $profileType)
+            ->first();
+        $capabilities = $this->arrayFrom($type?->capabilities ?? []);
+
+        return (bool) ($capabilities['has_nested_profile_groups'] ?? false);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function arrayFrom(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        return [];
     }
 
     private function normalizeGroupId(mixed $rawId, string $label, int $index): string

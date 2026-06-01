@@ -7,6 +7,8 @@ namespace App\Application\AccountProfiles;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Support\Str;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistryService
 {
@@ -27,7 +29,7 @@ class AccountProfileRegistryService
                 $visual = $this->resolveVisualPayload($type, $baseUrl);
                 $labels = $this->resolveLabels($type);
                 $capabilities = $this->resolveCapabilitiesPayload(
-                    is_array($type->capabilities ?? null) ? $type->capabilities : []
+                    $this->arrayFrom($type->capabilities ?? [])
                 );
 
                 return [
@@ -85,6 +87,14 @@ class AccountProfileRegistryService
         $capabilities = $definition['capabilities'] ?? [];
 
         return (bool) ($capabilities['has_events'] ?? false);
+    }
+
+    public function hasNestedProfileGroups(string $profileType): bool
+    {
+        $definition = $this->typeDefinition($profileType);
+        $capabilities = $definition['capabilities'] ?? [];
+
+        return (bool) ($capabilities['has_nested_profile_groups'] ?? false);
     }
 
     /**
@@ -168,6 +178,27 @@ class AccountProfileRegistryService
             'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
             'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
             'has_events' => (bool) ($capabilities['has_events'] ?? false),
+            'has_nested_profile_groups' => (bool) ($capabilities['has_nested_profile_groups'] ?? false),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function arrayFrom(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        return [];
     }
 }
