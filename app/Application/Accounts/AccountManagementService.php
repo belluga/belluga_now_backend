@@ -184,7 +184,7 @@ class AccountManagementService
             ]);
         }
 
-        $this->deleteInsideAccountAggregateDeletionBoundary($account);
+        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account);
     }
 
     public function restore(Account $account): Account

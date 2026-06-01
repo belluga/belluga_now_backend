@@ -80,6 +80,73 @@ class AccountMissingProfileRepairService
     /**
      * @return array<string, mixed>
      */
+    public function purgeTrashedTestSeedAggregates(bool $execute = false, int $chunkSize = 100): array
+    {
+        $tenant = Tenant::current();
+        $tenantSlug = (string) ($tenant?->slug ?? 'unknown');
+        $chunkSize = max(1, min($chunkSize, 500));
+        $rows = [];
+        $totals = [
+            'scanned' => 0,
+            'would_purge_test_seed' => 0,
+            'purged_test_seed' => 0,
+            'skipped' => 0,
+            'residual' => 0,
+        ];
+
+        Account::onlyTrashed()
+            ->orderBy('_id')
+            ->chunk($chunkSize, function ($accounts) use ($tenantSlug, &$rows, &$totals): void {
+                foreach ($accounts as $account) {
+                    if (! $account instanceof Account) {
+                        continue;
+                    }
+
+                    $totals['scanned']++;
+                    $row = $this->classifyTrashedTestSeedAccount($account, $tenantSlug);
+                    $row['mode'] = 'dry-run';
+                    $this->applyPurgeTotals($totals, $row);
+                    $rows[] = $row;
+                }
+            });
+
+        if ($execute) {
+            $totals = [
+                'scanned' => $totals['scanned'],
+                'would_purge_test_seed' => 0,
+                'purged_test_seed' => 0,
+                'skipped' => 0,
+                'residual' => 0,
+            ];
+
+            foreach ($rows as $index => $row) {
+                $row['mode'] = 'execute';
+                if (($row['action'] ?? null) === 'purge_test_seed_account') {
+                    $account = Account::withTrashed()->find((string) ($row['account_id'] ?? ''));
+                    if ($account instanceof Account) {
+                        $this->accountManagementService->deleteRepairApprovedTestSeedAggregate($account);
+                        $row['executed'] = true;
+                        $row['residual_reason'] = null;
+                    }
+                }
+
+                $rows[$index] = $row;
+                $this->applyPurgeTotals($totals, $row);
+            }
+        }
+
+        return [
+            'tenant_slug' => $tenantSlug,
+            'mode' => $execute ? 'execute' : 'dry-run',
+            'chunk_size' => $chunkSize,
+            'totals' => $totals,
+            'rows' => $rows,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function classifyAccount(Account $account, string $tenantSlug): array
     {
         $accountId = (string) $account->_id;
@@ -107,6 +174,24 @@ class AccountMissingProfileRepairService
         ];
 
         $linkedData = $this->linkedDataCheck($account, $restorableProfiles);
+        if ($this->isKnownTestSeedAccount($account)) {
+            if (! $this->linkedDataAllowsTestSeedDeletion($linkedData)) {
+                return [
+                    ...$base,
+                    'policy_branch' => (string) ($linkedData['reason'] ?? 'linked_data_not_safe'),
+                    'residual_reason' => (string) ($linkedData['reason'] ?? 'linked_data_not_safe'),
+                    'linked_data' => $linkedData['checks'] ?? [],
+                ];
+            }
+
+            return [
+                ...$base,
+                'action' => 'delete_test_seed_account',
+                'policy_branch' => 'safe_test_seed_aggregate_deletion',
+                'linked_data' => $linkedData['checks'] ?? [],
+            ];
+        }
+
         if (! (bool) ($linkedData['passes'] ?? false)) {
             return [
                 ...$base,
@@ -121,14 +206,6 @@ class AccountMissingProfileRepairService
                 ...$base,
                 'policy_branch' => 'multiple_soft_deleted_profiles',
                 'residual_reason' => 'multiple_soft_deleted_profiles',
-            ];
-        }
-
-        if ($this->isKnownTestSeedAccount($account)) {
-            return [
-                ...$base,
-                'action' => 'delete_test_seed_account',
-                'policy_branch' => 'safe_test_seed_aggregate_deletion',
             ];
         }
 
@@ -155,6 +232,59 @@ class AccountMissingProfileRepairService
             'action' => 'restore_profile',
             'policy_branch' => 'safe_restore',
             'profile_id' => (string) $profile->_id,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function classifyTrashedTestSeedAccount(Account $account, string $tenantSlug): array
+    {
+        $accountId = (string) $account->_id;
+        $profiles = AccountProfile::withTrashed()
+            ->where('account_id', $accountId)
+            ->get();
+        $profileIds = $profiles
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+            ->values()
+            ->all();
+
+        $base = [
+            'tenant_slug' => $tenantSlug,
+            'account_id' => $accountId,
+            'account_slug' => (string) ($account->slug ?? ''),
+            'account_name' => (string) ($account->name ?? ''),
+            'ownership_state' => (string) ($account->ownership_state ?? ''),
+            'profile_ids' => $profileIds,
+            'action' => 'skip',
+            'policy_branch' => 'unclassified',
+            'residual_reason' => null,
+            'executed' => false,
+        ];
+
+        if (! $this->isKnownTrashedTestSeedAccount($account)) {
+            return [
+                ...$base,
+                'policy_branch' => 'not_known_test_seed',
+                'residual_reason' => 'not_known_test_seed',
+            ];
+        }
+
+        $linkedData = $this->linkedDataCheck($account, $profiles);
+        if (! $this->linkedDataAllowsTestSeedDeletion($linkedData)) {
+            return [
+                ...$base,
+                'policy_branch' => (string) ($linkedData['reason'] ?? 'linked_data_not_safe'),
+                'residual_reason' => (string) ($linkedData['reason'] ?? 'linked_data_not_safe'),
+                'linked_data' => $linkedData['checks'] ?? [],
+            ];
+        }
+
+        return [
+            ...$base,
+            'action' => 'purge_test_seed_account',
+            'policy_branch' => 'safe_test_seed_aggregate_purge',
+            'linked_data' => $linkedData['checks'] ?? [],
         ];
     }
 
@@ -211,6 +341,25 @@ class AccountMissingProfileRepairService
         $totals['residual']++;
     }
 
+    /**
+     * @param  array<string, int>  $totals
+     * @param  array<string, mixed>  $row
+     */
+    private function applyPurgeTotals(array &$totals, array $row): void
+    {
+        $action = (string) ($row['action'] ?? 'skip');
+        $executed = (bool) ($row['executed'] ?? false);
+
+        if ($action === 'purge_test_seed_account') {
+            $totals[$executed ? 'purged_test_seed' : 'would_purge_test_seed']++;
+
+            return;
+        }
+
+        $totals['skipped']++;
+        $totals['residual']++;
+    }
+
     private function activeProfileCount(string $accountId): int
     {
         return AccountProfile::query()
@@ -221,16 +370,33 @@ class AccountMissingProfileRepairService
 
     private function isKnownTestSeedAccount(Account $account): bool
     {
+        $slug = (string) ($account->slug ?? '');
+
+        if ($slug === 'runtime-invite-account' || str_starts_with($slug, 'runtime-invite-account-')) {
+            return true;
+        }
+
         if ((string) ($account->ownership_state ?? '') !== AccountOwnershipStateService::TENANT_OWNED) {
             return false;
         }
 
+        return $this->isKnownHarnessTestSeedSlug($slug);
+    }
+
+    private function isKnownTrashedTestSeedAccount(Account $account): bool
+    {
         $slug = (string) ($account->slug ?? '');
 
+        return $slug === 'runtime-invite-account'
+            || str_starts_with($slug, 'runtime-invite-account-')
+            || $this->isKnownHarnessTestSeedSlug($slug);
+    }
+
+    private function isKnownHarnessTestSeedSlug(string $slug): bool
+    {
         return str_starts_with($slug, 'playwright-')
             || str_starts_with($slug, 'pw-sr-d-')
-            || $slug === 'runtime-invite-account'
-            || str_starts_with($slug, 'runtime-invite-account-');
+            || str_starts_with($slug, 'pw-nested-');
     }
 
     private function profileTypeExists(string $profileType): bool
@@ -254,8 +420,10 @@ class AccountMissingProfileRepairService
 
         $checks = [
             'account_users' => AccountUser::query()->where('account_id', $accountId)->count(),
-            'events' => $this->eventsReferenceCount($accountId, $profileIds),
-            'event_occurrences' => $this->eventOccurrencesReferenceCount($profileIds),
+            'events' => $this->eventsReferenceCount($accountId, $profileIds, includeTrashed: true),
+            'active_events' => $this->eventsReferenceCount($accountId, $profileIds, includeTrashed: false),
+            'event_occurrences' => $this->eventOccurrencesReferenceCount($profileIds, includeTrashed: true),
+            'active_event_occurrences' => $this->eventOccurrencesReferenceCount($profileIds, includeTrashed: false),
             'invite_edges' => $this->inviteEdgesReferenceCount($profileIds),
             'invite_share_codes' => $this->inviteShareCodesReferenceCount($profileIds),
             'inviteable_people_projection' => $this->inviteablePeopleReferenceCount($profileIds),
@@ -271,9 +439,37 @@ class AccountMissingProfileRepairService
     }
 
     /**
+     * @param  array{passes?:bool, reason?:string|null, checks?:array<string, int>}  $linkedData
+     */
+    private function linkedDataAllowsTestSeedDeletion(array $linkedData): bool
+    {
+        $checks = $linkedData['checks'] ?? [];
+        $hardBlockers = [
+            'account_users',
+            'active_events',
+            'active_event_occurrences',
+            'invite_edges',
+            'invite_share_codes',
+            'inviteable_people_projection',
+        ];
+
+        foreach ($hardBlockers as $key) {
+            if (! array_key_exists($key, $checks)) {
+                return false;
+            }
+
+            if ((int) $checks[$key] > 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * @param  array<int, string>  $profileIds
      */
-    private function eventsReferenceCount(string $accountId, array $profileIds): int
+    private function eventsReferenceCount(string $accountId, array $profileIds, bool $includeTrashed): int
     {
         $or = [
             ['account_context_ids' => $accountId],
@@ -286,30 +482,32 @@ class AccountMissingProfileRepairService
             $or[] = ['event_parties.account_profile_id' => ['$in' => $profileIds]];
         }
 
-        return Event::withTrashed()->whereRaw(['$or' => $or])->count();
+        $query = $includeTrashed ? Event::withTrashed() : Event::query();
+
+        return $query->whereRaw(['$or' => $or])->count();
     }
 
     /**
      * @param  array<int, string>  $profileIds
      */
-    private function eventOccurrencesReferenceCount(array $profileIds): int
+    private function eventOccurrencesReferenceCount(array $profileIds, bool $includeTrashed): int
     {
         if ($profileIds === []) {
             return 0;
         }
 
-        return EventOccurrence::withTrashed()
-            ->whereRaw([
-                '$or' => [
-                    ['own_linked_account_profiles.id' => ['$in' => $profileIds]],
-                    ['linked_account_profiles.id' => ['$in' => $profileIds]],
-                    ['programming_items.account_profile_ids' => ['$in' => $profileIds]],
-                    ['programming_items.linked_account_profiles.id' => ['$in' => $profileIds]],
-                    ['place_ref.id' => ['$in' => $profileIds]],
-                    ['place_ref.ref_id' => ['$in' => $profileIds]],
-                ],
-            ])
-            ->count();
+        $query = $includeTrashed ? EventOccurrence::withTrashed() : EventOccurrence::query();
+
+        return $query->whereRaw([
+            '$or' => [
+                ['own_linked_account_profiles.id' => ['$in' => $profileIds]],
+                ['linked_account_profiles.id' => ['$in' => $profileIds]],
+                ['programming_items.account_profile_ids' => ['$in' => $profileIds]],
+                ['programming_items.linked_account_profiles.id' => ['$in' => $profileIds]],
+                ['place_ref.id' => ['$in' => $profileIds]],
+                ['place_ref.ref_id' => ['$in' => $profileIds]],
+            ],
+        ])->count();
     }
 
     /**
