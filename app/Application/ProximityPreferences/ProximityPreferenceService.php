@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\ProximityPreferences;
 
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\ProximityPreference;
@@ -16,8 +17,10 @@ class ProximityPreferenceService
     private const REFERENCE_REASON_ELIGIBLE = 'eligible';
     private const REFERENCE_REASON_MANUAL_COORDINATE = 'manual_coordinate';
     private const REFERENCE_REASON_SOURCE_CAPABILITY_DISABLED = 'source_capability_disabled';
-    private const CAPABILITY_POI_ENABLED = 'is_poi_enabled';
-    private const CAPABILITY_REFERENCE_LOCATION_ENABLED = 'is_reference_location_enabled';
+
+    public function __construct(
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+    ) {}
 
     public function findForUser(AccountUser $user): ?ProximityPreference
     {
@@ -264,15 +267,18 @@ class ProximityPreferenceService
                 : [];
         }
 
-        $isPoiEnabled = (bool) ($capabilities[self::CAPABILITY_POI_ENABLED] ?? false);
-        $isReferenceLocationEnabled = (bool) ($capabilities[self::CAPABILITY_REFERENCE_LOCATION_ENABLED] ?? false);
-
-        if (! $isPoiEnabled) {
-            return $this->disabledReference(self::CAPABILITY_POI_ENABLED);
-        }
-
-        if (! $isReferenceLocationEnabled) {
-            return $this->disabledReference(self::CAPABILITY_REFERENCE_LOCATION_ENABLED);
+        if (! $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
+            $capabilities,
+            $capabilities,
+        )) {
+            return $this->disabledReference(
+                $this->capabilityCatalog->firstDisabledRequirement(
+                    AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
+                    $capabilities,
+                    $capabilities,
+                ) ?? AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
+            );
         }
 
         return $this->activeReference(self::REFERENCE_REASON_ELIGIBLE);

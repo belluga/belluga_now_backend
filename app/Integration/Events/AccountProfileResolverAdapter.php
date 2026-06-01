@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
@@ -17,6 +18,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     public function __construct(
         private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -258,10 +260,14 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     private function resolvePoiEnabledProfileTypes(): array
     {
         return collect($this->profileRegistryService->registry())
-            ->filter(static function (array $definition): bool {
+            ->filter(function (array $definition): bool {
                 $capabilities = $definition['capabilities'] ?? [];
 
-                return ($capabilities['is_poi_enabled'] ?? false) === true;
+                return $this->capabilityCatalog->isEnabled(
+                    AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+                    is_array($capabilities) ? $capabilities : [],
+                    is_array($capabilities) ? $capabilities : [],
+                );
             })
             ->map(static fn (array $definition): string => trim((string) ($definition['type'] ?? '')))
             ->filter(static fn (string $type): bool => $type !== '')

@@ -173,6 +173,31 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
     }
 
+    public function test_profile_type_create_keeps_nested_groups_capability_independent(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'expo',
+                'label' => 'Expo',
+                'capabilities' => [
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                    'has_nested_profile_groups' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $response->assertJsonPath('data.capabilities.has_events', false);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+
+        $model = TenantProfileType::query()->where('type', 'expo')->firstOrFail();
+        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
+    }
+
     public function test_profile_type_create_validation(): void
     {
         $response = $this->postJson(

@@ -15,6 +15,7 @@ class AccountProfileRegistryService
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly AccountProfileTypeMediaService $mediaService,
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
     ) {}
 
     /**
@@ -70,7 +71,11 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['is_poi_enabled'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     public function isReferenceLocationEnabled(string $profileType): bool
@@ -78,7 +83,11 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['is_reference_location_enabled'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     public function hasEvents(string $profileType): bool
@@ -86,7 +95,11 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['has_events'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_EVENTS,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     public function hasNestedProfileGroups(string $profileType): bool
@@ -94,7 +107,11 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['has_nested_profile_groups'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     /**
@@ -163,23 +180,7 @@ class AccountProfileRegistryService
      */
     private function resolveCapabilitiesPayload(array $capabilities): array
     {
-        $isPoiEnabled = (bool) ($capabilities['is_poi_enabled'] ?? false);
-        $isReferenceLocationRequested = (bool) ($capabilities['is_reference_location_enabled'] ?? false);
-
-        return [
-            'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
-            'is_inviteable' => (bool) ($capabilities['is_inviteable'] ?? false),
-            'is_publicly_discoverable' => (bool) ($capabilities['is_publicly_discoverable'] ?? false),
-            'is_poi_enabled' => $isPoiEnabled,
-            'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
-            'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
-            'has_content' => (bool) ($capabilities['has_content'] ?? false),
-            'has_taxonomies' => (bool) ($capabilities['has_taxonomies'] ?? false),
-            'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
-            'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
-            'has_events' => (bool) ($capabilities['has_events'] ?? false),
-            'has_nested_profile_groups' => (bool) ($capabilities['has_nested_profile_groups'] ?? false),
-        ];
+        return $this->capabilityCatalog->normalize($capabilities, $capabilities);
     }
 
     /**

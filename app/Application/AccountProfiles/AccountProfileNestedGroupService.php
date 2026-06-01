@@ -19,6 +19,7 @@ class AccountProfileNestedGroupService
     public function __construct(
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
     ) {}
 
     /**
@@ -217,7 +218,11 @@ class AccountProfileNestedGroupService
             ->first();
         $capabilities = $this->arrayFrom($type?->capabilities ?? []);
 
-        return (bool) ($capabilities['has_nested_profile_groups'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
+            $capabilities,
+            $capabilities,
+        );
     }
 
     /**

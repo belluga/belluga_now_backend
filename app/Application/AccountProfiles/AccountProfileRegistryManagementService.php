@@ -24,6 +24,7 @@ class AccountProfileRegistryManagementService
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly MapPoiProjectionRefService $mapPoiProjectionRefs,
         private readonly AccountProfileTypeMediaService $mediaService,
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
     ) {}
 
     /**
@@ -81,11 +82,19 @@ class AccountProfileRegistryManagementService
 
         $entry = $this->mergeEntry($model, $payload, $nextType);
         $currentCapabilities = $this->arrayFrom($model->capabilities ?? []);
-        $currentPoiEnabled = (bool) ($currentCapabilities['is_poi_enabled'] ?? false);
+        $currentPoiEnabled = $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+            $currentCapabilities,
+            $currentCapabilities,
+        );
         $nextCapabilities = is_array($entry['capabilities'] ?? null)
             ? $entry['capabilities']
             : [];
-        $nextPoiEnabled = (bool) ($nextCapabilities['is_poi_enabled'] ?? false);
+        $nextPoiEnabled = $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+            $nextCapabilities,
+            $nextCapabilities,
+        );
         $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->visual ?? $model->poi_visual ?? null);
         $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['visual'] ?? $entry['poi_visual'] ?? null);
         $poiVisualChanged = $currentPoiVisual !== $nextPoiVisual;
@@ -239,47 +248,7 @@ class AccountProfileRegistryManagementService
      */
     private function normalizeCapabilities(array $capabilities, array $currentCapabilities = []): array
     {
-        $isPoiEnabled = array_key_exists('is_poi_enabled', $capabilities)
-            ? (bool) $capabilities['is_poi_enabled']
-            : (bool) ($currentCapabilities['is_poi_enabled'] ?? false);
-        $isReferenceLocationRequested = array_key_exists('is_reference_location_enabled', $capabilities)
-            ? (bool) $capabilities['is_reference_location_enabled']
-            : (bool) ($currentCapabilities['is_reference_location_enabled'] ?? false);
-
-        return [
-            'is_favoritable' => array_key_exists('is_favoritable', $capabilities)
-                ? (bool) $capabilities['is_favoritable']
-                : (bool) ($currentCapabilities['is_favoritable'] ?? false),
-            'is_inviteable' => array_key_exists('is_inviteable', $capabilities)
-                ? (bool) $capabilities['is_inviteable']
-                : (bool) ($currentCapabilities['is_inviteable'] ?? false),
-            'is_publicly_discoverable' => array_key_exists('is_publicly_discoverable', $capabilities)
-                ? (bool) $capabilities['is_publicly_discoverable']
-                : (bool) ($currentCapabilities['is_publicly_discoverable'] ?? false),
-            'is_poi_enabled' => $isPoiEnabled,
-            'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
-            'has_bio' => array_key_exists('has_bio', $capabilities)
-                ? (bool) $capabilities['has_bio']
-                : (bool) ($currentCapabilities['has_bio'] ?? false),
-            'has_content' => array_key_exists('has_content', $capabilities)
-                ? (bool) $capabilities['has_content']
-                : (bool) ($currentCapabilities['has_content'] ?? false),
-            'has_taxonomies' => array_key_exists('has_taxonomies', $capabilities)
-                ? (bool) $capabilities['has_taxonomies']
-                : (bool) ($currentCapabilities['has_taxonomies'] ?? false),
-            'has_avatar' => array_key_exists('has_avatar', $capabilities)
-                ? (bool) $capabilities['has_avatar']
-                : (bool) ($currentCapabilities['has_avatar'] ?? false),
-            'has_cover' => array_key_exists('has_cover', $capabilities)
-                ? (bool) $capabilities['has_cover']
-                : (bool) ($currentCapabilities['has_cover'] ?? false),
-            'has_events' => array_key_exists('has_events', $capabilities)
-                ? (bool) $capabilities['has_events']
-                : (bool) ($currentCapabilities['has_events'] ?? false),
-            'has_nested_profile_groups' => array_key_exists('has_nested_profile_groups', $capabilities)
-                ? (bool) $capabilities['has_nested_profile_groups']
-                : (bool) ($currentCapabilities['has_nested_profile_groups'] ?? false),
-        ];
+        return $this->capabilityCatalog->normalize($capabilities, $currentCapabilities);
     }
 
     /**
