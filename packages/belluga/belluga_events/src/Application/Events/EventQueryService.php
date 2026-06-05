@@ -18,6 +18,9 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Fluent;
+use Illuminate\Support\Str;
+use Illuminate\Contracts\Support\Arrayable;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 use MongoDB\BSON\UTCDateTime;
@@ -66,12 +69,15 @@ class EventQueryService
         $useGeo = $filters['use_geo'] && ! $filters['confirmed_only'];
         $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $useGeo);
 
-        $hasMore = count($raw) > $pageSize;
-        $pageSlice = array_slice($raw, 0, $pageSize);
+        $pageRows = $raw['page_rows'] ?? [];
+        $hasMore = count($pageRows) > $pageSize;
+        $pageSlice = array_slice($pageRows, 0, $pageSize);
 
         return [
             'items' => $this->formatEvents($pageSlice, $userId),
             'has_more' => $hasMore,
+            'discovery_filter_facets' => $raw['discovery_filter_facets']
+                ?? $this->emptyAgendaDiscoveryFilterFacetsPayload(),
         ];
     }
 
@@ -419,12 +425,21 @@ class EventQueryService
         $payload['thumb'] = $this->normalizeThumbPayload(
             $this->normalizeArray($event->thumb ?? null)
         );
-        $payload['occurrences'] = $this->resolveEventOccurrences($event, $selectedOccurrenceId, $preloadedOccurrences);
+        $payload['occurrences'] = $this->resolveEventOccurrences(
+            $event,
+            $selectedOccurrenceId,
+            $preloadedOccurrences,
+            true
+        );
         $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
             $this->resolveLinkedAccountProfiles(
                 $this->normalizeEventParties($event->event_parties ?? [])
             ),
             $payload['occurrences']
+        );
+        $payload['profile_groups'] = $this->formatAggregateProfileGroupsForPublic(
+            $event,
+            $preloadedOccurrences
         );
         if (array_key_exists('artists', $payload)) {
             $payload['artists'] = $this->resolveArtistsReadProjectionFromLinkedProfiles(
@@ -459,6 +474,7 @@ class EventQueryService
             $eventParties,
             $this->resolveOccurrenceOwnedEventParties($event, $preloadedOccurrences)
         );
+        $eventLinkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($effectiveEventParties);
         $taxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
         $typeVisual = $this->normalizeEventTypeVisual(
@@ -544,6 +560,10 @@ class EventQueryService
             ],
             'event_parties' => $eventParties,
             'linked_account_profiles' => $linkedAccountProfiles,
+            'profile_groups' => $this->formatProfileGroupsForManagement(
+                $event->profile_groups ?? [],
+                $eventLinkedAccountProfiles
+            ),
             'capabilities' => $this->resolveEventCapabilities($event),
             'taxonomy_terms' => $taxonomyTerms,
             'publication' => [
@@ -667,7 +687,6 @@ class EventQueryService
             'since' => $since->toISOString(),
             'use_geo' => (bool) ($filters['use_geo'] ?? false),
             'category_filter_count' => count($filters['categories'] ?? []),
-            'tag_filter_count' => count($filters['tags'] ?? []),
             'taxonomy_filter_count' => count($filters['taxonomy'] ?? []),
             'confirmed_only' => (bool) ($filters['confirmed_only'] ?? false),
         ]);
@@ -691,7 +710,6 @@ class EventQueryService
 
         return [
             'categories' => $this->normalizeStringArray($queryParams['categories'] ?? []),
-            'tags' => $this->normalizeStringArray($queryParams['tags'] ?? []),
             'taxonomy' => $this->normalizeTaxonomyArray($queryParams['taxonomy'] ?? []),
             'occurrence_ids' => $this->normalizeStringArray($queryParams['occurrence_ids'] ?? []),
             'search' => $this->extractSearchQuery($queryParams),
@@ -742,15 +760,29 @@ class EventQueryService
     {
         $confirmedOccurrenceIds = $this->resolveConfirmedOccurrenceIds($filters, $userId);
         if (is_array($confirmedOccurrenceIds) && $confirmedOccurrenceIds === []) {
-            return [];
+            return [
+                'page_rows' => [],
+                'discovery_filter_facets' => $this->emptyAgendaDiscoveryFilterFacetsPayload(),
+            ];
         }
 
         $pipeline = $this->buildAgendaPipeline($filters, $skip, $limit, $useGeo, $confirmedOccurrenceIds);
+        EventBus::dispatch('belluga.events.public_agenda_aggregate', [
+            'purpose' => 'public_agenda_page_with_runtime_facets',
+            'pipeline' => $pipeline,
+        ]);
 
         /** @var Collection<int, EventOccurrence> $events */
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+        $payload = $this->normalizeArray($events->first());
 
-        return $events->all();
+        return [
+            'page_rows' => $this->hydrateAgendaAggregateRows($payload['page_rows'] ?? []),
+            'discovery_filter_facets' => $this->formatAgendaDiscoveryFilterFacets(
+                $payload,
+                $filters
+            ),
+        ];
     }
 
     /**
@@ -825,9 +857,6 @@ class EventQueryService
             $pipeline[] = ['$match' => $baseMatch];
         }
 
-        $this->applyCategoryFilter($pipeline, $filters['categories']);
-        $this->applyTagsFilter($pipeline, $filters['tags']);
-        $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
         $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
 
         $pipeline[] = [
@@ -863,11 +892,130 @@ class EventQueryService
             $sort = ['starts_at' => 1, '_id' => 1];
         }
 
-        $pipeline[] = ['$sort' => $sort];
-        $pipeline[] = ['$skip' => $skip];
-        $pipeline[] = ['$limit' => $limit];
+        $taxonomyGroups = array_keys($this->groupTaxonomySelectionsByType($filters['taxonomy']));
+        $pipeline[] = [
+            '$facet' => $this->buildAgendaFacetBranches(
+                filters: $filters,
+                taxonomyGroups: $taxonomyGroups,
+                sort: $sort,
+                skip: $skip,
+                limit: $limit,
+            ),
+        ];
 
         return $pipeline;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @param  array<int, string>  $taxonomyGroups
+     * @param  array<string, int>  $sort
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function buildAgendaFacetBranches(
+        array $filters,
+        array $taxonomyGroups,
+        array $sort,
+        int $skip,
+        int $limit,
+    ): array {
+        $branches = [];
+
+        $pageRows = [];
+        $this->applyCategoryFilter($pageRows, $filters['categories']);
+        $this->applyTaxonomyFilter($pageRows, $filters['taxonomy']);
+        $pageRows[] = ['$sort' => $sort];
+        $pageRows[] = ['$skip' => $skip];
+        $pageRows[] = ['$limit' => $limit];
+        $branches['page_rows'] = $pageRows;
+
+        $typeKeys = [];
+        $this->applyTaxonomyFilter($typeKeys, $filters['taxonomy']);
+        $typeKeys[] = [
+            '$project' => [
+                'filter_keys' => [
+                    '$setUnion' => [
+                        [['$ifNull' => ['$type.slug', null]]],
+                        ['$ifNull' => ['$categories', []]],
+                    ],
+                ],
+            ],
+        ];
+        $typeKeys[] = ['$unwind' => '$filter_keys'];
+        $typeKeys[] = ['$match' => ['filter_keys' => ['$ne' => null]]];
+        $typeKeys[] = ['$group' => ['_id' => '$filter_keys']];
+        $typeKeys[] = [
+            '$project' => [
+                '_id' => 0,
+                'filter_key' => '$_id',
+            ],
+        ];
+        $typeKeys[] = ['$sort' => ['filter_key' => 1]];
+        $branches['type_keys'] = $typeKeys;
+
+        $taxonomyBase = [];
+        $this->applyCategoryFilter($taxonomyBase, $filters['categories']);
+        $this->applyTaxonomyFilter($taxonomyBase, $filters['taxonomy']);
+        $this->appendTaxonomyTermsGroupStages($taxonomyBase);
+        $branches['taxonomy_base'] = $taxonomyBase;
+
+        foreach ($taxonomyGroups as $taxonomyGroup) {
+            $groupFilters = [];
+            $this->applyCategoryFilter($groupFilters, $filters['categories']);
+            $this->applyTaxonomyFilter(
+                $groupFilters,
+                $this->excludeTaxonomySelectionsForType(
+                    $filters['taxonomy'],
+                    $taxonomyGroup
+                )
+            );
+            $this->appendTaxonomyTermsGroupStages($groupFilters);
+            $branches[$this->taxonomyFacetBranchKey($taxonomyGroup)] = $groupFilters;
+        }
+
+        return $branches;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     */
+    private function appendTaxonomyTermsGroupStages(array &$pipeline): void
+    {
+        $pipeline[] = ['$unwind' => '$taxonomy_terms'];
+        $pipeline[] = [
+            '$group' => [
+                '_id' => [
+                    'type' => '$taxonomy_terms.type',
+                    'value' => '$taxonomy_terms.value',
+                ],
+                'label' => [
+                    '$first' => [
+                        '$ifNull' => [
+                            '$taxonomy_terms.label',
+                            '$taxonomy_terms.name',
+                        ],
+                    ],
+                ],
+                'group_label' => [
+                    '$first' => [
+                        '$ifNull' => [
+                            '$taxonomy_terms.taxonomy_name',
+                            '$taxonomy_terms.type',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+        $pipeline[] = [
+            '$project' => [
+                '_id' => 0,
+                'type' => '$_id.type',
+                'value' => '$_id.value',
+                'label' => '$label',
+                'group_label' => '$group_label',
+            ],
+        ];
+        $pipeline[] = ['$sort' => ['type' => 1, 'label' => 1, 'value' => 1]];
     }
 
     /**
@@ -925,7 +1073,6 @@ class EventQueryService
         }
 
         $this->applyCategoryFilter($pipeline, $filters['categories']);
-        $this->applyTagsFilter($pipeline, $filters['tags']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy']);
         $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
 
@@ -962,28 +1109,6 @@ class EventQueryService
 
     /**
      * @param  array<int, array<string, mixed>>  $pipeline
-     * @param  array<int, string>  $tags
-     */
-    private function applyTagsFilter(array &$pipeline, array $tags): void
-    {
-        if ($tags === []) {
-            return;
-        }
-
-        $regexes = array_map(
-            static fn (string $value): Regex => new Regex('^'.preg_quote($value).'$', 'i'),
-            $tags
-        );
-
-        $pipeline[] = [
-            '$match' => [
-                'tags' => ['$in' => $regexes],
-            ],
-        ];
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $pipeline
      * @param  array<int, array{type: string, value: string}>  $taxonomy
      */
     private function applyTaxonomyFilter(array &$pipeline, array $taxonomy): void
@@ -1008,6 +1133,194 @@ class EventQueryService
         if ($termMatches !== []) {
             $pipeline[] = ['$match' => ['$or' => $termMatches]];
         }
+    }
+
+    /**
+     * @param  array<int, array{type: string, value: string}>  $taxonomy
+     * @return array<string, array<int, string>>
+     */
+    private function groupTaxonomySelectionsByType(array $taxonomy): array
+    {
+        $grouped = [];
+        foreach ($taxonomy as $term) {
+            $type = trim((string) ($term['type'] ?? ''));
+            $value = trim((string) ($term['value'] ?? ''));
+            if ($type === '' || $value === '') {
+                continue;
+            }
+            $grouped[$type] ??= [];
+            $grouped[$type][] = $value;
+        }
+
+        foreach ($grouped as $type => $values) {
+            $grouped[$type] = array_values(array_unique($values));
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * @param  array<int, array{type: string, value: string}>  $taxonomy
+     * @return array<int, array{type: string, value: string}>
+     */
+    private function excludeTaxonomySelectionsForType(array $taxonomy, string $excludedType): array
+    {
+        return array_values(array_filter(
+            $taxonomy,
+            static fn (array $term): bool => trim((string) ($term['type'] ?? '')) !== $excludedType
+        ));
+    }
+
+    private function taxonomyFacetBranchKey(string $taxonomyType): string
+    {
+        return 'taxonomy_scope_'.trim($taxonomyType);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    private function formatAgendaDiscoveryFilterFacets(array $payload, array $filters): array
+    {
+        $filterKeys = [];
+        foreach ($this->normalizeArray($payload['type_keys'] ?? []) as $row) {
+            $normalized = $this->normalizeArray($row);
+            $value = strtolower(trim((string) (
+                $normalized['filter_key']
+                ?? $normalized['_id']
+                ?? $normalized['id']
+                ?? ''
+            )));
+            if ($value === '') {
+                continue;
+            }
+            $filterKeys[$value] = $value;
+        }
+
+        $taxonomyOptions = $this->formatMergedTaxonomyFacetRows(
+            baseRows: $this->normalizeArray($payload['taxonomy_base'] ?? []),
+            scopedRowsByType: $this->agendaScopedTaxonomyRowsByType($payload, $filters),
+        );
+
+        return [
+            'surface' => 'home.events',
+            'filter_keys' => array_values($filterKeys),
+            'taxonomy_options' => $taxonomyOptions,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $filters
+     * @return array<string, array<int, mixed>>
+     */
+    private function agendaScopedTaxonomyRowsByType(array $payload, array $filters): array
+    {
+        $rows = [];
+        foreach (array_keys($this->groupTaxonomySelectionsByType($filters['taxonomy'] ?? [])) as $taxonomyType) {
+            $rows[$taxonomyType] = $this->normalizeArray(
+                $payload[$this->taxonomyFacetBranchKey($taxonomyType)] ?? []
+            );
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<int, mixed>  $baseRows
+     * @param  array<string, array<int, mixed>>  $scopedRowsByType
+     * @return array<string, array<string, mixed>>
+     */
+    private function formatMergedTaxonomyFacetRows(array $baseRows, array $scopedRowsByType): array
+    {
+        $mergedRowsByType = [];
+
+        foreach ($baseRows as $row) {
+            $normalized = $this->normalizeArray($row);
+            $type = strtolower(trim((string) ($normalized['type'] ?? '')));
+            if ($type === '') {
+                continue;
+            }
+            $mergedRowsByType[$type][] = $normalized;
+        }
+
+        foreach ($scopedRowsByType as $type => $rows) {
+            $mergedRowsByType[$type] = array_map(
+                fn (mixed $row): array => $this->normalizeArray($row),
+                $rows
+            );
+        }
+
+        $taxonomyOptions = [];
+        foreach ($mergedRowsByType as $type => $rows) {
+            $terms = [];
+            $groupLabel = $type;
+            foreach ($rows as $row) {
+                $value = strtolower(trim((string) ($row['value'] ?? '')));
+                $label = trim((string) ($row['label'] ?? $value));
+                if ($value === '' || $label === '') {
+                    continue;
+                }
+                $groupLabel = trim((string) ($row['group_label'] ?? $groupLabel));
+                $terms[$value] = [
+                    'value' => $value,
+                    'label' => $label,
+                ];
+            }
+
+            if ($terms === []) {
+                continue;
+            }
+
+            uasort($terms, static fn (array $left, array $right): int => [$left['label'], $left['value']] <=> [$right['label'], $right['value']]);
+            $taxonomyOptions[$type] = [
+                'key' => $type,
+                'label' => $groupLabel === '' ? $type : $groupLabel,
+                'terms' => array_values($terms),
+                'terms_truncated' => false,
+                'terms_limit' => count($terms),
+            ];
+        }
+
+        ksort($taxonomyOptions);
+
+        return $taxonomyOptions;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyAgendaDiscoveryFilterFacetsPayload(): array
+    {
+        return [
+            'surface' => 'home.events',
+            'filter_keys' => [],
+            'taxonomy_options' => [],
+        ];
+    }
+
+    /**
+     * @return array<int, Fluent>
+     */
+    private function hydrateAgendaAggregateRows(mixed $rows): array
+    {
+        $hydrated = [];
+        foreach ($this->normalizeArray($rows) as $row) {
+            $payload = $this->normalizeArray($row);
+            if ($payload === []) {
+                continue;
+            }
+            if (! array_key_exists('_id', $payload) && array_key_exists('id', $payload)) {
+                $payload['_id'] = $payload['id'];
+            }
+            if (! array_key_exists('id', $payload) && array_key_exists('_id', $payload)) {
+                $payload['id'] = $payload['_id'];
+            }
+            $hydrated[] = new Fluent($payload);
+        }
+
+        return $hydrated;
     }
 
     /**
@@ -1149,7 +1462,6 @@ class EventQueryService
                 ['title' => ['$regex' => $regex, '$options' => 'i']],
                 ['slug' => ['$regex' => $regex, '$options' => 'i']],
                 ['content' => ['$regex' => $regex, '$options' => 'i']],
-                ['tags' => ['$regex' => $regex, '$options' => 'i']],
                 ['categories' => ['$regex' => $regex, '$options' => 'i']],
                 ['taxonomy_terms.value' => ['$regex' => $regex, '$options' => 'i']],
                 ['event_parties.metadata.display_name' => ['$regex' => $regex, '$options' => 'i']],
@@ -1272,7 +1584,6 @@ class EventQueryService
         $artists = $includeArtists
             ? $this->resolveArtistsReadProjection($eventParties)
             : [];
-        $tags = $this->normalizeArray($event->tags ?? []);
         $taxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
 
         $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
@@ -1308,6 +1619,7 @@ class EventQueryService
         if ($parentEvent !== null && $isOccurrence) {
             $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
         }
+        $profileGroups = $this->formatProfileGroupsForPublic($event->profile_groups ?? [], $linkedAccountProfiles);
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
@@ -1353,9 +1665,9 @@ class EventQueryService
             ],
             'event_parties' => $eventParties,
             'linked_account_profiles' => $linkedAccountProfiles,
+            'profile_groups' => $profileGroups,
             'programming_items' => $this->normalizeProgrammingItems($event->programming_items ?? []),
             'capabilities' => $capabilities,
-            'tags' => array_values(array_map('strval', $tags)),
             'taxonomy_terms' => $taxonomyTerms,
         ];
 
@@ -1434,6 +1746,9 @@ class EventQueryService
     {
         if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
             return $value->getArrayCopy();
+        }
+        if ($value instanceof Arrayable) {
+            return $value->toArray();
         }
         if (is_array($value)) {
             return $value;
@@ -1742,7 +2057,8 @@ class EventQueryService
     private function resolveEventOccurrences(
         mixed $event,
         ?string $selectedOccurrenceId = null,
-        ?iterable $preloadedOccurrences = null
+        ?iterable $preloadedOccurrences = null,
+        bool $forPublic = false
     ): array {
         if (isset($event->event_id) && (string) $event->event_id !== '') {
             $start = $this->formatDate($this->extractRawAttribute($event, 'starts_at'));
@@ -1752,6 +2068,11 @@ class EventQueryService
 
             $occurrenceId = isset($event->_id) ? (string) $event->_id : null;
             $programmingItems = $this->normalizeProgrammingItems($event->programming_items ?? []);
+            $ownEventParties = $this->normalizeEventParties($event->own_event_parties ?? []);
+            $ownLinkedAccountProfiles = $this->normalizeManagementLinkedAccountProfiles(
+                $event->own_linked_account_profiles ?? [],
+                $ownEventParties
+            );
 
             return [[
                 'occurrence_id' => $occurrenceId,
@@ -1763,8 +2084,18 @@ class EventQueryService
                 'location_override' => null,
                 'own_taxonomy_terms' => $this->ensureTaxonomySnapshots($event->own_taxonomy_terms ?? []),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []),
-                'own_event_parties' => $this->normalizeEventParties($event->own_event_parties ?? []),
-                'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($event->own_linked_account_profiles ?? []),
+                'own_event_parties' => $ownEventParties,
+                'own_linked_account_profiles' => $ownLinkedAccountProfiles,
+                'profile_groups' => $forPublic
+                    ? $this->formatProfileGroupsForPublic(
+                        $event->own_profile_groups ?? [],
+                        $ownLinkedAccountProfiles,
+                        false
+                    )
+                    : $this->formatProfileGroupsForManagement(
+                        $event->own_profile_groups ?? [],
+                        $ownLinkedAccountProfiles
+                    ),
                 'programming_items' => $programmingItems,
                 'programming_count' => count($programmingItems),
             ]];
@@ -1780,9 +2111,14 @@ class EventQueryService
                 : collect($preloadedOccurrences);
 
             if ($documents->isNotEmpty()) {
-                return $documents->map(function (EventOccurrence $occurrence) use ($selectedOccurrenceId): array {
+                return $documents->map(function (EventOccurrence $occurrence) use ($selectedOccurrenceId, $forPublic): array {
                     $occurrenceId = isset($occurrence->_id) ? (string) $occurrence->_id : null;
                     $programmingItems = $this->normalizeProgrammingItems($occurrence->programming_items ?? []);
+                    $ownEventParties = $this->normalizeEventParties($occurrence->own_event_parties ?? []);
+                    $ownLinkedAccountProfiles = $this->normalizeManagementLinkedAccountProfiles(
+                        $occurrence->own_linked_account_profiles ?? [],
+                        $ownEventParties
+                    );
 
                     return [
                         'occurrence_id' => $occurrenceId,
@@ -1794,8 +2130,18 @@ class EventQueryService
                         'location_override' => null,
                         'own_taxonomy_terms' => $this->ensureTaxonomySnapshots($occurrence->own_taxonomy_terms ?? []),
                         'taxonomy_terms' => $this->ensureTaxonomySnapshots($occurrence->taxonomy_terms ?? []),
-                        'own_event_parties' => $this->normalizeEventParties($occurrence->own_event_parties ?? []),
-                        'own_linked_account_profiles' => $this->normalizeLinkedAccountProfileSummaries($occurrence->own_linked_account_profiles ?? []),
+                        'own_event_parties' => $ownEventParties,
+                        'own_linked_account_profiles' => $ownLinkedAccountProfiles,
+                        'profile_groups' => $forPublic
+                            ? $this->formatProfileGroupsForPublic(
+                                $occurrence->own_profile_groups ?? [],
+                                $ownLinkedAccountProfiles,
+                                false
+                            )
+                            : $this->formatProfileGroupsForManagement(
+                                $occurrence->own_profile_groups ?? [],
+                                $ownLinkedAccountProfiles
+                            ),
                         'programming_items' => $programmingItems,
                         'programming_count' => count($programmingItems),
                     ];
@@ -1931,14 +2277,15 @@ class EventQueryService
             $metadata = isset($party['metadata']) && is_array($party['metadata'])
                 ? $party['metadata']
                 : [];
+            $profileType = $this->scalarString($metadata['profile_type'] ?? null)
+                ?? $this->scalarString($party['party_type'] ?? null)
+                ?? '';
 
             return [
                 'id' => $this->scalarString($party['party_ref_id'] ?? null) ?? '',
                 'display_name' => $this->scalarString($metadata['display_name'] ?? null) ?? '',
                 'slug' => $this->scalarString($metadata['slug'] ?? null),
-                'profile_type' => $this->scalarString($metadata['profile_type'] ?? null)
-                    ?? $this->scalarString($party['party_type'] ?? null)
-                    ?? '',
+                'profile_type' => $profileType,
                 'avatar_url' => $this->absoluteUrlString($metadata['avatar_url'] ?? null),
                 'cover_url' => $this->absoluteUrlString($metadata['cover_url'] ?? null),
                 'highlight' => false,
@@ -1950,10 +2297,12 @@ class EventQueryService
             $metadata = isset($party['metadata']) && is_array($party['metadata'])
                 ? $party['metadata']
                 : [];
+            $profileType = trim((string) ($metadata['profile_type'] ?? $party['party_type'] ?? ''));
 
             return $partyType !== 'venue'
                 && trim((string) ($party['party_ref_id'] ?? '')) !== ''
-                && trim((string) ($metadata['display_name'] ?? '')) !== '';
+                && trim((string) ($metadata['display_name'] ?? '')) !== ''
+                && $this->eventProfileResolver->isProfileTypeQueryable($profileType);
         }))));
     }
 
@@ -1975,7 +2324,7 @@ class EventQueryService
                 return;
             }
 
-            $items[] = [
+            $normalized = $this->normalizeLinkedAccountProfileSummary([
                 'id' => $id,
                 'display_name' => $displayName,
                 'slug' => $this->scalarString($payload['slug'] ?? null),
@@ -1984,7 +2333,12 @@ class EventQueryService
                 'avatar_url' => $this->absoluteUrlString($payload['avatar_url'] ?? null),
                 'cover_url' => $this->absoluteUrlString($payload['cover_url'] ?? null),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($payload['taxonomy_terms'] ?? []),
-            ];
+            ]);
+            if ($normalized === null) {
+                return;
+            }
+
+            $items[] = $normalized;
             $seenIds[$id] = true;
         };
 
@@ -2006,6 +2360,530 @@ class EventQueryService
         }
 
         return $items;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
+     */
+    private function formatProfileGroupsForManagement(mixed $rawGroups, array $linkedProfiles = []): array
+    {
+        $groups = $this->normalizeProfileGroups($rawGroups);
+        if ($groups !== []) {
+            $visibleProfileIds = [];
+            foreach ($linkedProfiles as $profile) {
+                $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
+                if ($normalized === null) {
+                    continue;
+                }
+
+                $profileId = trim((string) ($this->scalarString($normalized['id'] ?? null) ?? ''));
+                if ($profileId !== '') {
+                    $visibleProfileIds[$profileId] = true;
+                }
+            }
+
+            return array_values(array_map(
+                static function (array $group) use ($visibleProfileIds): array {
+                    $memberIds = [];
+                    foreach ($group['account_profile_ids'] as $profileId) {
+                        if (! isset($visibleProfileIds[$profileId]) || in_array($profileId, $memberIds, true)) {
+                            continue;
+                        }
+
+                        $memberIds[] = $profileId;
+                    }
+
+                    return [
+                        'id' => $group['id'],
+                        'label' => $group['label'],
+                        'order' => $group['order'],
+                        'account_profile_ids' => $memberIds,
+                    ];
+                },
+                $groups
+            ));
+        }
+
+        return array_map(
+            static fn (array $group): array => [
+                'id' => $group['id'],
+                'label' => $group['label'],
+                'order' => $group['order'],
+                'account_profile_ids' => array_values(array_map(
+                    static fn (array $profile): string => (string) ($profile['id'] ?? ''),
+                    $group['profiles'] ?? []
+                )),
+            ],
+            $this->fallbackProfileGroupsByType($linkedProfiles)
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<int, array<string, mixed>>
+     */
+    private function formatProfileGroupsForPublic(
+        mixed $rawGroups,
+        array $linkedProfiles,
+        bool $allowFallback = true
+    ): array
+    {
+        $groups = $this->normalizeProfileGroups($rawGroups);
+        if ($groups === []) {
+            return $allowFallback ? $this->fallbackProfileGroupsByType($linkedProfiles) : [];
+        }
+
+        $profilesById = [];
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            if ($id !== '' && ! isset($profilesById[$id])) {
+                $profilesById[$id] = $profile;
+            }
+        }
+
+        $publicGroups = [];
+        foreach ($groups as $group) {
+            $profiles = [];
+            foreach ($group['account_profile_ids'] as $profileId) {
+                $profile = $profilesById[$profileId] ?? null;
+                if (! is_array($profile)) {
+                    continue;
+                }
+                $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
+                if ($normalized !== null) {
+                    $profiles[] = $normalized;
+                }
+            }
+
+            if ($profiles === []) {
+                continue;
+            }
+
+            $publicGroups[] = [
+                'id' => $group['id'],
+                'label' => $group['label'],
+                'order' => $group['order'],
+                'profiles' => $profiles,
+            ];
+        }
+
+        return $publicGroups;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function formatSelectedOccurrenceProfileGroupsForPublic(Event $event, EventOccurrence $occurrence): array
+    {
+        $eventLinkedProfiles = $this->resolveLinkedAccountProfiles(
+            $this->normalizeEventParties($event->event_parties ?? [])
+        );
+        $occurrenceLinkedProfiles = $this->normalizeManagementLinkedAccountProfiles(
+            $occurrence->own_linked_account_profiles ?? [],
+            $this->normalizeEventParties($occurrence->own_event_parties ?? [])
+        );
+
+        $eventExplicitGroups = $this->formatProfileGroupsForPublic(
+            $event->profile_groups ?? [],
+            $eventLinkedProfiles,
+            false
+        );
+        $occurrenceExplicitGroups = $this->formatProfileGroupsForPublic(
+            $occurrence->own_profile_groups ?? [],
+            $occurrenceLinkedProfiles,
+            false
+        );
+
+        $eventGroups = $eventExplicitGroups !== []
+            ? $eventExplicitGroups
+            : $this->fallbackProfileGroupsByType(
+                $this->excludeLinkedProfilesById(
+                    $eventLinkedProfiles,
+                    $this->profileIdsFromPublicGroups($occurrenceExplicitGroups)
+                )
+            );
+
+        $occurrenceGroups = $occurrenceExplicitGroups !== []
+            ? $occurrenceExplicitGroups
+            : $this->fallbackProfileGroupsByType(
+                $this->excludeLinkedProfilesById(
+                    $occurrenceLinkedProfiles,
+                    $this->profileIdsFromPublicGroups($eventExplicitGroups)
+                )
+            );
+
+        return $this->mergeProfileGroupsForPublic(
+            $eventGroups,
+            $occurrenceGroups
+        );
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function formatAggregateProfileGroupsForPublic(Event $event, iterable $occurrences): array
+    {
+        $groupSets = [];
+        $eventLinkedProfiles = $this->resolveLinkedAccountProfiles(
+            $this->normalizeEventParties($event->event_parties ?? [])
+        );
+        $eventExplicitGroups = $this->formatProfileGroupsForPublic(
+            $event->profile_groups ?? [],
+            $eventLinkedProfiles,
+            false
+        );
+
+        $occurrenceContexts = [];
+        $explicitCoveredIds = $this->profileIdsFromPublicGroups($eventExplicitGroups);
+
+        foreach ($occurrences as $occurrence) {
+            $occurrenceLinkedProfiles = $this->normalizeManagementLinkedAccountProfiles(
+                $occurrence->own_linked_account_profiles ?? [],
+                $this->normalizeEventParties($occurrence->own_event_parties ?? [])
+            );
+
+            $occurrenceExplicitGroups = $this->formatProfileGroupsForPublic(
+                $occurrence->own_profile_groups ?? [],
+                $occurrenceLinkedProfiles,
+                false
+            );
+
+            foreach ($this->profileIdsFromPublicGroups($occurrenceExplicitGroups) as $profileId) {
+                if (! in_array($profileId, $explicitCoveredIds, true)) {
+                    $explicitCoveredIds[] = $profileId;
+                }
+            }
+
+            $occurrenceContexts[] = [
+                'linked_profiles' => $occurrenceLinkedProfiles,
+                'explicit_groups' => $occurrenceExplicitGroups,
+            ];
+        }
+
+        $groupSets[] = $eventExplicitGroups !== []
+            ? $eventExplicitGroups
+            : $this->fallbackProfileGroupsByType(
+                $this->excludeLinkedProfilesById($eventLinkedProfiles, $explicitCoveredIds)
+            );
+
+        foreach ($occurrenceContexts as $context) {
+            $explicitGroups = $context['explicit_groups'];
+            if ($explicitGroups !== []) {
+                $groupSets[] = $explicitGroups;
+                continue;
+            }
+
+            $groupSets[] = $this->fallbackProfileGroupsByType(
+                $this->excludeLinkedProfilesById(
+                    $context['linked_profiles'],
+                    $explicitCoveredIds
+                )
+            );
+        }
+
+        return $this->mergeProfileGroupsForPublic(...$groupSets);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, string>
+     */
+    private function profileIdsFromPublicGroups(array $groups): array
+    {
+        $ids = [];
+
+        foreach ($groups as $group) {
+            foreach ($this->normalizeLinkedAccountProfileSummaries($group['profiles'] ?? []) as $profile) {
+                $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+                if ($profileId !== '' && ! in_array($profileId, $ids, true)) {
+                    $ids[] = $profileId;
+                }
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @param  array<int, string>  $excludedProfileIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function excludeLinkedProfilesById(array $linkedProfiles, array $excludedProfileIds): array
+    {
+        if ($excludedProfileIds === []) {
+            return $this->normalizeLinkedAccountProfileSummaries($linkedProfiles);
+        }
+
+        $excluded = array_fill_keys($excludedProfileIds, true);
+        $filtered = [];
+
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            if ($profileId === '' || isset($excluded[$profileId])) {
+                continue;
+            }
+
+            $filtered[] = $profile;
+        }
+
+        return $filtered;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  ...$groupSets
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeProfileGroupsForPublic(array ...$groupSets): array
+    {
+        $merged = [];
+        $indexByLabel = [];
+
+        foreach ($groupSets as $groupSet) {
+            foreach ($groupSet as $group) {
+                $id = trim((string) ($group['id'] ?? ''));
+                $label = trim((string) ($group['label'] ?? ''));
+                if ($id === '' || $label === '') {
+                    continue;
+                }
+
+                $profiles = $this->normalizeLinkedAccountProfileSummaries($group['profiles'] ?? []);
+                if ($profiles === []) {
+                    continue;
+                }
+
+                $groupKey = Str::lower($label);
+                $groupIndex = $indexByLabel[$groupKey] ?? null;
+                $seenProfileIds = [];
+                if ($groupIndex !== null) {
+                    foreach ($merged[$groupIndex]['profiles'] as $existingProfile) {
+                        $existingProfileId = trim((string) ($this->scalarString($existingProfile['id'] ?? null) ?? ''));
+                        if ($existingProfileId !== '') {
+                            $seenProfileIds[$existingProfileId] = true;
+                        }
+                    }
+                }
+
+                $profilesToAppend = [];
+                foreach ($profiles as $profile) {
+                    $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+                    if ($profileId === '' || isset($seenProfileIds[$profileId])) {
+                        continue;
+                    }
+
+                    $profilesToAppend[] = $profile;
+                    $seenProfileIds[$profileId] = true;
+                }
+
+                if ($profilesToAppend === []) {
+                    continue;
+                }
+
+                if ($groupIndex === null) {
+                    $indexByLabel[$groupKey] = count($merged);
+                    $groupIndex = $indexByLabel[$groupKey];
+                    $merged[] = [
+                        'id' => $id,
+                        'label' => $label,
+                        'order' => count($merged),
+                        'profiles' => [],
+                    ];
+                }
+
+                foreach ($profilesToAppend as $profile) {
+                    $merged[$groupIndex]['profiles'][] = $profile;
+                }
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeManagementLinkedAccountProfiles(mixed $linkedProfiles, array $eventParties): array
+    {
+        $normalizedById = [];
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $profilePayload = $this->normalizeLinkedAccountProfileSummary($profile);
+            if ($profilePayload === null) {
+                continue;
+            }
+
+            $profileId = trim((string) ($this->scalarString($profilePayload['id'] ?? null) ?? ''));
+            if ($profileId === '' || isset($normalizedById[$profileId])) {
+                continue;
+            }
+
+            $normalizedById[$profileId] = $profilePayload;
+        }
+
+        if ($eventParties === []) {
+            return array_values($normalizedById);
+        }
+
+        $resolvedById = [];
+        foreach ($this->resolveLinkedAccountProfiles($eventParties) as $profilePayload) {
+            $profileId = trim((string) ($this->scalarString($profilePayload['id'] ?? null) ?? ''));
+            if ($profileId === '' || isset($resolvedById[$profileId])) {
+                continue;
+            }
+
+            $resolvedById[$profileId] = $profilePayload;
+        }
+
+        $merged = [];
+        $seenIds = [];
+        foreach ($eventParties as $party) {
+            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
+            if ($profileId === '' || isset($seenIds[$profileId])) {
+                continue;
+            }
+
+            $profilePayload = $resolvedById[$profileId] ?? $normalizedById[$profileId] ?? null;
+            if (! is_array($profilePayload)) {
+                continue;
+            }
+
+            $merged[] = $profilePayload;
+            $seenIds[$profileId] = true;
+        }
+
+        if ($merged !== []) {
+            return $merged;
+        }
+
+        if ($resolvedById !== []) {
+            return array_values($resolvedById);
+        }
+
+        return array_values($normalizedById);
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
+     */
+    private function normalizeProfileGroups(mixed $rawGroups): array
+    {
+        $rows = $this->normalizeArray($rawGroups);
+        $groups = [];
+
+        foreach ($rows as $index => $row) {
+            $payload = $this->normalizeArray($row);
+            $label = trim((string) ($payload['label'] ?? ''));
+            if ($label === '') {
+                continue;
+            }
+
+            $id = trim((string) ($payload['id'] ?? $payload['key'] ?? ''));
+            if ($id === '') {
+                $id = Str::slug($label);
+            }
+            if ($id === '') {
+                $id = 'group-'.$index;
+            }
+
+            $memberIds = [];
+            foreach ($this->normalizeArray($payload['account_profile_ids'] ?? $payload['profile_ids'] ?? []) as $rawMemberId) {
+                $memberId = trim((string) $rawMemberId);
+                if ($memberId !== '' && ! in_array($memberId, $memberIds, true)) {
+                    $memberIds[] = $memberId;
+                }
+            }
+
+            $groups[] = [
+                '_source_index' => $index,
+                'id' => $id,
+                'label' => $label,
+                'order' => isset($payload['order']) ? (int) $payload['order'] : $index,
+                'account_profile_ids' => $memberIds,
+            ];
+        }
+
+        usort(
+            $groups,
+            static fn (array $left, array $right): int => [$left['order'], $left['_source_index']]
+                <=> [$right['order'], $right['_source_index']]
+        );
+
+        return array_values(array_map(
+            static fn (array $group): array => [
+                'id' => $group['id'],
+                'label' => $group['label'],
+                'order' => $group['order'],
+                'account_profile_ids' => $group['account_profile_ids'],
+            ],
+            $groups
+        ));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<int, array<string, mixed>>
+     */
+    private function fallbackProfileGroupsByType(array $linkedProfiles): array
+    {
+        $labelsByType = $this->profileTypePluralLabelsByType($linkedProfiles);
+        $groups = [];
+        $indexByType = [];
+
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $type = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
+            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            if ($type === '' || $id === '') {
+                continue;
+            }
+
+            if (! isset($indexByType[$type])) {
+                $indexByType[$type] = count($groups);
+                $groups[] = [
+                    'id' => $type,
+                    'label' => $labelsByType[$type] ?? Str::headline(Str::plural($type)),
+                    'order' => count($groups),
+                    'profiles' => [],
+                ];
+            }
+
+            $groups[$indexByType[$type]]['profiles'][] = $profile;
+        }
+
+        usort(
+            $groups,
+            static fn (array $left, array $right): int => [$left['label'], $left['id']]
+                <=> [$right['label'], $right['id']]
+        );
+
+        foreach ($groups as $index => &$group) {
+            $group['order'] = $index;
+        }
+        unset($group);
+
+        return $groups;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<string, string>
+     */
+    private function profileTypePluralLabelsByType(array $linkedProfiles): array
+    {
+        $types = [];
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $type = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
+            if ($type !== '') {
+                $types[$type] = true;
+            }
+        }
+
+        if ($types === []) {
+            return [];
+        }
+
+        return $this->eventProfileResolver->resolveProfileTypePluralLabelsByTypes(array_keys($types));
     }
 
     /**
@@ -2082,6 +2960,27 @@ class EventQueryService
             $payload['taxonomy_terms'] = $this->ensureTaxonomySnapshots($payload['taxonomy_terms']);
         }
 
+        $id = trim((string) ($this->scalarString($payload['id'] ?? null) ?? ''));
+        $displayName = trim((string) ($this->scalarString($payload['display_name'] ?? $payload['name'] ?? null) ?? ''));
+        $profileType = trim((string) ($this->scalarString($payload['profile_type'] ?? $payload['party_type'] ?? null) ?? ''));
+        if ($id === '' || $displayName === '' || $profileType === '') {
+            return null;
+        }
+        if (! $this->eventProfileResolver->isProfileTypeQueryable($profileType)) {
+            return null;
+        }
+
+        $slug = trim((string) ($this->scalarString($payload['slug'] ?? null) ?? ''));
+        $canOpenPublicDetail = $slug !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($profileType);
+
+        $payload['id'] = $id;
+        $payload['display_name'] = $displayName;
+        $payload['profile_type'] = $profileType;
+        $payload['slug'] = $slug === '' ? null : $slug;
+        $payload['can_open_public_detail'] = $canOpenPublicDetail;
+        $payload['public_detail_path'] = $canOpenPublicDetail ? '/parceiro/'.$slug : null;
+
         return $payload;
     }
 
@@ -2114,6 +3013,8 @@ class EventQueryService
                 'slug' => $this->scalarString($normalized['slug'] ?? null),
                 'profile_type' => $profileType,
                 'party_type' => $this->scalarString($normalized['party_type'] ?? null),
+                'can_open_public_detail' => (bool) ($normalized['can_open_public_detail'] ?? false),
+                'public_detail_path' => $this->scalarString($normalized['public_detail_path'] ?? null),
                 'avatar_url' => $this->absoluteUrlString($normalized['avatar_url'] ?? null),
                 'cover_url' => $this->absoluteUrlString($normalized['cover_url'] ?? null),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($normalized['taxonomy_terms'] ?? []),

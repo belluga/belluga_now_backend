@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Application\Media\SystemExternalImageDnsResolver;
 use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
@@ -31,6 +32,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TenantDomainResolverService::class, function ($app) {
             return new TenantDomainResolverService;
         });
+        $this->app->singleton(AccountProfileTypeSetProvider::class);
 
         $this->app->bind(
             ResetPasswordRequestContract::class,

@@ -105,6 +105,7 @@ class InvitesFlowTest extends TestCaseTenant
 
     public function test_send_invite_creates_grouped_feed_and_updates_metrics(): void
     {
+        $this->event = $this->decorateEventWithParticipantGroups($this->event);
         Sanctum::actingAs($this->sender, ['*']);
 
         $response = $this->postJson("{$this->base_api_tenant}invites", [
@@ -150,6 +151,10 @@ class InvitesFlowTest extends TestCaseTenant
         $feedResponse->assertJsonPath('invites.0.event_date', $occurrence->starts_at->toISOString());
         $feedResponse->assertJsonPath('invites.0.location', 'Invite Venue');
         $feedResponse->assertJsonPath('invites.0.message', 'Come with us');
+        $feedResponse->assertJsonPath('invites.0.venue_account_profile_id', 'venue-1');
+        $feedResponse->assertJsonPath('invites.0.profile_groups.0.label', 'Bandas');
+        $feedResponse->assertJsonPath('invites.0.profile_groups.1.label', 'Expositores');
+        $feedResponse->assertJsonPath('invites.0.linked_account_profiles.0.display_name', 'Invite Band');
     }
 
     public function test_feed_expires_finished_invites_before_returning_projections(): void
@@ -1204,6 +1209,7 @@ class InvitesFlowTest extends TestCaseTenant
 
     public function test_share_preview_resolves_without_authentication(): void
     {
+        $this->event = $this->decorateEventWithParticipantGroups($this->event);
         $code = 'PREVIEW1234';
         $occurrenceId = $this->firstOccurrenceId($this->event);
         InviteShareCode::query()->create([
@@ -1231,6 +1237,10 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('invite.event_image_url', 'https://example.org/thumb.jpg');
         $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Sender User');
         $response->assertJsonPath('invite.inviter_candidates.0.status', 'pending');
+        $response->assertJsonPath('invite.venue_account_profile_id', 'venue-1');
+        $response->assertJsonPath('invite.profile_groups.0.label', 'Bandas');
+        $response->assertJsonPath('invite.profile_groups.1.label', 'Expositores');
+        $response->assertJsonPath('invite.linked_account_profiles.0.display_name', 'Invite Band');
     }
 
     public function test_share_preview_rejects_unknown_or_expired_code(): void
@@ -2491,6 +2501,82 @@ class InvitesFlowTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
             'date_time_start' => Carbon::instance($event->date_time_start),
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
+        ]]);
+
+        return $event->fresh();
+    }
+
+    private function decorateEventWithParticipantGroups(Event $event): Event
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'exhibitor'],
+            [
+                'label' => 'Exhibitor',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_inviteable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                    'has_content' => false,
+                ],
+            ]
+        );
+
+        $bandId = 'band-profile-1';
+        $exhibitorId = 'exhibitor-profile-1';
+
+        $event->forceFill([
+            'event_parties' => [
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => $bandId,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => 'Invite Band',
+                        'slug' => 'invite-band',
+                        'profile_type' => 'artist',
+                        'avatar_url' => 'https://example.org/band.png',
+                        'cover_url' => 'https://example.org/band-cover.png',
+                        'taxonomy_terms' => [],
+                    ],
+                ],
+                [
+                    'party_type' => 'exhibitor',
+                    'party_ref_id' => $exhibitorId,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => 'Invite Exhibitor',
+                        'slug' => 'invite-exhibitor',
+                        'profile_type' => 'exhibitor',
+                        'avatar_url' => 'https://example.org/exhibitor.png',
+                        'cover_url' => 'https://example.org/exhibitor-cover.png',
+                        'taxonomy_terms' => [],
+                    ],
+                ],
+            ],
+            'profile_groups' => [
+                [
+                    'id' => 'bandas',
+                    'label' => 'Bandas',
+                    'order' => 0,
+                    'account_profile_ids' => [$bandId],
+                ],
+                [
+                    'id' => 'expositores',
+                    'label' => 'Expositores',
+                    'order' => 1,
+                    'account_profile_ids' => [$exhibitorId],
+                ],
+            ],
+        ])->save();
+
+        $freshEvent = $event->fresh();
+        app(EventOccurrenceSyncService::class)->syncFromEvent($freshEvent, [[
+            'date_time_start' => Carbon::instance($freshEvent->date_time_start),
+            'date_time_end' => $freshEvent->date_time_end ? Carbon::instance($freshEvent->date_time_end) : null,
         ]]);
 
         return $event->fresh();

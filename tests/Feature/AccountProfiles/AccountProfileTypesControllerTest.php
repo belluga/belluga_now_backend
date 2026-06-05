@@ -198,6 +198,70 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
     }
 
+    public function test_profile_type_create_normalizes_queryability_discovery_and_public_navigation(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'delegate',
+                'label' => 'Delegate',
+                'capabilities' => [
+                    'is_queryable' => false,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_favoritable' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.is_queryable', false);
+        $response->assertJsonPath('data.capabilities.is_publicly_navigable', true);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable', false);
+        $response->assertJsonPath('data.capabilities.is_favoritable', true);
+
+        $model = TenantProfileType::query()->where('type', 'delegate')->firstOrFail();
+        $this->assertFalse((bool) ($model->capabilities['is_queryable'] ?? true));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_navigable'] ?? false));
+        $this->assertFalse((bool) ($model->capabilities['is_publicly_discoverable'] ?? true));
+        $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
+    }
+
+    public function test_publicly_navigable_scope_defaults_independently_from_public_discovery(): void
+    {
+        TenantProfileType::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'direct-only',
+            'label' => 'Direct Only',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => false,
+            ],
+        ]);
+
+        TenantProfileType::create([
+            'type' => 'closed-detail',
+            'label' => 'Closed Detail',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => false,
+            ],
+        ]);
+
+        $publiclyNavigableTypes = TenantProfileType::query()
+            ->publiclyNavigable()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->values()
+            ->all();
+
+        $this->assertContains('direct-only', $publiclyNavigableTypes);
+        $this->assertNotContains('closed-detail', $publiclyNavigableTypes);
+    }
+
     public function test_profile_type_create_validation(): void
     {
         $response = $this->postJson(

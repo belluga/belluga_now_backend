@@ -20,6 +20,7 @@ use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
 
@@ -107,10 +108,15 @@ class EventManagementService
     {
         $normalized = [];
 
+        if (array_key_exists('tags', $payload)) {
+            throw ValidationException::withMessages([
+                'tags' => ['The legacy tags field is not accepted; use taxonomy_terms.'],
+            ]);
+        }
+
         foreach ([
             'title',
             'thumb',
-            'tags',
             'categories',
             'taxonomy_terms',
         ] as $field) {
@@ -182,6 +188,12 @@ class EventManagementService
         }
 
         $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
+        $normalized['profile_groups'] = $this->resolveProfileGroups(
+            $payload['profile_groups'] ?? ($existing?->profile_groups ?? []),
+            $this->profileIdsFromEventParties($normalized['event_parties']),
+            'profile_groups',
+            array_key_exists('profile_groups', $payload)
+        );
         $normalized['account_context_ids'] = $this->eventAccountContextResolver->resolveForAggregate(
             $this->baseAccountContextIdsForPayload($payload),
             $this->normalizeArray($normalized['event_parties'] ?? []),
@@ -303,6 +315,12 @@ class EventManagementService
             $ownEventParties = array_key_exists('event_parties', $occurrence)
                 ? $this->resolveEventParties(['event_parties' => $occurrence['event_parties']], null)
                 : $this->normalizeArray($existingOccurrence['event_parties'] ?? []);
+            $profileGroups = $this->resolveProfileGroups(
+                $occurrence['profile_groups'] ?? ($existingOccurrence['profile_groups'] ?? []),
+                $this->profileIdsFromEventParties($ownEventParties),
+                "occurrences.{$index}.profile_groups",
+                array_key_exists('profile_groups', $occurrence)
+            );
             $taxonomyTerms = array_key_exists('taxonomy_terms', $occurrence)
                 ? $this->resolveOccurrenceTaxonomyTerms(
                     $occurrence['taxonomy_terms'],
@@ -329,6 +347,7 @@ class EventManagementService
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $ownEventParties,
+                'profile_groups' => $profileGroups,
                 'has_location_override' => false,
                 'location_override' => null,
                 'taxonomy_terms' => $taxonomyTerms,
@@ -341,6 +360,215 @@ class EventManagementService
         });
 
         return $normalized;
+    }
+
+    /**
+     * @param  array<int, string>  $allowedProfileIds
+     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
+     */
+    private function resolveProfileGroups(
+        mixed $rawGroups,
+        array $allowedProfileIds,
+        string $field,
+        bool $isExplicitWrite
+    ): array {
+        if ($rawGroups === null) {
+            return [];
+        }
+
+        if (! is_array($rawGroups)) {
+            if ($isExplicitWrite) {
+                throw ValidationException::withMessages([
+                    $field => ['Profile groups must be an array.'],
+                ]);
+            }
+
+            return [];
+        }
+
+        if (count($rawGroups) > InputConstraints::EVENT_PROFILE_GROUPS_MAX) {
+            throw ValidationException::withMessages([
+                $field => ['Profile groups exceed the configured limit.'],
+            ]);
+        }
+
+        $allowed = array_fill_keys($allowedProfileIds, true);
+        $groups = [];
+        $groupIds = [];
+        $memberIdsAcrossGroups = [];
+
+        foreach ($rawGroups as $index => $rawGroup) {
+            if (! is_array($rawGroup)) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}" => ['Profile group must be an object.'],
+                ]);
+            }
+
+            $label = trim((string) ($rawGroup['label'] ?? ''));
+            if ($label === '') {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.label" => ['Profile group label is required.'],
+                ]);
+            }
+
+            $id = $this->normalizeProfileGroupId($rawGroup['id'] ?? $rawGroup['key'] ?? null, $label, $index, $field);
+            if (isset($groupIds[$id])) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.id" => ['Profile group ids must be unique.'],
+                ]);
+            }
+            $groupIds[$id] = true;
+
+            $memberIds = $this->normalizeProfileGroupMemberIds(
+                $rawGroup['account_profile_ids'] ?? $rawGroup['profile_ids'] ?? [],
+                $allowed,
+                "{$field}.{$index}.account_profile_ids",
+                $isExplicitWrite
+            );
+
+            foreach ($memberIds as $memberId) {
+                if (isset($memberIdsAcrossGroups[$memberId])) {
+                    throw ValidationException::withMessages([
+                        "{$field}.{$index}.account_profile_ids" => ['Profile group members must not appear in more than one group.'],
+                    ]);
+                }
+                $memberIdsAcrossGroups[$memberId] = true;
+            }
+
+            if ($memberIds === [] && ! $isExplicitWrite) {
+                continue;
+            }
+
+            $groups[] = [
+                '_source_index' => $index,
+                'id' => $id,
+                'label' => $label,
+                'order' => isset($rawGroup['order']) ? (int) $rawGroup['order'] : $index,
+                'account_profile_ids' => $memberIds,
+            ];
+        }
+
+        usort(
+            $groups,
+            static fn (array $left, array $right): int => [$left['order'], $left['_source_index']]
+                <=> [$right['order'], $right['_source_index']]
+        );
+
+        if ($isExplicitWrite) {
+            $expectedMemberIds = array_values(array_unique($allowedProfileIds));
+            $actualMemberIds = array_keys($memberIdsAcrossGroups);
+            sort($expectedMemberIds);
+            sort($actualMemberIds);
+
+            if ($actualMemberIds !== $expectedMemberIds) {
+                throw ValidationException::withMessages([
+                    $field => ['Profile group members must match event_parties.'],
+                ]);
+            }
+        }
+
+        return array_values(array_map(
+            static fn (array $group): array => [
+                'id' => $group['id'],
+                'label' => $group['label'],
+                'order' => $group['order'],
+                'account_profile_ids' => $group['account_profile_ids'],
+            ],
+            $groups
+        ));
+    }
+
+    private function normalizeProfileGroupId(mixed $rawId, string $label, int $index, string $field): string
+    {
+        $id = trim((string) ($rawId ?? ''));
+        if ($id === '') {
+            $id = Str::slug($label);
+        }
+        if ($id === '') {
+            $id = 'group-'.$index;
+        }
+        $id = Str::lower($id);
+
+        if (
+            strlen($id) > InputConstraints::EVENT_PROFILE_GROUP_KEY_MAX
+            || ! preg_match('/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/', $id)
+        ) {
+            throw ValidationException::withMessages([
+                $field => ['Profile group id is invalid.'],
+            ]);
+        }
+
+        return $id;
+    }
+
+    /**
+     * @param  array<string, true>  $allowedProfileIds
+     * @return array<int, string>
+     */
+    private function normalizeProfileGroupMemberIds(
+        mixed $rawMemberIds,
+        array $allowedProfileIds,
+        string $field,
+        bool $isExplicitWrite
+    ): array {
+        if (! is_array($rawMemberIds)) {
+            return [];
+        }
+
+        if (count($rawMemberIds) > InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX) {
+            throw ValidationException::withMessages([
+                $field => ['Profile group members exceed the configured limit.'],
+            ]);
+        }
+
+        $memberIds = [];
+        $seen = [];
+        foreach ($rawMemberIds as $memberIndex => $rawMemberId) {
+            $memberId = trim((string) $rawMemberId);
+            if ($memberId === '') {
+                continue;
+            }
+            if (! preg_match('/^[a-f0-9]{24}$/i', $memberId)) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$memberIndex}" => ['Profile group member id is invalid.'],
+                ]);
+            }
+            if (isset($seen[$memberId])) {
+                throw ValidationException::withMessages([
+                    $field => ['Profile group members must be unique.'],
+                ]);
+            }
+            if (! isset($allowedProfileIds[$memberId])) {
+                if ($isExplicitWrite) {
+                    throw ValidationException::withMessages([
+                        $field => ['Profile group members must be present in event_parties.'],
+                    ]);
+                }
+
+                continue;
+            }
+            $seen[$memberId] = true;
+            $memberIds[] = $memberId;
+        }
+
+        return $memberIds;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @return array<int, string>
+     */
+    private function profileIdsFromEventParties(array $eventParties): array
+    {
+        $ids = [];
+        foreach ($eventParties as $party) {
+            $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
+            if ($partyRefId !== '' && ! in_array($partyRefId, $ids, true)) {
+                $ids[] = $partyRefId;
+            }
+        }
+
+        return $ids;
     }
 
     private function normalizeOptionalString(mixed $value): ?string

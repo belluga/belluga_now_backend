@@ -46,6 +46,24 @@ interface InviteTargetReadContract
     public function findOccurrenceByIdOrSlug(string $occurrenceRef): ?array;
 
     /**
+     * @return array{
+     *     event_id:string,
+     *     occurrence_id:?string,
+     *     slug:string,
+     *     title:string,
+     *     date_time_start:?string,
+     *     date_time_end:?string,
+     *     hero_image_url:?string,
+     *     location:mixed,
+     *     venue:?array<string,mixed>,
+     *     tags:array<int,string>,
+     *     linked_account_profiles:array<int,array<string,mixed>>,
+     *     profile_groups:array<int,array<string,mixed>>
+     * }|null
+     */
+    public function findEventDetailProjection(string $eventRef, string $occurrenceRef): ?array;
+
+    /**
      * @param  positive-int  $limit
      */
     public function countOccurrencesForEvent(string $eventId, int $limit = 2): int;

@@ -6,6 +6,8 @@ namespace App\Application\AccountProfiles;
 
 final class AccountProfileTypeCapabilityCatalog
 {
+    public const IS_QUERYABLE = 'is_queryable';
+    public const IS_PUBLICLY_NAVIGABLE = 'is_publicly_navigable';
     public const IS_PUBLICLY_DISCOVERABLE = 'is_publicly_discoverable';
     public const IS_FAVORITABLE = 'is_favoritable';
     public const IS_INVITEABLE = 'is_inviteable';
@@ -25,7 +27,9 @@ final class AccountProfileTypeCapabilityCatalog
     public function definitions(): array
     {
         return [
-            $this->definition(self::IS_PUBLICLY_DISCOVERABLE),
+            $this->definition(self::IS_QUERYABLE, default: true),
+            $this->definition(self::IS_PUBLICLY_NAVIGABLE, default: true),
+            $this->definition(self::IS_PUBLICLY_DISCOVERABLE, default: true, requires: [self::IS_QUERYABLE]),
             $this->definition(self::IS_FAVORITABLE),
             $this->definition(self::IS_INVITEABLE),
             $this->definition(self::IS_POI_ENABLED),

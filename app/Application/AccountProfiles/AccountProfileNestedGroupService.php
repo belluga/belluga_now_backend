@@ -20,6 +20,7 @@ class AccountProfileNestedGroupService
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
     /**
@@ -179,7 +180,13 @@ class AccountProfileNestedGroupService
             }
         }
 
-        $profilesById = $this->publicProfilesById(array_keys($orderedMemberIds));
+        $queryableTypes = $this->queryableProfileTypes();
+        if ($queryableTypes === []) {
+            return [];
+        }
+
+        $publiclyNavigableTypes = $this->publiclyNavigableProfileTypes();
+        $profilesById = $this->publicProfilesById(array_keys($orderedMemberIds), $queryableTypes);
         $publicGroups = [];
         foreach ($groups as $group) {
             $profiles = [];
@@ -188,7 +195,7 @@ class AccountProfileNestedGroupService
                 if (! $profile) {
                     continue;
                 }
-                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl);
+                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publiclyNavigableTypes);
             }
 
             if ($profiles === []) {
@@ -321,56 +328,53 @@ class AccountProfileNestedGroupService
             return;
         }
 
-        $missing = [];
+        $queryableTypes = $this->queryableProfileTypes();
+        $profiles = AccountProfile::query()
+            ->whereIn('_id', $memberIds)
+            ->where('is_active', true)
+            ->get();
+        $profilesById = [];
+        foreach ($profiles as $profile) {
+            $profilesById[(string) $profile->getKey()] = $profile;
+        }
+
+        $invalid = [];
         foreach ($memberIds as $memberId) {
-            $profile = $this->findProfileById($memberId);
-            if (! $profile || ! (bool) $profile->is_active) {
-                $missing[] = $memberId;
+            $profile = $profilesById[$memberId] ?? null;
+            if (
+                ! $profile
+                || ! in_array((string) $profile->profile_type, $queryableTypes, true)
+            ) {
+                $invalid[] = $memberId;
             }
         }
 
-        if ($missing !== []) {
+        if ($invalid !== []) {
             throw ValidationException::withMessages([
-                'nested_profile_groups' => ['Nested profile group includes unavailable profiles.'],
+                'nested_profile_groups' => ['Nested profile group includes unavailable or non-queryable profiles.'],
             ]);
         }
     }
 
     /**
      * @param  array<int, string>  $memberIds
+     * @param  array<int, string>  $queryableTypes
      * @return array<string, AccountProfile>
      */
-    private function publicProfilesById(array $memberIds): array
+    private function publicProfilesById(array $memberIds, array $queryableTypes): array
     {
-        if ($memberIds === []) {
+        if ($memberIds === [] || $queryableTypes === []) {
             return [];
         }
 
-        $publicTypes = TenantProfileType::query()
-            ->publicCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
-
-        if ($publicTypes === []) {
-            return [];
-        }
-
+        $profiles = AccountProfile::query()
+            ->whereIn('_id', $memberIds)
+            ->where('is_active', true)
+            ->where('visibility', 'public')
+            ->whereIn('profile_type', $queryableTypes)
+            ->get();
         $byId = [];
-        foreach ($memberIds as $memberId) {
-            $profile = $this->findProfileById($memberId);
-            if (
-                ! $profile
-                || ! (bool) $profile->is_active
-                || $profile->visibility !== 'public'
-                || ! in_array($profile->profile_type, $publicTypes, true)
-            ) {
-                continue;
-            }
-
+        foreach ($profiles as $profile) {
             $byId[(string) $profile->getKey()] = $profile;
         }
 
@@ -398,14 +402,17 @@ class AccountProfileNestedGroupService
     /**
      * @return array<string, mixed>
      */
-    private function formatLinkedProfile(AccountProfile $profile, string $baseUrl): array
+    private function formatLinkedProfile(AccountProfile $profile, string $baseUrl, array $publiclyNavigableTypes): array
     {
+        $slug = trim((string) ($profile->slug ?? ''));
+        $canOpenPublicDetail = $slug !== '' && in_array((string) $profile->profile_type, $publiclyNavigableTypes, true);
+
         return [
             'id' => (string) $profile->_id,
             'account_id' => (string) $profile->account_id,
             'profile_type' => $profile->profile_type,
             'display_name' => $profile->display_name,
-            'slug' => $profile->slug,
+            'slug' => $slug !== '' ? $slug : null,
             'avatar_url' => $this->mediaService->normalizePublicUrl(
                 $baseUrl,
                 $profile,
@@ -421,6 +428,24 @@ class AccountProfileNestedGroupService
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),
+            'can_open_public_detail' => $canOpenPublicDetail,
+            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function queryableProfileTypes(): array
+    {
+        return $this->typeSetProvider->queryableTypes();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function publiclyNavigableProfileTypes(): array
+    {
+        return $this->typeSetProvider->publiclyNavigableTypes();
     }
 }

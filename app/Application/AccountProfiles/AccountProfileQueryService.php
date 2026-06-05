@@ -9,13 +9,13 @@ use App\Application\Shared\Query\AbstractQueryService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
@@ -30,11 +30,13 @@ class AccountProfileQueryService extends AbstractQueryService
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         $query = AccountProfile::query();
+        $queryParams = $this->applyAdminCandidateFilters($query, $queryParams);
 
         $ownershipState = $this->extractOwnershipState($queryParams);
         if ($ownershipState !== null) {
@@ -51,11 +53,42 @@ class AccountProfileQueryService extends AbstractQueryService
         return $this->hydrateOwnershipState($paginator);
     }
 
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @return array<string, mixed>
+     */
+    private function applyAdminCandidateFilters(Builder $query, array $queryParams): array
+    {
+        $queryableOnly = filter_var(
+            $queryParams['queryable_only'] ?? false,
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE
+        ) ?? false;
+        if ($queryableOnly) {
+            $queryableTypes = $this->queryableProfileTypes();
+            if ($queryableTypes === []) {
+                $query->whereRaw(['_id' => ['$exists' => false]]);
+            } else {
+                $query->whereIn('profile_type', $queryableTypes)
+                    ->where('is_active', true);
+            }
+        }
+
+        $excludedProfileId = trim((string) ($queryParams['exclude_account_profile_id'] ?? ''));
+        if ($excludedProfileId !== '') {
+            $query->where('_id', '!=', $excludedProfileId);
+        }
+
+        unset($queryParams['queryable_only'], $queryParams['exclude_account_profile_id']);
+
+        return $queryParams;
+    }
+
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $allowedTypes = $this->publicCatalogProfileTypes();
+        $allowedTypes = $this->publiclyDiscoverableProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
 
         $query = $this->withoutPublicProfileTypeFilters($queryParams);
@@ -87,6 +120,97 @@ class AccountProfileQueryService extends AbstractQueryService
         return $this->hydrateOwnershipState($paginator);
     }
 
+    /**
+     * @param  array<string, mixed>  $queryParams
+     * @return array<string, mixed>
+     */
+    public function publicPageEnvelope(array $queryParams, int $perPage = 15): array
+    {
+        $perPage = $this->normalizePublicPageSize($perPage);
+        $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
+        $allowedTypes = $this->publiclyDiscoverableProfileTypes();
+        $selectedTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
+        $hasExplicitTypeFilter = $this->hasExplicitPublicTypeFilter($queryParams);
+        $selectedTypesForItems = $hasExplicitTypeFilter && $selectedTypes === []
+            ? ['__no_public_profile_match__']
+            : $selectedTypes;
+        $taxonomyFilters = $this->resolvePublicTaxonomyFilters($queryParams);
+        $search = trim((string) ($queryParams['search'] ?? ''));
+
+        if ($allowedTypes === []) {
+            return [
+                'data' => [],
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'last_page' => 1,
+                'total' => 0,
+                'has_more' => false,
+                'discovery_filter_facets' => $this->emptyPublicDiscoveryFilterFacetsPayload(),
+            ];
+        }
+
+        $aggregate = $this->runPublicDiscoveryAggregate(
+            allowedTypes: $allowedTypes,
+            selectedTypes: $selectedTypesForItems,
+            taxonomyFilters: $taxonomyFilters,
+            search: $search,
+            page: $page,
+            perPage: $perPage,
+        );
+
+        $orderedIds = [];
+        foreach ($aggregate['page_rows'] as $row) {
+            $payload = $this->normalizeDocument($row);
+            $id = $this->resolveAggregateRowId($payload);
+            if ($id === null) {
+                continue;
+            }
+            $orderedIds[] = $id;
+        }
+
+        $profilesById = [];
+        if ($orderedIds !== []) {
+            $profiles = AccountProfile::query()
+                ->whereIn('_id', $orderedIds)
+                ->get();
+            foreach ($profiles as $profile) {
+                $profilesById[(string) $profile->getKey()] = $profile;
+            }
+        }
+
+        /** @var Collection<int, AccountProfile> $orderedProfiles */
+        $orderedProfiles = collect($orderedIds)
+            ->map(static fn (string $id): ?AccountProfile => $profilesById[$id] ?? null)
+            ->filter(static fn ($item): bool => $item instanceof AccountProfile)
+            ->values();
+        $accountsById = $this->loadAccountsById($orderedProfiles);
+        $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(
+            array_keys($accountsById)
+        );
+
+        $data = $orderedProfiles
+            ->map(fn (AccountProfile $profile): array => $this->format(
+                $profile,
+                $accountsById[(string) $profile->account_id] ?? null,
+                $userOperatedLookup
+            ))
+            ->values()
+            ->all();
+
+        $total = $aggregate['total'];
+        $lastPage = max(1, (int) ceil($total / max(1, $perPage)));
+
+        return [
+            'data' => $data,
+            'current_page' => $page,
+            'per_page' => $perPage,
+            'last_page' => $lastPage,
+            'total' => $total,
+            'has_more' => $page < $lastPage,
+            'discovery_filter_facets' => $aggregate['discovery_filter_facets'],
+        ];
+    }
+
     private function normalizePublicPageSize(int $perPage, int $default = self::PUBLIC_PAGE_SIZE_DEFAULT): int
     {
         if ($perPage <= 0) {
@@ -101,6 +225,14 @@ class AccountProfileQueryService extends AbstractQueryService
         $page = max(1, (int) $value);
 
         return min($page, InputConstraints::PUBLIC_PAGE_MAX);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function queryableProfileTypes(): array
+    {
+        return $this->typeSetProvider->queryableTypes();
     }
 
     /**
@@ -253,10 +385,391 @@ class AccountProfileQueryService extends AbstractQueryService
         ];
     }
 
+    /**
+     * @param  array<int, string>  $allowedTypes
+     * @param  array<int, string>  $selectedTypes
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array{page_rows: array<int, mixed>, total: int, discovery_filter_facets: array<string, mixed>}
+     */
+    private function runPublicDiscoveryAggregate(
+        array $allowedTypes,
+        array $selectedTypes,
+        array $taxonomyFilters,
+        string $search,
+        int $page,
+        int $perPage,
+    ): array {
+        $skip = ($page - 1) * $perPage;
+        $limit = $perPage;
+
+        $pipeline = $this->buildPublicDiscoveryAggregatePipeline(
+            allowedTypes: $allowedTypes,
+            selectedTypes: $selectedTypes,
+            taxonomyFilters: $taxonomyFilters,
+            search: $search,
+            skip: $skip,
+            limit: $limit,
+        );
+        EventBus::dispatch('account_profiles.public_discovery_aggregate', [
+            'purpose' => 'public_discovery_page_with_runtime_facets',
+            'pipeline' => $pipeline,
+        ]);
+
+        $rows = AccountProfile::raw(fn ($collection) => $collection->aggregate($pipeline));
+        $payload = $this->normalizeDocument($rows->first());
+
+        return [
+            'page_rows' => $this->normalizeList($payload['page_rows'] ?? []),
+            'total' => $this->extractAggregateTotal($payload['page_total'] ?? []),
+            'discovery_filter_facets' => $this->formatPublicDiscoveryFilterFacets(
+                $payload,
+                $taxonomyFilters
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $allowedTypes
+     * @param  array<int, string>  $selectedTypes
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildPublicDiscoveryAggregatePipeline(
+        array $allowedTypes,
+        array $selectedTypes,
+        array $taxonomyFilters,
+        string $search,
+        int $skip,
+        int $limit,
+    ): array {
+        $baseMatch = [
+            '$and' => [
+                ['is_active' => true],
+                ['deleted_at' => null],
+                ['profile_type' => ['$in' => $allowedTypes]],
+                $this->publicVisibilityConstraintExpression(),
+            ],
+        ];
+
+        if ($search !== '') {
+            $baseMatch['$and'][] = $this->publicSearchExpression($search);
+        }
+
+        $facet = [
+            'page_rows' => $this->buildPublicDiscoveryPageRowsBranch(
+                $selectedTypes,
+                $taxonomyFilters,
+                $skip,
+                $limit
+            ),
+            'page_total' => $this->buildPublicDiscoveryTotalBranch(
+                $selectedTypes,
+                $taxonomyFilters
+            ),
+            'type_keys' => $this->buildPublicDiscoveryTypeKeysBranch($taxonomyFilters),
+            'taxonomy_base' => $this->buildPublicDiscoveryTaxonomyBranch(
+                $selectedTypes,
+                $taxonomyFilters
+            ),
+        ];
+
+        foreach (array_keys($taxonomyFilters) as $taxonomyType) {
+            $facet[$this->taxonomyFacetBranchKey($taxonomyType)] = $this->buildPublicDiscoveryTaxonomyBranch(
+                $selectedTypes,
+                $this->excludePublicTaxonomySelectionsForType(
+                    $taxonomyFilters,
+                    $taxonomyType
+                )
+            );
+        }
+
+        return [
+            ['$match' => $baseMatch],
+            ['$facet' => $facet],
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $selectedTypes
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildPublicDiscoveryPageRowsBranch(
+        array $selectedTypes,
+        array $taxonomyFilters,
+        int $skip,
+        int $limit,
+    ): array {
+        $pipeline = [];
+        $this->applySelectedPublicProfileTypesMatch($pipeline, $selectedTypes);
+        $this->applyPublicTaxonomySelectionMatch($pipeline, $taxonomyFilters);
+        $pipeline[] = ['$sort' => ['created_at' => -1, '_id' => -1]];
+        $pipeline[] = ['$skip' => $skip];
+        $pipeline[] = ['$limit' => $limit];
+        $pipeline[] = ['$project' => ['_id' => 1]];
+
+        return $pipeline;
+    }
+
+    /**
+     * @param  array<int, string>  $selectedTypes
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildPublicDiscoveryTotalBranch(
+        array $selectedTypes,
+        array $taxonomyFilters,
+    ): array {
+        $pipeline = [];
+        $this->applySelectedPublicProfileTypesMatch($pipeline, $selectedTypes);
+        $this->applyPublicTaxonomySelectionMatch($pipeline, $taxonomyFilters);
+        $pipeline[] = ['$count' => 'total'];
+
+        return $pipeline;
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildPublicDiscoveryTypeKeysBranch(array $taxonomyFilters): array
+    {
+        $pipeline = [];
+        $this->applyPublicTaxonomySelectionMatch($pipeline, $taxonomyFilters);
+        $pipeline[] = ['$group' => ['_id' => '$profile_type']];
+        $pipeline[] = [
+            '$project' => [
+                '_id' => 0,
+                'filter_key' => '$_id',
+            ],
+        ];
+        $pipeline[] = ['$sort' => ['filter_key' => 1]];
+
+        return $pipeline;
+    }
+
+    /**
+     * @param  array<int, string>  $selectedTypes
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildPublicDiscoveryTaxonomyBranch(
+        array $selectedTypes,
+        array $taxonomyFilters,
+    ): array {
+        $pipeline = [];
+        $this->applySelectedPublicProfileTypesMatch($pipeline, $selectedTypes);
+        $this->applyPublicTaxonomySelectionMatch($pipeline, $taxonomyFilters);
+        $pipeline[] = ['$unwind' => '$taxonomy_terms'];
+        $pipeline[] = [
+            '$group' => [
+                '_id' => [
+                    'type' => '$taxonomy_terms.type',
+                    'value' => '$taxonomy_terms.value',
+                ],
+                'label' => [
+                    '$first' => [
+                        '$ifNull' => [
+                            '$taxonomy_terms.label',
+                            '$taxonomy_terms.name',
+                        ],
+                    ],
+                ],
+                'group_label' => [
+                    '$first' => [
+                        '$ifNull' => [
+                            '$taxonomy_terms.taxonomy_name',
+                            '$taxonomy_terms.type',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+        $pipeline[] = [
+            '$project' => [
+                '_id' => 0,
+                'type' => '$_id.type',
+                'value' => '$_id.value',
+                'label' => '$label',
+                'group_label' => '$group_label',
+            ],
+        ];
+        $pipeline[] = ['$sort' => ['type' => 1, 'label' => 1, 'value' => 1]];
+
+        return $pipeline;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param  array<int, string>  $selectedTypes
+     */
+    private function applySelectedPublicProfileTypesMatch(array &$pipeline, array $selectedTypes): void
+    {
+        if ($selectedTypes === []) {
+            return;
+        }
+
+        $pipeline[] = ['$match' => ['profile_type' => ['$in' => $selectedTypes]]];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     */
+    private function applyPublicTaxonomySelectionMatch(array &$pipeline, array $taxonomyFilters): void
+    {
+        $expression = $this->publicTaxonomyExpression($taxonomyFilters);
+        if ($expression === []) {
+            return;
+        }
+
+        $pipeline[] = ['$match' => $expression];
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<string, array<int, string>>
+     */
+    private function excludePublicTaxonomySelectionsForType(array $taxonomyFilters, string $excludedType): array
+    {
+        return array_filter(
+            $taxonomyFilters,
+            static fn (string $type): bool => $type !== $excludedType,
+            ARRAY_FILTER_USE_KEY
+        );
+    }
+
+    private function taxonomyFacetBranchKey(string $taxonomyType): string
+    {
+        return 'taxonomy_scope_'.trim($taxonomyType);
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     */
+    private function extractAggregateTotal(array $rows): int
+    {
+        $first = $this->normalizeDocument($rows[0] ?? []);
+        $total = $first['total'] ?? 0;
+
+        return is_numeric($total) ? max(0, (int) $total) : 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, array<int, string>>  $taxonomyFilters
+     * @return array<string, mixed>
+     */
+    private function formatPublicDiscoveryFilterFacets(array $payload, array $taxonomyFilters): array
+    {
+        $filterKeys = [];
+        foreach ($this->normalizeList($payload['type_keys'] ?? []) as $row) {
+            $normalized = $this->normalizeDocument($row);
+            $value = strtolower(trim((string) (
+                $normalized['filter_key']
+                ?? $normalized['_id']
+                ?? $normalized['id']
+                ?? ''
+            )));
+            if ($value === '') {
+                continue;
+            }
+            $filterKeys[$value] = $value;
+        }
+
+        $taxonomyOptions = $this->formatMergedPublicTaxonomyFacetRows(
+            $this->normalizeList($payload['taxonomy_base'] ?? []),
+            $payload,
+            array_keys($taxonomyFilters)
+        );
+
+        return [
+            'surface' => 'discovery.account_profiles',
+            'filter_keys' => array_values($filterKeys),
+            'taxonomy_options' => $taxonomyOptions,
+        ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $baseRows
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, string>  $selectedTaxonomyTypes
+     * @return array<string, array<string, mixed>>
+     */
+    private function formatMergedPublicTaxonomyFacetRows(
+        array $baseRows,
+        array $payload,
+        array $selectedTaxonomyTypes,
+    ): array {
+        $rowsByType = [];
+        foreach ($baseRows as $row) {
+            $normalized = $this->normalizeDocument($row);
+            $type = strtolower(trim((string) ($normalized['type'] ?? '')));
+            if ($type === '') {
+                continue;
+            }
+            $rowsByType[$type][] = $normalized;
+        }
+
+        foreach ($selectedTaxonomyTypes as $type) {
+            $rowsByType[$type] = array_map(
+                fn (mixed $row): array => $this->normalizeDocument($row),
+                $this->normalizeList($payload[$this->taxonomyFacetBranchKey($type)] ?? [])
+            );
+        }
+
+        $taxonomyOptions = [];
+        foreach ($rowsByType as $type => $rows) {
+            $terms = [];
+            $groupLabel = $type;
+            foreach ($rows as $row) {
+                $value = strtolower(trim((string) ($row['value'] ?? '')));
+                $label = trim((string) ($row['label'] ?? $value));
+                if ($value === '' || $label === '') {
+                    continue;
+                }
+                $groupLabel = trim((string) ($row['group_label'] ?? $groupLabel));
+                $terms[$value] = [
+                    'value' => $value,
+                    'label' => $label,
+                ];
+            }
+
+            if ($terms === []) {
+                continue;
+            }
+
+            uasort($terms, static fn (array $left, array $right): int => [$left['label'], $left['value']] <=> [$right['label'], $right['value']]);
+            $taxonomyOptions[$type] = [
+                'key' => $type,
+                'label' => $groupLabel === '' ? $type : $groupLabel,
+                'terms' => array_values($terms),
+                'terms_truncated' => false,
+                'terms_limit' => count($terms),
+            ];
+        }
+
+        ksort($taxonomyOptions);
+
+        return $taxonomyOptions;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyPublicDiscoveryFilterFacetsPayload(): array
+    {
+        return [
+            'surface' => 'discovery.account_profiles',
+            'filter_keys' => [],
+            'taxonomy_options' => [],
+        ];
+    }
+
     public function publicFindBySlugOrFail(string $slug): AccountProfile
     {
         $normalizedSlug = trim($slug);
-        $allowedTypes = $this->publicCatalogProfileTypes();
+        $allowedTypes = $this->publiclyNavigableProfileTypes();
 
         if ($normalizedSlug === '' || $allowedTypes === []) {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$slug]);
@@ -319,6 +832,9 @@ class AccountProfileQueryService extends AbstractQueryService
         $baseUrl = request()->getSchemeAndHttpHost();
         $resolvedAccount = $account
             ?? Account::query()->where('_id', $profile->account_id)->first();
+        $slug = trim((string) ($profile->slug ?? ''));
+        $canOpenPublicDetail = $slug !== ''
+            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
 
         return [
             'id' => (string) $profile->_id,
@@ -326,6 +842,8 @@ class AccountProfileQueryService extends AbstractQueryService
             'profile_type' => $profile->profile_type,
             'display_name' => $profile->display_name,
             'slug' => $profile->slug,
+            'can_open_public_detail' => $canOpenPublicDetail,
+            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
             'avatar_url' => $this->mediaService->normalizePublicUrl(
                 $baseUrl,
                 $profile,
@@ -503,16 +1021,17 @@ class AccountProfileQueryService extends AbstractQueryService
     /**
      * @return array<int, string>
      */
-    private function publicCatalogProfileTypes(): array
+    private function publiclyDiscoverableProfileTypes(): array
     {
-        return TenantProfileType::query()
-            ->publicCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return $this->typeSetProvider->publicDiscoverySurfaceTypes();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function publiclyNavigableProfileTypes(): array
+    {
+        return $this->typeSetProvider->publiclyNavigableTypes();
     }
 
     /**
@@ -520,14 +1039,7 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     private function nearEligibleProfileTypes(): array
     {
-        return TenantProfileType::query()
-            ->publicPoiCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return $this->typeSetProvider->publicPoiCatalogTypes();
     }
 
     /**
@@ -559,6 +1071,21 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         return array_values(array_intersect($allowedTypes, $requested));
+    }
+
+    private function hasExplicitPublicTypeFilter(array $queryParams): bool
+    {
+        $topLevelRequested = $this->normalizeProfileTypeList($queryParams['profile_type'] ?? null);
+        if ($topLevelRequested !== []) {
+            return true;
+        }
+
+        $filterPayload = $queryParams['filter'] ?? null;
+        if (! is_array($filterPayload)) {
+            return false;
+        }
+
+        return $this->normalizeProfileTypeList($filterPayload['profile_type'] ?? null) !== [];
     }
 
     /**
@@ -816,6 +1343,22 @@ class AccountProfileQueryService extends AbstractQueryService
             }
 
             return get_object_vars($value);
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function normalizeList(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values($value);
+        }
+
+        if ($value instanceof \Traversable) {
+            return array_values(iterator_to_array($value));
         }
 
         return [];

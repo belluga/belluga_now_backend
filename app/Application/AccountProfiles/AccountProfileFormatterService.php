@@ -17,6 +17,7 @@ class AccountProfileFormatterService
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
     /**
@@ -26,6 +27,9 @@ class AccountProfileFormatterService
     {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
+        $slug = trim((string) ($profile->slug ?? ''));
+        $canOpenPublicDetail = $slug !== ''
+            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
 
         $payload = [
             'id' => (string) $profile->_id,
@@ -33,6 +37,8 @@ class AccountProfileFormatterService
             'profile_type' => $profile->profile_type,
             'display_name' => $profile->display_name,
             'slug' => $profile->slug,
+            'can_open_public_detail' => $canOpenPublicDetail,
+            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
             'avatar_url' => $this->mediaService->normalizePublicUrl(
                 $baseUrl,
                 $profile,

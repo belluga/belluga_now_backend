@@ -52,6 +52,12 @@ final class InputConstraints
 
     public const EVENT_PROGRAMMING_REFERENCES_TOTAL_MAX = 480;
 
+    public const EVENT_PROFILE_GROUPS_MAX = 12;
+
+    public const EVENT_PROFILE_GROUP_MEMBERS_MAX = 50;
+
+    public const EVENT_PROFILE_GROUP_KEY_MAX = 64;
+
     public const MAP_POI_POLYGON_RINGS_MAX = 4;
 
     public const MAP_POI_POLYGON_POINTS_PER_RING_MAX = 256;

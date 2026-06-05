@@ -9,9 +9,11 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AttendanceCommitment;
 use App\Models\Tenants\EventType;
+use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantSettings;
@@ -22,6 +24,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event as EventBus;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -565,6 +568,117 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_agenda_returns_runtime_facets_for_the_full_filtered_universe_before_pagination(): void
+    {
+        $this->createEvent([
+            'title' => 'Universe First Page',
+            'type' => [
+                'id' => 'type-show',
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Show desc',
+            ],
+            'categories' => ['culture'],
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Universe Second Page',
+            'type' => [
+                'id' => 'type-fair',
+                'name' => 'Fair',
+                'slug' => 'fair',
+                'description' => 'Fair desc',
+            ],
+            'categories' => ['sports'],
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'night'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(2),
+            'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=1");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('items.0.title', 'Universe First Page');
+        $response->assertJsonPath('discovery_filter_facets.surface', 'home.events');
+
+        $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
+        $this->assertContains('show', $filterKeys);
+        $this->assertContains('fair', $filterKeys);
+        $this->assertContains('culture', $filterKeys);
+        $this->assertContains('sports', $filterKeys);
+
+        $moodTerms = collect($response->json('discovery_filter_facets.taxonomy_options.mood.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['night', 'sunset'], $moodTerms);
+    }
+
+    public function test_agenda_runtime_taxonomy_facets_are_self_excluding_for_the_selected_group(): void
+    {
+        $this->createEvent([
+            'title' => 'Mood Sunset Event',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Mood Night Event',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'night'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(2),
+            'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
+        ]);
+
+        $aggregateCalls = [];
+        EventBus::listen(
+            'belluga.events.public_agenda_aggregate',
+            static function (string $purpose, array $pipeline) use (&$aggregateCalls): void {
+                $aggregateCalls[] = [
+                    'purpose' => $purpose,
+                    'pipeline' => $pipeline,
+                ];
+            }
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=mood&taxonomy[0][value]=sunset&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'items');
+        $response->assertJsonPath('items.0.title', 'Mood Sunset Event');
+
+        $moodTerms = collect($response->json('discovery_filter_facets.taxonomy_options.mood.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['night', 'sunset'], $moodTerms);
+
+        $this->assertCount(1, $aggregateCalls);
+        $this->assertSame(
+            'public_agenda_page_with_runtime_facets',
+            $aggregateCalls[0]['purpose'],
+        );
+        $this->assertTrue(
+            collect($aggregateCalls[0]['pipeline'])->contains(
+                static fn (array $stage): bool => array_key_exists('$facet', $stage)
+            ),
+            'Public agenda runtime facets must be computed through a single $facet aggregate.'
+        );
+    }
+
     public function test_agenda_supports_text_search_query_param(): void
     {
         $this->createEvent([
@@ -1099,8 +1213,76 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(404);
     }
 
+    public function test_public_event_payloads_omit_legacy_tags_field(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Canonical Taxonomy Event',
+            'tags' => ['legacy-music'],
+            'taxonomy_terms' => [
+                [
+                    'type' => 'event_style',
+                    'value' => 'showcase',
+                    'name' => 'Showcase',
+                    'taxonomy_name' => 'Event Style',
+                ],
+            ],
+        ]);
+
+        $detail = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+        $detail->assertStatus(200);
+        $this->assertArrayNotHasKey('tags', $detail->json('data'));
+        $detail->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
+
+        $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+        $agenda->assertStatus(200);
+        $items = $agenda->json('items');
+        $this->assertIsArray($items);
+        $matching = collect($items)->firstWhere('event_id', (string) $event->_id);
+        $this->assertIsArray($matching);
+        $this->assertArrayNotHasKey('tags', $matching);
+        $this->assertSame('showcase', data_get($matching, 'taxonomy_terms.0.value'));
+    }
+
+    public function test_agenda_rejects_legacy_tags_query_parameter(): void
+    {
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10&tags[]=legacy");
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['tags']);
+    }
+
     public function test_event_detail_exposes_linked_account_profiles_for_dynamic_category_tabs(): void
     {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Band',
+                'labels' => [
+                    'singular' => 'Band',
+                    'plural' => 'Bands',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'band',
+            'display_name' => 'Ananda Torres',
+            'avatar_url' => 'https://example.org/artist-avatar.jpg',
+            'cover_url' => 'https://example.org/artist-cover.jpg',
+            'taxonomy_terms' => [
+                ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
+            ],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
         $event = $this->createEvent([
             'venue' => [
                 'id' => 'venue-1',
@@ -1120,11 +1302,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'event_parties' => [
                 [
                     'party_type' => 'band',
-                    'party_ref_id' => 'artist-1',
+                    'party_ref_id' => (string) $profile->_id,
                     'permissions' => ['can_edit' => true],
                     'metadata' => [
                         'display_name' => 'Ananda Torres',
-                        'slug' => 'ananda-torres',
+                        'slug' => (string) $profile->slug,
                         'profile_type' => 'band',
                         'avatar_url' => 'https://example.org/artist-avatar.jpg',
                         'cover_url' => 'https://example.org/artist-cover.jpg',
@@ -1139,9 +1321,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.linked_account_profiles');
-        $response->assertJsonPath('data.linked_account_profiles.0.id', 'artist-1');
+        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $profile->_id);
         $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'band');
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', 'ananda-torres');
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $profile->slug);
+        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
         $response->assertJsonPath(
             'data.linked_account_profiles.0.taxonomy_terms.0.name',
             'Showcase'

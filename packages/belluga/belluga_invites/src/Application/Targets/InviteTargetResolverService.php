@@ -31,6 +31,9 @@ class InviteTargetResolverService
      *         location:string,
      *         host_name:string,
      *         tags:array<int,string>,
+     *         linked_account_profiles:array<int,array<string,mixed>>,
+     *         profile_groups:array<int,array<string,mixed>>,
+     *         venue_account_profile_id:?string,
      *         attendance_policy:string,
      *         expires_at:?Carbon
      *     }
@@ -71,8 +74,14 @@ class InviteTargetResolverService
 
         $eventPayload = $this->normalizeArray($event['attributes'] ?? []);
         $occurrencePayload = $occurrence ? $this->normalizeArray($occurrence['attributes'] ?? []) : [];
-        $location = $this->resolveLocationLabel($eventPayload);
-        $hostName = $this->resolveHostName($eventPayload);
+        $detailProjection = $this->normalizeArray(
+            $this->targetRead->findEventDetailProjection(
+                (string) $event['id'],
+                (string) $occurrence['id'],
+            ) ?? []
+        );
+        $location = $this->resolveLocationLabel($eventPayload, $detailProjection);
+        $hostName = $this->resolveHostName($eventPayload, $detailProjection);
 
         return [
             'target_ref' => [
@@ -80,13 +89,28 @@ class InviteTargetResolverService
                 'occurrence_id' => (string) $occurrence['id'],
             ],
             'event_snapshot' => [
-                'event_name' => (string) ($event['title'] ?? ''),
-                'event_slug' => (string) ($event['slug'] ?? ''),
+                'event_name' => (string) ($detailProjection['title'] ?? $event['title'] ?? ''),
+                'event_slug' => (string) ($detailProjection['slug'] ?? $event['slug'] ?? ''),
                 'event_date' => $eventDate,
-                'event_image_url' => $this->normalizeOptionalString($event['event_image_url'] ?? null),
+                'event_image_url' => $this->normalizeOptionalString(
+                    $detailProjection['hero_image_url'] ?? $event['event_image_url'] ?? null,
+                ),
                 'location' => $location,
                 'host_name' => $hostName,
-                'tags' => array_values(array_map('strval', $this->normalizeArray($eventPayload['tags'] ?? []))),
+                'tags' => array_values(array_map(
+                    'strval',
+                    $this->normalizeList($detailProjection['tags'] ?? $eventPayload['tags'] ?? []),
+                )),
+                'linked_account_profiles' => $this->normalizeListOfMaps(
+                    $detailProjection['linked_account_profiles'] ?? [],
+                ),
+                'profile_groups' => $this->normalizeListOfMaps(
+                    $detailProjection['profile_groups'] ?? [],
+                ),
+                'venue_account_profile_id' => $this->resolveVenueAccountProfileId(
+                    $detailProjection,
+                    $eventPayload,
+                ),
                 'attendance_policy' => $this->runtimeSettings->resolveAttendancePolicy(
                     $eventPayload['attendance_policy'] ?? null,
                     $occurrencePayload['attendance_policy'] ?? null,
@@ -136,6 +160,41 @@ class InviteTargetResolverService
         return [];
     }
 
+    /**
+     * @return array<int, mixed>
+     */
+    private function normalizeList(mixed $value): array
+    {
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return array_values($value->getArrayCopy());
+        }
+        if (is_array($value)) {
+            return array_values($value);
+        }
+        if ($value instanceof \Traversable) {
+            return array_values(iterator_to_array($value));
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeListOfMaps(mixed $value): array
+    {
+        $items = [];
+        foreach ($this->normalizeList($value) as $item) {
+            $normalized = $this->normalizeArray($item);
+            if ($normalized === []) {
+                continue;
+            }
+            $items[] = $normalized;
+        }
+
+        return $items;
+    }
+
     private function normalizeCarbon(mixed $value): ?Carbon
     {
         if ($value instanceof UTCDateTime) {
@@ -153,13 +212,32 @@ class InviteTargetResolverService
 
     /**
      * @param  array<string, mixed>  $eventPayload
+     * @param  array<string, mixed>  $detailProjection
      */
-    private function resolveLocationLabel(array $eventPayload): string
+    private function resolveLocationLabel(array $eventPayload, array $detailProjection = []): string
     {
+        $detailLocation = $detailProjection['location'] ?? null;
+        if (is_string($detailLocation) && trim($detailLocation) !== '') {
+            return trim($detailLocation);
+        }
+
+        $detailLocationPayload = $this->normalizeArray($detailLocation);
+        $detailVenue = $this->normalizeArray($detailProjection['venue'] ?? []);
         $location = $this->normalizeArray($eventPayload['location'] ?? []);
         $venue = $this->normalizeArray($eventPayload['venue'] ?? []);
 
-        foreach ([$location['label'] ?? null, $location['name'] ?? null, $venue['display_name'] ?? null, $venue['name'] ?? null] as $candidate) {
+        foreach ([
+            $detailLocationPayload['display_name'] ?? null,
+            $detailLocationPayload['name'] ?? null,
+            $detailLocationPayload['label'] ?? null,
+            $detailLocationPayload['address'] ?? null,
+            $detailVenue['display_name'] ?? null,
+            $detailVenue['name'] ?? null,
+            $location['label'] ?? null,
+            $location['name'] ?? null,
+            $venue['display_name'] ?? null,
+            $venue['name'] ?? null,
+        ] as $candidate) {
             if (is_string($candidate) && trim($candidate) !== '') {
                 return trim($candidate);
             }
@@ -170,33 +248,80 @@ class InviteTargetResolverService
 
     /**
      * @param  array<string, mixed>  $eventPayload
+     * @param  array<string, mixed>  $detailProjection
      */
-    private function resolveHostName(array $eventPayload): string
+    private function resolveHostName(array $eventPayload, array $detailProjection = []): string
     {
+        $detailVenue = $this->normalizeArray($detailProjection['venue'] ?? []);
+        foreach ([$detailVenue['display_name'] ?? null, $detailVenue['name'] ?? null] as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return trim($candidate);
+            }
+        }
+
+        foreach ($this->normalizeListOfMaps($detailProjection['linked_account_profiles'] ?? []) as $profile) {
+            foreach ([$profile['display_name'] ?? null, $profile['name'] ?? null] as $candidate) {
+                if (is_string($candidate) && trim($candidate) !== '') {
+                    return trim($candidate);
+                }
+            }
+        }
+
         $venue = $this->normalizeArray($eventPayload['venue'] ?? []);
         if (isset($venue['display_name']) && is_string($venue['display_name']) && trim($venue['display_name']) !== '') {
             return trim($venue['display_name']);
         }
 
-        $eventParties = $this->normalizeArray($eventPayload['event_parties'] ?? []);
+        $eventParties = $this->normalizeList($eventPayload['event_parties'] ?? []);
         foreach ($eventParties as $party) {
             $payload = $this->normalizeArray($party);
-            $displayName = $payload['display_name'] ?? $payload['name'] ?? null;
-            if (is_string($displayName) && trim($displayName) !== '') {
-                return trim($displayName);
+            $metadata = $this->normalizeArray($payload['metadata'] ?? []);
+            foreach ([
+                $payload['display_name'] ?? null,
+                $payload['name'] ?? null,
+                $metadata['display_name'] ?? null,
+                $metadata['name'] ?? null,
+            ] as $candidate) {
+                if (is_string($candidate) && trim($candidate) !== '') {
+                    return trim($candidate);
+                }
             }
         }
 
         return 'Belluga';
     }
 
+    /**
+     * @param  array<string, mixed>  $detailProjection
+     * @param  array<string, mixed>  $eventPayload
+     */
+    private function resolveVenueAccountProfileId(array $detailProjection, array $eventPayload): ?string
+    {
+        $detailVenue = $this->normalizeArray($detailProjection['venue'] ?? []);
+        $eventVenue = $this->normalizeArray($eventPayload['venue'] ?? []);
+        $placeRef = $this->normalizeArray($eventPayload['place_ref'] ?? []);
+
+        foreach ([
+            $detailVenue['id'] ?? null,
+            $eventVenue['id'] ?? null,
+            $placeRef['type'] === 'account_profile' ? ($placeRef['id'] ?? null) : null,
+        ] as $candidate) {
+            $normalized = $this->normalizeOptionalString($candidate);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
     private function normalizeOptionalString(mixed $value): ?string
     {
-        if (! is_string($value)) {
+        if (! is_scalar($value)) {
             return null;
         }
 
-        $normalized = trim($value);
+        $normalized = trim((string) $value);
 
         return $normalized !== '' ? $normalized : null;
     }

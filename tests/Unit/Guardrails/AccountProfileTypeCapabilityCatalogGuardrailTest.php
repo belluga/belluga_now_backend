@@ -12,29 +12,29 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     public function test_profile_type_capability_dependency_map_is_explicit_and_reviewed(): void
     {
         $definitions = $this->definitionsByKey();
-        $expected = $this->expectedDependencyMap();
+        $expected = $this->expectedDefinitions();
 
         $this->assertSame(array_keys($expected), array_keys($definitions));
 
-        foreach ($expected as $key => $requiredKeys) {
+        foreach ($expected as $key => $expectation) {
             $definition = $definitions[$key];
 
             $this->assertSame($key, $definition['key']);
-            $this->assertSame(false, $definition['default']);
-            $this->assertSame($requiredKeys, $definition['requires']);
+            $this->assertSame($expectation['default'], $definition['default']);
+            $this->assertSame($expectation['requires'], $definition['requires']);
         }
     }
 
     public function test_profile_type_capabilities_enable_independently_when_declared_requirements_are_met(): void
     {
         $catalog = new AccountProfileTypeCapabilityCatalog();
-        $keys = array_keys($this->expectedDependencyMap());
+        $keys = array_keys($this->expectedDefinitions());
 
-        foreach ($this->expectedDependencyMap() as $targetKey => $requiredKeys) {
+        foreach ($this->expectedDefinitions() as $targetKey => $expectation) {
             $payload = array_fill_keys($keys, false);
             $payload[$targetKey] = true;
 
-            foreach ($requiredKeys as $requiredKey) {
+            foreach ($expectation['requires'] as $requiredKey) {
                 $payload[$requiredKey] = true;
             }
 
@@ -53,14 +53,14 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     public function test_profile_type_capability_dependencies_fail_closed_only_for_declared_requirements(): void
     {
         $catalog = new AccountProfileTypeCapabilityCatalog();
-        $keys = array_keys($this->expectedDependencyMap());
+        $keys = array_keys($this->expectedDefinitions());
 
-        foreach ($this->expectedDependencyMap() as $targetKey => $requiredKeys) {
-            foreach ($requiredKeys as $missingRequiredKey) {
+        foreach ($this->expectedDefinitions() as $targetKey => $expectation) {
+            foreach ($expectation['requires'] as $missingRequiredKey) {
                 $payload = array_fill_keys($keys, false);
                 $payload[$targetKey] = true;
 
-                foreach ($requiredKeys as $requiredKey) {
+                foreach ($expectation['requires'] as $requiredKey) {
                     $payload[$requiredKey] = $requiredKey !== $missingRequiredKey;
                 }
 
@@ -81,21 +81,21 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     public function test_non_required_capabilities_do_not_change_target_capability_resolution(): void
     {
         $catalog = new AccountProfileTypeCapabilityCatalog();
-        $dependencyMap = $this->expectedDependencyMap();
-        $keys = array_keys($dependencyMap);
+        $definitions = $this->expectedDefinitions();
+        $keys = array_keys($definitions);
 
-        foreach ($dependencyMap as $targetKey => $requiredKeys) {
+        foreach ($definitions as $targetKey => $expectation) {
             $basePayload = array_fill_keys($keys, false);
             $basePayload[$targetKey] = true;
 
-            foreach ($requiredKeys as $requiredKey) {
+            foreach ($expectation['requires'] as $requiredKey) {
                 $basePayload[$requiredKey] = true;
             }
 
             $baseline = $catalog->normalize($basePayload);
 
             foreach ($keys as $probeKey) {
-                if ($probeKey === $targetKey || in_array($probeKey, $requiredKeys, true)) {
+                if ($probeKey === $targetKey || in_array($probeKey, $expectation['requires'], true)) {
                     continue;
                 }
 
@@ -122,7 +122,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             'unknown_future_transport_key' => true,
         ]);
 
-        $this->assertSame(array_keys($this->expectedDependencyMap()), array_keys($normalized));
+        $this->assertSame(array_keys($this->expectedDefinitions()), array_keys($normalized));
     }
 
     public function test_effective_capability_accessors_use_catalog_dependency_resolution(): void
@@ -165,18 +165,52 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         ));
     }
 
+    public function test_queryability_and_public_navigability_defaults_and_independence_are_explicit(): void
+    {
+        $catalog = new AccountProfileTypeCapabilityCatalog();
+
+        $normalizedDefaults = $catalog->normalize([]);
+        $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_QUERYABLE]);
+        $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE]);
+        $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE]);
+
+        $nonQueryableNavigable = $catalog->normalize([
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE => true,
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => false,
+        ]);
+        $this->assertFalse($nonQueryableNavigable[AccountProfileTypeCapabilityCatalog::IS_QUERYABLE]);
+        $this->assertTrue($nonQueryableNavigable[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE]);
+
+        $nonQueryableDiscoverable = $catalog->normalize([
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
+        ]);
+        $this->assertFalse($nonQueryableDiscoverable[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE]);
+        $this->assertSame(
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE,
+            $catalog->firstDisabledRequirement(
+                AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE,
+                [
+                    AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
+                    AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
+                ],
+            ),
+        );
+    }
+
     public function test_runtime_consumers_resolve_account_profile_type_capabilities_through_catalog(): void
     {
         foreach ($this->runtimeConsumerPaths() as $relativePath) {
             $source = $this->readSource($relativePath);
 
-            $this->assertStringContainsString(
-                'AccountProfileTypeCapabilityCatalog',
-                $source,
-                "{$relativePath} must depend on the centralized Account Profile type capability catalog.",
+            $this->assertTrue(
+                str_contains($source, 'AccountProfileTypeCapabilityCatalog')
+                || str_contains($source, 'AccountProfileTypeSetProvider'),
+                "{$relativePath} must depend on centralized Account Profile capability/queryability ownership.",
             );
 
-            foreach (array_keys($this->expectedDependencyMap()) as $capabilityKey) {
+            foreach (array_keys($this->expectedDefinitions()) as $capabilityKey) {
                 foreach ([
                     'capabilities',
                     'currentCapabilities',
@@ -189,6 +223,24 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                     );
                 }
             }
+        }
+    }
+
+    public function test_queryability_type_set_consumers_delegate_scope_resolution_to_provider(): void
+    {
+        foreach ($this->queryabilityTypeSetConsumerPaths() as $relativePath) {
+            $source = $this->readSource($relativePath);
+
+            $this->assertStringContainsString(
+                'AccountProfileTypeSetProvider',
+                $source,
+                "{$relativePath} must delegate queryability/public navigability type-set resolution to AccountProfileTypeSetProvider.",
+            );
+            $this->assertDoesNotMatchRegularExpression(
+                '/TenantProfileType::query\(\)\s*->(queryable|publiclyNavigable|publiclyDiscoverable|publicPoiCatalog)\(/',
+                $source,
+                "{$relativePath} must not own direct TenantProfileType capability-set scopes outside AccountProfileTypeSetProvider.",
+            );
         }
     }
 
@@ -211,7 +263,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 "{$relativePath} must delegate capability validation rule construction."
             );
 
-            foreach (array_keys($this->expectedDependencyMap()) as $capabilityKey) {
+            foreach (array_keys($this->expectedDefinitions()) as $capabilityKey) {
                 $this->assertStringNotContainsString(
                     "'capabilities.{$capabilityKey}'",
                     $source,
@@ -242,25 +294,67 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     }
 
     /**
-     * @return array<string, array<int, string>>
+     * @return array<string, array{default:bool, requires:array<int, string>}>
      */
-    private function expectedDependencyMap(): array
+    private function expectedDefinitions(): array
     {
         return [
-            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => [],
-            AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => [],
-            AccountProfileTypeCapabilityCatalog::IS_INVITEABLE => [],
-            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => [],
-            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED => [
-                AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => [
+                'default' => true,
+                'requires' => [],
             ],
-            AccountProfileTypeCapabilityCatalog::HAS_BIO => [],
-            AccountProfileTypeCapabilityCatalog::HAS_CONTENT => [],
-            AccountProfileTypeCapabilityCatalog::HAS_TAXONOMIES => [],
-            AccountProfileTypeCapabilityCatalog::HAS_AVATAR => [],
-            AccountProfileTypeCapabilityCatalog::HAS_COVER => [],
-            AccountProfileTypeCapabilityCatalog::HAS_EVENTS => [],
-            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS => [],
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE => [
+                'default' => true,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => [
+                'default' => true,
+                'requires' => [AccountProfileTypeCapabilityCatalog::IS_QUERYABLE],
+            ],
+            AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::IS_INVITEABLE => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED => [
+                'default' => false,
+                'requires' => [AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_BIO => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_CONTENT => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_TAXONOMIES => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_AVATAR => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_COVER => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_EVENTS => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS => [
+                'default' => false,
+                'requires' => [],
+            ],
         ];
     }
 
@@ -275,6 +369,18 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             'app/Application/AccountProfiles/AccountProfileRegistryService.php',
             'app/Application/ProximityPreferences/ProximityPreferenceService.php',
             'app/Application/Social/InviteablePeopleService.php',
+            'app/Integration/Events/AccountProfileResolverAdapter.php',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function queryabilityTypeSetConsumerPaths(): array
+    {
+        return [
+            'app/Application/AccountProfiles/AccountProfileQueryService.php',
+            'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
             'app/Integration/Events/AccountProfileResolverAdapter.php',
         ];
     }

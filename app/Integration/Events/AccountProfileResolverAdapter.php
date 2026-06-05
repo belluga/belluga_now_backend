@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AccountProfileResolverAdapter implements EventProfileResolverContract
@@ -18,7 +20,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     public function __construct(
         private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -45,16 +47,16 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [];
         }
 
+        $eligibleTypes = $this->typeSetProvider->queryablePoiEnabledTypes();
         $profiles = AccountProfile::query()
             ->whereIn('_id', $ids)
+            ->whereIn('profile_type', $eligibleTypes)
             ->get()
             ->keyBy(static fn (AccountProfile $profile): string => (string) $profile->_id);
 
         $missing = array_diff($ids, array_keys($profiles->all()));
         if ($missing !== []) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile not found.'],
-            ]);
+            $this->throwPhysicalHostEligibilityError($ids, $missing);
         }
 
         $resolved = [];
@@ -76,6 +78,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     private function formatPhysicalHostProfile(AccountProfile $profile): array
     {
         $profileType = trim((string) ($profile->profile_type ?? ''));
+        if (! $this->isProfileTypeQueryable($profileType)) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile type is not queryable.'],
+            ]);
+        }
         if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
             throw ValidationException::withMessages([
                 'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
@@ -119,8 +126,13 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [];
         }
 
+        $eligibleTypes = array_values(array_filter(
+            $this->resolveQueryableProfileTypes(),
+            static fn (string $type): bool => $type !== 'venue'
+        ));
         $profiles = AccountProfile::query()
             ->whereIn('_id', array_values($profileIds))
+            ->whereIn('profile_type', $eligibleTypes)
             ->get();
 
         $profilesById = $profiles->keyBy(
@@ -129,15 +141,19 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
         $missing = array_diff($profileIds, array_keys($profilesById->all()));
         if ($missing !== []) {
-            throw ValidationException::withMessages([
-                'event_parties' => ['Some event parties were not found.'],
-            ]);
+            $this->throwEventPartyEligibilityError($profileIds, $missing);
         }
 
         $resolved = [];
         foreach ($profileIds as $profileId) {
             /** @var AccountProfile $profile */
             $profile = $profilesById[$profileId];
+            $profileType = trim((string) ($profile->profile_type ?? ''));
+            if (! $this->isProfileTypeQueryable($profileType) || $profileType === 'venue') {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Related account profile type is not selectable.'],
+                ]);
+            }
             $taxonomy = $profile->taxonomy_terms ?? [];
             $genres = [];
 
@@ -204,6 +220,35 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ->all();
     }
 
+    public function resolveProfileTypePluralLabelsByTypes(array $types): array
+    {
+        $normalizedTypes = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $type): string => trim((string) $type),
+            $types
+        ), static fn (string $type): bool => $type !== '')));
+
+        if ($normalizedTypes === []) {
+            return [];
+        }
+
+        $labels = [];
+        foreach (TenantProfileType::query()->whereIn('type', $normalizedTypes)->get() as $profileType) {
+            $type = trim((string) ($profileType->type ?? ''));
+            if ($type === '') {
+                continue;
+            }
+
+            $rawLabels = is_array($profileType->labels ?? null) ? $profileType->labels : [];
+            $plural = trim((string) ($rawLabels['plural'] ?? ''));
+            $label = trim((string) ($profileType->label ?? ''));
+            $labels[$type] = $plural !== ''
+                ? $plural
+                : ($label !== '' ? Str::plural($label) : Str::headline(Str::plural($type)));
+        }
+
+        return $labels;
+    }
+
     public function accountOwnsProfile(string $accountId, string $profileId): bool
     {
         return AccountProfile::query()
@@ -218,8 +263,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         int $page = 1,
         int $perPage = 15,
         ?string $accountId = null
-    ): LengthAwarePaginator
-    {
+    ): LengthAwarePaginator {
         $normalizedPage = max(1, $page);
         $normalizedPerPage = max(1, min($perPage, 50));
         $normalizedSearch = trim((string) ($search ?? ''));
@@ -259,21 +303,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      */
     private function resolvePoiEnabledProfileTypes(): array
     {
-        return collect($this->profileRegistryService->registry())
-            ->filter(function (array $definition): bool {
-                $capabilities = $definition['capabilities'] ?? [];
-
-                return $this->capabilityCatalog->isEnabled(
-                    AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-                    is_array($capabilities) ? $capabilities : [],
-                    is_array($capabilities) ? $capabilities : [],
-                );
-            })
-            ->map(static fn (array $definition): string => trim((string) ($definition['type'] ?? '')))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return $this->typeSetProvider->queryablePoiEnabledTypes();
     }
 
     /**
@@ -283,8 +313,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         array $profileTypes,
         ?string $likePattern,
         ?string $accountId
-    ): Builder
-    {
+    ): Builder {
         if ($profileTypes === []) {
             return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
         }
@@ -313,8 +342,16 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      */
     private function queryRelatedAccountProfileCandidates(?string $likePattern, ?string $accountId): Builder
     {
+        $allowedTypes = array_values(array_filter(
+            $this->resolveQueryableProfileTypes(),
+            static fn (string $type): bool => $type !== 'venue'
+        ));
+        if ($allowedTypes === []) {
+            return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
+        }
+
         $query = AccountProfile::query()
-            ->where('profile_type', '!=', 'venue');
+            ->whereIn('profile_type', $allowedTypes);
 
         if ($accountId !== null) {
             $query->where('account_id', $accountId);
@@ -328,6 +365,114 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         }
 
         return $query;
+    }
+
+    public function isProfileTypeQueryable(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->resolveQueryableProfileTypes(), true);
+    }
+
+    public function isProfileTypePubliclyNavigable(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->resolvePubliclyNavigableProfileTypes(), true);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveQueryableProfileTypes(): array
+    {
+        return $this->typeSetProvider->queryableTypes();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolvePubliclyNavigableProfileTypes(): array
+    {
+        return $this->typeSetProvider->publiclyNavigableTypes();
+    }
+
+    /**
+     * @param  array<int, string>  $requestedIds
+     * @param  array<int, string>  $missingIds
+     */
+    private function throwPhysicalHostEligibilityError(array $requestedIds, array $missingIds): never
+    {
+        $profilesById = AccountProfile::query()
+            ->whereIn('_id', array_values($requestedIds))
+            ->get(['_id', 'profile_type'])
+            ->keyBy(static fn (AccountProfile $profile): string => (string) $profile->_id);
+
+        foreach ($missingIds as $profileId) {
+            /** @var AccountProfile|null $profile */
+            $profile = $profilesById->get($profileId);
+            if (! $profile instanceof AccountProfile) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Physical host account profile not found.'],
+                ]);
+            }
+
+            $profileType = trim((string) ($profile->profile_type ?? ''));
+            if (! $this->isProfileTypeQueryable($profileType)) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Physical host account profile type is not queryable.'],
+                ]);
+            }
+
+            if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
+                ]);
+            }
+        }
+
+        throw ValidationException::withMessages([
+            'place_ref.id' => ['Physical host account profile not found.'],
+        ]);
+    }
+
+    /**
+     * @param  array<int, string>  $requestedIds
+     * @param  array<int, string>  $missingIds
+     */
+    private function throwEventPartyEligibilityError(array $requestedIds, array $missingIds): never
+    {
+        $profilesById = AccountProfile::query()
+            ->whereIn('_id', array_values($requestedIds))
+            ->get(['_id', 'profile_type'])
+            ->keyBy(static fn (AccountProfile $profile): string => (string) $profile->_id);
+
+        foreach ($missingIds as $profileId) {
+            /** @var AccountProfile|null $profile */
+            $profile = $profilesById->get($profileId);
+            if (! $profile instanceof AccountProfile) {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Some event parties were not found.'],
+                ]);
+            }
+
+            $profileType = trim((string) ($profile->profile_type ?? ''));
+            if (! $this->isProfileTypeQueryable($profileType) || $profileType === 'venue') {
+                throw ValidationException::withMessages([
+                    'event_parties' => ['Related account profile type is not selectable.'],
+                ]);
+            }
+        }
+
+        throw ValidationException::withMessages([
+            'event_parties' => ['Some event parties were not found.'],
+        ]);
     }
 
     /**

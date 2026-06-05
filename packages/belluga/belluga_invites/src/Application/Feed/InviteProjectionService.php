@@ -85,6 +85,11 @@ class InviteProjectionService
             'host_name' => (string) ($primary->host_name ?? ''),
             'message' => (string) ($primary->message ?? ''),
             'tags' => is_array($primary->tags) ? array_values(array_map('strval', $primary->tags)) : [],
+            'linked_account_profiles' => is_array($primary->linked_account_profiles) ? $primary->linked_account_profiles : [],
+            'profile_groups' => is_array($primary->profile_groups) ? $primary->profile_groups : [],
+            'venue_account_profile_id' => is_string($primary->venue_account_profile_id)
+                ? trim($primary->venue_account_profile_id)
+                : null,
             'attendance_policy' => (string) ($primary->attendance_policy ?? 'free_confirmation_only'),
             'inviter_candidates' => $pendingEdges
                 ->map(static function (InviteEdge $edge): array {
@@ -145,6 +150,11 @@ class InviteProjectionService
             'host_name' => (string) ($projection->host_name ?? ''),
             'message' => (string) ($projection->message ?? ''),
             'tags' => is_array($projection->tags) ? array_values(array_map('strval', $projection->tags)) : [],
+            'linked_account_profiles' => is_array($projection->linked_account_profiles) ? $projection->linked_account_profiles : [],
+            'profile_groups' => is_array($projection->profile_groups) ? $projection->profile_groups : [],
+            'venue_account_profile_id' => is_string($projection->venue_account_profile_id)
+                ? trim($projection->venue_account_profile_id)
+                : null,
             'attendance_policy' => (string) ($projection->attendance_policy ?? 'free_confirmation_only'),
             'inviter_candidates' => is_array($projection->inviter_candidates) ? $projection->inviter_candidates : [],
             'social_proof' => is_array($projection->social_proof) ? $projection->social_proof : ['additional_inviter_count' => 0],
