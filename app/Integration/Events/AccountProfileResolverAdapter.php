@@ -101,16 +101,19 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ]);
         }
 
+        $slug = trim((string) ($profile->slug ?? ''));
+        $slug = $slug !== '' ? $slug : null;
+        $canOpenPublicDetail = $slug !== null
+            && $this->typeSetProvider->isPubliclyNavigable($profileType);
+
         return [
             'venue' => [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
-                'slug' => $profile->slug ? (string) $profile->slug : null,
-                'can_open_public_detail' => $profile->slug
-                    ? $this->typeSetProvider->isPubliclyNavigable($profileType)
-                    : false,
-                'public_detail_path' => $profile->slug && $this->typeSetProvider->isPubliclyNavigable($profileType)
-                    ? '/parceiro/'.(string) $profile->slug
+                'slug' => $slug,
+                'can_open_public_detail' => $canOpenPublicDetail,
+                'public_detail_path' => $canOpenPublicDetail
+                    ? '/parceiro/'.$slug
                     : null,
                 'profile_type' => (string) ($profile->profile_type ?? ''),
                 'tagline' => null,

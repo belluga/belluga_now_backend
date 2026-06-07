@@ -1255,6 +1255,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('Showcase', data_get($artistParty, 'metadata.taxonomy_terms.0.name'));
     }
 
+    public function test_event_create_preserves_public_detail_contract_for_numeric_zero_venue_slug(): void
+    {
+        $this->venue->slug = '0';
+        $this->venue->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.venue.slug', '0');
+        $response->assertJsonPath('data.venue.can_open_public_detail', true);
+        $response->assertJsonPath('data.venue.public_detail_path', '/parceiro/0');
+
+        $eventId = (string) $response->json('data.event_id');
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.venue.slug', '0');
+        $public->assertJsonPath('data.venue.can_open_public_detail', true);
+        $public->assertJsonPath('data.venue.public_detail_path', '/parceiro/0');
+    }
+
     public function test_event_create_rejects_legacy_single_date_payload_without_occurrences(): void
     {
         $now = Carbon::now();
