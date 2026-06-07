@@ -5487,6 +5487,53 @@ class EventCrudControllerTest extends TestCaseTenant
         $staleQueryResponse->assertJsonPath('data.occurrences.1.is_selected', false);
     }
 
+    public function test_public_event_detail_and_occurrence_slug_alias_keep_non_navigable_venue_without_public_detail_path(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        $venueSlug = 'main-venue-private-'.Str::lower(Str::random(6));
+        $this->venue->slug = $venueSlug;
+        $this->venue->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $selectedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
+
+        $eventDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $eventDetail->assertStatus(200);
+        $eventDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $eventDetail->assertJsonPath('data.venue.can_open_public_detail', false);
+        $eventDetail->assertJsonPath('data.venue.public_detail_path', null);
+
+        $aliasDetail = $this->getJson("{$this->base_api_tenant}events/{$selectedOccurrence->occurrence_slug}");
+        $aliasDetail->assertStatus(200);
+        $aliasDetail->assertJsonPath('data.occurrence_id', (string) $selectedOccurrence->_id);
+        $aliasDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $aliasDetail->assertJsonPath('data.venue.can_open_public_detail', false);
+        $aliasDetail->assertJsonPath('data.venue.public_detail_path', null);
+    }
+
     public function test_public_event_detail_related_profiles_aggregate_event_occurrences_and_programming_profiles(): void
     {
         $guestArtist = $this->createAccountProfile('artist', 'Convidado Programacao');
