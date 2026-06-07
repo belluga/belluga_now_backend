@@ -1030,6 +1030,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 'label' => 'Restaurant',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'has_bio' => false,
@@ -4744,7 +4747,12 @@ class EventCrudControllerTest extends TestCaseTenant
                     'plural' => 'Perfis Smoke Públicos',
                 ],
                 'allowed_taxonomies' => [],
-                'capabilities' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
             ]
         );
 
@@ -5588,6 +5596,23 @@ class EventCrudControllerTest extends TestCaseTenant
         $aliasDetail->assertJsonPath('data.venue.slug', $venueSlug);
         $aliasDetail->assertJsonPath('data.venue.can_open_public_detail', false);
         $aliasDetail->assertJsonPath('data.venue.public_detail_path', null);
+
+        $postCutoverCreate = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Post cutover venue contract',
+        ]));
+        $postCutoverCreate->assertStatus(201);
+        $postCutoverCreate->assertJsonPath('data.venue.slug', $venueSlug);
+        $postCutoverCreate->assertJsonPath('data.venue.can_open_public_detail', false);
+        $postCutoverCreate->assertJsonPath('data.venue.public_detail_path', null);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $adminDetail = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
+        $adminDetail->assertStatus(200);
+        $adminDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $adminDetail->assertJsonPath('data.venue.can_open_public_detail', false);
+        $adminDetail->assertJsonPath('data.venue.public_detail_path', null);
     }
 
     public function test_public_event_detail_related_profiles_aggregate_event_occurrences_and_programming_profiles(): void

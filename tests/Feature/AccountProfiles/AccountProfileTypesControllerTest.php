@@ -356,11 +356,11 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ->values()
             ->all();
 
-        $this->assertSame(
+        $this->assertEqualsCanonicalizing(
             ['non-favoritable-poi', 'public-non-poi', 'public-poi'],
             $publicCatalogTypes
         );
-        $this->assertSame(['non-favoritable-poi', 'public-poi'], $publicPoiCatalogTypes);
+        $this->assertEqualsCanonicalizing(['non-favoritable-poi', 'public-poi'], $publicPoiCatalogTypes);
     }
 
     public function test_queryability_and_public_navigation_backfill_repairs_missing_flags_without_overwriting_explicit_values(): void

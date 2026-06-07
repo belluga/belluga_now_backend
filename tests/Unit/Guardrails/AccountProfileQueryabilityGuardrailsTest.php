@@ -34,6 +34,21 @@ final class AccountProfileQueryabilityGuardrailsTest extends TestCase
         $this->assertStringContainsString('[QRY-GUARD] PASS - no blocked AccountProfile operational query findings detected.', $output);
     }
 
+    public function test_architecture_guardrails_script_invokes_queryability_guard_for_real_repository(): void
+    {
+        $process = $this->guardProcess([
+            'php',
+            $this->architectureGuardrailsScriptPath(),
+        ]);
+        $process->run();
+
+        $output = $process->getOutput().$process->getErrorOutput();
+
+        $this->assertSame(0, $process->getExitCode(), $output);
+        $this->assertStringContainsString('[QRY-GUARD] PASS - no blocked AccountProfile operational query findings detected.', $output);
+        $this->assertStringContainsString('[ARCH-GUARDRAILS] PASS - no architecture violations found.', $output);
+    }
+
     public function test_guard_fails_for_unallowlisted_operational_query_fixture(): void
     {
         $fixtureRoot = $this->makeFixtureRepo([
@@ -152,5 +167,10 @@ PHP,
     private function guardScriptPath(): string
     {
         return $this->repositoryRoot.'/scripts/account_profile_queryability_guardrails.php';
+    }
+
+    private function architectureGuardrailsScriptPath(): string
+    {
+        return $this->repositoryRoot.'/scripts/architecture_guardrails.php';
     }
 }

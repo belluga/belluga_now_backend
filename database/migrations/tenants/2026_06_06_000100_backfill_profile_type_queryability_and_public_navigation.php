@@ -62,10 +62,28 @@ return new class extends Migration
         $collection->updateMany(
             [
                 'type' => ['$ne' => 'personal'],
+                'capabilities.is_queryable' => false,
                 '$or' => [
                     ['capabilities.is_publicly_discoverable' => ['$exists' => false]],
                     ['capabilities.is_publicly_discoverable' => null],
                 ],
+            ],
+            [
+                '$set' => [
+                    'capabilities.is_publicly_discoverable' => false,
+                    'updated_at' => $now,
+                ],
+            ],
+        );
+
+        $collection->updateMany(
+            [
+                'type' => ['$ne' => 'personal'],
+                '$or' => [
+                    ['capabilities.is_publicly_discoverable' => ['$exists' => false]],
+                    ['capabilities.is_publicly_discoverable' => null],
+                ],
+                'capabilities.is_queryable' => ['$ne' => false],
             ],
             [
                 '$set' => [
@@ -78,10 +96,38 @@ return new class extends Migration
         $collection->updateMany(
             [
                 'type' => ['$ne' => 'personal'],
+                '$and' => [
+                    [
+                        '$or' => [
+                            ['capabilities.is_publicly_navigable' => ['$exists' => false]],
+                            ['capabilities.is_publicly_navigable' => null],
+                        ],
+                    ],
+                    [
+                        '$or' => [
+                            ['capabilities.is_queryable' => false],
+                            ['capabilities.is_publicly_discoverable' => false],
+                        ],
+                    ],
+                ],
+            ],
+            [
+                '$set' => [
+                    'capabilities.is_publicly_navigable' => false,
+                    'updated_at' => $now,
+                ],
+            ],
+        );
+
+        $collection->updateMany(
+            [
+                'type' => ['$ne' => 'personal'],
                 '$or' => [
                     ['capabilities.is_publicly_navigable' => ['$exists' => false]],
                     ['capabilities.is_publicly_navigable' => null],
                 ],
+                'capabilities.is_queryable' => ['$ne' => false],
+                'capabilities.is_publicly_discoverable' => ['$ne' => false],
             ],
             [
                 '$set' => [
