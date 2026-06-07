@@ -101,8 +101,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             ]);
         }
 
-        $slug = trim((string) ($profile->slug ?? ''));
-        $slug = $slug !== '' ? $slug : null;
+        $slug = $this->normalizeSlug($profile->slug ?? null);
         $canOpenPublicDetail = $slug !== null
             && $this->typeSetProvider->isPubliclyNavigable($profileType);
 
@@ -182,7 +181,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             $resolved[] = [
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
-                'slug' => $profile->slug ? (string) $profile->slug : null,
+                'slug' => $this->normalizeSlug($profile->slug ?? null),
                 'profile_type' => (string) ($profile->profile_type ?? ''),
                 'avatar_url' => $profile->avatar_url ?? null,
                 'cover_url' => $profile->cover_url ?? null,
@@ -494,9 +493,16 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             'account_id' => (string) $profile->account_id,
             'profile_type' => (string) $profile->profile_type,
             'display_name' => (string) ($profile->display_name ?? ''),
-            'slug' => $profile->slug ? (string) $profile->slug : null,
+            'slug' => $this->normalizeSlug($profile->slug ?? null),
             'avatar_url' => $profile->avatar_url ?? null,
             'cover_url' => $profile->cover_url ?? null,
         ];
+    }
+
+    private function normalizeSlug(mixed $slug): ?string
+    {
+        $normalized = trim((string) $slug);
+
+        return $normalized !== '' ? $normalized : null;
     }
 }

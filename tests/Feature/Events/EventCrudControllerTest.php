@@ -92,6 +92,7 @@ class EventCrudControllerTest extends TestCaseTenant
         EventType::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
+        AccountProfile::withTrashed()->forceDelete();
 
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
@@ -104,23 +105,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'events:delete',
         ]);
 
-        TenantProfileType::query()->updateOrCreate(
-            ['type' => 'band'],
-            [
-                'label' => 'Banda',
-                'labels' => [
-                    'singular' => 'Banda',
-                    'plural' => 'Bandas',
-                ],
-                'allowed_taxonomies' => [],
-                'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
-                ],
-            ]
-        );
+        $this->resetCoreProfileTypeBaselines();
 
         $this->venue = $this->createAccountProfile('venue', 'Main Venue', $this->account);
         $this->artist = $this->createAccountProfile('artist', 'DJ Test');
@@ -1013,6 +998,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotContains((string) $hiddenGuest->_id, $candidateIds);
     }
 
+    public function test_event_account_profile_candidates_endpoint_preserves_numeric_zero_slug_in_related_results(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $this->artist->display_name = 'Selector Zero Slug Artist';
+        $this->artist->slug = '0';
+        $this->artist->save();
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&search=selector%20zero"
+        );
+
+        $response->assertStatus(200);
+        $candidate = collect($response->json('data') ?? [])
+            ->firstWhere('id', (string) $this->artist->_id);
+
+        $this->assertNotNull($candidate);
+        $this->assertSame('0', data_get($candidate, 'slug'));
+    }
+
     public function test_event_account_profile_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -1274,6 +1280,29 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.venue.slug', '0');
         $public->assertJsonPath('data.venue.can_open_public_detail', true);
         $public->assertJsonPath('data.venue.public_detail_path', '/parceiro/0');
+    }
+
+    public function test_event_create_preserves_linked_profile_contract_for_numeric_zero_related_profile_slug(): void
+    {
+        $this->artist->slug = '0';
+        $this->artist->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', '0');
+        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/0');
+        $response->assertJsonPath('data.event_parties.0.metadata.slug', '0');
+
+        $eventId = (string) $response->json('data.event_id');
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.linked_account_profiles.0.slug', '0');
+        $public->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
+        $public->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/0');
+        $public->assertJsonPath('data.artists.0.slug', '0');
     }
 
     public function test_event_create_rejects_legacy_single_date_payload_without_occurrences(): void
@@ -6752,6 +6781,63 @@ class EventCrudControllerTest extends TestCaseTenant
             'is_active' => true,
             'is_verified' => false,
         ]);
+    }
+
+    private function resetCoreProfileTypeBaselines(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'labels' => [
+                    'singular' => 'Artist',
+                    'plural' => 'Artists',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
+            ]
+        );
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Banda',
+                'labels' => [
+                    'singular' => 'Banda',
+                    'plural' => 'Bandas',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
+            ]
+        );
     }
 
     /**
