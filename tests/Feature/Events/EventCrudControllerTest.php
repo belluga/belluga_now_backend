@@ -4935,15 +4935,24 @@ class EventCrudControllerTest extends TestCaseTenant
         $event->save();
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
 
         $public->assertStatus(200);
+        $management->assertStatus(200);
         $profiles = $public->json('data.profile_groups.0.profiles');
         $this->assertSame(
             [(string) $this->artist->_id, (string) $delegate->_id],
             array_column($profiles, 'id')
         );
+        $management->assertJsonPath('data.profile_groups.0.account_profile_ids', [
+            (string) $this->artist->_id,
+            (string) $delegate->_id,
+        ]);
         $linkedProfiles = collect($public->json('data.linked_account_profiles'));
         $this->assertFalse($linkedProfiles->pluck('id')->contains((string) $hiddenGuest->_id));
+        $this->assertFalse(
+            collect($management->json('data.linked_account_profiles'))->pluck('id')->contains((string) $hiddenGuest->_id)
+        );
 
         $delegatePayload = collect($profiles)
             ->firstWhere('id', (string) $delegate->_id);
@@ -4962,7 +4971,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('/parceiro/'.$this->artist->slug, $linkedArtistPayload['public_detail_path'] ?? null);
     }
 
-    public function test_management_event_readback_preserves_persisted_non_queryable_occurrence_group_members_for_repair(): void
+    public function test_management_event_readback_suppresses_persisted_non_queryable_occurrence_group_members_in_normal_payload(): void
     {
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'delegate'],
@@ -5070,13 +5079,11 @@ class EventCrudControllerTest extends TestCaseTenant
         $management->assertJsonPath('data.occurrences.1.profile_groups.0.account_profile_ids', [
             (string) $this->artist->_id,
             (string) $delegate->_id,
-            (string) $hiddenGuest->_id,
         ]);
         $this->assertSame(
             [
                 (string) $this->artist->_id,
                 (string) $delegate->_id,
-                (string) $hiddenGuest->_id,
             ],
             collect($management->json('data.occurrences.1.own_linked_account_profiles') ?? [])
                 ->pluck('id')

@@ -2425,10 +2425,15 @@ class EventQueryService
     {
         $groups = $this->normalizeProfileGroups($rawGroups);
         if ($groups !== []) {
-            return array_values(array_map(
-                static function (array $group): array {
+            $allowedProfileIds = $this->managementLinkedProfileIdLookup($linkedProfiles);
+
+            return array_values(array_filter(array_map(
+                static function (array $group) use ($allowedProfileIds): array {
                     $memberIds = [];
                     foreach ($group['account_profile_ids'] as $profileId) {
+                        if (! isset($allowedProfileIds[$profileId])) {
+                            continue;
+                        }
                         if (in_array($profileId, $memberIds, true)) {
                             continue;
                         }
@@ -2444,7 +2449,7 @@ class EventQueryService
                     ];
                 },
                 $groups
-            ));
+            ), static fn (array $group): bool => $group['account_profile_ids'] !== []));
         }
 
         return array_map(
@@ -2511,6 +2516,26 @@ class EventQueryService
         }
 
         return $publicGroups;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<string, bool>
+     */
+    private function managementLinkedProfileIdLookup(array $linkedProfiles): array
+    {
+        $allowedProfileIds = [];
+
+        foreach ($this->normalizeManagementLinkedAccountProfiles($linkedProfiles, []) as $profile) {
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            if ($profileId === '' || isset($allowedProfileIds[$profileId])) {
+                continue;
+            }
+
+            $allowedProfileIds[$profileId] = true;
+        }
+
+        return $allowedProfileIds;
     }
 
     /**
@@ -2863,34 +2888,7 @@ class EventQueryService
      */
     private function normalizeManagementLinkedAccountProfileSummary(mixed $profile): ?array
     {
-        $payload = $this->normalizeArray($profile);
-        if ($payload === []) {
-            return null;
-        }
-
-        if (array_key_exists('taxonomy_terms', $payload)) {
-            $payload['taxonomy_terms'] = $this->ensureTaxonomySnapshots($payload['taxonomy_terms']);
-        }
-
-        $id = trim((string) ($this->scalarString($payload['id'] ?? null) ?? ''));
-        $displayName = trim((string) ($this->scalarString($payload['display_name'] ?? $payload['name'] ?? null) ?? ''));
-        $profileType = trim((string) ($this->scalarString($payload['profile_type'] ?? $payload['party_type'] ?? null) ?? ''));
-        if ($id === '' || $displayName === '' || $profileType === '') {
-            return null;
-        }
-
-        $slug = trim((string) ($this->scalarString($payload['slug'] ?? null) ?? ''));
-        $canOpenPublicDetail = $slug !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($profileType);
-
-        $payload['id'] = $id;
-        $payload['display_name'] = $displayName;
-        $payload['profile_type'] = $profileType;
-        $payload['slug'] = $slug === '' ? null : $slug;
-        $payload['can_open_public_detail'] = $canOpenPublicDetail;
-        $payload['public_detail_path'] = $canOpenPublicDetail ? '/parceiro/'.$slug : null;
-
-        return $payload;
+        return $this->normalizeLinkedAccountProfileSummary($profile);
     }
 
     /**
