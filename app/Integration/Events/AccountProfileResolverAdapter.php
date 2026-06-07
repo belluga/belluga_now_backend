@@ -106,6 +106,12 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                 'id' => (string) $profile->_id,
                 'display_name' => $profile->display_name,
                 'slug' => $profile->slug ? (string) $profile->slug : null,
+                'can_open_public_detail' => $profile->slug
+                    ? $this->typeSetProvider->isPubliclyNavigable($profileType)
+                    : false,
+                'public_detail_path' => $profile->slug && $this->typeSetProvider->isPubliclyNavigable($profileType)
+                    ? '/parceiro/'.(string) $profile->slug
+                    : null,
                 'profile_type' => (string) ($profile->profile_type ?? ''),
                 'tagline' => null,
                 'hero_image_url' => $profile->cover_url ?? null,

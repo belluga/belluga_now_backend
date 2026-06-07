@@ -486,11 +486,20 @@ class EventQueryService
         $publication = is_array($publication) ? $publication : (array) $publication;
         $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
             ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
         $venuePayload = $venue === [] ? null : [
             'id' => $this->resolveLegacyDocumentId($venue),
             'display_name' => $venueDisplay ?? '',
-            'slug' => $this->scalarString($venue['slug'] ?? null),
-            'profile_type' => $this->scalarString($venue['profile_type'] ?? null),
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
             'tagline' => $this->scalarString($venue['tagline'] ?? null),
             'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
             'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
@@ -1603,11 +1612,20 @@ class EventQueryService
 
         $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
             ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
         $venuePayload = $venue === [] ? null : [
             'id' => $this->resolveLegacyDocumentId($venue),
             'display_name' => $venueDisplay ?? '',
-            'slug' => $this->scalarString($venue['slug'] ?? null),
-            'profile_type' => $this->scalarString($venue['profile_type'] ?? null),
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
             'tagline' => $this->scalarString($venue['tagline'] ?? null),
             'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
             'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),

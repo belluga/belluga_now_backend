@@ -1230,6 +1230,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.created_by.type', 'account_user');
         $response->assertJsonPath('data.created_by.id', (string) $this->user->_id);
         $response->assertJsonPath('data.venue.slug', $venueSlug);
+        $response->assertJsonPath('data.venue.can_open_public_detail', true);
+        $response->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
         $response->assertJsonPath('data.linked_account_profiles.0.slug', $artistSlug);
 
         $parties = collect($response->json('data.event_parties') ?? []);
