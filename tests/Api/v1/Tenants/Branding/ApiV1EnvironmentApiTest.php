@@ -19,6 +19,7 @@ use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -241,6 +242,16 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             );
         } finally {
             $primaryTenant->makeCurrent();
+
+            $secondaryDatabaseName = trim((string) ($secondaryTenant->database ?? ''));
+            if ($secondaryDatabaseName !== '') {
+                $secondaryDatabase = DB::connection('tenant')->getMongoClient()->selectDatabase($secondaryDatabaseName);
+
+                foreach ($secondaryDatabase->listCollectionNames() as $collectionName) {
+                    $secondaryDatabase->dropCollection($collectionName);
+                }
+            }
+
             $secondaryTenant->domains()->withTrashed()->forceDelete();
             $secondaryTenant->forceDelete();
         }
