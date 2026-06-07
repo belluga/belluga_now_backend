@@ -17,6 +17,7 @@ use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Queue;
 use Tests\Helpers\TenantLabels;
@@ -196,22 +197,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     public function test_dispatch_refresh_for_specific_tenant_preserves_current_tenant_context(): void
     {
         $primaryTenant = $this->currentTenant();
+        $reason = 'test_preserve_current_tenant_context_'.Str::lower(Str::random(8));
 
-        $reason = 'test_preserve_current_tenant_context';
-
-        $secondaryTenant = Tenant::query()
-            ->where('_id', '!=', $primaryTenant->getKey())
-            ->first();
-        $createdSecondaryTenant = false;
-
-        if (! $secondaryTenant instanceof Tenant) {
-            $secondaryTenant = Tenant::create([
-                'name' => 'Environment Snapshot Secondary',
-                'subdomain' => 'environment-snapshot-secondary',
-                'app_domains' => ['com.environment.snapshot.secondary'],
-            ]);
-            $createdSecondaryTenant = true;
-        }
+        $secondaryTenant = Tenant::create([
+            'name' => 'Environment Snapshot Secondary '.Str::lower(Str::random(6)),
+            'subdomain' => 'environment-snapshot-secondary-'.Str::lower(Str::random(8)),
+            'app_domains' => ['com.environment.snapshot.secondary.'.Str::lower(Str::random(8))],
+        ]);
 
         try {
             $primaryTenant->makeCurrent();
@@ -249,11 +241,8 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
             );
         } finally {
             $primaryTenant->makeCurrent();
-
-            if ($createdSecondaryTenant) {
-                $secondaryTenant->domains()->withTrashed()->forceDelete();
-                $secondaryTenant->forceDelete();
-            }
+            $secondaryTenant->domains()->withTrashed()->forceDelete();
+            $secondaryTenant->forceDelete();
         }
     }
 
