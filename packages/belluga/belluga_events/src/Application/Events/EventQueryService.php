@@ -2685,21 +2685,26 @@ class EventQueryService
     {
         $merged = [];
         $indexById = [];
+        $indexByLabel = [];
 
         foreach ($groupSets as $groupSet) {
             foreach ($groupSet as $group) {
                 $id = trim((string) ($group['id'] ?? ''));
                 $label = trim((string) ($group['label'] ?? ''));
-                if ($id === '' || $label === '') {
+                if ($label === '') {
                     continue;
                 }
+                $normalizedLabel = mb_strtolower($label);
 
                 $profiles = $this->normalizeLinkedAccountProfileSummaries($group['profiles'] ?? []);
                 if ($profiles === []) {
                     continue;
                 }
 
-                $groupIndex = $indexById[$id] ?? null;
+                $groupIndex = $id !== '' ? ($indexById[$id] ?? null) : null;
+                if ($groupIndex === null) {
+                    $groupIndex = $indexByLabel[$normalizedLabel] ?? null;
+                }
                 $seenProfileIds = [];
                 if ($groupIndex !== null) {
                     foreach ($merged[$groupIndex]['profiles'] as $existingProfile) {
@@ -2726,14 +2731,24 @@ class EventQueryService
                 }
 
                 if ($groupIndex === null) {
-                    $indexById[$id] = count($merged);
-                    $groupIndex = $indexById[$id];
+                    $groupIndex = count($merged);
+                    if ($id !== '') {
+                        $indexById[$id] = $groupIndex;
+                    }
+                    $indexByLabel[$normalizedLabel] = $groupIndex;
                     $merged[] = [
-                        'id' => $id,
+                        'id' => $id === '' ? Str::slug($label) : $id,
                         'label' => $label,
                         'order' => count($merged),
                         'profiles' => [],
                     ];
+                } else {
+                    if ($id !== '' && ! isset($indexById[$id])) {
+                        $indexById[$id] = $groupIndex;
+                    }
+                    if (! isset($indexByLabel[$normalizedLabel])) {
+                        $indexByLabel[$normalizedLabel] = $groupIndex;
+                    }
                 }
 
                 foreach ($profilesToAppend as $profile) {

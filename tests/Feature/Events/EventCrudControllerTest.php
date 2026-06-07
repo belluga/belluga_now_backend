@@ -5242,7 +5242,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.profile_groups.1.profiles.1.id', (string) $this->band->_id);
     }
 
-    public function test_public_event_detail_keeps_groups_separate_when_ids_differ_even_if_labels_match(): void
+    public function test_public_event_detail_merges_groups_when_labels_match_even_if_ids_differ(): void
     {
         $occurrences = $this->makeOccurrences(2);
         $occurrences[1]['event_parties'] = [[
@@ -5277,11 +5277,10 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $public->assertStatus(200);
         $public->assertJsonPath('data.profile_groups.0.id', 'grupo-evento');
-        $public->assertJsonPath('data.profile_groups.1.id', 'grupo-ocorrencia');
         $public->assertJsonPath('data.profile_groups.0.label', 'Participantes');
-        $public->assertJsonPath('data.profile_groups.1.label', 'Participantes');
         $public->assertJsonPath('data.profile_groups.0.profiles.0.id', (string) $this->artist->_id);
-        $public->assertJsonPath('data.profile_groups.1.profiles.0.id', (string) $this->band->_id);
+        $public->assertJsonPath('data.profile_groups.0.profiles.1.id', (string) $this->band->_id);
+        $public->assertJsonCount(1, 'data.profile_groups');
     }
 
     public function test_account_event_create_rejects_foreign_programming_location_profile(): void
@@ -5812,11 +5811,16 @@ class EventCrudControllerTest extends TestCaseTenant
             'tags' => ['legacy-music'],
             'categories' => $oversizedCategories,
             'taxonomy_terms' => $oversizedTaxonomyTerms,
+            'occurrences' => [[
+                ...$this->makeOccurrences(1)[0],
+                'tags' => ['legacy-occurrence-music'],
+            ]],
         ]));
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
             'tags',
+            'occurrences.0.tags',
             'categories',
             'taxonomy_terms',
         ]);

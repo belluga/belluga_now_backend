@@ -105,6 +105,8 @@ final class EventWriteRules
             'occurrences.*.taxonomy_terms' => 'sometimes|array|max:'.InputConstraints::EVENT_TAXONOMY_TERMS_MAX,
             'occurrences.*.taxonomy_terms.*.type' => 'required_with:occurrences.*.taxonomy_terms|string|max:'.InputConstraints::NAME_MAX,
             'occurrences.*.taxonomy_terms.*.value' => 'required_with:occurrences.*.taxonomy_terms|string|max:'.InputConstraints::NAME_MAX,
+            'occurrences.*.tags' => 'prohibited',
+            'occurrences.*.tags.*' => 'prohibited',
             'tags' => 'prohibited',
             'tags.*' => 'prohibited',
             'categories' => 'sometimes|array|max:'.InputConstraints::EVENT_CATEGORIES_MAX,
