@@ -540,7 +540,7 @@ class InviteShareService
             'event_image_url' => $target['event_snapshot']['event_image_url'],
             'location_label' => $target['event_snapshot']['location'],
             'host_name' => $target['event_snapshot']['host_name'],
-            'tags' => $target['event_snapshot']['tags'],
+            'taxonomy_terms' => $target['event_snapshot']['taxonomy_terms'],
             'linked_account_profiles' => $target['event_snapshot']['linked_account_profiles'],
             'profile_groups' => $target['event_snapshot']['profile_groups'],
             'venue_account_profile_id' => $target['event_snapshot']['venue_account_profile_id'],

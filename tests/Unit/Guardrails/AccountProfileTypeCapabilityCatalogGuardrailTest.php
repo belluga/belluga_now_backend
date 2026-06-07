@@ -186,17 +186,14 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
             AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
         ]);
-        $this->assertFalse($nonQueryableDiscoverable[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE]);
-        $this->assertSame(
-            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE,
-            $catalog->firstDisabledRequirement(
-                AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE,
-                [
-                    AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
-                    AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
-                ],
-            ),
-        );
+        $this->assertTrue($nonQueryableDiscoverable[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE]);
+        $this->assertNull($catalog->firstDisabledRequirement(
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE,
+            [
+                AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
+                AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
+            ],
+        ));
     }
 
     public function test_runtime_consumers_resolve_account_profile_type_capabilities_through_catalog(): void
@@ -309,7 +306,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             ],
             AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => [
                 'default' => true,
-                'requires' => [AccountProfileTypeCapabilityCatalog::IS_QUERYABLE],
+                'requires' => [],
             ],
             AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => [
                 'default' => false,

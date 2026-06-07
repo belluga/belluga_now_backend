@@ -32,7 +32,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TenantDomainResolverService::class, function ($app) {
             return new TenantDomainResolverService;
         });
-        $this->app->singleton(AccountProfileTypeSetProvider::class);
+        $this->app->bind(AccountProfileTypeSetProvider::class);
 
         $this->app->bind(
             ResetPasswordRequestContract::class,

@@ -30,7 +30,7 @@ class InviteTargetResolverService
      *         event_image_url:?string,
      *         location:string,
      *         host_name:string,
-     *         tags:array<int,string>,
+     *         taxonomy_terms:array<int,array<string,mixed>>,
      *         linked_account_profiles:array<int,array<string,mixed>>,
      *         profile_groups:array<int,array<string,mixed>>,
      *         venue_account_profile_id:?string,
@@ -97,10 +97,10 @@ class InviteTargetResolverService
                 ),
                 'location' => $location,
                 'host_name' => $hostName,
-                'tags' => array_values(array_map(
-                    'strval',
-                    $this->normalizeList($detailProjection['tags'] ?? $eventPayload['tags'] ?? []),
-                )),
+                'taxonomy_terms' => $this->resolveSnapshotTaxonomyTerms(
+                    $detailProjection,
+                    $eventPayload,
+                ),
                 'linked_account_profiles' => $this->normalizeListOfMaps(
                     $detailProjection['linked_account_profiles'] ?? [],
                 ),
@@ -158,6 +158,18 @@ class InviteTargetResolverService
         }
 
         return [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $detailProjection
+     * @param  array<string, mixed>  $eventPayload
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveSnapshotTaxonomyTerms(array $detailProjection, array $eventPayload): array
+    {
+        return $this->normalizeListOfMaps(
+            $detailProjection['taxonomy_terms'] ?? $eventPayload['taxonomy_terms'] ?? [],
+        );
     }
 
     /**

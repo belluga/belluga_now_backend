@@ -35,7 +35,7 @@ class InviteEdge extends Model
         'event_image_url',
         'location_label',
         'host_name',
-        'tags',
+        'taxonomy_terms',
         'linked_account_profiles',
         'profile_groups',
         'venue_account_profile_id',

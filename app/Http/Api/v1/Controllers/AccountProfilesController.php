@@ -134,7 +134,7 @@ class AccountProfilesController extends Controller
 
     public function forceDestroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = $this->profileQueryService->findWithTrashedOrFail($account_profile_id);
+        $profile = $this->profileQueryService->findOrFail($account_profile_id, true);
         $this->profileService->forceDelete($profile);
 
         return response()->json();
