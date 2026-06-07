@@ -5471,6 +5471,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $aliasResponse->assertJsonPath('data.occurrence_id', (string) $secondOccurrence->_id);
         $aliasResponse->assertJsonPath('data.occurrences.0.is_selected', false);
         $aliasResponse->assertJsonPath('data.occurrences.1.is_selected', true);
+        $aliasResponse->assertJsonPath('data.venue.slug', (string) $this->venue->slug);
+        $aliasResponse->assertJsonPath('data.venue.can_open_public_detail', true);
+        $aliasResponse->assertJsonPath(
+            'data.venue.public_detail_path',
+            '/parceiro/'.(string) $this->venue->slug
+        );
         $aliasResponse->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
         $aliasResponse->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
 
