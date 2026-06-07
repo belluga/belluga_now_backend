@@ -241,16 +241,14 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
                 trim((string) Context::get($contextKey, '')),
             );
         } finally {
-            $primaryTenant->makeCurrent();
+            $secondaryTenant->makeCurrent();
+            $secondaryDatabase = DB::connection('tenant')->getDatabase();
 
-            $secondaryDatabaseName = trim((string) ($secondaryTenant->database ?? ''));
-            if ($secondaryDatabaseName !== '') {
-                $secondaryDatabase = DB::connection('tenant')->getMongoClient()->selectDatabase($secondaryDatabaseName);
-
-                foreach ($secondaryDatabase->listCollectionNames() as $collectionName) {
-                    $secondaryDatabase->dropCollection($collectionName);
-                }
+            foreach ($secondaryDatabase->listCollectionNames() as $collectionName) {
+                $secondaryDatabase->dropCollection($collectionName);
             }
+
+            $primaryTenant->makeCurrent();
 
             $secondaryTenant->domains()->withTrashed()->forceDelete();
             $secondaryTenant->forceDelete();
