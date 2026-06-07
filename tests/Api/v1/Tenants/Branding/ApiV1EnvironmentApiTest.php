@@ -197,6 +197,8 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
     {
         $primaryTenant = $this->currentTenant();
 
+        $reason = 'test_preserve_current_tenant_context';
+
         $secondaryTenant = Tenant::query()
             ->where('_id', '!=', $primaryTenant->getKey())
             ->first();
@@ -216,7 +218,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
             app(TenantEnvironmentSnapshotService::class)->dispatchRefreshForTenant(
                 $secondaryTenant,
-                'test_preserve_current_tenant_context',
+                $reason,
             );
 
             $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
@@ -225,6 +227,22 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
                 (string) $primaryTenant->getKey(),
                 (string) (Tenant::current()?->getKey() ?? ''),
             );
+            $this->assertSame(
+                (string) $primaryTenant->getKey(),
+                trim((string) Context::get($contextKey, '')),
+            );
+
+            $secondaryTenant->makeCurrent();
+            $secondarySnapshot = TenantEnvironmentSnapshot::current();
+
+            $this->assertNotNull($secondarySnapshot);
+            $this->assertSame($reason, (string) $secondarySnapshot?->last_rebuild_reason);
+            $this->assertSame(
+                (string) $secondaryTenant->getKey(),
+                (string) ($secondarySnapshot?->snapshot['tenant_id'] ?? ''),
+            );
+
+            $primaryTenant->makeCurrent();
             $this->assertSame(
                 (string) $primaryTenant->getKey(),
                 trim((string) Context::get($contextKey, '')),
