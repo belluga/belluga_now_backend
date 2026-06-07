@@ -8,8 +8,17 @@ use App\Models\Tenants\TenantProfileType;
 
 final class AccountProfileTypeSetProvider
 {
+    private static int $revision = 0;
+
     /** @var array<string, array<int, string>> */
     private array $cache = [];
+
+    private int $cacheRevision = -1;
+
+    public static function bumpRevision(): void
+    {
+        self::$revision++;
+    }
 
     /**
      * @return array<int, string>
@@ -128,6 +137,8 @@ final class AccountProfileTypeSetProvider
      */
     private function remember(string $key, \Closure $resolver): array
     {
+        $this->refreshIfStale();
+
         if (array_key_exists($key, $this->cache)) {
             return $this->cache[$key];
         }
@@ -135,5 +146,15 @@ final class AccountProfileTypeSetProvider
         $this->cache[$key] = $resolver();
 
         return $this->cache[$key];
+    }
+
+    private function refreshIfStale(): void
+    {
+        if ($this->cacheRevision === self::$revision) {
+            return;
+        }
+
+        $this->cache = [];
+        $this->cacheRevision = self::$revision;
     }
 }

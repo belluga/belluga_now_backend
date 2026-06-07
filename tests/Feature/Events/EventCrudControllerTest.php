@@ -5489,6 +5489,25 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_public_event_detail_and_occurrence_slug_alias_keep_non_navigable_venue_without_public_detail_path(): void
     {
+        $venueSlug = 'main-venue-private-'.Str::lower(Str::random(6));
+        $this->venue->slug = $venueSlug;
+        $this->venue->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $selectedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
+
+        $preCutoverEventDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $preCutoverEventDetail->assertStatus(200);
+        $preCutoverEventDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $preCutoverEventDetail->assertJsonPath('data.venue.can_open_public_detail', true);
+        $preCutoverEventDetail->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
+
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'venue'],
             [
@@ -5506,19 +5525,6 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
             ]
         );
-
-        $venueSlug = 'main-venue-private-'.Str::lower(Str::random(6));
-        $this->venue->slug = $venueSlug;
-        $this->venue->save();
-
-        $occurrences = $this->makeOccurrences(2);
-        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'occurrences' => $occurrences,
-        ]));
-        $created->assertStatus(201);
-
-        $eventId = (string) $created->json('data.event_id');
-        $selectedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $eventDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
         $eventDetail->assertStatus(200);

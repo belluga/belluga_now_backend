@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use MongoDB\Laravel\Eloquent\Model;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -28,6 +29,16 @@ class TenantProfileType extends Model
 
     protected $casts = [
     ];
+
+    protected static function booted(): void
+    {
+        $invalidateTypeSets = static function (): void {
+            AccountProfileTypeSetProvider::bumpRevision();
+        };
+
+        static::saved($invalidateTypeSets);
+        static::deleted($invalidateTypeSets);
+    }
 
     public function scopeQueryable($query)
     {
