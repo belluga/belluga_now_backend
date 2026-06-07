@@ -290,6 +290,12 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $publicResponse = $this->getJson("{$this->base_api_tenant}events/{$stored->_id}");
         $publicResponse->assertStatus(200);
+        $publicResponse->assertJsonPath('data.venue.slug', (string) $this->venue->slug);
+        $publicResponse->assertJsonPath('data.venue.can_open_public_detail', true);
+        $publicResponse->assertJsonPath(
+            'data.venue.public_detail_path',
+            '/parceiro/'.(string) $this->venue->slug
+        );
         $publicResponse->assertJsonPath('data.artists.0.profile_type', (string) $this->band->profile_type);
         $publicResponse->assertJsonPath('data.artists.0.slug', (string) $this->band->slug);
 
