@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Invites;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -350,7 +351,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
     {
         $viewer = $this->createReleaseUser('Page Service Viewer', '+55 27 99999-1221');
 
-        $service = new class extends InviteablePeopleService
+        $service = new class(app(AccountProfileTypeCapabilityCatalog::class)) extends InviteablePeopleService
         {
             public int $pageCalls = 0;
 
@@ -551,7 +552,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $target = $this->createReleaseUser('Bounded Import Target', '+55 27 99999-1162');
         $targetProfile = $this->personalProfileFor($target);
 
-        $this->app->instance(InviteablePeopleService::class, new class extends InviteablePeopleService
+        $this->app->instance(InviteablePeopleService::class, new class(app(AccountProfileTypeCapabilityCatalog::class)) extends InviteablePeopleService
         {
             public function sourceInviteableItemsFor(AccountUser $viewer, ?int $sourceRowLimit = null): array
             {

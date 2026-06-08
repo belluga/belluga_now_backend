@@ -1236,6 +1236,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'allowed_taxonomies' => ['music_genre'],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_queryable' => true,
                 'is_publicly_discoverable' => true,
             ],
         ]);
@@ -1694,6 +1695,8 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
             ],
         ]);
         TenantProfileType::query()
@@ -1735,6 +1738,7 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_queryable' => true,
                 'is_publicly_discoverable' => true,
             ],
         ]);
@@ -1809,6 +1813,7 @@ class MapPoisControllerTest extends TestCaseTenant
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_favoritable' => true,
+                    'is_queryable' => true,
                     'is_publicly_discoverable' => true,
                 ],
             ]);
