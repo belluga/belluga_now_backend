@@ -71,15 +71,24 @@ class TenantPublicAccountTokenScopeTest extends TestCaseTenant
             (string) $this->accountRoleTemplate->_id
         );
 
-        TenantProfileType::create([
-            'type' => 'venue',
-            'label' => 'Venue',
-            'allowed_taxonomies' => [],
-            'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
-            ],
-        ]);
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
 
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
