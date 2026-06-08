@@ -6,7 +6,9 @@ namespace App\Application\Organizations;
 
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\Organization;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use MongoDB\BSON\ObjectId;
 
 class OrganizationQueryService extends AbstractQueryService
 {
@@ -32,7 +34,21 @@ class OrganizationQueryService extends AbstractQueryService
     {
         $query = $onlyTrashed ? Organization::onlyTrashed() : Organization::query();
 
-        return $query->where('_id', $organizationId)->firstOrFail();
+        $organization = $query->find($organizationId);
+
+        if (! $organization) {
+            try {
+                $organization = $query->where('_id', new ObjectId($organizationId))->first();
+            } catch (\Throwable) {
+                $organization = null;
+            }
+        }
+
+        if (! $organization) {
+            throw (new ModelNotFoundException)->setModel(Organization::class, [$organizationId]);
+        }
+
+        return $organization;
     }
 
     /**
