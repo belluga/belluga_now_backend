@@ -493,9 +493,17 @@ class AnonymousIdentityMerger
             'location' => $this->preferProjectionValue($targetProjection->location ?? null, $sourceProjection->location ?? null),
             'host_name' => $this->preferProjectionValue($targetProjection->host_name ?? null, $sourceProjection->host_name ?? null),
             'message' => $this->preferProjectionValue($targetProjection->message ?? null, $sourceProjection->message ?? null),
-            'tags' => $this->mergeInviteProjectionTags(
-                $targetProjection->tags ?? null,
-                $sourceProjection->tags ?? null,
+            'taxonomy_terms' => $this->mergeProjectionTaxonomyTerms(
+                $targetProjection->taxonomy_terms ?? null,
+                $sourceProjection->taxonomy_terms ?? null,
+            ),
+            'linked_account_profiles' => $this->mergeProjectionLinkedProfiles(
+                $targetProjection->linked_account_profiles ?? null,
+                $sourceProjection->linked_account_profiles ?? null,
+            ),
+            'profile_groups' => $this->mergeProjectionProfileGroups(
+                $targetProjection->profile_groups ?? null,
+                $sourceProjection->profile_groups ?? null,
             ),
             'attendance_policy' => $this->preferProjectionValue($targetProjection->attendance_policy ?? null, $sourceProjection->attendance_policy ?? null),
             'inviter_candidates' => $mergedCandidates,
@@ -521,17 +529,74 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, array<string, mixed>>
      */
-    private function mergeInviteProjectionTags(mixed $currentTags, mixed $incomingTags): array
+    private function mergeProjectionTaxonomyTerms(mixed $currentTerms, mixed $incomingTerms): array
     {
-        return Collection::make(is_array($currentTags) ? $currentTags : [])
-            ->concat(is_array($incomingTags) ? $incomingTags : [])
-            ->map(static fn (mixed $tag): string => trim((string) $tag))
-            ->filter(static fn (string $tag): bool => $tag !== '')
-            ->unique()
-            ->values()
-            ->all();
+        return $this->mergeProjectionMapList(
+            $currentTerms,
+            $incomingTerms,
+            static function (array $term): string {
+                $type = trim((string) ($term['type'] ?? ''));
+                $value = trim((string) ($term['value'] ?? ''));
+                if ($type !== '' || $value !== '') {
+                    return $type.'::'.$value;
+                }
+
+                $taxonomyId = trim((string) ($term['taxonomy_id'] ?? ''));
+                $termId = trim((string) ($term['term_id'] ?? ''));
+
+                return $taxonomyId.'::'.$termId;
+            }
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeProjectionLinkedProfiles(mixed $currentProfiles, mixed $incomingProfiles): array
+    {
+        return $this->mergeProjectionMapList(
+            $currentProfiles,
+            $incomingProfiles,
+            static fn (array $profile): string => trim((string) ($profile['id'] ?? $profile['account_profile_id'] ?? $profile['slug'] ?? '')),
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeProjectionProfileGroups(mixed $currentGroups, mixed $incomingGroups): array
+    {
+        return $this->mergeProjectionMapList(
+            $currentGroups,
+            $incomingGroups,
+            static fn (array $group): string => trim((string) ($group['id'] ?? $group['key'] ?? $group['label'] ?? '')),
+        );
+    }
+
+    /**
+     * @param  callable(array<string, mixed>): string  $keyResolver
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeProjectionMapList(mixed $currentItems, mixed $incomingItems, callable $keyResolver): array
+    {
+        $merged = Collection::make([is_array($currentItems) ? $currentItems : [], is_array($incomingItems) ? $incomingItems : []])
+            ->flatten(1)
+            ->filter(static fn (mixed $item): bool => is_array($item))
+            ->map(static fn (mixed $item): array => $item)
+            ->reduce(function (array $carry, array $item) use ($keyResolver): array {
+                $key = trim($keyResolver($item));
+                if ($key === '') {
+                    $key = sha1(serialize($item));
+                }
+
+                $carry[$key] = array_replace_recursive($carry[$key] ?? [], $item);
+
+                return $carry;
+            }, []);
+
+        return array_values($merged);
     }
 
     /**
