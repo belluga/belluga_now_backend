@@ -275,7 +275,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
         );
     }
 
-    private function merger(): AnonymousIdentityMerger
+    protected function merger(): AnonymousIdentityMerger
     {
         return app(AnonymousIdentityMerger::class);
     }
@@ -283,7 +283,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     /**
      * @param  array<string, mixed>  $overrides
      */
-    private function createCanonicalUser(array $overrides = []): AccountUser
+    protected function createCanonicalUser(array $overrides = []): AccountUser
     {
         $payload = array_merge([
             'name' => 'Canonical '.Str::random(8),
@@ -322,7 +322,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     /**
      * @param  array<string, mixed>  $overrides
      */
-    private function createAnonymousSource(array $overrides = []): AccountUser
+    protected function createAnonymousSource(array $overrides = []): AccountUser
     {
         $payload = array_merge([
             'name' => 'Anonymous '.Str::random(8),
