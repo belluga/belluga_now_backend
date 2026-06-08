@@ -239,7 +239,7 @@ class AnonymousIdentityMerger
                     ->first();
 
                 $timelineFirst = $finalFirstSeen ?? $aggregateFirst;
-                $timelineLast = Collection::make([$aggregateLast, $targetFingerprintLastSeen, $this->toCarbon($target->updated_at ?? null)])
+                $timelineLast = Collection::make([$aggregateLast, $targetFingerprintLastSeen])
                     ->filter()
                     ->sortByDesc(static fn (Carbon $timestamp): int => $timestamp->getTimestamp())
                     ->first();
@@ -757,16 +757,11 @@ class AnonymousIdentityMerger
             ->sortByDesc(static fn (Carbon $timestamp): int => $timestamp->getTimestamp())
             ->first();
 
-        $identityUpdatedAt = $this->toCarbon($source->updated_at ?? null);
-        if ($identityUpdatedAt === null) {
+        if ($lastFingerprintSeen !== null) {
             return $lastFingerprintSeen;
         }
 
-        if ($lastFingerprintSeen === null || $identityUpdatedAt->greaterThan($lastFingerprintSeen)) {
-            return $identityUpdatedAt;
-        }
-
-        return $lastFingerprintSeen;
+        return $this->toCarbon($source->updated_at ?? null);
     }
 
     /**

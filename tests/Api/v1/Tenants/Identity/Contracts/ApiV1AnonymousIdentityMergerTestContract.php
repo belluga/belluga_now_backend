@@ -173,6 +173,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
     public function testMergeIncrementsVersionAndPersistsUpdatedState(): void
     {
         $existingFingerprintHash = hash('sha256', Str::uuid()->toString());
+        $sourceFingerprintHash = hash('sha256', Str::uuid()->toString());
         $target = $this->createCanonicalUser([
             'fingerprints' => [[
                 'hash' => $existingFingerprintHash,
@@ -183,7 +184,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
 
         $source = $this->createAnonymousSource([
             'fingerprints' => [[
-                'hash' => $existingFingerprintHash,
+                'hash' => $sourceFingerprintHash,
                 'first_seen_at' => Carbon::now()->subDays(10),
                 'last_seen_at' => Carbon::now(),
             ]],
@@ -196,9 +197,13 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
         $refreshedTarget = $target->fresh();
         $this->assertSame($initialVersion + 1, $refreshedTarget->version);
 
-        $fingerprint = Collection::make($refreshedTarget->fingerprints ?? [])
-            ->firstWhere('hash', $existingFingerprintHash);
+        $fingerprints = Collection::make($refreshedTarget->fingerprints ?? [])
+            ->keyBy('hash');
+        $this->assertCount(2, $fingerprints);
 
+        $this->assertNotNull($fingerprints->get($existingFingerprintHash));
+
+        $fingerprint = $fingerprints->get($sourceFingerprintHash);
         $this->assertNotNull($fingerprint);
         $this->assertTrue(
             $this->toCarbon($fingerprint['first_seen_at'] ?? null)->lessThan(
@@ -391,21 +396,28 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
      */
     private function applyTimestamps(AccountUser $user, array $timestamps): void
     {
-        $dirty = false;
+        $payload = [];
 
         if ($timestamps['created_at'] !== null) {
-            $user->setAttribute('created_at', $timestamps['created_at']);
-            $dirty = true;
+            $payload['created_at'] = new UTCDateTime($this->toCarbon($timestamps['created_at']));
         }
 
         if ($timestamps['updated_at'] !== null) {
-            $user->setAttribute('updated_at', $timestamps['updated_at']);
-            $dirty = true;
+            $payload['updated_at'] = new UTCDateTime($this->toCarbon($timestamps['updated_at']));
         }
 
-        if ($dirty) {
-            $user->save();
+        if ($payload === []) {
+            return;
         }
+
+        AccountUser::raw(static function ($collection) use ($user, $payload): void {
+            $collection->updateOne(
+                ['_id' => new ObjectId((string) $user->_id)],
+                ['$set' => $payload],
+            );
+        });
+
+        $user->refresh();
     }
 
     private function scalarise(mixed $value): mixed
