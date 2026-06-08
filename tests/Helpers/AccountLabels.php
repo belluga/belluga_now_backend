@@ -2,6 +2,8 @@
 
 namespace Tests\Helpers;
 
+use Illuminate\Support\Str;
+
 class AccountLabels extends Labels
 {
     public string $id {
@@ -10,7 +12,7 @@ class AccountLabels extends Labels
             $this->id = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.id');
+            return $this->getGlobal($this->base_label.'.id') ?? '';
         }
     }
 
@@ -20,7 +22,7 @@ class AccountLabels extends Labels
             $this->name = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.name');
+            return $this->getGlobal($this->base_label.'.name') ?? $this->resolveDefaultName();
         }
     }
 
@@ -30,7 +32,7 @@ class AccountLabels extends Labels
             $this->document = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.document');
+            return $this->getGlobal($this->base_label.'.document') ?? '';
         }
     }
 
@@ -40,7 +42,7 @@ class AccountLabels extends Labels
             $this->slug = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.slug');
+            return $this->getGlobal($this->base_label.'.slug') ?? Str::slug($this->name);
         }
     }
 
@@ -129,5 +131,15 @@ class AccountLabels extends Labels
                 'visitor' => $this->user_visitor->toArray(),
             ],
         ];
+    }
+
+    private function resolveDefaultName(): string
+    {
+        return match (true) {
+            str_ends_with($this->base_label, '.accounts.primary') => 'Primary Account',
+            str_ends_with($this->base_label, '.accounts.secondary') => 'Secondary Account',
+            str_ends_with($this->base_label, '.accounts.disposable') => 'Disposable Account',
+            default => 'Account',
+        };
     }
 }
