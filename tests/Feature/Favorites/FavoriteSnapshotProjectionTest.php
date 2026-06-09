@@ -156,8 +156,60 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $target = $this->toArray($snapshot['target'] ?? []);
         $this->assertSame('restaurant', (string) ($target['profile_type'] ?? ''));
         $this->assertSame('https://cdn.test/profile-cover.png', $target['cover_url'] ?? null);
+        $this->assertFalse((bool) ($target['can_open_public_detail'] ?? true));
+        $this->assertArrayHasKey('public_detail_path', $target);
+        $this->assertNull($target['public_detail_path']);
+        $navigation = $this->toArray($snapshot['navigation'] ?? []);
+        $this->assertFalse((bool) ($navigation['can_open_public_detail'] ?? true));
+        $this->assertArrayHasKey('target_path', $navigation);
+        $this->assertNull($navigation['target_path']);
         $this->assertSame((string) $liveOccurrence->_id, (string) ($snapshot['live_now_event_occurrence_id'] ?? ''));
         $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
+    }
+
+    public function test_snapshot_materializes_public_navigation_contract_from_profile_type_capabilities(): void
+    {
+        $publicProfile = $this->createProfile(
+            displayName: 'Profile Public Snapshot',
+            slug: 'profile-public-snapshot',
+            profileType: 'artist',
+        );
+        $hiddenProfile = $this->createProfile(
+            displayName: 'Profile Hidden Snapshot',
+            slug: 'profile-hidden-snapshot',
+            profileType: 'personal',
+        );
+
+        $this->createOccurrence(
+            profileId: (string) $publicProfile->_id,
+            startsAt: Carbon::now()->addDay(),
+        );
+        $this->createOccurrence(
+            profileId: (string) $hiddenProfile->_id,
+            startsAt: Carbon::now()->addDays(2),
+        );
+
+        $publicSnapshot = $this->loadSnapshot((string) $publicProfile->_id);
+        $hiddenSnapshot = $this->loadSnapshot((string) $hiddenProfile->_id);
+
+        $this->assertNotNull($publicSnapshot);
+        $this->assertNotNull($hiddenSnapshot);
+
+        $publicTarget = $this->toArray($publicSnapshot['target'] ?? []);
+        $publicNavigation = $this->toArray($publicSnapshot['navigation'] ?? []);
+        $this->assertTrue((bool) ($publicTarget['can_open_public_detail'] ?? false));
+        $this->assertSame('/parceiro/profile-public-snapshot', $publicTarget['public_detail_path'] ?? null);
+        $this->assertTrue((bool) ($publicNavigation['can_open_public_detail'] ?? false));
+        $this->assertSame('/parceiro/profile-public-snapshot', $publicNavigation['target_path'] ?? null);
+
+        $hiddenTarget = $this->toArray($hiddenSnapshot['target'] ?? []);
+        $hiddenNavigation = $this->toArray($hiddenSnapshot['navigation'] ?? []);
+        $this->assertFalse((bool) ($hiddenTarget['can_open_public_detail'] ?? true));
+        $this->assertArrayHasKey('public_detail_path', $hiddenTarget);
+        $this->assertNull($hiddenTarget['public_detail_path']);
+        $this->assertFalse((bool) ($hiddenNavigation['can_open_public_detail'] ?? true));
+        $this->assertArrayHasKey('target_path', $hiddenNavigation);
+        $this->assertNull($hiddenNavigation['target_path']);
     }
 
     public function test_snapshot_rebuilds_from_linked_account_profiles_without_artists_or_venue(): void
@@ -199,8 +251,12 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         ?string $coverUrl = null,
     ): AccountProfile
     {
+        [$account] = $this->seedAccountWithRole([
+            'account-users:view',
+        ]);
+
         return AccountProfile::query()->create([
-            'account_id' => (string) $this->account->_id,
+            'account_id' => (string) $account->_id,
             'profile_type' => $profileType,
             'display_name' => $displayName,
             'slug' => $slug,

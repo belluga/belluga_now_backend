@@ -154,6 +154,7 @@ class FavoritesControllerTest extends TestCaseTenant
             'slug' => 'profile-default-registry',
             'profile_type' => 'artist',
             'can_open_public_detail' => true,
+            'public_detail_path' => '/parceiro/profile-default-registry',
         ]);
 
         $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
@@ -410,11 +411,10 @@ class FavoritesControllerTest extends TestCaseTenant
             ->getDatabase()
             ->selectCollection('favoritable_account_profile_snapshots');
 
-        $targetSlug = trim((string) ($target['slug'] ?? ''));
         $canOpenPublicDetail = (bool) ($target['can_open_public_detail'] ?? false);
         $explicitPublicDetailPath = trim((string) ($target['public_detail_path'] ?? ''));
         $publicDetailPath = $canOpenPublicDetail
-            ? ($explicitPublicDetailPath !== '' ? $explicitPublicDetailPath : ($targetSlug !== '' ? '/parceiro/'.$targetSlug : null))
+            ? ($explicitPublicDetailPath !== '' ? $explicitPublicDetailPath : null)
             : null;
         $canOpenPublicDetail = $canOpenPublicDetail && $publicDetailPath !== null;
 
