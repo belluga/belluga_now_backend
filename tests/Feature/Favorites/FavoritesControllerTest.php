@@ -430,6 +430,8 @@ class FavoritesControllerTest extends TestCaseTenant
                         'avatar_url' => $target['avatar_url'] ?? null,
                         'cover_url' => $target['cover_url'] ?? null,
                         'profile_type' => $target['profile_type'] ?? null,
+                        'can_open_public_detail' => true,
+                        'public_detail_path' => '/parceiro/'.$target['slug'],
                     ],
                     'snapshot' => [
                         ...$snapshot,
@@ -445,6 +447,8 @@ class FavoritesControllerTest extends TestCaseTenant
                     'navigation' => [
                         'kind' => 'account_profile',
                         'target_slug' => $target['slug'],
+                        'target_path' => '/parceiro/'.$target['slug'],
+                        'can_open_public_detail' => true,
                     ],
                     'updated_at' => Carbon::now(),
                 ],
