@@ -403,9 +403,9 @@ class FavoritesControllerTest extends TestCaseTenant
         $targetSlug = trim((string) ($target['slug'] ?? ''));
         $canOpenPublicDetail = (bool) ($target['can_open_public_detail'] ?? false);
         $explicitPublicDetailPath = trim((string) ($target['public_detail_path'] ?? ''));
-        $publicDetailPath = $explicitPublicDetailPath !== ''
-            ? $explicitPublicDetailPath
-            : ($canOpenPublicDetail && $targetSlug !== '' ? '/parceiro/'.$targetSlug : null);
+        $publicDetailPath = $canOpenPublicDetail
+            ? ($explicitPublicDetailPath !== '' ? $explicitPublicDetailPath : ($targetSlug !== '' ? '/parceiro/'.$targetSlug : null))
+            : null;
         $canOpenPublicDetail = $canOpenPublicDetail && $publicDetailPath !== null;
 
         $toUtcDateTime = static function (mixed $value): ?UTCDateTime {
