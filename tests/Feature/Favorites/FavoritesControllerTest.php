@@ -392,13 +392,21 @@ class FavoritesControllerTest extends TestCaseTenant
 
     /**
      * @param  array{next_event_occurrence_id:?string,next_event_occurrence_at:mixed,last_event_occurrence_at:mixed,live_now_event_occurrence_id?:?string,live_now_event_occurrence_at?:mixed}  $snapshot
-     * @param  array{display_name:string,slug:string,avatar_url?:?string,cover_url?:?string,profile_type?:?string}  $target
+     * @param  array{display_name:string,slug:string,avatar_url?:?string,cover_url?:?string,profile_type?:?string,can_open_public_detail?:bool,public_detail_path?:?string}  $target
      */
     private function insertSnapshot(string $profileId, array $snapshot, array $target): void
     {
         $collection = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('favoritable_account_profile_snapshots');
+
+        $targetSlug = trim((string) ($target['slug'] ?? ''));
+        $canOpenPublicDetail = (bool) ($target['can_open_public_detail'] ?? false);
+        $explicitPublicDetailPath = trim((string) ($target['public_detail_path'] ?? ''));
+        $publicDetailPath = $explicitPublicDetailPath !== ''
+            ? $explicitPublicDetailPath
+            : ($canOpenPublicDetail && $targetSlug !== '' ? '/parceiro/'.$targetSlug : null);
+        $canOpenPublicDetail = $canOpenPublicDetail && $publicDetailPath !== null;
 
         $toUtcDateTime = static function (mixed $value): ?UTCDateTime {
             if (! $value instanceof \DateTimeInterface) {
@@ -430,8 +438,8 @@ class FavoritesControllerTest extends TestCaseTenant
                         'avatar_url' => $target['avatar_url'] ?? null,
                         'cover_url' => $target['cover_url'] ?? null,
                         'profile_type' => $target['profile_type'] ?? null,
-                        'can_open_public_detail' => true,
-                        'public_detail_path' => '/parceiro/'.$target['slug'],
+                        'can_open_public_detail' => $canOpenPublicDetail,
+                        'public_detail_path' => $publicDetailPath,
                     ],
                     'snapshot' => [
                         ...$snapshot,
@@ -447,8 +455,8 @@ class FavoritesControllerTest extends TestCaseTenant
                     'navigation' => [
                         'kind' => 'account_profile',
                         'target_slug' => $target['slug'],
-                        'target_path' => '/parceiro/'.$target['slug'],
-                        'can_open_public_detail' => true,
+                        'target_path' => $publicDetailPath,
+                        'can_open_public_detail' => $canOpenPublicDetail,
                     ],
                     'updated_at' => Carbon::now(),
                 ],
