@@ -82,6 +82,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Personal',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
                 'is_favoritable' => false,
                 'is_publicly_discoverable' => false,
                 'is_poi_enabled' => false,
@@ -93,7 +95,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Venue',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
                 'has_nested_profile_groups' => true,
@@ -220,7 +225,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('venue', $items->first()['profile_type'] ?? null);
     }
 
-    public function test_public_account_profile_index_excludes_publicly_discoverable_non_favoritable_types(): void
+    public function test_public_account_profile_index_includes_publicly_discoverable_non_favoritable_types(): void
     {
         $this->createAccountUser([]);
 
@@ -229,6 +234,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Internal Partner',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_publicly_discoverable' => true,
                 'is_favoritable' => false,
             ],
@@ -261,8 +268,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $items = collect($response->json('data'));
-        $this->assertSame(['venue'], $items->pluck('profile_type')->unique()->values()->all());
-        $this->assertFalse(
+        $this->assertSame(
+            ['internal_partner', 'venue'],
+            $items->pluck('profile_type')->unique()->sort()->values()->all()
+        );
+        $this->assertTrue(
             $items->contains(fn (array $item): bool => ($item['profile_type'] ?? null) === 'internal_partner')
         );
     }
@@ -293,6 +303,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Public Catalog Guard',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
             ],
@@ -334,7 +346,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $detailResponse->assertStatus(404);
     }
 
-    public function test_public_account_profile_index_returns_empty_when_filter_requests_publicly_discoverable_non_favoritable_type(): void
+    public function test_public_account_profile_index_returns_requested_items_when_filter_requests_publicly_discoverable_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
 
@@ -343,6 +355,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Internal Partner',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_publicly_discoverable' => true,
                 'is_favoritable' => false,
             ],
@@ -366,41 +380,25 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(200);
-        $this->assertSame([], $response->json('data'));
+        $this->assertSame(
+            ['Internal Filter Profile'],
+            collect($response->json('data'))->pluck('display_name')->values()->all()
+        );
     }
 
-    public function test_public_account_profile_index_keeps_legacy_public_types_without_discovery_flag(): void
+    public function test_public_account_profile_index_excludes_unbackfilled_types_missing_required_public_capabilities(): void
     {
         $this->createAccountUser([]);
-
-        TenantProfileType::query()
-            ->where('type', 'personal')
-            ->firstOrFail()
-            ->forceFill([
-                'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_inviteable' => true,
-                ],
-            ])
-            ->save();
 
         TenantProfileType::create([
             'type' => 'public_catalog_fixture',
             'label' => 'Public Catalog Fixture',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
             ],
-        ]);
-
-        AccountProfile::create([
-            'account_id' => (string) $this->account->_id,
-            'profile_type' => 'personal',
-            'display_name' => 'Legacy Personal Profile',
-            'slug' => 'legacy-personal-profile',
-            'is_active' => true,
-            'visibility' => 'public',
         ]);
 
         $secondary = Account::create([
@@ -420,10 +418,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}account_profiles");
 
         $response->assertStatus(200);
-        $this->assertSame(
-            ['Legacy Public Catalog Profile'],
-            collect($response->json('data'))->pluck('display_name')->values()->all()
-        );
+        $this->assertSame([], $response->json('data'));
     }
 
     public function test_public_account_profile_index_returns_empty_when_filter_requests_non_favoritable_type(): void
@@ -497,6 +492,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist Public',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
@@ -566,6 +563,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist Public',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
@@ -1045,6 +1044,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
@@ -1097,6 +1098,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Community Hub',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
@@ -1148,6 +1151,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'POI Without Events',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => false,
@@ -1374,6 +1379,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
@@ -1507,6 +1514,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Restaurant',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
@@ -2824,6 +2833,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->where('type', 'venue')
             ->firstOrFail();
         $venueType->capabilities = [
+            'is_queryable' => true,
+            'is_publicly_navigable' => true,
             'is_favoritable' => true,
             'is_poi_enabled' => true,
             'has_events' => true,

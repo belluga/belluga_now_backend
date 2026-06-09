@@ -7,7 +7,7 @@ namespace Tests\Unit\Guardrails;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
-final class AccountProfileQueryabilityGuardrailsTest extends TestCase
+final class PublicTaxonomyCutoverGuardrailsTest extends TestCase
 {
     private string $repositoryRoot;
 
@@ -29,12 +29,12 @@ final class AccountProfileQueryabilityGuardrailsTest extends TestCase
         $output = $process->getOutput().$process->getErrorOutput();
 
         $this->assertSame(0, $process->getExitCode(), $output);
-        $this->assertStringContainsString('[QRY-GUARD] Allowlisted findings requiring audit:', $output);
-        $this->assertStringContainsString('Confirm this is not a user-facing selector/list/candidate path outside the canonical gateway.', $output);
-        $this->assertStringContainsString('[QRY-GUARD] PASS - no blocked AccountProfile operational query findings detected.', $output);
+        $this->assertStringContainsString('[TAX-GUARD] Allowlisted findings requiring audit:', $output);
+        $this->assertStringContainsString('Reject convenience bridges, dual-path mirrors, and pseudo-canonical fallback fields.', $output);
+        $this->assertStringContainsString('[TAX-GUARD] PASS - no blocked public taxonomy cutover findings detected.', $output);
     }
 
-    public function test_architecture_guardrails_script_invokes_queryability_guard_for_real_repository(): void
+    public function test_architecture_guardrails_script_invokes_public_taxonomy_guard_for_real_repository(): void
     {
         $process = $this->guardProcess([
             'php',
@@ -45,24 +45,23 @@ final class AccountProfileQueryabilityGuardrailsTest extends TestCase
         $output = $process->getOutput().$process->getErrorOutput();
 
         $this->assertSame(0, $process->getExitCode(), $output);
-        $this->assertStringContainsString('[QRY-GUARD] PASS - no blocked AccountProfile operational query findings detected.', $output);
+        $this->assertStringContainsString('[TAX-GUARD] PASS - no blocked public taxonomy cutover findings detected.', $output);
         $this->assertStringContainsString('[ARCH-GUARDRAILS] PASS - no architecture violations found.', $output);
     }
 
-    public function test_guard_fails_for_unallowlisted_operational_query_fixture(): void
+    public function test_guard_fails_for_unallowlisted_pseudo_canonical_bridge_fixture(): void
     {
         $fixtureRoot = $this->makeFixtureRepo([
-            'app/Application/Example/BrokenSelector.php' => <<<'PHP'
+            'app/Application/Events/BrokenBridge.php' => <<<'PHP'
 <?php
 
-final class BrokenSelector
+final class BrokenBridge
 {
-    public function queryCandidates(): array
+    public function buildPayload(): array
     {
-        return \App\Models\Tenants\AccountProfile::query()
-            ->whereIn('profile_type', ['artist'])
-            ->get()
-            ->all();
+        return [
+            'taxonomy_terms_effective' => ['music:show'],
+        ];
     }
 }
 PHP,
@@ -77,7 +76,7 @@ PHP,
             'php',
             $this->guardScriptPath(),
             '--root='.$fixtureRoot,
-            '--scan-dir=app',
+            '--scan-path=app',
             '--allowlist='.$fixtureRoot.'/allowlist.php',
         ]);
         $process->run();
@@ -85,39 +84,33 @@ PHP,
         $output = $process->getOutput().$process->getErrorOutput();
 
         $this->assertSame(1, $process->getExitCode(), $output);
-        $this->assertStringContainsString('BrokenSelector.php', $output);
-        $this->assertStringContainsString('move the operational query into the canonical gateway', $output);
+        $this->assertStringContainsString('taxonomy_terms_effective', $output);
+        $this->assertStringContainsString('lacks a reviewed baseline entry', $output);
     }
 
-    public function test_guard_fails_when_operational_query_lacks_reviewed_baseline_key(): void
+    public function test_guard_fails_for_unallowlisted_runtime_facets_builder_fixture(): void
     {
         $fixtureRoot = $this->makeFixtureRepo([
-            'app/Application/Example/CanonicalGateway.php' => <<<'PHP'
+            'app/Application/Discovery/BrokenDiscoveryPayload.php' => <<<'PHP'
 <?php
 
-final class CanonicalGateway
+final class BrokenDiscoveryPayload
 {
-    public function publicPaginate(): array
+    public function buildPayload(): array
     {
-        return \App\Models\Tenants\AccountProfile::query()
-            ->whereIn('profile_type', ['artist'])
-            ->get()
-            ->all();
+        return [
+            'discovery_filter_facets' => [
+                'filter_keys' => ['artist_public'],
+                'taxonomy_options' => [],
+            ],
+        ];
     }
 }
 PHP,
             'allowlist.php' => <<<'PHP'
 <?php
 
-return [[
-    'key' => 'app/Application/Example/CanonicalGateway.php::differentMethod::query',
-    'path' => 'app/Application/Example/CanonicalGateway.php',
-    'method' => 'differentMethod',
-    'source_kind' => 'query',
-    'category' => 'canonical_gateway',
-    'owner' => 'test-fixture',
-    'rationale' => 'Intentional mismatch to prove that new findings need reviewed baseline entries.',
-]];
+return [];
 PHP,
         ]);
 
@@ -125,7 +118,7 @@ PHP,
             'php',
             $this->guardScriptPath(),
             '--root='.$fixtureRoot,
-            '--scan-dir=app',
+            '--scan-path=app',
             '--allowlist='.$fixtureRoot.'/allowlist.php',
         ]);
         $process->run();
@@ -133,13 +126,10 @@ PHP,
         $output = $process->getOutput().$process->getErrorOutput();
 
         $this->assertSame(1, $process->getExitCode(), $output);
-        $this->assertStringContainsString('lacks a reviewed baseline entry', $output);
-        $this->assertStringContainsString('stale or mismatched', $output);
+        $this->assertStringContainsString('runtime facet payload/contracts', $output);
+        $this->assertStringContainsString('canonical owner', $output);
     }
 
-    /**
-     * @param  array<int, string>  $command
-     */
     private function guardProcess(array $command): Process
     {
         return new Process($command, $this->repositoryRoot, null, null, 30);
@@ -150,7 +140,7 @@ PHP,
      */
     private function makeFixtureRepo(array $files): string
     {
-        $root = sys_get_temp_dir().'/account-profile-queryability-guard-'.bin2hex(random_bytes(6));
+        $root = sys_get_temp_dir().'/public-taxonomy-cutover-guard-'.bin2hex(random_bytes(6));
 
         foreach ($files as $relativePath => $contents) {
             $absolutePath = $root.'/'.$relativePath;
@@ -166,7 +156,7 @@ PHP,
 
     private function guardScriptPath(): string
     {
-        return $this->repositoryRoot.'/scripts/account_profile_queryability_guardrails.php';
+        return $this->repositoryRoot.'/scripts/public_taxonomy_cutover_guardrails.php';
     }
 
     private function architectureGuardrailsScriptPath(): string

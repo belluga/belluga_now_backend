@@ -56,7 +56,7 @@ interface InviteTargetReadContract
      *     hero_image_url:?string,
      *     location:mixed,
      *     venue:?array<string,mixed>,
-     *     tags:array<int,string>,
+     *     taxonomy_terms:array<int,array<string,mixed>>,
      *     linked_account_profiles:array<int,array<string,mixed>>,
      *     profile_groups:array<int,array<string,mixed>>
      * }|null

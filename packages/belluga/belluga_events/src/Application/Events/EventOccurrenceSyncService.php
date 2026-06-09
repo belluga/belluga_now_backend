@@ -56,7 +56,9 @@ class EventOccurrenceSyncService
             $start = $this->toCarbon($occurrence['date_time_start'] ?? null) ?? $now;
             $end = $this->toCarbon($occurrence['date_time_end'] ?? null);
             $effectiveEnd = $this->resolveEffectiveEnd($start, $end);
-            $eventTaxonomyTerms = $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []);
+            $eventTaxonomyTerms = $this->ensureTaxonomySnapshots(
+                $event->taxonomy_terms ?? []
+            );
             $ownTaxonomyTerms = $this->ensureTaxonomySnapshots($occurrence['taxonomy_terms'] ?? []);
             $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
             $eventParties = $this->normalizeEventParties($event->event_parties ?? []);

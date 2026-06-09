@@ -30,6 +30,7 @@ use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -91,6 +92,7 @@ class EventCrudControllerTest extends TestCaseTenant
         EventType::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
+        AccountProfile::withTrashed()->forceDelete();
 
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
@@ -103,23 +105,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'events:delete',
         ]);
 
-        TenantProfileType::query()->updateOrCreate(
-            ['type' => 'band'],
-            [
-                'label' => 'Banda',
-                'labels' => [
-                    'singular' => 'Banda',
-                    'plural' => 'Bandas',
-                ],
-                'allowed_taxonomies' => [],
-                'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
-                ],
-            ]
-        );
+        $this->resetCoreProfileTypeBaselines();
 
         $this->venue = $this->createAccountProfile('venue', 'Main Venue', $this->account);
         $this->artist = $this->createAccountProfile('artist', 'DJ Test');
@@ -289,6 +275,12 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $publicResponse = $this->getJson("{$this->base_api_tenant}events/{$stored->_id}");
         $publicResponse->assertStatus(200);
+        $publicResponse->assertJsonPath('data.venue.slug', (string) $this->venue->slug);
+        $publicResponse->assertJsonPath('data.venue.can_open_public_detail', true);
+        $publicResponse->assertJsonPath(
+            'data.venue.public_detail_path',
+            '/parceiro/'.(string) $this->venue->slug
+        );
         $publicResponse->assertJsonPath('data.artists.0.profile_type', (string) $this->band->profile_type);
         $publicResponse->assertJsonPath('data.artists.0.slug', (string) $this->band->slug);
 
@@ -1006,6 +998,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotContains((string) $hiddenGuest->_id, $candidateIds);
     }
 
+    public function test_event_account_profile_candidates_endpoint_preserves_numeric_zero_slug_in_related_results(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $this->artist->display_name = 'Selector Zero Slug Artist';
+        $this->artist->slug = '0';
+        $this->artist->save();
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&search=selector%20zero"
+        );
+
+        $response->assertStatus(200);
+        $candidate = collect($response->json('data') ?? [])
+            ->firstWhere('id', (string) $this->artist->_id);
+
+        $this->assertNotNull($candidate);
+        $this->assertSame('0', data_get($candidate, 'slug'));
+    }
+
     public function test_event_account_profile_candidates_endpoint_includes_non_venue_profiles_when_poi_capability_is_enabled(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -1017,6 +1030,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 'label' => 'Restaurant',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'has_bio' => false,
@@ -1229,6 +1245,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.created_by.type', 'account_user');
         $response->assertJsonPath('data.created_by.id', (string) $this->user->_id);
         $response->assertJsonPath('data.venue.slug', $venueSlug);
+        $response->assertJsonPath('data.venue.can_open_public_detail', true);
+        $response->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
         $response->assertJsonPath('data.linked_account_profiles.0.slug', $artistSlug);
 
         $parties = collect($response->json('data.event_parties') ?? []);
@@ -1244,6 +1262,50 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('https://tenant.test/artist-avatar.png', data_get($artistParty, 'metadata.avatar_url'));
         $this->assertSame('https://tenant.test/artist-cover.png', data_get($artistParty, 'metadata.cover_url'));
         $this->assertSame('Showcase', data_get($artistParty, 'metadata.taxonomy_terms.0.name'));
+    }
+
+    public function test_event_create_preserves_public_detail_contract_for_numeric_zero_venue_slug(): void
+    {
+        $this->venue->slug = '0';
+        $this->venue->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.venue.slug', '0');
+        $response->assertJsonPath('data.venue.can_open_public_detail', true);
+        $response->assertJsonPath('data.venue.public_detail_path', '/parceiro/0');
+
+        $eventId = (string) $response->json('data.event_id');
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.venue.slug', '0');
+        $public->assertJsonPath('data.venue.can_open_public_detail', true);
+        $public->assertJsonPath('data.venue.public_detail_path', '/parceiro/0');
+    }
+
+    public function test_event_create_preserves_linked_profile_contract_for_numeric_zero_related_profile_slug(): void
+    {
+        $this->artist->slug = '0';
+        $this->artist->save();
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', '0');
+        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/0');
+        $response->assertJsonPath('data.event_parties.0.metadata.slug', '0');
+
+        $eventId = (string) $response->json('data.event_id');
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.linked_account_profiles.0.slug', '0');
+        $public->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
+        $public->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/0');
+        $public->assertJsonPath('data.artists.0.slug', '0');
     }
 
     public function test_event_create_rejects_legacy_single_date_payload_without_occurrences(): void
@@ -1629,6 +1691,29 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame('Showcase', data_get($event->taxonomy_terms, '0.name'));
         $this->assertSame('Event Style', data_get($occurrence->taxonomy_terms, '0.taxonomy_name'));
+    }
+
+    public function test_tenant_admin_event_reads_do_not_synthesize_taxonomy_terms_from_legacy_tags(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Legacy Admin Taxonomy Event',
+            'tags' => ['legacy-music'],
+            'taxonomy_terms' => [],
+        ]);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $show = $this->getJson("{$this->tenantAdminEventsBase}/{$event->_id}");
+        $show->assertStatus(200);
+        $show->assertJsonPath('data.taxonomy_terms', []);
+
+        $list = $this->getJson("{$this->tenantAdminEventsBase}?page=1&page_size=10");
+        $list->assertStatus(200);
+        $matching = collect($list->json('data') ?? [])
+            ->firstWhere('event_id', (string) $event->_id);
+        $this->assertIsArray($matching);
+        $this->assertSame([], data_get($matching, 'taxonomy_terms', []));
     }
 
     public function test_event_create_persists_programming_item_end_time_in_admin_and_public_payloads(): void
@@ -4332,6 +4417,74 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonCount(0, 'data.occurrences.0.profile_groups');
     }
 
+    public function test_local_diagnostic_append_profile_group_member_mirrors_canonical_event_party_and_repairs_occurrence_projections(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Diagnostic Profile Group Repair',
+            'profile_groups' => [[
+                'id' => 'atracoes',
+                'label' => 'Atrações',
+                'order' => 0,
+                'account_profile_ids' => [(string) $this->artist->_id],
+            ]],
+        ]);
+
+        $eventId = (string) $event->_id;
+        $beforeOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertSame([(string) $this->artist->_id], data_get($beforeOccurrence, 'profile_groups.0.account_profile_ids'));
+        $this->assertNull(
+            collect($beforeOccurrence->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id)
+        );
+
+        $exitCode = Artisan::call('events:diagnostic:append-profile-group-member', [
+            'tenant_ref' => $this->tenant->slug,
+            'event_id' => $eventId,
+            'profile_id' => (string) $this->band->_id,
+            '--with-event-party' => true,
+        ]);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertStringContainsString('"occurrence_projections_repaired": true', Artisan::output());
+
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+
+        $freshEvent = Event::query()->findOrFail($eventId);
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            data_get($freshEvent, 'profile_groups.0.account_profile_ids')
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            data_get($freshOccurrence, 'profile_groups.0.account_profile_ids')
+        );
+
+        $bandParty = collect($freshEvent->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id);
+        $this->assertIsArray($bandParty);
+        $this->assertSame('band', data_get($bandParty, 'party_type'));
+        $this->assertFalse((bool) data_get($bandParty, 'permissions.can_edit'));
+        $this->assertSame($this->band->display_name, data_get($bandParty, 'metadata.display_name'));
+        $this->assertSame((string) $this->band->slug, data_get($bandParty, 'metadata.slug'));
+        $this->assertSame('band', data_get($bandParty, 'metadata.profile_type'));
+
+        $occurrenceBandParty = collect($freshOccurrence->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id);
+        $this->assertIsArray($occurrenceBandParty);
+        $this->assertSame('band', data_get($occurrenceBandParty, 'party_type'));
+        $this->assertSame((string) $this->band->slug, data_get($occurrenceBandParty, 'metadata.slug'));
+
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.profile_groups.0.id', 'atracoes');
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            collect($public->json('data.profile_groups.0.profiles') ?? [])
+                ->pluck('id')
+                ->values()
+                ->all()
+        );
+    }
+
     public function test_event_profile_groups_reject_members_outside_event_parties(): void
     {
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -4594,7 +4747,12 @@ class EventCrudControllerTest extends TestCaseTenant
                     'plural' => 'Perfis Smoke Públicos',
                 ],
                 'allowed_taxonomies' => [],
-                'capabilities' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
             ]
         );
 
@@ -4777,15 +4935,24 @@ class EventCrudControllerTest extends TestCaseTenant
         $event->save();
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
 
         $public->assertStatus(200);
+        $management->assertStatus(200);
         $profiles = $public->json('data.profile_groups.0.profiles');
         $this->assertSame(
             [(string) $this->artist->_id, (string) $delegate->_id],
             array_column($profiles, 'id')
         );
+        $management->assertJsonPath('data.profile_groups.0.account_profile_ids', [
+            (string) $this->artist->_id,
+            (string) $delegate->_id,
+        ]);
         $linkedProfiles = collect($public->json('data.linked_account_profiles'));
         $this->assertFalse($linkedProfiles->pluck('id')->contains((string) $hiddenGuest->_id));
+        $this->assertFalse(
+            collect($management->json('data.linked_account_profiles'))->pluck('id')->contains((string) $hiddenGuest->_id)
+        );
 
         $delegatePayload = collect($profiles)
             ->firstWhere('id', (string) $delegate->_id);
@@ -4804,7 +4971,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('/parceiro/'.$this->artist->slug, $linkedArtistPayload['public_detail_path'] ?? null);
     }
 
-    public function test_management_event_readback_sanitizes_non_queryable_occurrence_group_members(): void
+    public function test_management_event_readback_suppresses_persisted_non_queryable_occurrence_group_members_in_normal_payload(): void
     {
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'delegate'],
@@ -4913,7 +5080,17 @@ class EventCrudControllerTest extends TestCaseTenant
             (string) $this->artist->_id,
             (string) $delegate->_id,
         ]);
-        $management->assertJsonMissingPath('data.occurrences.1.profile_groups.0.account_profile_ids.2');
+        $this->assertSame(
+            [
+                (string) $this->artist->_id,
+                (string) $delegate->_id,
+            ],
+            collect($management->json('data.occurrences.1.own_linked_account_profiles') ?? [])
+                ->pluck('id')
+                ->map(static fn ($id) => (string) $id)
+                ->values()
+                ->all()
+        );
     }
 
     public function test_management_event_readback_repairs_partial_occurrence_linked_profiles_from_occurrence_event_parties(): void
@@ -5138,6 +5315,47 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.profile_groups.1.profiles.1.id', (string) $this->band->_id);
     }
 
+    public function test_public_event_detail_merges_groups_when_labels_match_even_if_ids_differ(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $occurrences[1]['event_parties'] = [[
+            'party_ref_id' => (string) $this->band->_id,
+        ]];
+        $occurrences[1]['profile_groups'] = [[
+            'id' => 'grupo-ocorrencia',
+            'label' => 'Participantes',
+            'order' => 0,
+            'account_profile_ids' => [(string) $this->band->_id],
+        ]];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'event_parties' => [
+                ['party_ref_id' => (string) $this->artist->_id],
+            ],
+            'profile_groups' => [[
+                'id' => 'grupo-evento',
+                'label' => 'Participantes',
+                'order' => 0,
+                'account_profile_ids' => [
+                    (string) $this->artist->_id,
+                ],
+            ]],
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$secondOccurrence->_id}");
+
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.profile_groups.0.id', 'grupo-evento');
+        $public->assertJsonPath('data.profile_groups.0.label', 'Participantes');
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.id', (string) $this->artist->_id);
+        $public->assertJsonPath('data.profile_groups.0.profiles.1.id', (string) $this->band->_id);
+        $public->assertJsonCount(1, 'data.profile_groups');
+    }
+
     public function test_account_event_create_rejects_foreign_programming_location_profile(): void
     {
         $foreignVenue = $this->createAccountProfile('venue', 'Foreign Programming Venue');
@@ -5318,6 +5536,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $aliasResponse->assertJsonPath('data.occurrence_id', (string) $secondOccurrence->_id);
         $aliasResponse->assertJsonPath('data.occurrences.0.is_selected', false);
         $aliasResponse->assertJsonPath('data.occurrences.1.is_selected', true);
+        $aliasResponse->assertJsonPath('data.venue.slug', (string) $this->venue->slug);
+        $aliasResponse->assertJsonPath('data.venue.can_open_public_detail', true);
+        $aliasResponse->assertJsonPath(
+            'data.venue.public_detail_path',
+            '/parceiro/'.(string) $this->venue->slug
+        );
         $aliasResponse->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
         $aliasResponse->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
 
@@ -5326,6 +5550,76 @@ class EventCrudControllerTest extends TestCaseTenant
         $staleQueryResponse->assertJsonPath('data.event_id', $eventId);
         $staleQueryResponse->assertJsonPath('data.occurrences.0.is_selected', true);
         $staleQueryResponse->assertJsonPath('data.occurrences.1.is_selected', false);
+    }
+
+    public function test_public_event_detail_and_occurrence_slug_alias_keep_non_navigable_venue_without_public_detail_path(): void
+    {
+        $venueSlug = 'main-venue-private-'.Str::lower(Str::random(6));
+        $this->venue->slug = $venueSlug;
+        $this->venue->save();
+
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $selectedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
+
+        $preCutoverEventDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $preCutoverEventDetail->assertStatus(200);
+        $preCutoverEventDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $preCutoverEventDetail->assertJsonPath('data.venue.can_open_public_detail', true);
+        $preCutoverEventDetail->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        $eventDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $eventDetail->assertStatus(200);
+        $eventDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $eventDetail->assertJsonPath('data.venue.can_open_public_detail', false);
+        $eventDetail->assertJsonPath('data.venue.public_detail_path', null);
+
+        $aliasDetail = $this->getJson("{$this->base_api_tenant}events/{$selectedOccurrence->occurrence_slug}");
+        $aliasDetail->assertStatus(200);
+        $aliasDetail->assertJsonPath('data.occurrence_id', (string) $selectedOccurrence->_id);
+        $aliasDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $aliasDetail->assertJsonPath('data.venue.can_open_public_detail', false);
+        $aliasDetail->assertJsonPath('data.venue.public_detail_path', null);
+
+        $postCutoverCreate = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'title' => 'Post cutover venue contract',
+        ]));
+        $postCutoverCreate->assertStatus(201);
+        $postCutoverCreate->assertJsonPath('data.venue.slug', $venueSlug);
+        $postCutoverCreate->assertJsonPath('data.venue.can_open_public_detail', false);
+        $postCutoverCreate->assertJsonPath('data.venue.public_detail_path', null);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $adminDetail = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
+        $adminDetail->assertStatus(200);
+        $adminDetail->assertJsonPath('data.venue.slug', $venueSlug);
+        $adminDetail->assertJsonPath('data.venue.can_open_public_detail', false);
+        $adminDetail->assertJsonPath('data.venue.public_detail_path', null);
     }
 
     public function test_public_event_detail_related_profiles_aggregate_event_occurrences_and_programming_profiles(): void
@@ -5666,11 +5960,16 @@ class EventCrudControllerTest extends TestCaseTenant
             'tags' => ['legacy-music'],
             'categories' => $oversizedCategories,
             'taxonomy_terms' => $oversizedTaxonomyTerms,
+            'occurrences' => [[
+                ...$this->makeOccurrences(1)[0],
+                'tags' => ['legacy-occurrence-music'],
+            ]],
         ]));
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors([
             'tags',
+            'occurrences.0.tags',
             'categories',
             'taxonomy_terms',
         ]);
@@ -6514,6 +6813,63 @@ class EventCrudControllerTest extends TestCaseTenant
             'is_active' => true,
             'is_verified' => false,
         ]);
+    }
+
+    private function resetCoreProfileTypeBaselines(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'labels' => [
+                    'singular' => 'Artist',
+                    'plural' => 'Artists',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
+            ]
+        );
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Banda',
+                'labels' => [
+                    'singular' => 'Banda',
+                    'plural' => 'Bandas',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
+            ]
+        );
     }
 
     /**

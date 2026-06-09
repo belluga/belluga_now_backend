@@ -10,7 +10,7 @@ class RoleLabels extends Labels
             $this->id = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.id');
+            return $this->getGlobal($this->base_label.'.id') ?? '';
         }
     }
 
@@ -20,7 +20,7 @@ class RoleLabels extends Labels
             $this->name = $value;
         }
         get {
-            return $this->getGlobal($this->base_label.'.name');
+            return $this->getGlobal($this->base_label.'.name') ?? '';
         }
     }
 

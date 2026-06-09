@@ -287,6 +287,11 @@ class EventManagementService
                     "occurrences.{$index}" => ['Occurrence payload must be an object.'],
                 ]);
             }
+            if (array_key_exists('tags', $occurrence)) {
+                throw ValidationException::withMessages([
+                    "occurrences.{$index}.tags" => ['The legacy tags field is not accepted; use taxonomy_terms.'],
+                ]);
+            }
 
             $start = $this->normalizeDateValue(
                 $occurrence['date_time_start'] ?? null,

@@ -1234,6 +1234,7 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('inviter_principal.kind', 'user');
         $response->assertJsonPath('invite.target_ref.event_id', (string) $this->event->_id);
         $response->assertJsonPath('invite.target_ref.occurrence_id', $occurrenceId);
+        $response->assertJsonPath('invite.event_slug', (string) $this->event->slug);
         $response->assertJsonPath('invite.event_image_url', 'https://example.org/thumb.jpg');
         $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Sender User');
         $response->assertJsonPath('invite.inviter_candidates.0.status', 'pending');
@@ -1241,6 +1242,91 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('invite.profile_groups.0.label', 'Bandas');
         $response->assertJsonPath('invite.profile_groups.1.label', 'Expositores');
         $response->assertJsonPath('invite.linked_account_profiles.0.display_name', 'Invite Band');
+    }
+
+    public function test_share_preview_exposes_taxonomy_terms_when_legacy_tags_are_absent(): void
+    {
+        $now = Carbon::now();
+        $event = Event::query()->create([
+            'title' => 'Taxonomy Invite Event',
+            'slug' => 'taxonomy-invite-event-'.Str::random(6),
+            'content' => 'Taxonomy invite event content',
+            'location' => [
+                'mode' => 'physical',
+                'label' => 'Invite Venue',
+                'geo' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0, -20.0],
+                ],
+            ],
+            'place_ref' => [
+                'type' => 'venue',
+                'id' => 'venue-1',
+                'metadata' => ['display_name' => 'Invite Venue'],
+            ],
+            'type' => [
+                'id' => 'show',
+                'name' => 'Show',
+                'slug' => 'show',
+            ],
+            'venue' => [
+                'id' => 'venue-1',
+                'display_name' => 'Invite Venue',
+                'hero_image_url' => 'https://example.org/hero.jpg',
+            ],
+            'thumb' => [
+                'type' => 'image',
+                'data' => [
+                    'url' => 'https://example.org/thumb.jpg',
+                ],
+            ],
+            'date_time_start' => $now->copy()->addDay(),
+            'date_time_end' => $now->copy()->addDay()->addHours(4),
+            'tags' => [],
+            'taxonomy_terms' => [[
+                'type' => 'event_style',
+                'value' => 'showcase',
+                'name' => 'Showcase',
+                'label' => 'Showcase',
+                'taxonomy_name' => 'Event Style',
+            ]],
+            'publication' => [
+                'status' => 'published',
+                'publish_at' => $now->copy()->subMinute(),
+            ],
+            'is_active' => true,
+        ]);
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
+            'date_time_start' => Carbon::instance($event->date_time_start),
+            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
+        ]]);
+
+        $event = $event->fresh();
+        $occurrenceId = $this->firstOccurrenceId($event);
+        $code = 'PREVIEWTAXO';
+        InviteShareCode::query()->create([
+            'code' => $code,
+            'event_id' => (string) $event->_id,
+            'occurrence_id' => $occurrenceId,
+            'inviter_principal' => [
+                'kind' => 'user',
+                'principal_id' => (string) $this->sender->_id,
+            ],
+            'issued_by_user_id' => (string) $this->sender->_id,
+            'account_profile_id' => null,
+            'inviter_display_name' => 'Sender User',
+            'inviter_avatar_url' => 'https://example.com/sender.png',
+            'expires_at' => Carbon::now()->addDay(),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}invites/share/{$code}");
+
+        $response->assertOk();
+        $response->assertJsonPath('invite.event_slug', (string) $event->slug);
+        $response->assertJsonPath('invite.taxonomy_terms.0.type', 'event_style');
+        $response->assertJsonPath('invite.taxonomy_terms.0.value', 'showcase');
+        $response->assertJsonPath('invite.taxonomy_terms.0.name', 'Showcase');
     }
 
     public function test_share_preview_rejects_unknown_or_expired_code(): void

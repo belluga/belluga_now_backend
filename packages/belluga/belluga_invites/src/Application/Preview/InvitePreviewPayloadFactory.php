@@ -19,7 +19,7 @@ class InvitePreviewPayloadFactory
      *         event_image_url:?string,
      *         location:string,
      *         host_name:string,
-     *         tags:array<int,string>,
+     *         taxonomy_terms:array<int,array<string,mixed>>,
      *         linked_account_profiles:array<int,array<string,mixed>>,
      *         profile_groups:array<int,array<string,mixed>>,
      *         venue_account_profile_id:?string,
@@ -44,12 +44,13 @@ class InvitePreviewPayloadFactory
             inviterDisplayName: $inviterDisplayName,
             inviterAvatarUrl: $inviterAvatarUrl,
             eventName: (string) ($target['event_snapshot']['event_name'] ?? ''),
+            eventSlug: (string) ($target['event_snapshot']['event_slug'] ?? ''),
             eventDate: $target['event_snapshot']['event_date'] ?? null,
             eventImageUrl: $target['event_snapshot']['event_image_url'] ?? null,
             location: (string) ($target['event_snapshot']['location'] ?? ''),
             hostName: (string) ($target['event_snapshot']['host_name'] ?? ''),
             message: 'Entre para aceitar ou recusar o convite.',
-            tags: $target['event_snapshot']['tags'] ?? [],
+            taxonomyTerms: $target['event_snapshot']['taxonomy_terms'] ?? [],
             linkedAccountProfiles: $target['event_snapshot']['linked_account_profiles'] ?? [],
             profileGroups: $target['event_snapshot']['profile_groups'] ?? [],
             venueAccountProfileId: $target['event_snapshot']['venue_account_profile_id'] ?? null,
@@ -80,12 +81,13 @@ class InvitePreviewPayloadFactory
             inviterDisplayName: $edge->inviter_display_name,
             inviterAvatarUrl: $edge->inviter_avatar_url,
             eventName: (string) ($edge->event_name ?? ''),
+            eventSlug: (string) ($edge->event_slug ?? ''),
             eventDate: $edge->event_date,
             eventImageUrl: $edge->event_image_url,
             location: (string) ($edge->location_label ?? ''),
             hostName: (string) ($edge->host_name ?? ''),
             message: (string) ($edge->message ?? ''),
-            tags: is_array($edge->tags) ? $edge->tags : [],
+            taxonomyTerms: is_array($edge->taxonomy_terms) ? $edge->taxonomy_terms : [],
             linkedAccountProfiles: is_array($edge->linked_account_profiles) ? $edge->linked_account_profiles : [],
             profileGroups: is_array($edge->profile_groups) ? $edge->profile_groups : [],
             venueAccountProfileId: $edge->venue_account_profile_id,
@@ -97,7 +99,7 @@ class InvitePreviewPayloadFactory
     /**
      * @param  array{event_id:string,occurrence_id:string}  $targetRef
      * @param  array{kind:string,id:string}  $principal
-     * @param  array<int, mixed>  $tags
+     * @param  array<int, array<string, mixed>>  $taxonomyTerms
      * @param  array<int, array<string, mixed>>  $linkedAccountProfiles
      * @param  array<int, array<string, mixed>>  $profileGroups
      * @return array<string, mixed>
@@ -109,12 +111,13 @@ class InvitePreviewPayloadFactory
         ?string $inviterDisplayName,
         ?string $inviterAvatarUrl,
         string $eventName,
+        string $eventSlug,
         ?Carbon $eventDate,
         ?string $eventImageUrl,
         string $location,
         string $hostName,
         string $message,
-        array $tags,
+        array $taxonomyTerms,
         array $linkedAccountProfiles,
         array $profileGroups,
         ?string $venueAccountProfileId,
@@ -139,6 +142,7 @@ class InvitePreviewPayloadFactory
         return [
             'id' => $normalizedInviteId,
             'event_id' => $normalizedTargetRef['event_id'],
+            'event_slug' => trim($eventSlug),
             'occurrence_id' => $normalizedTargetRef['occurrence_id'],
             'target_ref' => $normalizedTargetRef,
             'event_name' => trim($eventName),
@@ -147,10 +151,10 @@ class InvitePreviewPayloadFactory
             'location' => trim($location),
             'host_name' => trim($hostName),
             'message' => trim($message),
-            'tags' => array_values(array_filter(array_map(
-                static fn (mixed $tag): string => trim((string) $tag),
-                $tags,
-            ), static fn (string $tag): bool => $tag !== '')),
+            'taxonomy_terms' => array_values(array_filter(
+                array_map([$this, 'normalizeMap'], $taxonomyTerms),
+                static fn (array $term): bool => $term !== [],
+            )),
             'linked_account_profiles' => array_values(array_filter(
                 array_map([$this, 'normalizeMap'], $linkedAccountProfiles),
                 static fn (array $profile): bool => $profile !== [],

@@ -16,23 +16,31 @@ class ApiV1AdminTenantTest extends TestCaseAuthenticated
         $tenantsList->assertOk();
 
         $responseData = $tenantsList->json();
-        $this->assertEquals(1, $responseData['total']);
-        $this->assertCount(1, $responseData['data']);
+        $this->assertGreaterThanOrEqual(1, $responseData['total']);
+        $this->assertNotEmpty($responseData['data']);
         $this->assertEquals(1, $responseData['current_page']);
-        $this->assertArrayHasKey('main_domain', $responseData['data'][0]);
-        $this->assertNotEmpty($responseData['data'][0]['main_domain']);
-        $this->assertArrayHasKey('domains', $responseData['data'][0]);
-        $this->assertIsArray($responseData['data'][0]['domains']);
-        $this->assertNotEmpty($responseData['data'][0]['domains']);
+
+        $primaryTenant = collect($responseData['data'])
+            ->first(fn (array $item): bool => ($item['slug'] ?? null) === $this->landlord->tenant_primary->slug);
+
+        $this->assertIsArray($primaryTenant);
+        $this->assertArrayHasKey('main_domain', $primaryTenant);
+        $this->assertNotEmpty($primaryTenant['main_domain']);
+        $this->assertArrayHasKey('domains', $primaryTenant);
+        $this->assertIsArray($primaryTenant['domains']);
+        $this->assertNotEmpty($primaryTenant['domains']);
     }
 
     public function test_tenants_create(): void
     {
         $beforeTotal = $this->tenantsList()->json('total') ?? 0;
+        $tenantSuffix = Str::lower(Str::random(12));
+        $tenantName = 'Tenant Create '.$tenantSuffix;
+        $tenantSubdomain = 'tenant-create-'.$tenantSuffix;
 
         $response = $this->tenantsCreate([
-            'name' => $this->landlord->tenant_secondary->name,
-            'subdomain' => $this->landlord->tenant_secondary->subdomain,
+            'name' => $tenantName,
+            'subdomain' => $tenantSubdomain,
         ]);
 
         $response->assertStatus(201);
@@ -45,12 +53,8 @@ class ApiV1AdminTenantTest extends TestCaseAuthenticated
                 'created_at',
             ],
         ]);
-
-        $this->landlord->tenant_secondary->slug = $response->json()['data']['slug'];
-        $this->landlord->tenant_secondary->id = $response->json()['data']['id'];
-
-        $this->landlord->tenant_secondary->role_admin->name = 'Admin';
-        $this->landlord->tenant_secondary->role_admin->id = $response->json()['data']['role_admin_id'];
+        $this->assertSame($tenantName, $response->json('data.name'));
+        $this->assertSame($tenantSubdomain, $response->json('data.subdomain'));
 
         $tenantsList = $this->tenantsList();
         $tenantsList->assertOk();

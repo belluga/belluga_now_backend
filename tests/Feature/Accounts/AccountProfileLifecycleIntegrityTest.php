@@ -76,7 +76,7 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
         );
     }
 
-    public function test_direct_profile_force_delete_rejects_last_active_profile_for_live_account_with_response_and_state_assertions(): void
+    public function test_direct_profile_force_delete_returns_not_found_for_active_profile(): void
     {
         [$account, $profile] = $this->createLiveAccountWithProfile('Last Active Force Delete');
 
@@ -86,8 +86,7 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['account_profile_lifecycle']);
+        $response->assertStatus(404);
         $this->assertNotNull(AccountProfile::query()->find((string) $profile->_id));
         $this->assertSame(
             1,

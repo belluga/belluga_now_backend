@@ -29,7 +29,7 @@ final class AccountProfileTypeCapabilityCatalog
         return [
             $this->definition(self::IS_QUERYABLE, default: true),
             $this->definition(self::IS_PUBLICLY_NAVIGABLE, default: true),
-            $this->definition(self::IS_PUBLICLY_DISCOVERABLE, default: true, requires: [self::IS_QUERYABLE]),
+            $this->definition(self::IS_PUBLICLY_DISCOVERABLE, default: true),
             $this->definition(self::IS_FAVORITABLE),
             $this->definition(self::IS_INVITEABLE),
             $this->definition(self::IS_POI_ENABLED),

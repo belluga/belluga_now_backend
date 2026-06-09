@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use MongoDB\Laravel\Eloquent\Model;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -29,6 +30,16 @@ class TenantProfileType extends Model
     protected $casts = [
     ];
 
+    protected static function booted(): void
+    {
+        $invalidateTypeSets = static function (): void {
+            AccountProfileTypeSetProvider::bumpRevision();
+        };
+
+        static::saved($invalidateTypeSets);
+        static::deleted($invalidateTypeSets);
+    }
+
     public function scopeQueryable($query)
     {
         return $query->whereRaw(self::queryabilityCapabilityExpression());
@@ -48,8 +59,7 @@ class TenantProfileType extends Model
 
     public function scopePublicCatalog($query)
     {
-        return $query
-            ->publiclyDiscoverable();
+        return $query->publiclyDiscoverable();
     }
 
     public function scopeFavoritable($query)
@@ -60,8 +70,7 @@ class TenantProfileType extends Model
     public function scopePublicDiscoverySurface($query)
     {
         return $query
-            ->publiclyDiscoverable()
-            ->favoritable();
+            ->publicCatalog();
     }
 
     public function scopePublicPoiCatalog($query)
@@ -79,13 +88,7 @@ class TenantProfileType extends Model
         return [
             '$and' => [
                 ['type' => ['$ne' => self::PERSONAL_TYPE]],
-                [
-                    '$or' => [
-                        ['capabilities.is_queryable' => true],
-                        ['capabilities.is_queryable' => ['$exists' => false]],
-                        ['capabilities.is_queryable' => null],
-                    ],
-                ],
+                ['capabilities.is_queryable' => true],
             ],
         ];
     }
@@ -95,22 +98,7 @@ class TenantProfileType extends Model
      */
     public static function publicDiscoveryCapabilityExpression(): array
     {
-        return [
-            '$or' => [
-                ['capabilities.is_publicly_discoverable' => true],
-                [
-                    '$and' => [
-                        ['type' => ['$ne' => self::PERSONAL_TYPE]],
-                        [
-                            '$or' => [
-                                ['capabilities.is_publicly_discoverable' => ['$exists' => false]],
-                                ['capabilities.is_publicly_discoverable' => null],
-                            ],
-                        ],
-                    ],
-                ],
-            ],
-        ];
+        return ['capabilities.is_publicly_discoverable' => true];
     }
 
     /**
@@ -118,22 +106,7 @@ class TenantProfileType extends Model
      */
     public static function publicNavigabilityCapabilityExpression(): array
     {
-        return [
-            '$or' => [
-                ['capabilities.is_publicly_navigable' => true],
-                [
-                    '$and' => [
-                        ['type' => ['$ne' => self::PERSONAL_TYPE]],
-                        [
-                            '$or' => [
-                                ['capabilities.is_publicly_navigable' => ['$exists' => false]],
-                                ['capabilities.is_publicly_navigable' => null],
-                            ],
-                        ],
-                    ],
-                ],
-            ],
-        ];
+        return ['capabilities.is_publicly_navigable' => true];
     }
 
     /**
@@ -141,12 +114,6 @@ class TenantProfileType extends Model
      */
     public static function favoritableCapabilityExpression(): array
     {
-        return [
-            '$or' => [
-                ['capabilities.is_favoritable' => true],
-                ['capabilities.is_favoritable' => ['$exists' => false]],
-                ['capabilities.is_favoritable' => null],
-            ],
-        ];
+        return ['capabilities.is_favoritable' => true];
     }
 }

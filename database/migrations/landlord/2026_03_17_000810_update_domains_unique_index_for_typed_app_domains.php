@@ -31,7 +31,11 @@ return new class extends Migration
             }
 
             if (array_keys($key) === ['path']) {
-                $collection->dropIndex($name);
+                try {
+                    $collection->dropIndex($name);
+                } catch (\Throwable) {
+                    // Repeated Mongo migrate flows can reach here after the legacy index was already removed.
+                }
             }
         }
 

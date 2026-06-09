@@ -4,12 +4,22 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
 
 final class AccountProfileTypeSetProvider
 {
+    private static int $revision = 0;
+
     /** @var array<string, array<int, string>> */
     private array $cache = [];
+
+    private int $cacheRevision = -1;
+
+    public static function bumpRevision(): void
+    {
+        self::$revision++;
+    }
 
     /**
      * @return array<int, string>
@@ -128,12 +138,36 @@ final class AccountProfileTypeSetProvider
      */
     private function remember(string $key, \Closure $resolver): array
     {
-        if (array_key_exists($key, $this->cache)) {
-            return $this->cache[$key];
+        $this->refreshIfStale();
+        $scopedKey = $this->tenantScopedCacheKey($key);
+
+        if (array_key_exists($scopedKey, $this->cache)) {
+            return $this->cache[$scopedKey];
         }
 
-        $this->cache[$key] = $resolver();
+        $this->cache[$scopedKey] = $resolver();
 
-        return $this->cache[$key];
+        return $this->cache[$scopedKey];
+    }
+
+    private function refreshIfStale(): void
+    {
+        if ($this->cacheRevision === self::$revision) {
+            return;
+        }
+
+        $this->cache = [];
+        $this->cacheRevision = self::$revision;
+    }
+
+    private function tenantScopedCacheKey(string $key): string
+    {
+        $tenant = Tenant::current();
+        $tenantKey = $tenant?->getKey();
+        $scope = is_scalar($tenantKey) && trim((string) $tenantKey) !== ''
+            ? 'tenant:'.trim((string) $tenantKey)
+            : 'tenant:none';
+
+        return "{$scope}:{$key}";
     }
 }

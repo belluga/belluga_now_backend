@@ -105,6 +105,9 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'restaurant',
             'label' => 'Restaurante',
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
             ],
