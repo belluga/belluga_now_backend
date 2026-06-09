@@ -152,6 +152,7 @@ class FavoritesControllerTest extends TestCaseTenant
         ], [
             'display_name' => 'Profile Default Registry',
             'slug' => 'profile-default-registry',
+            'profile_type' => 'artist',
             'can_open_public_detail' => true,
         ]);
 
