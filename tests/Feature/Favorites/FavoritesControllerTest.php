@@ -152,6 +152,7 @@ class FavoritesControllerTest extends TestCaseTenant
         ], [
             'display_name' => 'Profile Default Registry',
             'slug' => 'profile-default-registry',
+            'can_open_public_detail' => true,
         ]);
 
         $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
@@ -164,6 +165,10 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertCount(1, $items);
         $this->assertSame((string) $profile->_id, (string) ($items[0]['target_id'] ?? ''));
         $this->assertSame('account_profile', (string) ($items[0]['registry_key'] ?? ''));
+        $response->assertJsonPath('items.0.target.can_open_public_detail', true);
+        $response->assertJsonPath('items.0.target.public_detail_path', '/parceiro/profile-default-registry');
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', true);
+        $response->assertJsonPath('items.0.navigation.target_path', '/parceiro/profile-default-registry');
     }
 
     public function test_favorites_returns_edges_for_anonymous_identity(): void
@@ -217,6 +222,10 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('items.0.target.cover_url', 'https://cdn.test/profile-cover.png');
         $response->assertJsonPath('items.0.target.profile_type', 'restaurant');
+        $response->assertJsonPath('items.0.target.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.target.public_detail_path', null);
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.navigation.target_path', null);
         $response->assertJsonPath('items.0.snapshot.live_now_event_occurrence_id', 'occ-live');
     }
 
