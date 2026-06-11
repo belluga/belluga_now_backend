@@ -100,6 +100,39 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame('/invite?code=CODE123', $fallbackQuery['redirect'] ?? null);
     }
 
+    public function test_open_app_redirect_ignores_target_fallback_outside_web_direct(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.openapp');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.openapp',
+                ],
+            ],
+        ]);
+
+        $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+            ->get("{$this->base_tenant_url}open-app?path=/invite&code=CODE123&store_channel=web_cta&fallback=target");
+
+        $response->assertRedirect();
+
+        $location = $response->headers->get('Location');
+        $this->assertNotNull($location);
+
+        $intent = $this->parseAndroidIntentLocation((string) $location);
+        $fallback = parse_url($intent['fallback_url']);
+        parse_str((string) ($fallback['query'] ?? ''), $fallbackQuery);
+
+        $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
+        $this->assertSame(parse_url($tenantOrigin, PHP_URL_HOST), $fallback['host'] ?? null);
+        $this->assertSame('/baixe-o-app', $fallback['path'] ?? null);
+        $this->assertSame('/invite?code=CODE123', $fallbackQuery['redirect'] ?? null);
+    }
+
     public function test_open_app_redirect_for_android_invite_without_code_falls_back_to_home(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);

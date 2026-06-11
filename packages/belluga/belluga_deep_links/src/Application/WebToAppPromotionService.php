@@ -132,6 +132,19 @@ class WebToAppPromotionService
         return null;
     }
 
+    public function coerceFallbackModeForStoreChannel(
+        string $storeChannel,
+        ?string $fallbackMode,
+    ): ?string {
+        if ($fallbackMode !== 'target') {
+            return $fallbackMode;
+        }
+
+        return $storeChannel === 'web_direct'
+            ? 'target'
+            : 'promotion';
+    }
+
     public function shouldSeedWebDirectFallbackBypassCookie(
         string $platformTarget,
         string $storeChannel,
