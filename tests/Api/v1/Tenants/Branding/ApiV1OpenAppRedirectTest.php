@@ -135,7 +135,7 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame('/', $fallbackQuery['redirect'] ?? null);
     }
 
-    public function test_android_public_routes_redirect_through_open_app_intent_on_direct_navigation(): void
+    public function test_android_public_routes_redirect_through_open_app_intent_with_original_route_browser_fallback(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.direct');
@@ -174,6 +174,11 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
             $response->assertRedirect();
             $openAppLocation = (string) $response->headers->get('Location');
             $this->assertStringStartsWith($tenantOrigin.'/open-app?', $openAppLocation);
+            $openAppQuery = [];
+            parse_str((string) parse_url($openAppLocation, PHP_URL_QUERY), $openAppQuery);
+            $this->assertSame('web_direct', $openAppQuery['store_channel'] ?? null);
+            $this->assertSame('android', $openAppQuery['platform_target'] ?? null);
+            $this->assertSame('target', $openAppQuery['fallback'] ?? null);
 
             $intentResponse = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
                 ->get($openAppLocation);
@@ -190,13 +195,13 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
             $this->assertSame($case['expected_target_path'], $intentTarget);
 
             $fallback = parse_url($intent['fallback_url']);
-            parse_str((string) ($fallback['query'] ?? ''), $fallbackQuery);
             $this->assertSame(
                 parse_url($tenantOrigin, PHP_URL_HOST),
                 $fallback['host'] ?? null
             );
-            $this->assertSame('/baixe-o-app', $fallback['path'] ?? null);
-            $this->assertSame($case['expected_target_path'], $fallbackQuery['redirect'] ?? null);
+            $fallbackTarget = ($fallback['path'] ?? '/')
+                .(isset($fallback['query']) ? '?'.$fallback['query'] : '');
+            $this->assertSame($case['expected_target_path'], $fallbackTarget);
         }
     }
 

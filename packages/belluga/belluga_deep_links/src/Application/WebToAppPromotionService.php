@@ -24,7 +24,7 @@ class WebToAppPromotionService
         ?string $code,
         string $storeChannel,
         array $settings,
-        bool $preferPromotionFallback = false,
+        ?string $fallbackMode = null,
     ): string {
         $normalizedOrigin = rtrim($origin, '/');
         $propagatedCode = $this->resolvePropagatedCode(
@@ -43,7 +43,7 @@ class WebToAppPromotionService
                 code: $propagatedCode,
                 storeChannel: $storeChannel,
                 settings: $settings,
-                preferPromotionFallback: $preferPromotionFallback,
+                fallbackMode: $fallbackMode,
             );
         }
 
@@ -116,13 +116,18 @@ class WebToAppPromotionService
         return $safe;
     }
 
-    public function prefersPromotionFallback(mixed $fallback): bool
+    public function normalizeFallbackMode(mixed $fallback): ?string
     {
         if (! is_scalar($fallback)) {
-            return false;
+            return null;
         }
 
-        return strtolower(trim((string) $fallback)) === 'promotion';
+        $candidate = strtolower(trim((string) $fallback));
+        if ($candidate === 'promotion' || $candidate === 'target') {
+            return $candidate;
+        }
+
+        return null;
     }
 
     /**
@@ -133,14 +138,17 @@ class WebToAppPromotionService
         ?string $code,
         string $storeChannel,
         array $settings,
-        bool $preferPromotionFallback,
+        ?string $fallbackMode,
     ): string {
-        $promotionFallbackUrl = $preferPromotionFallback
+        $promotionFallbackUrl = $fallbackMode === 'promotion'
             ? $this->buildPromotionFallbackUrl($openTargetUrl)
+            : null;
+        $targetFallbackUrl = $fallbackMode === 'target'
+            ? $openTargetUrl
             : null;
         $storeUrl = $this->associationService->resolveAndroidStoreUrl($settings);
         if ($storeUrl === null) {
-            return $promotionFallbackUrl ?? $openTargetUrl;
+            return $promotionFallbackUrl ?? $targetFallbackUrl ?? $openTargetUrl;
         }
 
         $referrerParams = [
@@ -156,7 +164,8 @@ class WebToAppPromotionService
             $storeUrl,
             ['referrer' => http_build_query($referrerParams)],
         );
-        $browserFallbackUrl = $promotionFallbackUrl ?? $fallbackStoreUrl;
+        $browserFallbackUrl =
+            $promotionFallbackUrl ?? $targetFallbackUrl ?? $fallbackStoreUrl;
         $packageName = $this->associationService->resolveAndroidPackageName($settings);
         if ($packageName === '') {
             return $browserFallbackUrl;

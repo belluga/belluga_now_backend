@@ -150,7 +150,7 @@ class TenantPublicShellController extends Controller
             'path' => $this->promotionService->normalizeTargetPath($targetPath),
             'store_channel' => 'web_direct',
             'platform_target' => 'android',
-            'fallback' => 'promotion',
+            'fallback' => 'target',
         ]));
     }
 
