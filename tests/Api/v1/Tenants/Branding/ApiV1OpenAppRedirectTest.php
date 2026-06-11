@@ -183,6 +183,11 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
             $intentResponse = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
                 ->get($openAppLocation);
             $intentResponse->assertRedirect();
+            $this->assertTrue(
+                collect($intentResponse->headers->getCookies())->contains(
+                    fn ($cookie) => $cookie->getName() === 'belluga_web_direct_fallback_target'
+                )
+            );
 
             $intent = $this->parseAndroidIntentLocation(
                 (string) $intentResponse->headers->get('Location')

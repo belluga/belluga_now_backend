@@ -37,6 +37,25 @@ class OpenAppRedirectController extends Controller
             fallbackMode: $fallbackMode,
         );
 
-        return redirect()->away($redirectUrl);
+        $response = redirect()->away($redirectUrl);
+        if ($this->promotionService->shouldSeedWebDirectFallbackBypassCookie(
+            platformTarget: $platformTarget,
+            storeChannel: $storeChannel,
+            fallbackMode: $fallbackMode,
+        )) {
+            $response->cookie(cookie(
+                WebToAppPromotionService::WEB_DIRECT_FALLBACK_BYPASS_COOKIE,
+                $this->promotionService->normalizeTargetPath($targetPath),
+                1,
+                '/',
+                null,
+                $request->isSecure(),
+                true,
+                false,
+                'lax',
+            ));
+        }
+
+        return $response;
     }
 }

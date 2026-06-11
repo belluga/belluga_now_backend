@@ -23,16 +23,23 @@ class TenantPublicShellController extends Controller
         Request $request,
         string $accountProfileSlug,
     ): Response|RedirectResponse {
+        $targetPath = $this->requestTargetPath($request, '/parceiro/'.$accountProfileSlug);
+        $consumeDirectFallbackBypass = $this->shouldConsumeDirectFallbackBypass(
+            $request,
+            $targetPath,
+        );
         $redirect = $this->redirectToInstalledAppIfAndroid(
             $request,
-            $this->requestTargetPath($request, '/parceiro/'.$accountProfileSlug),
+            $targetPath,
+            $consumeDirectFallbackBypass,
         );
         if ($redirect !== null) {
             return $redirect;
         }
 
         return $this->renderShell(
-            $this->metadataService->accountProfileMetadata($accountProfileSlug)
+            $this->metadataService->accountProfileMetadata($accountProfileSlug),
+            forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
         );
     }
 
@@ -40,16 +47,23 @@ class TenantPublicShellController extends Controller
         Request $request,
         string $eventSlug,
     ): Response|RedirectResponse {
+        $targetPath = $this->requestTargetPath($request, '/agenda/evento/'.$eventSlug);
+        $consumeDirectFallbackBypass = $this->shouldConsumeDirectFallbackBypass(
+            $request,
+            $targetPath,
+        );
         $redirect = $this->redirectToInstalledAppIfAndroid(
             $request,
-            $this->requestTargetPath($request, '/agenda/evento/'.$eventSlug),
+            $targetPath,
+            $consumeDirectFallbackBypass,
         );
         if ($redirect !== null) {
             return $redirect;
         }
 
         return $this->renderShell(
-            $this->metadataService->eventMetadata($eventSlug)
+            $this->metadataService->eventMetadata($eventSlug),
+            forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
         );
     }
 
@@ -57,16 +71,23 @@ class TenantPublicShellController extends Controller
         Request $request,
         string $assetRef,
     ): Response|RedirectResponse {
+        $targetPath = $this->requestTargetPath($request, '/static/'.$assetRef);
+        $consumeDirectFallbackBypass = $this->shouldConsumeDirectFallbackBypass(
+            $request,
+            $targetPath,
+        );
         $redirect = $this->redirectToInstalledAppIfAndroid(
             $request,
-            $this->requestTargetPath($request, '/static/'.$assetRef),
+            $targetPath,
+            $consumeDirectFallbackBypass,
         );
         if ($redirect !== null) {
             return $redirect;
         }
 
         return $this->renderShell(
-            $this->metadataService->staticAssetMetadata($assetRef)
+            $this->metadataService->staticAssetMetadata($assetRef),
+            forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
         );
     }
 
@@ -75,9 +96,14 @@ class TenantPublicShellController extends Controller
         ?string $fallbackPath = null,
     ): Response|RedirectResponse {
         $requestedUri = $this->requestTargetPath($request, $fallbackPath);
+        $consumeDirectFallbackBypass = $this->shouldConsumeDirectFallbackBypass(
+            $request,
+            $requestedUri,
+        );
         $redirect = $this->redirectToInstalledAppIfAndroid(
             $request,
-            $requestedUri
+            $requestedUri,
+            $consumeDirectFallbackBypass,
         );
         if ($redirect !== null) {
             return $redirect;
@@ -85,21 +111,26 @@ class TenantPublicShellController extends Controller
 
         if ($this->isInvitePath($requestedUri)) {
             return $this->renderShell(
-                $this->metadataService->inviteMetadata($request->query('code'))
+                $this->metadataService->inviteMetadata($request->query('code')),
+                forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
             );
         }
 
         return $this->renderShell(
-            $this->metadataService->defaultMetadata($requestedUri)
+            $this->metadataService->defaultMetadata($requestedUri),
+            forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
         );
     }
 
     /**
      * @param  array<string, string>  $metadata
      */
-    private function renderShell(array $metadata): Response
+    private function renderShell(
+        array $metadata,
+        bool $forgetDirectFallbackBypass = false,
+    ): Response
     {
-        return response(
+        $response = response(
             $this->shellRenderer->render($metadata),
             200,
             [
@@ -107,6 +138,16 @@ class TenantPublicShellController extends Controller
                 'Cache-Control' => 'no-cache, no-store, max-age=0, must-revalidate',
             ]
         );
+
+        if ($forgetDirectFallbackBypass) {
+            $response->cookie(
+                cookie()->forget(
+                    WebToAppPromotionService::WEB_DIRECT_FALLBACK_BYPASS_COOKIE
+                )
+            );
+        }
+
+        return $response;
     }
 
     private function normalizeFallbackPath(?string $fallbackPath): string
@@ -134,7 +175,12 @@ class TenantPublicShellController extends Controller
     private function redirectToInstalledAppIfAndroid(
         Request $request,
         string $targetPath,
+        bool $suppressDirectHandoff = false,
     ): ?RedirectResponse {
+        if ($suppressDirectHandoff) {
+            return null;
+        }
+
         if (
             $this->promotionService->detectPlatformTarget($request->userAgent())
             !== 'android'
@@ -152,6 +198,22 @@ class TenantPublicShellController extends Controller
             'platform_target' => 'android',
             'fallback' => 'target',
         ]));
+    }
+
+    private function shouldConsumeDirectFallbackBypass(
+        Request $request,
+        string $targetPath,
+    ): bool {
+        $cookieTargetPath = trim((string) $request->cookie(
+            WebToAppPromotionService::WEB_DIRECT_FALLBACK_BYPASS_COOKIE
+        ));
+
+        if ($cookieTargetPath === '') {
+            return false;
+        }
+
+        return $cookieTargetPath === $this->promotionService
+            ->normalizeTargetPath($targetPath);
     }
 
     private function isPromotionBoundaryPath(string $targetPath): bool

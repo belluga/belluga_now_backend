@@ -6,6 +6,8 @@ namespace Belluga\DeepLinks\Application;
 
 class WebToAppPromotionService
 {
+    public const string WEB_DIRECT_FALLBACK_BYPASS_COOKIE = 'belluga_web_direct_fallback_target';
+
     private const int MAX_TARGET_PATH_LENGTH = 2048;
 
     private const int MAX_REDIRECT_UNWRAP_DEPTH = 5;
@@ -128,6 +130,16 @@ class WebToAppPromotionService
         }
 
         return null;
+    }
+
+    public function shouldSeedWebDirectFallbackBypassCookie(
+        string $platformTarget,
+        string $storeChannel,
+        ?string $fallbackMode,
+    ): bool {
+        return $platformTarget === 'android'
+            && $storeChannel === 'web_direct'
+            && $fallbackMode === 'target';
     }
 
     /**
