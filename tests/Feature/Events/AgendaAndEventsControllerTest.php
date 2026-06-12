@@ -1125,6 +1125,52 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame($targetOccurrenceId, (string) ($items[0]['occurrence_id'] ?? ''));
     }
 
+    public function test_agenda_excludes_orphan_occurrences_and_only_returns_resolvable_public_detail_rows(): void
+    {
+        $validEvent = $this->createEvent([
+            'title' => 'Resolvable Public Event',
+            'date_time_start' => Carbon::now()->addDays(3),
+            'date_time_end' => Carbon::now()->addDays(3)->addHours(2),
+        ]);
+        $validOccurrenceId = $this->firstOccurrenceId($validEvent);
+
+        $orphanEvent = $this->createEvent([
+            'title' => 'Orphaned Public Occurrence',
+            'date_time_start' => Carbon::now()->addDays(4),
+            'date_time_end' => Carbon::now()->addDays(4)->addHours(2),
+        ]);
+        $orphanOccurrenceId = $this->firstOccurrenceId($orphanEvent);
+        $orphanEvent->forceDelete();
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $items = $response->json('items', []);
+        $titles = array_map(static fn (array $item): string => (string) ($item['title'] ?? ''), $items);
+
+        $this->assertContains('Resolvable Public Event', $titles);
+        $this->assertNotContains('Orphaned Public Occurrence', $titles);
+
+        $this->assertFalse(
+            collect($items)->contains(
+                static fn (array $item): bool => (string) ($item['occurrence_id'] ?? '') === $orphanOccurrenceId
+            ),
+            'Agenda must hard-cut orphan occurrences instead of exposing broken public detail routes.'
+        );
+
+        $validAgendaRow = collect($items)->first(
+            static fn (array $item): bool => (string) ($item['occurrence_id'] ?? '') === $validOccurrenceId
+        );
+        $this->assertIsArray($validAgendaRow);
+
+        $detailRouteRef = (string) ($validAgendaRow['slug'] ?? '');
+        $this->assertNotSame('', $detailRouteRef, 'Returned agenda rows must expose a resolvable route reference.');
+
+        $this->getJson(
+            "{$this->base_api_tenant}events/{$detailRouteRef}?occurrence={$validOccurrenceId}"
+        )->assertStatus(200);
+    }
+
     public function test_occurrence_ids_are_applied_in_initial_agenda_and_stream_pipeline_stages(): void
     {
         $occurrenceId = '507f1f77bcf86cd799439011';
@@ -1165,6 +1211,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 $occurrenceId
             )
         );
+        $this->assertTrue(
+            $this->pipelineUsesIndexedPublicParentEventLookup($searchAgendaPipeline),
+            'Public agenda pipeline must exclude orphan occurrences through indexed parent-event lookup.'
+        );
 
         $geoStreamPipeline = $this->buildStreamPipelineForTest($baseFilters, true);
         $this->assertTrue(
@@ -1187,6 +1237,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 $streamPipeline[0]['$match'] ?? [],
                 $occurrenceId
             )
+        );
+        $this->assertTrue(
+            $this->pipelineUsesIndexedPublicParentEventLookup($streamPipeline),
+            'Public stream pipeline must exclude orphan occurrences through indexed parent-event lookup.'
         );
 
         $agendaSearchIndex = $this->findStageIndex(
@@ -2108,6 +2162,36 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             if (is_array($expression) && array_key_exists($field, $expression)) {
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     */
+    private function pipelineUsesIndexedPublicParentEventLookup(array $pipeline): bool
+    {
+        foreach ($pipeline as $index => $operation) {
+            if (! is_array($operation) || ! isset($operation['$lookup']) || ! is_array($operation['$lookup'])) {
+                continue;
+            }
+
+            $lookup = $operation['$lookup'];
+            if (($lookup['from'] ?? null) !== 'events'
+                || ($lookup['localField'] ?? null) !== 'event_object_id'
+                || ($lookup['foreignField'] ?? null) !== '_id'
+                || array_key_exists('pipeline', $lookup)) {
+                continue;
+            }
+
+            $previousOperation = $pipeline[$index - 1] ?? [];
+            $nextOperation = $pipeline[$index + 1] ?? [];
+            $matchAfterUnwind = $pipeline[$index + 2]['$match'] ?? [];
+
+            return isset($previousOperation['$addFields']['event_object_id'])
+                && ($nextOperation['$unwind'] ?? null) === '$event'
+                && ($matchAfterUnwind['event.deleted_at'] ?? null) === null;
         }
 
         return false;

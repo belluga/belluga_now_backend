@@ -862,6 +862,7 @@ class EventQueryService
         }
 
         $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
+        $this->appendPublicParentEventLookupStages($pipeline);
 
         $pipeline[] = [
             '$addFields' => [
@@ -1079,6 +1080,7 @@ class EventQueryService
         $this->applyCategoryFilter($pipeline, $filters['categories']);
         $this->applyTaxonomyFilter($pipeline, $filters['taxonomy'], 'taxonomy_terms');
         $this->applyConfirmedOccurrencesFilter($pipeline, $confirmedOccurrenceIds);
+        $this->appendPublicParentEventLookupStages($pipeline);
 
         $pipeline[] = ['$sort' => ['updated_at' => 1, '_id' => 1]];
         $pipeline[] = ['$limit' => InputConstraints::PUBLIC_STREAM_DELTA_LIMIT];
@@ -1198,6 +1200,36 @@ class EventQueryService
     private function taxonomyFacetBranchKey(string $taxonomyType): string
     {
         return 'taxonomy_scope_'.trim($taxonomyType);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     */
+    private function appendPublicParentEventLookupStages(array &$pipeline): void
+    {
+        $pipeline[] = [
+            '$addFields' => [
+                'event_object_id' => [
+                    '$convert' => [
+                        'input' => '$event_id',
+                        'to' => 'objectId',
+                        'onError' => null,
+                        'onNull' => null,
+                    ],
+                ],
+            ],
+        ];
+        $pipeline[] = [
+            '$lookup' => [
+                'from' => 'events',
+                'localField' => 'event_object_id',
+                'foreignField' => '_id',
+                'as' => 'event',
+            ],
+        ];
+        $pipeline[] = ['$unwind' => '$event'];
+        $pipeline[] = ['$match' => ['event.deleted_at' => null]];
+        $pipeline[] = ['$project' => ['event' => 0, 'event_object_id' => 0]];
     }
 
     /**
