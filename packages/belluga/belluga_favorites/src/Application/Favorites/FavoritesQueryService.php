@@ -165,6 +165,8 @@ class FavoritesQueryService
                 'avatar_url' => $target['avatar_url'] ?? null,
                 'cover_url' => $target['cover_url'] ?? null,
                 'profile_type' => isset($target['profile_type']) ? (string) $target['profile_type'] : null,
+                'can_open_public_detail' => (bool) ($target['can_open_public_detail'] ?? false),
+                'public_detail_path' => isset($target['public_detail_path']) ? (string) $target['public_detail_path'] : null,
             ],
             'snapshot' => [
                 'live_now_event_occurrence_id' => $liveNowOccurrenceId ? (string) $liveNowOccurrenceId : null,
@@ -176,6 +178,8 @@ class FavoritesQueryService
             'navigation' => [
                 'kind' => isset($navigation['kind']) ? (string) $navigation['kind'] : (string) ($row['target_type'] ?? ''),
                 'target_slug' => isset($navigation['target_slug']) ? (string) $navigation['target_slug'] : (isset($target['slug']) ? (string) $target['slug'] : null),
+                'target_path' => isset($navigation['target_path']) ? (string) $navigation['target_path'] : (isset($target['public_detail_path']) ? (string) $target['public_detail_path'] : null),
+                'can_open_public_detail' => (bool) ($navigation['can_open_public_detail'] ?? ($target['can_open_public_detail'] ?? false)),
             ],
         ];
     }

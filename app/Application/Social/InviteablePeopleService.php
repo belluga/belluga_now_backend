@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Social;
 
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
@@ -22,6 +23,10 @@ class InviteablePeopleService
     private const string TARGET_TYPE = 'account_profile';
 
     private const int MAX_INVITEABLE_SOURCE_ROWS = 500;
+
+    public function __construct(
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+    ) {}
 
     /**
      * @return array<int, array<string, mixed>>
@@ -749,7 +754,13 @@ class InviteablePeopleService
 
         $profileType = (string) ($profile->profile_type ?? '');
         if (array_key_exists($profileType, $capabilitiesByType)) {
-            return (bool) ($capabilitiesByType[$profileType]['is_inviteable'] ?? false);
+            $capabilities = $capabilitiesByType[$profileType];
+
+            return $this->capabilityCatalog->isEnabled(
+                AccountProfileTypeCapabilityCatalog::IS_INVITEABLE,
+                $capabilities,
+                $capabilities,
+            );
         }
 
         /** @var TenantProfileType|null $type */
@@ -759,7 +770,11 @@ class InviteablePeopleService
 
         $capabilities = is_array($type?->capabilities ?? null) ? $type->capabilities : [];
 
-        return (bool) ($capabilities['is_inviteable'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_INVITEABLE,
+            $capabilities,
+            $capabilities,
+        );
     }
 
     private function profileIsDiscoverableByContacts(AccountProfile $profile): bool
@@ -875,7 +890,7 @@ class InviteablePeopleService
             ->mapWithKeys(function (TenantProfileType $type): array {
                 $capabilities = is_array($type->capabilities ?? null) ? $type->capabilities : [];
 
-                return [(string) $type->type => $capabilities];
+                return [(string) $type->type => $this->capabilityCatalog->normalize($capabilities, $capabilities)];
             })
             ->all();
     }

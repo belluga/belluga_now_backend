@@ -6,6 +6,8 @@ namespace Belluga\DeepLinks\Application;
 
 class WebToAppPromotionService
 {
+    public const string WEB_DIRECT_FALLBACK_BYPASS_COOKIE = 'belluga_web_direct_fallback_target';
+
     private const int MAX_TARGET_PATH_LENGTH = 2048;
 
     private const int MAX_REDIRECT_UNWRAP_DEPTH = 5;
@@ -24,7 +26,7 @@ class WebToAppPromotionService
         ?string $code,
         string $storeChannel,
         array $settings,
-        bool $preferPromotionFallback = false,
+        ?string $fallbackMode = null,
     ): string {
         $normalizedOrigin = rtrim($origin, '/');
         $propagatedCode = $this->resolvePropagatedCode(
@@ -43,7 +45,7 @@ class WebToAppPromotionService
                 code: $propagatedCode,
                 storeChannel: $storeChannel,
                 settings: $settings,
-                preferPromotionFallback: $preferPromotionFallback,
+                fallbackMode: $fallbackMode,
             );
         }
 
@@ -116,13 +118,41 @@ class WebToAppPromotionService
         return $safe;
     }
 
-    public function prefersPromotionFallback(mixed $fallback): bool
+    public function normalizeFallbackMode(mixed $fallback): ?string
     {
         if (! is_scalar($fallback)) {
-            return false;
+            return null;
         }
 
-        return strtolower(trim((string) $fallback)) === 'promotion';
+        $candidate = strtolower(trim((string) $fallback));
+        if ($candidate === 'promotion' || $candidate === 'target') {
+            return $candidate;
+        }
+
+        return null;
+    }
+
+    public function coerceFallbackModeForStoreChannel(
+        string $storeChannel,
+        ?string $fallbackMode,
+    ): ?string {
+        if ($fallbackMode !== 'target') {
+            return $fallbackMode;
+        }
+
+        return $storeChannel === 'web_direct'
+            ? 'target'
+            : 'promotion';
+    }
+
+    public function shouldSeedWebDirectFallbackBypassCookie(
+        string $platformTarget,
+        string $storeChannel,
+        ?string $fallbackMode,
+    ): bool {
+        return $platformTarget === 'android'
+            && $storeChannel === 'web_direct'
+            && $fallbackMode === 'target';
     }
 
     /**
@@ -133,14 +163,17 @@ class WebToAppPromotionService
         ?string $code,
         string $storeChannel,
         array $settings,
-        bool $preferPromotionFallback,
+        ?string $fallbackMode,
     ): string {
-        $promotionFallbackUrl = $preferPromotionFallback
+        $promotionFallbackUrl = $fallbackMode === 'promotion'
             ? $this->buildPromotionFallbackUrl($openTargetUrl)
+            : null;
+        $targetFallbackUrl = $fallbackMode === 'target'
+            ? $openTargetUrl
             : null;
         $storeUrl = $this->associationService->resolveAndroidStoreUrl($settings);
         if ($storeUrl === null) {
-            return $promotionFallbackUrl ?? $openTargetUrl;
+            return $promotionFallbackUrl ?? $targetFallbackUrl ?? $openTargetUrl;
         }
 
         $referrerParams = [
@@ -156,7 +189,8 @@ class WebToAppPromotionService
             $storeUrl,
             ['referrer' => http_build_query($referrerParams)],
         );
-        $browserFallbackUrl = $promotionFallbackUrl ?? $fallbackStoreUrl;
+        $browserFallbackUrl =
+            $promotionFallbackUrl ?? $targetFallbackUrl ?? $fallbackStoreUrl;
         $packageName = $this->associationService->resolveAndroidPackageName($settings);
         if ($packageName === '') {
             return $browserFallbackUrl;

@@ -436,7 +436,11 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
             'event_name' => 'Projection Merge Event',
             'event_slug' => 'projection-merge-event',
             'attendance_policy' => 'free_confirmation_only',
-            'tags' => ['vip'],
+            'taxonomy_terms' => [[
+                'type' => 'audiencia',
+                'value' => 'vip',
+                'label' => 'VIP',
+            ]],
             'inviter_candidates' => [[
                 'invite_id' => 'invite-first',
                 'inviter_principal' => [
@@ -458,7 +462,11 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
             'event_name' => 'Projection Merge Event',
             'event_slug' => 'projection-merge-event',
             'attendance_policy' => 'free_confirmation_only',
-            'tags' => ['early'],
+            'taxonomy_terms' => [[
+                'type' => 'momento',
+                'value' => 'early',
+                'label' => 'Early',
+            ]],
             'inviter_candidates' => [[
                 'invite_id' => 'invite-second',
                 'inviter_principal' => [
@@ -502,8 +510,12 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
             ->firstOrFail();
 
         $this->assertSame(
-            ['early', 'vip'],
-            collect($projection->tags ?? [])->sort()->values()->all(),
+            ['audiencia:vip', 'momento:early'],
+            collect($projection->taxonomy_terms ?? [])
+                ->map(fn (mixed $term): string => trim((string) data_get($term, 'type')).':'.trim((string) data_get($term, 'value')))
+                ->sort()
+                ->values()
+                ->all(),
         );
         $this->assertCount(2, $projection->inviter_candidates ?? []);
         $this->assertSame(

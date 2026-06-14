@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integration\Invites;
 
 use Belluga\Events\Application\Events\EventHeroImageResolver;
+use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Contracts\InviteTargetReadContract;
@@ -14,6 +15,7 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
 {
     public function __construct(
         private readonly EventHeroImageResolver $eventHeroImages,
+        private readonly EventQueryService $eventQueries,
     ) {}
 
     public function findEventByIdOrSlug(string $eventRef): ?array
@@ -104,6 +106,16 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
             'is_event_published' => (bool) ($occurrence->is_event_published ?? false),
             'attributes' => $this->normalizeArray($occurrence->getAttributes()),
         ];
+    }
+
+    public function findEventDetailProjection(string $eventRef, string $occurrenceRef): ?array
+    {
+        $event = $this->eventQueries->findByIdOrSlug($eventRef);
+        if (! $event instanceof Event) {
+            return null;
+        }
+
+        return $this->eventQueries->formatEventDetail($event, null, $occurrenceRef);
     }
 
     public function countOccurrencesForEvent(string $eventId, int $limit = 2): int

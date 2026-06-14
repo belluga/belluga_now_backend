@@ -739,7 +739,6 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'map_ui.group.radius',
             'map_ui.group.poi_time_window_days',
             'map_ui.group.default_origin',
-            'map_ui.group.filters',
         ], $rootNodeIds);
 
         $radiusNode = collect($mapUi['nodes'] ?? [])->firstWhere('id', 'map_ui.group.radius');
@@ -764,14 +763,21 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'map_ui.default_origin.label',
         ], $originChildren);
 
-        $filtersNode = collect($mapUi['nodes'] ?? [])->firstWhere('id', 'map_ui.group.filters');
-        $filtersChildren = array_map(
-            static fn (array $node): ?string => $node['id'] ?? null,
-            $filtersNode['children'] ?? []
-        );
-        $this->assertSame([
-            'map_ui.filters',
-        ], $filtersChildren);
+    }
+
+    public function test_patch_map_ui_rejects_legacy_filters_field(): void
+    {
+        $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/map_ui", [
+            'filters' => [
+                [
+                    'key' => 'events',
+                    'label' => 'Eventos',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['filters']);
     }
 
     public function test_schema_nodes_expose_every_registered_field_as_renderable_node(): void

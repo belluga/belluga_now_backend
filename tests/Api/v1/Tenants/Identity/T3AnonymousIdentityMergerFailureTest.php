@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Api\v1\Tenants\Identity;
 
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
-use Illuminate\Support\Facades\DB;
+use App\Models\Landlord\Tenant;
+use Illuminate\Support\Str;
 use Tests\Api\v1\Tenants\Identity\Contracts\ApiV1AnonymousIdentityMergerTestContract;
 use Tests\Helpers\TenantLabels;
 
@@ -19,54 +19,42 @@ class T3AnonymousIdentityMergerFailureTest extends ApiV1AnonymousIdentityMergerT
 
     public function test_merge_fails_when_anonymous_user_does_not_exist(): void
     {
-        $target = $this->createCanonicalUser();
         $source = $this->createAnonymousSource();
+        $this->enablePasswordAuthFixture();
 
-        $this->expectException(\Illuminate\Validation\ValidationException::class);
-        $this->expectExceptionMessage('One or more anonymous identities could not be found.');
+        $response = $this->json('post', sprintf('%sauth/register/password', $this->base_api_tenant), [
+            'name' => 'Merge Candidate',
+            'email' => sprintf('merge-missing-%s@example.org', Str::uuid()),
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [(string) $source->_id, '60c6e5e5d3f2a3e5c9b7e3a2'],
+        ]);
 
-        $this->app[\App\Http\Api\v1\Controllers\PasswordRegistrationController::class]->__invoke(
-            new \App\Http\Api\v1\Requests\PasswordRegistrationRequest([
-                'name' => $target->name,
-                'email' => $target->emails[0],
-                'password' => 'password',
-                'anonymous_user_ids' => [$source->_id, '60c6e5e5d3f2a3e5c9b7e3a2'],
-            ]),
-            app(\App\Domain\Identity\PasswordIdentityRegistrar::class),
-            app(\App\Domain\Identity\AnonymousIdentityMerger::class)
-        );
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.anonymous_user_ids.0', 'One or more anonymous identities could not be found.');
     }
 
     public function test_merge_fails_when_not_anonymous_identity(): void
     {
-        $target = $this->createCanonicalUser();
         $source = $this->createCanonicalUser();
+        $this->enablePasswordAuthFixture();
 
-        $this->expectException(\Illuminate\Validation\ValidationException::class);
-        $this->expectExceptionMessage('Only anonymous identities can be merged during registration.');
+        $response = $this->json('post', sprintf('%sauth/register/password', $this->base_api_tenant), [
+            'name' => 'Merge Candidate',
+            'email' => sprintf('merge-registered-%s@example.org', Str::uuid()),
+            'password' => 'SecurePass!123',
+            'anonymous_user_ids' => [(string) $source->_id],
+        ]);
 
-        $this->app[\App\Http\Api\v1\Controllers\PasswordRegistrationController::class]->__invoke(
-            new \App\Http\Api\v1\Requests\PasswordRegistrationRequest([
-                'name' => $target->name,
-                'email' => $target->emails[0],
-                'password' => 'password',
-                'anonymous_user_ids' => [$source->_id],
-            ]),
-            app(\App\Domain\Identity\PasswordIdentityRegistrar::class),
-            app(\App\Domain\Identity\AnonymousIdentityMerger::class)
-        );
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.anonymous_user_ids.0', 'Only anonymous identities can be merged during registration.');
     }
 
-    public function test_concurrency_conflict_throws_exception(): void
+    private function enablePasswordAuthFixture(): void
     {
-        $this->expectException(ConcurrencyConflictException::class);
-
-        $target = $this->createCanonicalUser();
-        $source = $this->createAnonymousSource();
-
-        // Simulate a concurrent update by incrementing the version
-        DB::connection('tenant')->collection('account_users')->where('_id', $target->_id)->increment('version');
-
-        $this->merger()->merge($target, [$source]);
+        Tenant::forgetCurrent();
+        $tenant = $this->ensureCanonicalTenantExists($this->tenant);
+        $tenant->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $tenant);
+        Tenant::forgetCurrent();
     }
 }

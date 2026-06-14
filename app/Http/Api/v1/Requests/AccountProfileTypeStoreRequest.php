@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -36,17 +37,7 @@ class AccountProfileTypeStoreRequest extends FormRequest
             'poi_visual.image_source' => ['required_if:poi_visual.mode,image', 'string', 'in:avatar,cover,type_asset'],
             'type_asset' => ['sometimes', 'nullable', 'image'],
             'remove_type_asset' => ['sometimes', 'boolean'],
-            'capabilities' => ['sometimes', 'array'],
-            'capabilities.is_favoritable' => ['sometimes', 'boolean'],
-            'capabilities.is_publicly_discoverable' => ['sometimes', 'boolean'],
-            'capabilities.is_poi_enabled' => ['sometimes', 'boolean'],
-            'capabilities.is_reference_location_enabled' => ['sometimes', 'boolean'],
-            'capabilities.has_bio' => ['sometimes', 'boolean'],
-            'capabilities.has_content' => ['sometimes', 'boolean'],
-            'capabilities.has_taxonomies' => ['sometimes', 'boolean'],
-            'capabilities.has_avatar' => ['sometimes', 'boolean'],
-            'capabilities.has_cover' => ['sometimes', 'boolean'],
-            'capabilities.has_events' => ['sometimes', 'boolean'],
+            ...app(AccountProfileTypeCapabilityCatalog::class)->validationRules(),
         ];
     }
 }

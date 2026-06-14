@@ -7,12 +7,15 @@ namespace App\Application\AccountProfiles;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Support\Str;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistryService
 {
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly AccountProfileTypeMediaService $mediaService,
+        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
     ) {}
 
     /**
@@ -27,7 +30,7 @@ class AccountProfileRegistryService
                 $visual = $this->resolveVisualPayload($type, $baseUrl);
                 $labels = $this->resolveLabels($type);
                 $capabilities = $this->resolveCapabilitiesPayload(
-                    is_array($type->capabilities ?? null) ? $type->capabilities : []
+                    $this->arrayFrom($type->capabilities ?? [])
                 );
 
                 return [
@@ -68,7 +71,11 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['is_poi_enabled'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     public function isReferenceLocationEnabled(string $profileType): bool
@@ -76,7 +83,11 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['is_reference_location_enabled'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     public function hasEvents(string $profileType): bool
@@ -84,7 +95,23 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return (bool) ($capabilities['has_events'] ?? false);
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_EVENTS,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
+    }
+
+    public function hasNestedProfileGroups(string $profileType): bool
+    {
+        $definition = $this->typeDefinition($profileType);
+        $capabilities = $definition['capabilities'] ?? [];
+
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
+            is_array($capabilities) ? $capabilities : [],
+            is_array($capabilities) ? $capabilities : [],
+        );
     }
 
     /**
@@ -153,21 +180,26 @@ class AccountProfileRegistryService
      */
     private function resolveCapabilitiesPayload(array $capabilities): array
     {
-        $isPoiEnabled = (bool) ($capabilities['is_poi_enabled'] ?? false);
-        $isReferenceLocationRequested = (bool) ($capabilities['is_reference_location_enabled'] ?? false);
+        return $this->capabilityCatalog->normalize($capabilities, $capabilities);
+    }
 
-        return [
-            'is_favoritable' => (bool) ($capabilities['is_favoritable'] ?? false),
-            'is_inviteable' => (bool) ($capabilities['is_inviteable'] ?? false),
-            'is_publicly_discoverable' => (bool) ($capabilities['is_publicly_discoverable'] ?? false),
-            'is_poi_enabled' => $isPoiEnabled,
-            'is_reference_location_enabled' => $isPoiEnabled && $isReferenceLocationRequested,
-            'has_bio' => (bool) ($capabilities['has_bio'] ?? false),
-            'has_content' => (bool) ($capabilities['has_content'] ?? false),
-            'has_taxonomies' => (bool) ($capabilities['has_taxonomies'] ?? false),
-            'has_avatar' => (bool) ($capabilities['has_avatar'] ?? false),
-            'has_cover' => (bool) ($capabilities['has_cover'] ?? false),
-            'has_events' => (bool) ($capabilities['has_events'] ?? false),
-        ];
+    /**
+     * @return array<string, mixed>
+     */
+    private function arrayFrom(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \Traversable) {
+            return iterator_to_array($value);
+        }
+
+        return [];
     }
 }

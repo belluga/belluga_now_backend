@@ -42,6 +42,7 @@ class EventAggregateWriteService
     {
         /** @var Event $updated */
         $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
+            $event->unset('tags');
             $event->fill($payload);
             $event->save();
 
