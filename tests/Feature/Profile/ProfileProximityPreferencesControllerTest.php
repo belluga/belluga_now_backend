@@ -9,8 +9,10 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\ProximityPreference;
+use App\Models\Tenants\TenantProfileType;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -101,6 +103,18 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         $putResponse->assertJsonPath(
             'data.location_preference.fixed_reference.entity_type',
             'hotel',
+        );
+        $putResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status',
+            'active',
+        );
+        $putResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status_reason',
+            'manual_coordinate',
+        );
+        $putResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.blocked_capability_key',
+            null,
         );
 
         $getResponse = $this->getJson(
@@ -201,6 +215,274 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             ->firstOrFail();
 
         $this->assertNull(data_get($stored->location_preference, 'fixed_reference'));
+    }
+
+    public function test_route_reference_point_policy_preserves_nullable_boolean_values(): void
+    {
+        $user = $this->createRegisteredUser();
+        Sanctum::actingAs($user, ['account-users:view']);
+
+        foreach ([null, true, false] as $value) {
+            $response = $this->putJson(
+                "{$this->base_api_tenant}profile/proximity-preferences",
+                [
+                    'max_distance_meters' => 30000,
+                    'use_reference_point_for_routes' => $value,
+                    'location_preference' => [
+                        'mode' => 'live_device_location',
+                        'fixed_reference' => null,
+                    ],
+                ],
+            );
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('data.use_reference_point_for_routes', $value);
+
+            $getResponse = $this->getJson(
+                "{$this->base_api_tenant}profile/proximity-preferences",
+            );
+
+            $getResponse->assertStatus(200);
+            $getResponse->assertJsonPath('data.use_reference_point_for_routes', $value);
+
+            $stored = ProximityPreference::query()
+                ->where('owner_user_id', (string) $user->_id)
+                ->firstOrFail();
+
+            $this->assertSame($value, $stored->use_reference_point_for_routes);
+        }
+    }
+
+    public function test_entity_reference_resolves_disabled_when_source_type_loses_poi_prerequisite(): void
+    {
+        $user = $this->createRegisteredUser();
+        Sanctum::actingAs($user, ['account-users:view']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hotel'],
+            [
+                'label' => 'Hotel',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'is_reference_location_enabled' => true,
+                ],
+            ],
+        );
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'hotel',
+            'display_name' => 'Hotel Base',
+            'slug' => 'hotel-base',
+            'visibility' => 'public',
+            'is_active' => true,
+            'is_verified' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.4976, -20.6736],
+            ],
+        ]);
+
+        $payload = [
+            'max_distance_meters' => 25000,
+            'location_preference' => [
+                'mode' => 'fixed_reference',
+                'fixed_reference' => [
+                    'source_kind' => 'entity_reference',
+                    'coordinate' => [
+                        'lat' => -20.6736,
+                        'lng' => -40.4976,
+                    ],
+                    'label' => 'Hotel Base',
+                    'entity_namespace' => 'account_profile',
+                    'entity_type' => 'hotel',
+                    'entity_id' => (string) $profile->_id,
+                    'entity_slug' => 'hotel-base',
+                ],
+            ],
+        ];
+
+        $putResponse = $this->putJson(
+            "{$this->base_api_tenant}profile/proximity-preferences",
+            $payload,
+        );
+
+        $putResponse->assertStatus(200);
+        $putResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status',
+            'active',
+        );
+
+        TenantProfileType::query()
+            ->where('type', 'hotel')
+            ->firstOrFail()
+            ->update([
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => false,
+                    'is_reference_location_enabled' => false,
+                ],
+            ]);
+
+        $getResponse = $this->getJson(
+            "{$this->base_api_tenant}profile/proximity-preferences",
+        );
+
+        $getResponse->assertStatus(200);
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.source_kind',
+            'entity_reference',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_namespace',
+            'account_profile',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_type',
+            'hotel',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_id',
+            (string) $profile->_id,
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_slug',
+            'hotel-base',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.coordinate.lat',
+            -20.6736,
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status',
+            'disabled',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status_reason',
+            'source_capability_disabled',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.blocked_capability_key',
+            'is_poi_enabled',
+        );
+    }
+
+    public function test_entity_reference_resolves_disabled_when_source_type_loses_reference_location_capability(): void
+    {
+        $user = $this->createRegisteredUser();
+        Sanctum::actingAs($user, ['account-users:view']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hotel'],
+            [
+                'label' => 'Hotel',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'is_reference_location_enabled' => true,
+                ],
+            ],
+        );
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'hotel',
+            'display_name' => 'Hotel Base',
+            'slug' => 'hotel-base-ref',
+            'visibility' => 'public',
+            'is_active' => true,
+            'is_verified' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.4976, -20.6736],
+            ],
+        ]);
+
+        $payload = [
+            'max_distance_meters' => 25000,
+            'location_preference' => [
+                'mode' => 'fixed_reference',
+                'fixed_reference' => [
+                    'source_kind' => 'entity_reference',
+                    'coordinate' => [
+                        'lat' => -20.6736,
+                        'lng' => -40.4976,
+                    ],
+                    'label' => 'Hotel Base',
+                    'entity_namespace' => 'account_profile',
+                    'entity_type' => 'hotel',
+                    'entity_id' => (string) $profile->_id,
+                    'entity_slug' => 'hotel-base-ref',
+                ],
+            ],
+        ];
+
+        $putResponse = $this->putJson(
+            "{$this->base_api_tenant}profile/proximity-preferences",
+            $payload,
+        );
+
+        $putResponse->assertStatus(200);
+        $putResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status',
+            'active',
+        );
+
+        TenantProfileType::query()
+            ->where('type', 'hotel')
+            ->firstOrFail()
+            ->update([
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'is_reference_location_enabled' => false,
+                ],
+            ]);
+
+        $getResponse = $this->getJson(
+            "{$this->base_api_tenant}profile/proximity-preferences",
+        );
+
+        $getResponse->assertStatus(200);
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.source_kind',
+            'entity_reference',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_namespace',
+            'account_profile',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_type',
+            'hotel',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_id',
+            (string) $profile->_id,
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.entity_slug',
+            'hotel-base-ref',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.coordinate.lat',
+            -20.6736,
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status',
+            'disabled',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.reference_status_reason',
+            'source_capability_disabled',
+        );
+        $getResponse->assertJsonPath(
+            'data.location_preference.fixed_reference.blocked_capability_key',
+            'is_reference_location_enabled',
+        );
     }
 
     public function test_missing_preference_returns_not_found(): void

@@ -22,8 +22,10 @@ class OpenAppRedirectController extends Controller
         $targetPath = $this->promotionService->normalizeTargetPath($request->query('path'));
         $code = $this->promotionService->normalizeCode($request->query('code'));
         $storeChannel = $this->promotionService->normalizeStoreChannel($request->query('store_channel'));
-        $preferPromotionFallback = $this->promotionService
-            ->prefersPromotionFallback($request->query('fallback'));
+        $fallbackMode = $this->promotionService->coerceFallbackModeForStoreChannel(
+            $storeChannel,
+            $this->promotionService->normalizeFallbackMode($request->query('fallback'))
+        );
         $platformTarget = $this->promotionService->normalizePlatformTarget($request->query('platform_target'))
             ?? $this->promotionService->detectPlatformTarget($request->userAgent());
 
@@ -34,9 +36,28 @@ class OpenAppRedirectController extends Controller
             code: $code,
             storeChannel: $storeChannel,
             settings: $this->settingsSource->currentAppLinksSettings(),
-            preferPromotionFallback: $preferPromotionFallback,
+            fallbackMode: $fallbackMode,
         );
 
-        return redirect()->away($redirectUrl);
+        $response = redirect()->away($redirectUrl);
+        if ($this->promotionService->shouldSeedWebDirectFallbackBypassCookie(
+            platformTarget: $platformTarget,
+            storeChannel: $storeChannel,
+            fallbackMode: $fallbackMode,
+        )) {
+            $response->cookie(cookie(
+                WebToAppPromotionService::WEB_DIRECT_FALLBACK_BYPASS_COOKIE,
+                $this->promotionService->normalizeTargetPath($targetPath),
+                1,
+                '/',
+                null,
+                $request->isSecure(),
+                true,
+                false,
+                'lax',
+            ));
+        }
+
+        return $response;
     }
 }

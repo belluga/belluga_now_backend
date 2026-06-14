@@ -667,10 +667,6 @@ class MapPoiQueryService
         ?array $markerOverride,
         bool $overrideMarker,
     ): array {
-        if (! $overrideMarker) {
-            return [false, null];
-        }
-
         if (! is_array($markerOverride)) {
             return [false, null];
         }
@@ -689,7 +685,7 @@ class MapPoiQueryService
             }
 
             return [
-                true,
+                $overrideMarker,
                 [
                     'mode' => 'icon',
                     'icon' => $icon,
@@ -706,7 +702,7 @@ class MapPoiQueryService
             }
 
             return [
-                true,
+                $overrideMarker,
                 [
                     'mode' => 'image',
                     'image_uri' => $imageUri,

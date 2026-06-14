@@ -26,6 +26,7 @@ use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -81,6 +82,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Personal',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
                 'is_favoritable' => false,
                 'is_publicly_discoverable' => false,
                 'is_poi_enabled' => false,
@@ -92,9 +95,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Venue',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
+                'has_nested_profile_groups' => true,
             ],
         ]);
 
@@ -218,6 +225,58 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('venue', $items->first()['profile_type'] ?? null);
     }
 
+    public function test_public_account_profile_index_includes_publicly_discoverable_non_favoritable_types(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'internal_partner',
+            'label' => 'Internal Partner',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => false,
+            ],
+        ]);
+
+        $discoverableAccount = Account::create([
+            'name' => 'Discoverable Venue',
+            'document' => 'DOC-DISCOVERABLE-VENUE',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $discoverableAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Visible Venue',
+            'is_active' => true,
+        ]);
+
+        $internalAccount = Account::create([
+            'name' => 'Internal Partner Account',
+            'document' => 'DOC-INTERNAL-PARTNER',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $internalAccount->_id,
+            'profile_type' => 'internal_partner',
+            'display_name' => 'Internal Partner Profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertSame(
+            ['internal_partner', 'venue'],
+            $items->pluck('profile_type')->unique()->sort()->values()->all()
+        );
+        $this->assertTrue(
+            $items->contains(fn (array $item): bool => ($item['profile_type'] ?? null) === 'internal_partner')
+        );
+    }
+
     public function test_public_account_profile_index_excludes_personal_profiles_even_when_inviteable_and_favoritable(): void
     {
         $this->createAccountUser([]);
@@ -244,6 +303,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Public Catalog Guard',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
             ],
@@ -285,38 +346,59 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $detailResponse->assertStatus(404);
     }
 
-    public function test_public_account_profile_index_keeps_legacy_public_types_without_discovery_flag(): void
+    public function test_public_account_profile_index_returns_requested_items_when_filter_requests_publicly_discoverable_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
 
-        TenantProfileType::query()
-            ->where('type', 'personal')
-            ->firstOrFail()
-            ->forceFill([
-                'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_inviteable' => true,
-                ],
-            ])
-            ->save();
+        TenantProfileType::create([
+            'type' => 'internal_partner',
+            'label' => 'Internal Partner',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => false,
+            ],
+        ]);
+
+        $internalAccount = Account::create([
+            'name' => 'Internal Filter Account',
+            'document' => 'DOC-INTERNAL-FILTER',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $internalAccount->_id,
+            'profile_type' => 'internal_partner',
+            'display_name' => 'Internal Filter Profile',
+            'slug' => 'internal-filter-profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?filter[profile_type]=internal_partner"
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            ['Internal Filter Profile'],
+            collect($response->json('data'))->pluck('display_name')->values()->all()
+        );
+    }
+
+    public function test_public_account_profile_index_excludes_unbackfilled_types_missing_required_public_capabilities(): void
+    {
+        $this->createAccountUser([]);
 
         TenantProfileType::create([
             'type' => 'public_catalog_fixture',
             'label' => 'Public Catalog Fixture',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
             ],
-        ]);
-
-        AccountProfile::create([
-            'account_id' => (string) $this->account->_id,
-            'profile_type' => 'personal',
-            'display_name' => 'Legacy Personal Profile',
-            'slug' => 'legacy-personal-profile',
-            'is_active' => true,
-            'visibility' => 'public',
         ]);
 
         $secondary = Account::create([
@@ -336,10 +418,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}account_profiles");
 
         $response->assertStatus(200);
-        $this->assertSame(
-            ['Legacy Public Catalog Profile'],
-            collect($response->json('data'))->pluck('display_name')->values()->all()
-        );
+        $this->assertSame([], $response->json('data'));
     }
 
     public function test_public_account_profile_index_returns_empty_when_filter_requests_non_favoritable_type(): void
@@ -402,6 +481,189 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Italian Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_returns_runtime_facets_for_the_full_filtered_universe_before_pagination(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'artist_public',
+            'label' => 'Artist Public',
+            'allowed_taxonomies' => ['cuisine'],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) Taxonomy::query()->where('slug', 'cuisine')->firstOrFail()->_id,
+            'slug' => 'japanese',
+            'name' => 'Japanese',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Paginated Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:italian'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Facet Artist Account',
+            'document' => 'DOC-FACET-ARTIST',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'artist_public',
+            'display_name' => 'Paginated Artist',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'japanese'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:japanese'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles?page=1&per_page=1");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.0.display_name', 'Paginated Artist');
+        $response->assertJsonPath(
+            'discovery_filter_facets.surface',
+            'discovery.account_profiles',
+        );
+
+        $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
+        $this->assertContains('artist_public', $filterKeys);
+        $this->assertContains('venue', $filterKeys);
+
+        $cuisineTerms = collect($response->json('discovery_filter_facets.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $cuisineTerms);
+    }
+
+    public function test_public_account_profile_index_runtime_facets_are_self_excluding_for_selected_filters(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'artist_public',
+            'label' => 'Artist Public',
+            'allowed_taxonomies' => ['cuisine'],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TaxonomyTerm::create([
+            'taxonomy_id' => (string) Taxonomy::query()->where('slug', 'cuisine')->firstOrFail()->_id,
+            'slug' => 'japanese',
+            'name' => 'Japanese',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Italian Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:italian'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Facet Venue Account',
+            'document' => 'DOC-FACET-VENUE-TWO',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Japanese Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'japanese'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:japanese'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $artistAccount = Account::create([
+            'name' => 'Facet Artist Account',
+            'document' => 'DOC-FACET-ARTIST-TWO',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $artistAccount->_id,
+            'profile_type' => 'artist_public',
+            'display_name' => 'Italian Artist',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:italian'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $aggregateCalls = [];
+        EventBus::listen(
+            'account_profiles.public_discovery_aggregate',
+            static function (string $purpose, array $pipeline) use (&$aggregateCalls): void {
+                $aggregateCalls[] = [
+                    'purpose' => $purpose,
+                    'pipeline' => $pipeline,
+                ];
+            }
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=venue&taxonomy[0][type]=cuisine&taxonomy[0][value]=italian"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.display_name', 'Italian Venue');
+
+        $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
+        $this->assertContains(
+            'artist_public',
+            $filterKeys,
+            'Type facets must exclude only the active type selection, not collapse to the selected type.'
+        );
+
+        $cuisineTerms = collect($response->json('discovery_filter_facets.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $cuisineTerms);
+
+        $this->assertCount(1, $aggregateCalls);
+        $this->assertSame(
+            'public_discovery_page_with_runtime_facets',
+            $aggregateCalls[0]['purpose'],
+        );
+        $this->assertTrue(
+            collect($aggregateCalls[0]['pipeline'])->contains(
+                static fn (array $stage): bool => array_key_exists('$facet', $stage)
+            ),
+            'Public discovery runtime facets must be computed through a single $facet aggregate.'
+        );
     }
 
     public function test_public_account_profile_index_taxonomy_filters_use_flat_index_projection(): void
@@ -545,6 +807,77 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.slug', 'slug-detail-venue');
         $response->assertJsonPath('data.display_name', 'Slug Detail Venue');
+        $response->assertJsonPath('data.can_open_public_detail', true);
+        $response->assertJsonPath('data.public_detail_path', '/parceiro/slug-detail-venue');
+    }
+
+    public function test_public_account_profile_index_excludes_non_queryable_type_even_if_discoverable_flag_is_true(): void
+    {
+        $this->createAccountUser([]);
+
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $venueType->capabilities = [
+            'is_queryable' => false,
+            'is_publicly_discoverable' => true,
+            'is_publicly_navigable' => true,
+            'is_favoritable' => true,
+            'is_poi_enabled' => true,
+            'has_events' => true,
+            'has_nested_profile_groups' => true,
+        ];
+        $venueType->save();
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Non Queryable Venue',
+            'slug' => 'non-queryable-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles");
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('data'));
+    }
+
+    public function test_public_account_profile_show_by_slug_requires_public_navigation_capability(): void
+    {
+        $this->createAccountUser([]);
+
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $venueType->capabilities = [
+            'is_queryable' => true,
+            'is_publicly_discoverable' => true,
+            'is_publicly_navigable' => false,
+            'is_favoritable' => true,
+            'is_poi_enabled' => true,
+            'has_events' => true,
+            'has_nested_profile_groups' => true,
+        ];
+        $venueType->save();
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Route Disabled Venue',
+            'slug' => 'route-disabled-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $index = $this->getJson("{$this->base_api_tenant}account_profiles");
+        $index->assertStatus(200);
+        $index->assertJsonPath('data.0.slug', 'route-disabled-venue');
+        $index->assertJsonPath('data.0.can_open_public_detail', false);
+        $index->assertJsonPath('data.0.public_detail_path', null);
+
+        $detail = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/route-disabled-venue"
+        );
+
+        $detail->assertStatus(404);
     }
 
     public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_venue_occurrences(): void
@@ -711,6 +1044,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
@@ -763,6 +1098,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Community Hub',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
@@ -814,6 +1151,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'POI Without Events',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => false,
@@ -1040,6 +1379,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
@@ -1173,6 +1514,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Restaurant',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
@@ -2130,6 +2473,401 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['slug']);
     }
 
+    public function test_account_profile_update_persists_nested_profile_groups_in_order(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Parent Venue',
+            'slug' => 'nested-parent-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $partnerA = $this->createNestedProfileFixture('Nested Partner A', 'nested-partner-a');
+        $partnerB = $this->createNestedProfileFixture('Nested Partner B', 'nested-partner-b');
+        $sponsor = $this->createNestedProfileFixture('Nested Sponsor', 'nested-sponsor');
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'patrocinadores',
+                        'label' => 'Patrocinadores',
+                        'order' => 1,
+                        'account_profile_ids' => [(string) $sponsor->_id],
+                    ],
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'order' => 0,
+                        'account_profile_ids' => [
+                            (string) $partnerB->_id,
+                            (string) $partnerA->_id,
+                        ],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_ids.0', (string) $partnerB->_id);
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_ids.1', (string) $partnerA->_id);
+        $response->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
+
+        $readback = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            $this->getHeaders()
+        );
+
+        $readback->assertStatus(200);
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
+    }
+
+    public function test_account_profile_update_rejects_invalid_nested_profile_group_members(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Invalid Parent',
+            'slug' => 'nested-invalid-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $partner = $this->createNestedProfileFixture('Nested Duplicate', 'nested-duplicate');
+
+        $duplicate = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [
+                            (string) $partner->_id,
+                            (string) $partner->_id,
+                        ],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $duplicate->assertStatus(422);
+
+        $selfLink = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'equipe',
+                        'label' => 'Equipe',
+                        'account_profile_ids' => [(string) $parent->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $selfLink->assertStatus(422);
+    }
+
+    public function test_account_profile_update_rejects_non_queryable_nested_profile_group_members(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hidden_guest'],
+            ['capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
+                'is_publicly_discoverable' => false,
+            ]]
+        );
+
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Parent',
+            'slug' => 'nested-parent-non-queryable',
+            'is_active' => true,
+        ])->fresh();
+        $hiddenMember = $this->createNestedProfileFixture(
+            'Hidden Member',
+            'hidden-member',
+            ['profile_type' => 'hidden_guest']
+        );
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [(string) $hiddenMember->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+    }
+
+    public function test_account_profile_update_rejects_nested_profile_group_limits(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Limit Parent',
+            'slug' => 'nested-limit-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $groups = [];
+        for ($index = 0; $index <= InputConstraints::ACCOUNT_PROFILE_NESTED_GROUPS_MAX; $index++) {
+            $groups[] = [
+                'id' => "grupo-{$index}",
+                'label' => "Grupo {$index}",
+                'account_profile_ids' => [],
+            ];
+        }
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            ['nested_profile_groups' => $groups],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+    }
+
+    public function test_account_profile_update_rejects_nested_profile_groups_when_type_capability_is_disabled(): void
+    {
+        TenantProfileType::create([
+            'type' => 'plain',
+            'label' => 'Plain',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => false,
+                'is_poi_enabled' => false,
+                'has_nested_profile_groups' => false,
+            ],
+        ]);
+
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'plain',
+            'display_name' => 'Nested Disabled Parent',
+            'slug' => 'nested-disabled-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $partner = $this->createNestedProfileFixture('Disabled Partner', 'disabled-partner');
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [(string) $partner->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+    }
+
+    public function test_public_account_profile_detail_projects_nested_groups_and_hides_empty_groups(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Public Parent',
+            'slug' => 'nested-public-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $partnerA = $this->createNestedProfileFixture('Public Partner A', 'public-partner-a');
+        $partnerB = $this->createNestedProfileFixture('Public Partner B', 'public-partner-b');
+        $privatePartner = $this->createNestedProfileFixture(
+            'Private Partner',
+            'private-partner',
+            ['visibility' => 'private']
+        );
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'vazio',
+                        'label' => 'Vazio',
+                        'order' => 0,
+                        'account_profile_ids' => [],
+                    ],
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'order' => 1,
+                        'account_profile_ids' => [
+                            (string) $partnerB->_id,
+                            (string) $partnerA->_id,
+                        ],
+                    ],
+                    [
+                        'id' => 'privados',
+                        'label' => 'Privados',
+                        'order' => 2,
+                        'account_profile_ids' => [(string) $privatePartner->_id],
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        )->assertStatus(200);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles/nested-public-parent");
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data.nested_profile_groups');
+        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.id', (string) $partnerB->_id);
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.id', (string) $partnerA->_id);
+        $this->assertSame(
+            ['public-partner-b', 'public-partner-a'],
+            collect($response->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
+        );
+    }
+
+    public function test_public_account_profile_detail_nested_groups_use_queryability_and_public_navigation_contract(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'guest_public'],
+            ['capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => false,
+                'is_publicly_discoverable' => false,
+            ]]
+        );
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hidden_guest'],
+            ['capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
+                'is_publicly_discoverable' => false,
+            ]]
+        );
+
+        $navigableMember = $this->createNestedProfileFixture(
+            'Navigable Member',
+            'navigable-member',
+            ['profile_type' => 'venue']
+        );
+        $nonNavigableMember = $this->createNestedProfileFixture(
+            'Non Navigable Member',
+            'non-navigable-member',
+            ['profile_type' => 'guest_public']
+        );
+        $hiddenMember = $this->createNestedProfileFixture(
+            'Hidden Member',
+            'hidden-member',
+            ['profile_type' => 'hidden_guest']
+        );
+
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Queryability Contract Parent',
+            'slug' => 'queryability-contract-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [
+                [
+                    'id' => 'parceiros',
+                    'label' => 'Parceiros',
+                    'order' => 0,
+                    'account_profile_ids' => [
+                        (string) $navigableMember->_id,
+                        (string) $nonNavigableMember->_id,
+                        (string) $hiddenMember->_id,
+                    ],
+                ],
+            ],
+        ])->fresh();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/queryability-contract-parent",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data.nested_profile_groups');
+        $response->assertJsonCount(2, 'data.nested_profile_groups.0.profiles');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.slug', 'navigable-member');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.public_detail_path', '/parceiro/navigable-member');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.slug', 'non-navigable-member');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.can_open_public_detail', false);
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.public_detail_path', null);
+        $this->assertFalse(
+            collect($response->json('data.nested_profile_groups.0.profiles'))
+                ->pluck('slug')
+                ->contains('hidden-member')
+        );
+    }
+
+    public function test_public_account_profile_detail_hides_nested_groups_when_type_capability_is_disabled(): void
+    {
+        $venueType = TenantProfileType::query()
+            ->where('type', 'venue')
+            ->firstOrFail();
+        $venueType->capabilities = [
+            'is_queryable' => true,
+            'is_publicly_navigable' => true,
+            'is_favoritable' => true,
+            'is_poi_enabled' => true,
+            'has_events' => true,
+            'has_nested_profile_groups' => false,
+        ];
+        $venueType->save();
+        $partner = $this->createNestedProfileFixture('Hidden Public Partner', 'hidden-public-partner');
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Hidden Nested Public Parent',
+            'slug' => 'hidden-nested-public-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [
+                [
+                    'id' => 'parceiros',
+                    'label' => 'Parceiros',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $partner->_id],
+                ],
+            ],
+        ])->fresh();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/{$parent->slug}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(0, 'data.nested_profile_groups');
+    }
+
     public function test_account_profile_index_filters_by_account(): void
     {
         $otherAccount = Account::create([
@@ -2158,6 +2896,55 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $items = collect($response->json('data'));
         $this->assertTrue($items->every(fn (array $item): bool => $item['account_id'] === (string) $this->account->_id));
+    }
+
+    public function test_account_profile_index_queryable_only_excludes_non_queryable_profiles(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hidden_guest'],
+            ['capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
+                'is_publicly_discoverable' => false,
+            ]]
+        );
+
+        $this->createNestedProfileFixture('Queryable Profile', 'queryable-profile');
+        $hiddenProfile = $this->createNestedProfileFixture(
+            'Hidden Profile',
+            'hidden-profile',
+            ['profile_type' => 'hidden_guest']
+        );
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?queryable_only=1&exclude_account_profile_id=".(string) $hiddenProfile->_id,
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $slugs = collect($response->json('data'))->pluck('slug')->all();
+        $this->assertContains('queryable-profile', $slugs);
+        $this->assertNotContains('hidden-profile', $slugs);
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    private function createNestedProfileFixture(string $name, string $slug, array $overrides = []): AccountProfile
+    {
+        $account = Account::create([
+            'name' => "{$name} Account",
+            'document' => 'DOC-'.strtoupper(str_replace('-', '_', $slug)).'-'.uniqid('', true),
+        ]);
+
+        return AccountProfile::create(array_merge([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'venue',
+            'display_name' => $name,
+            'slug' => $slug,
+            'is_active' => true,
+            'visibility' => 'public',
+        ], $overrides))->fresh();
     }
 
     private function initializeSystem(): void

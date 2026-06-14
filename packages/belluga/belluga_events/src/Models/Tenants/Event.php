@@ -35,6 +35,7 @@ class Event extends Model
         'capabilities',
         'created_by',
         'event_parties',
+        'profile_groups',
         'account_context_ids',
         'occurrence_refs',
         'publication',

@@ -36,12 +36,6 @@ class TenantDomainControllerTest extends TestCaseTenant
     {
         parent::setUp();
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
-        }
-
         $this->tenantModel = Tenant::query()->firstOrFail();
         $this->tenantModel->update([
             'app_domains' => ['tenantkappa.app'],
@@ -362,7 +356,7 @@ class TenantDomainControllerTest extends TestCaseTenant
             uri: "http://{$tenantHost}/admin/api/v1/auth/login",
             data: [
                 'email' => 'root@example.org',
-                'password' => 'Secret!234',
+                'password' => $this->canonicalInitializationPassword(),
                 'device_name' => 'tenant-domain-index-check',
             ]
         );
@@ -381,6 +375,11 @@ class TenantDomainControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.status', 'active');
     }
 
+    protected function canonicalInitializationPassword(): string
+    {
+        return 'Secret!234';
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);
@@ -389,7 +388,7 @@ class TenantDomainControllerTest extends TestCaseTenant
             landlord: ['name' => 'Landlord HQ'],
             tenant: ['name' => 'Tenant Kappa', 'subdomain' => 'tenant-kappa'],
             role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => $this->canonicalInitializationPassword()],
             themeDataSettings: [
                 'brightness_default' => 'light',
                 'primary_seed_color' => '#fff',

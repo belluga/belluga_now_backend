@@ -27,6 +27,7 @@ class AgendaController extends Controller
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
             'items' => $payload['items'],
             'has_more' => $payload['has_more'],
+            'discovery_filter_facets' => $payload['discovery_filter_facets'] ?? null,
         ]);
     }
 }

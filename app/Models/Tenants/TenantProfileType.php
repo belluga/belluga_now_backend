@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use MongoDB\Laravel\Eloquent\Model;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
@@ -29,18 +30,47 @@ class TenantProfileType extends Model
     protected $casts = [
     ];
 
+    protected static function booted(): void
+    {
+        $invalidateTypeSets = static function (): void {
+            AccountProfileTypeSetProvider::bumpRevision();
+        };
+
+        static::saved($invalidateTypeSets);
+        static::deleted($invalidateTypeSets);
+    }
+
+    public function scopeQueryable($query)
+    {
+        return $query->whereRaw(self::queryabilityCapabilityExpression());
+    }
+
+    public function scopePubliclyNavigable($query)
+    {
+        return $query->whereRaw(self::publicNavigabilityCapabilityExpression());
+    }
+
     public function scopePubliclyDiscoverable($query)
     {
         return $query
-            ->where('type', '!=', self::PERSONAL_TYPE)
+            ->queryable()
             ->whereRaw(self::publicDiscoveryCapabilityExpression());
     }
 
     public function scopePublicCatalog($query)
     {
+        return $query->publiclyDiscoverable();
+    }
+
+    public function scopeFavoritable($query)
+    {
+        return $query->whereRaw(self::favoritableCapabilityExpression());
+    }
+
+    public function scopePublicDiscoverySurface($query)
+    {
         return $query
-            ->where('capabilities.is_favoritable', true)
-            ->publiclyDiscoverable();
+            ->publicCatalog();
     }
 
     public function scopePublicPoiCatalog($query)
@@ -53,23 +83,37 @@ class TenantProfileType extends Model
     /**
      * @return array<string, mixed>
      */
-    public static function publicDiscoveryCapabilityExpression(): array
+    public static function queryabilityCapabilityExpression(): array
     {
         return [
-            '$or' => [
-                ['capabilities.is_publicly_discoverable' => true],
-                [
-                    '$and' => [
-                        ['type' => ['$ne' => self::PERSONAL_TYPE]],
-                        [
-                            '$or' => [
-                                ['capabilities.is_publicly_discoverable' => ['$exists' => false]],
-                                ['capabilities.is_publicly_discoverable' => null],
-                            ],
-                        ],
-                    ],
-                ],
+            '$and' => [
+                ['type' => ['$ne' => self::PERSONAL_TYPE]],
+                ['capabilities.is_queryable' => true],
             ],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function publicDiscoveryCapabilityExpression(): array
+    {
+        return ['capabilities.is_publicly_discoverable' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function publicNavigabilityCapabilityExpression(): array
+    {
+        return ['capabilities.is_publicly_navigable' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function favoritableCapabilityExpression(): array
+    {
+        return ['capabilities.is_favoritable' => true];
     }
 }

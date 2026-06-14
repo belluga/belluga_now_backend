@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Favorites;
 
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Contracts\FavoriteSnapshotBuilderContract;
@@ -13,6 +14,10 @@ use Illuminate\Support\Carbon;
 
 class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderContract
 {
+    public function __construct(
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
+    ) {}
+
     public function build(string $targetId, FavoriteRegistryDefinition $definition): ?array
     {
         $profile = AccountProfile::withTrashed()->where('_id', $targetId)->first();
@@ -47,6 +52,10 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
         $nextOccurrenceAt = $nextOccurrence?->starts_at;
         $lastOccurrenceAt = $lastOccurrence?->starts_at;
         $slug = $profile->slug ? (string) $profile->slug : null;
+        $normalizedSlug = trim((string) $slug);
+        $canOpenPublicDetail = $normalizedSlug !== ''
+            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
+        $publicDetailPath = $canOpenPublicDetail ? '/parceiro/'.$normalizedSlug : null;
 
         return [
             'target' => [
@@ -56,6 +65,8 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
                 'avatar_url' => $profile->avatar_url ?? null,
                 'cover_url' => $profile->cover_url ?? null,
                 'profile_type' => $profile->profile_type ? (string) $profile->profile_type : null,
+                'can_open_public_detail' => $canOpenPublicDetail,
+                'public_detail_path' => $publicDetailPath,
             ],
             'snapshot' => [
                 'live_now_event_occurrence_id' => $liveNowOccurrenceId,
@@ -72,6 +83,8 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
             'navigation' => [
                 'kind' => 'account_profile',
                 'target_slug' => $slug,
+                'target_path' => $publicDetailPath,
+                'can_open_public_detail' => $canOpenPublicDetail,
             ],
         ];
     }

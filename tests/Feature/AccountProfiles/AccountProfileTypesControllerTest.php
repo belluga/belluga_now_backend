@@ -6,6 +6,7 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
@@ -108,7 +109,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profile_types",
             [
-                'type' => 'venue',
+                'type' => 'venue-create',
                 'label' => 'Venue',
                 'labels' => [
                     'singular' => 'Venue',
@@ -125,22 +126,55 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'is_reference_location_enabled' => true,
+                    'has_nested_profile_groups' => true,
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.type', 'venue');
+        $response->assertJsonPath('data.type', 'venue-create');
         $response->assertJsonPath('data.label', 'Venue');
         $response->assertJsonPath('data.labels.singular', 'Venue');
         $response->assertJsonPath('data.labels.plural', 'Venues');
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', true);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
         $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
+    }
+
+    public function test_profile_type_create_repairs_public_environment_snapshot_synchronously(): void
+    {
+        TenantProfileType::query()->delete();
+        $this->seedUsableTenantEnvironmentSnapshot('test_profile_type_create_sync_snapshot_seed');
+
+        $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'venue-sync-create',
+                'label' => 'Venue Sync Create',
+                'labels' => [
+                    'singular' => 'Venue Sync Create',
+                    'plural' => 'Venue Sync Creates',
+                ],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_publicly_navigable' => true,
+                ],
+            ],
+            $this->getHeaders()
+        )->assertStatus(201);
+
+        $environmentType = $this->publicEnvironmentProfileType('venue-sync-create');
+
+        $this->assertIsArray($environmentType);
+        $this->assertSame('Venue Sync Create', $environmentType['label'] ?? null);
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_queryable', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable', false));
     }
 
     public function test_profile_type_create_disables_reference_location_when_poi_is_disabled(): void
@@ -169,6 +203,212 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $model = TenantProfileType::query()->where('type', 'hotel')->firstOrFail();
         $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
+    }
+
+    public function test_profile_type_create_keeps_nested_groups_capability_independent(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'expo',
+                'label' => 'Expo',
+                'capabilities' => [
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                    'has_nested_profile_groups' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $response->assertJsonPath('data.capabilities.has_events', false);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+
+        $model = TenantProfileType::query()->where('type', 'expo')->firstOrFail();
+        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
+    }
+
+    public function test_profile_type_create_persists_independent_queryability_discovery_and_public_navigation_flags(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'delegate',
+                'label' => 'Delegate',
+                'capabilities' => [
+                    'is_queryable' => false,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_favoritable' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.capabilities.is_queryable', false);
+        $response->assertJsonPath('data.capabilities.is_publicly_navigable', true);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable', true);
+        $response->assertJsonPath('data.capabilities.is_favoritable', true);
+
+        $model = TenantProfileType::query()->where('type', 'delegate')->firstOrFail();
+        $this->assertFalse((bool) ($model->capabilities['is_queryable'] ?? true));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_navigable'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
+    }
+
+    public function test_publicly_navigable_scope_is_fail_closed_when_flag_is_omitted(): void
+    {
+        TenantProfileType::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'direct-only',
+            'label' => 'Direct Only',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => false,
+            ],
+        ]);
+
+        TenantProfileType::create([
+            'type' => 'closed-detail',
+            'label' => 'Closed Detail',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => false,
+            ],
+        ]);
+
+        $publiclyNavigableTypes = TenantProfileType::query()
+            ->publiclyNavigable()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->values()
+            ->all();
+
+        $this->assertNotContains('direct-only', $publiclyNavigableTypes);
+        $this->assertNotContains('closed-detail', $publiclyNavigableTypes);
+    }
+
+    public function test_public_catalog_and_public_poi_scopes_respect_public_discoverability_independently_from_favoritable(): void
+    {
+        TenantProfileType::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'public-poi',
+            'label' => 'Public Poi',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'public-non-poi',
+            'label' => 'Public Non Poi',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+                'is_poi_enabled' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'non-favoritable-poi',
+            'label' => 'Non Favoritable Poi',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => false,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'hidden-poi',
+            'label' => 'Hidden Poi',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => false,
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $publicCatalogTypes = TenantProfileType::query()
+            ->publicCatalog()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->values()
+            ->all();
+        $publicPoiCatalogTypes = TenantProfileType::query()
+            ->publicPoiCatalog()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->values()
+            ->all();
+
+        $this->assertEqualsCanonicalizing(
+            ['non-favoritable-poi', 'public-non-poi', 'public-poi'],
+            $publicCatalogTypes
+        );
+        $this->assertEqualsCanonicalizing(['non-favoritable-poi', 'public-poi'], $publicPoiCatalogTypes);
+    }
+
+    public function test_queryability_and_public_navigation_backfill_repairs_missing_flags_without_overwriting_explicit_values(): void
+    {
+        TenantProfileType::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'personal',
+            'label' => 'Personal',
+            'capabilities' => [
+                'is_favoritable' => true,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'explicit-hidden',
+            'label' => 'Explicit Hidden',
+            'capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
+            ],
+        ]);
+
+        $migration = require base_path(
+            'database/migrations/tenants/2026_06_06_000100_backfill_profile_type_queryability_and_public_navigation.php'
+        );
+        $migration->up();
+
+        $personal = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
+        $venue = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $explicitHidden = TenantProfileType::query()->where('type', 'explicit-hidden')->firstOrFail();
+
+        $this->assertFalse((bool) data_get($personal->capabilities, 'is_queryable', true));
+        $this->assertFalse((bool) data_get($personal->capabilities, 'is_publicly_discoverable', true));
+        $this->assertFalse((bool) data_get($personal->capabilities, 'is_publicly_navigable', true));
+        $this->assertTrue((bool) data_get($venue->capabilities, 'is_queryable', false));
+        $this->assertTrue((bool) data_get($venue->capabilities, 'is_publicly_discoverable', false));
+        $this->assertTrue((bool) data_get($venue->capabilities, 'is_publicly_navigable', false));
+        $this->assertFalse((bool) data_get($explicitHidden->capabilities, 'is_queryable', true));
+        $this->assertFalse((bool) data_get($explicitHidden->capabilities, 'is_publicly_discoverable', true));
+        $this->assertFalse((bool) data_get($explicitHidden->capabilities, 'is_publicly_navigable', true));
     }
 
     public function test_profile_type_create_validation(): void
@@ -358,6 +598,47 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.type', 'restaurante');
         $response->assertJsonPath('data.label', 'Restaurante Atualizado');
+    }
+
+    public function test_profile_type_update_preserves_existing_capabilities_when_toggling_nested_groups(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => ['cuisine'],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => true,
+                'has_events' => true,
+                'has_nested_profile_groups' => false,
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue",
+            [
+                'capabilities' => [
+                    'has_nested_profile_groups' => true,
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.capabilities.is_favoritable', true);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable', true);
+        $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
+        $response->assertJsonPath('data.capabilities.has_events', true);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+
+        $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_poi_enabled'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_events'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
     }
 
     public function test_profile_type_map_poi_projection_impact_returns_projection_count(): void
@@ -572,6 +853,50 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ->count();
 
         $this->assertSame(0, $remaining);
+    }
+
+    public function test_profile_type_update_repairs_public_environment_snapshot_synchronously(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'venue-sync-update',
+            'label' => 'Venue Sync Old',
+            'labels' => [
+                'singular' => 'Venue Sync Old',
+                'plural' => 'Venue Sync Olds',
+            ],
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => false,
+                'is_publicly_navigable' => false,
+            ],
+        ]);
+
+        $this->seedUsableTenantEnvironmentSnapshot('test_profile_type_update_sync_snapshot_seed');
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue-sync-update",
+            [
+                'label' => 'Venue Sync Updated',
+                'labels' => [
+                    'singular' => 'Venue Sync Updated',
+                    'plural' => 'Venue Sync Updateds',
+                ],
+                'capabilities' => [
+                    'is_publicly_discoverable' => true,
+                    'is_publicly_navigable' => true,
+                ],
+            ],
+            $this->getHeaders()
+        )->assertStatus(200);
+
+        $environmentType = $this->publicEnvironmentProfileType('venue-sync-update');
+
+        $this->assertIsArray($environmentType);
+        $this->assertSame('Venue Sync Updated', $environmentType['label'] ?? null);
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_navigable', false));
     }
 
     public function test_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void
@@ -868,6 +1193,36 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertCount(0, $response->json('data'));
     }
 
+    public function test_profile_type_delete_repairs_public_environment_snapshot_synchronously(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'artist-sync-delete',
+            'label' => 'Artist Sync Delete',
+            'labels' => [
+                'singular' => 'Artist Sync Delete',
+                'plural' => 'Artist Sync Deletes',
+            ],
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
+            ],
+        ]);
+
+        $this->seedUsableTenantEnvironmentSnapshot('test_profile_type_delete_sync_snapshot_seed');
+        $this->assertIsArray($this->publicEnvironmentProfileType('artist-sync-delete'));
+
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profile_types/artist-sync-delete",
+            [],
+            $this->getHeaders()
+        )->assertStatus(200);
+
+        $this->assertNull($this->publicEnvironmentProfileType('artist-sync-delete'));
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);
@@ -888,6 +1243,39 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+    }
+
+    private function seedUsableTenantEnvironmentSnapshot(string $reason): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        app(TenantEnvironmentSnapshotService::class)->repair(
+            $tenant->fresh() ?? $tenant,
+            $reason,
+            ['trigger' => 'account_profile_type_controller_test'],
+        );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function publicEnvironmentProfileType(string $type): ?array
+    {
+        $response = $this->getJson("{$this->base_api_tenant}environment");
+        $response->assertStatus(200);
+
+        foreach (($response->json('profile_types') ?? []) as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            if ((string) ($entry['type'] ?? '') === $type) {
+                return $entry;
+            }
+        }
+
+        return null;
     }
 
     private function getMultipartHeaders(): array

@@ -52,6 +52,8 @@ final class ArchitectureGuardrailRunner
         $this->checkApiSecurityHardeningBaseline();
         $this->checkAccountUserTokenIssuerGuardrails();
         $this->checkAccountRouteAbilityBindingGuardrails();
+        $this->checkAccountProfileQueryabilityGuardrails();
+        $this->checkPublicTaxonomyCutoverGuardrails();
 
         if ($this->violations === []) {
             fwrite(STDOUT, "[ARCH-GUARDRAILS] PASS - no architecture violations found.\n");
@@ -1943,6 +1945,106 @@ final class ArchitectureGuardrailRunner
         }
 
         return $normalizedPath;
+    }
+
+    private function checkAccountProfileQueryabilityGuardrails(): void
+    {
+        $scriptPath = $this->repoRoot.'/scripts/account_profile_queryability_guardrails.php';
+        if (! is_file($scriptPath)) {
+            $this->addViolation(
+                'LAR-QRY-GUARD',
+                'scripts/account_profile_queryability_guardrails.php',
+                1,
+                'Missing AccountProfile queryability guardrail script.'
+            );
+
+            return;
+        }
+
+        require_once $scriptPath;
+
+        if (! class_exists('AccountProfileQueryabilityGuard')
+            || ! function_exists('loadAccountProfileQueryabilityAllowlist')) {
+            $this->addViolation(
+                'LAR-QRY-GUARD',
+                'scripts/account_profile_queryability_guardrails.php',
+                1,
+                'AccountProfile queryability guardrail script did not expose the expected runtime symbols.'
+            );
+
+            return;
+        }
+
+        ob_start();
+        $exitCode = (new \AccountProfileQueryabilityGuard(
+            $this->repoRoot,
+            loadAccountProfileQueryabilityAllowlist(null),
+            \AccountProfileQueryabilityGuard::DEFAULT_SCAN_DIRS,
+        ))->run();
+        $guardOutput = (string) ob_get_clean();
+
+        if ($guardOutput !== '') {
+            fwrite($exitCode === 0 ? STDOUT : STDERR, $guardOutput);
+        }
+
+        if ($exitCode !== 0) {
+            $this->addViolation(
+                'LAR-QRY-GUARD',
+                'scripts/account_profile_queryability_guardrails.php',
+                1,
+                'AccountProfile queryability guardrails reported violations. Review the emitted findings above.'
+            );
+        }
+    }
+
+    private function checkPublicTaxonomyCutoverGuardrails(): void
+    {
+        $scriptPath = $this->repoRoot.'/scripts/public_taxonomy_cutover_guardrails.php';
+        if (! is_file($scriptPath)) {
+            $this->addViolation(
+                'LAR-TAX-GUARD',
+                'scripts/public_taxonomy_cutover_guardrails.php',
+                1,
+                'Missing public taxonomy cutover guardrail script.'
+            );
+
+            return;
+        }
+
+        require_once $scriptPath;
+
+        if (! class_exists('PublicTaxonomyCutoverGuard')
+            || ! function_exists('loadPublicTaxonomyCutoverAllowlist')) {
+            $this->addViolation(
+                'LAR-TAX-GUARD',
+                'scripts/public_taxonomy_cutover_guardrails.php',
+                1,
+                'Public taxonomy cutover guardrail script did not expose the expected runtime symbols.'
+            );
+
+            return;
+        }
+
+        ob_start();
+        $exitCode = (new \PublicTaxonomyCutoverGuard(
+            $this->repoRoot,
+            loadPublicTaxonomyCutoverAllowlist(null),
+            \PublicTaxonomyCutoverGuard::DEFAULT_SCAN_PATHS,
+        ))->run();
+        $guardOutput = (string) ob_get_clean();
+
+        if ($guardOutput !== '') {
+            fwrite($exitCode === 0 ? STDOUT : STDERR, $guardOutput);
+        }
+
+        if ($exitCode !== 0) {
+            $this->addViolation(
+                'LAR-TAX-GUARD',
+                'scripts/public_taxonomy_cutover_guardrails.php',
+                1,
+                'Public taxonomy cutover guardrails reported violations. Review the emitted findings above.'
+            );
+        }
     }
 
     private function addViolation(string $ruleId, string $file, int $line, string $message): void

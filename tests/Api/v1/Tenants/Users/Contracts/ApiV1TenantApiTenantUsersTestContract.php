@@ -6,9 +6,21 @@ use Illuminate\Testing\TestResponse;
 use Tests\Helpers\RoleLabels;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;
+use Tests\Traits\SeedsLandlordSupportRoles;
+use Tests\Traits\SeedsTenantSupportRoles;
 
 abstract class ApiV1TenantApiTenantUsersTestContract extends TestCaseTenant
 {
+    use SeedsLandlordSupportRoles;
+    use SeedsTenantSupportRoles;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureSupportRoles();
+        $this->ensureTenantSupportRoles();
+    }
+
     public function testUsersCreateAndAttachAdmin(): void
     {
         $this->userCreate(

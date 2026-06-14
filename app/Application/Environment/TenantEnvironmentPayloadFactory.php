@@ -83,7 +83,7 @@ class TenantEnvironmentPayloadFactory
             'push' => $push,
             'profile_types' => $profileTypes,
             'settings' => [
-                'map_ui' => $settings?->getAttribute('map_ui') ?? [],
+                'map_ui' => $this->resolveSnapshotMapUi($settings),
                 'app_links' => $settings?->getAttribute('app_links') ?? [],
                 'tenant_public_auth' => $this->withPhoneOtpDeliveryFlags(
                     $tenantPublicAuth,
@@ -122,6 +122,156 @@ class TenantEnvironmentPayloadFactory
         $webhookUrl = $otp['webhook_url'] ?? null;
 
         return is_string($webhookUrl) && trim($webhookUrl) !== '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveSnapshotMapUi(?TenantSettings $settings): array
+    {
+        $mapUi = $this->normalizeBrandingData($settings?->getAttribute('map_ui') ?? []);
+        $canonicalFilters = $this->canonicalPublicMapFilters(
+            $settings?->getAttribute('discovery_filters')
+        );
+        if ($canonicalFilters !== []) {
+            $mapUi['filters'] = $canonicalFilters;
+        }
+
+        return $mapUi;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function canonicalPublicMapFilters(mixed $discoveryFilters): array
+    {
+        $settings = $this->normalizeBrandingData($discoveryFilters);
+        $surfaces = $this->normalizeBrandingData($settings['surfaces'] ?? []);
+        $surface = $this->normalizeBrandingData($surfaces['public_map.primary'] ?? []);
+        $filters = $this->normalizeListData($surface['filters'] ?? []);
+        if ($filters === []) {
+            return [];
+        }
+
+        $canonical = [];
+        foreach ($filters as $filter) {
+            $normalized = $this->normalizeBrandingData($filter);
+            $key = strtolower(trim((string) ($normalized['key'] ?? '')));
+            $label = trim((string) ($normalized['label'] ?? ''));
+            if ($key === '' || $label === '') {
+                continue;
+            }
+
+            $markerOverride = $this->normalizeBrandingData($normalized['marker_override'] ?? []);
+            if ($markerOverride === []) {
+                $markerOverride = $this->canonicalFilterVisual($normalized);
+            }
+
+            $imageUri = $this->normalizeOptionalString($normalized['image_uri'] ?? null);
+            $canonical[] = [
+                'key' => $key,
+                'label' => $label,
+                ...($imageUri !== null ? ['image_uri' => $imageUri] : []),
+                'override_marker' => (bool) ($normalized['override_marker'] ?? false),
+                ...($markerOverride !== [] ? ['marker_override' => $markerOverride] : []),
+                'query' => $this->canonicalMapFilterQuery(
+                    $this->normalizeBrandingData($normalized['query'] ?? [])
+                ),
+            ];
+        }
+
+        return $canonical;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filter
+     * @return array<string, string>
+     */
+    private function canonicalFilterVisual(array $filter): array
+    {
+        $icon = $this->normalizeOptionalString($filter['icon'] ?? ($filter['icon_key'] ?? null));
+        $color = strtoupper($this->normalizeOptionalString($filter['color'] ?? ($filter['color_hex'] ?? null)) ?? '');
+        $iconColor = strtoupper($this->normalizeOptionalString($filter['icon_color'] ?? null) ?? '#FFFFFF');
+
+        if (
+            $icon === null
+            || preg_match('/^#[0-9A-F]{6}$/', $color) !== 1
+            || preg_match('/^#[0-9A-F]{6}$/', $iconColor) !== 1
+        ) {
+            return [];
+        }
+
+        return [
+            'mode' => 'icon',
+            'icon' => $icon,
+            'color' => $color,
+            'icon_color' => $iconColor,
+        ];
+    }
+
+    /**
+     * @return array{source: string|null, types: array<int, string>, taxonomy: array<int, string>, tags: array<int, string>, categories: array<int, string>}
+     */
+    private function canonicalMapFilterQuery(array $query): array
+    {
+        $entities = $this->normalizeTokenList($query['entities'] ?? null);
+        $typesByEntity = $this->normalizeBrandingData($query['types_by_entity'] ?? []);
+        $taxonomyByGroup = $this->normalizeBrandingData($query['taxonomy'] ?? []);
+
+        return [
+            'source' => count($entities) === 1 ? $this->mapEntityToSource($entities[0]) : null,
+            'types' => $this->flattenTypesByEntity($entities, $typesByEntity),
+            'taxonomy' => $this->flattenTaxonomyByGroup($taxonomyByGroup),
+            'tags' => $this->normalizeTokenList($query['tags'] ?? null),
+            'categories' => $this->normalizeTokenList($query['category_keys'] ?? ($query['categories'] ?? null)),
+        ];
+    }
+
+    private function mapEntityToSource(string $entity): ?string
+    {
+        return match (strtolower(trim($entity))) {
+            'event' => 'event',
+            'account_profile' => 'account_profile',
+            'static_asset' => 'static_asset',
+            default => null,
+        };
+    }
+
+    /**
+     * @param  array<int, string>  $entities
+     * @param  array<string, mixed>  $typesByEntity
+     * @return array<int, string>
+     */
+    private function flattenTypesByEntity(array $entities, array $typesByEntity): array
+    {
+        $types = [];
+        foreach ($entities as $entity) {
+            foreach ($this->normalizeTokenList($typesByEntity[$entity] ?? null) as $type) {
+                $types[$type] = $type;
+            }
+        }
+
+        return array_values($types);
+    }
+
+    /**
+     * @param  array<string, mixed>  $taxonomyByGroup
+     * @return array<int, string>
+     */
+    private function flattenTaxonomyByGroup(array $taxonomyByGroup): array
+    {
+        $tokens = [];
+        foreach ($taxonomyByGroup as $taxonomy => $values) {
+            $taxonomyKey = strtolower(trim((string) $taxonomy));
+            if ($taxonomyKey === '') {
+                continue;
+            }
+            foreach ($this->normalizeTokenList($values) as $value) {
+                $tokens["{$taxonomyKey}:{$value}"] = "{$taxonomyKey}:{$value}";
+            }
+        }
+
+        return array_values($tokens);
     }
 
     /**
@@ -318,6 +468,64 @@ class TenantEnvironmentPayloadFactory
     }
 
     /**
+     * @return array<int, mixed>
+     */
+    private function normalizeListData(mixed $values): array
+    {
+        if (is_array($values)) {
+            return array_values($values);
+        }
+
+        if ($values instanceof \Traversable) {
+            return array_values(iterator_to_array($values));
+        }
+
+        if (is_object($values) && method_exists($values, 'toArray')) {
+            $normalized = $values->toArray();
+
+            return is_array($normalized) ? array_values($normalized) : [];
+        }
+
+        if (is_object($values) && method_exists($values, 'getArrayCopy')) {
+            $normalized = $values->getArrayCopy();
+
+            return is_array($normalized) ? array_values($normalized) : [];
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeTokenList(mixed $values): array
+    {
+        $raw = is_array($values) || $values instanceof \Traversable || (is_object($values) && (method_exists($values, 'toArray') || method_exists($values, 'getArrayCopy')))
+            ? $this->normalizeListData($values)
+            : [$values];
+        $normalized = [];
+        foreach ($raw as $value) {
+            $token = strtolower(trim((string) $value));
+            if ($token !== '') {
+                $normalized[$token] = $token;
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = trim($value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    /**
      * @param  array<string, mixed>  $branding
      */
     private function resolveLogoUrl(array $branding, string $key): ?string
@@ -398,6 +606,12 @@ class TenantEnvironmentPayloadFactory
 
         if (is_object($branding) && method_exists($branding, 'toArray')) {
             $normalized = $branding->toArray();
+
+            return is_array($normalized) ? $normalized : [];
+        }
+
+        if (is_object($branding) && method_exists($branding, 'getArrayCopy')) {
+            $normalized = $branding->getArrayCopy();
 
             return is_array($normalized) ? $normalized : [];
         }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\LandlordUsers\LandlordPasswordCredentialBackfillService;
@@ -12,6 +13,7 @@ use App\Application\Social\InviteablePeopleProjectionService;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
@@ -53,6 +55,91 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 
     return 0;
 })->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+
+Artisan::command('accounts:missing-profiles:repair {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
+    if (! app()->environment(['local', 'testing'])) {
+        $this->error('accounts:missing-profiles:repair is local-only by default.');
+
+        return 1;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug === '') {
+        $this->error('Provide an explicit tenant_slug.');
+
+        return 1;
+    }
+
+    $execute = (bool) $this->option('execute');
+    $expectedConfirmation = "repair-missing-profiles:{$tenantSlug}";
+    if ($execute && trim((string) $this->option('confirm')) !== $expectedConfirmation) {
+        $this->error("Execute mode requires --confirm={$expectedConfirmation}.");
+
+        return 1;
+    }
+
+    $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+    if (! $tenant instanceof Tenant) {
+        $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+        return 1;
+    }
+
+    $chunkSize = max(1, min((int) $this->option('chunk'), 500));
+    $tenant->makeCurrent();
+
+    try {
+        $summary = app(AccountMissingProfileRepairService::class)->run($execute, $chunkSize);
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    } finally {
+        $tenant->forgetCurrent();
+    }
+
+    return 0;
+})->purpose('Dry-run or repair local tenant accounts that have no active account profile.');
+
+Artisan::command('accounts:test-seeds:purge {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
+    if (! app()->environment(['local', 'testing'])) {
+        $this->error('accounts:test-seeds:purge is local-only by default.');
+
+        return 1;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug === '') {
+        $this->error('Provide an explicit tenant_slug.');
+
+        return 1;
+    }
+
+    $execute = (bool) $this->option('execute');
+    $expectedConfirmation = "purge-test-seeds:{$tenantSlug}";
+    if ($execute && trim((string) $this->option('confirm')) !== $expectedConfirmation) {
+        $this->error("Execute mode requires --confirm={$expectedConfirmation}.");
+
+        return 1;
+    }
+
+    $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+    if (! $tenant instanceof Tenant) {
+        $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+        return 1;
+    }
+
+    $chunkSize = max(1, min((int) $this->option('chunk'), 500));
+    $tenant->makeCurrent();
+
+    try {
+        $summary = app(AccountMissingProfileRepairService::class)
+            ->purgeTrashedTestSeedAggregates($execute, $chunkSize);
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    } finally {
+        $tenant->forgetCurrent();
+    }
+
+    return 0;
+})->purpose('Dry-run or purge local tenant soft-deleted test-seed account aggregates.');
 
 Artisan::command('tenant:environment-snapshot:repair {tenant_slug?} {--all} {--reason=manual_repair}', function () {
     /** @var TenantEnvironmentSnapshotService $service */
@@ -307,6 +394,149 @@ Artisan::command('events:occurrences:repair {tenant_slug?} {--all}', function ()
 
     return 0;
 })->purpose('Explicit manual repair for event occurrence projections; not part of recurring scheduler runtime.');
+
+Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {event_id} {profile_id} {--with-event-party}', function () {
+    if (! app()->environment(['local', 'testing'])) {
+        $this->error('events:diagnostic:append-profile-group-member is local/testing only.');
+
+        return 1;
+    }
+
+    $tenantRef = trim((string) $this->argument('tenant_ref'));
+    $eventId = trim((string) $this->argument('event_id'));
+    $profileId = trim((string) $this->argument('profile_id'));
+
+    if ($tenantRef === '' || $eventId === '' || $profileId === '') {
+        $this->error('tenant_ref, event_id, and profile_id are required.');
+
+        return 1;
+    }
+
+    $tenant = Tenant::query()
+        ->where('_id', $tenantRef)
+        ->orWhere('slug', $tenantRef)
+        ->first();
+    if (! $tenant) {
+        $this->error("Tenant not found for reference [{$tenantRef}].");
+
+        return 1;
+    }
+
+    $normalizeArray = static function ($value): array {
+        if ($value instanceof \MongoDB\Model\BSONArray || $value instanceof \MongoDB\Model\BSONDocument) {
+            return $value->getArrayCopy();
+        }
+
+        return is_array($value) ? $value : [];
+    };
+
+    $normalizeDocumentArray = static function ($value) use ($normalizeArray): array {
+        return array_values(array_map(static function ($row): array {
+            if ($row instanceof \MongoDB\Model\BSONArray || $row instanceof \MongoDB\Model\BSONDocument) {
+                $row = $row->getArrayCopy();
+            }
+
+            return is_array($row) ? $row : [];
+        }, $normalizeArray($value)));
+    };
+
+    $normalizeScalarArray = static function ($value) use ($normalizeArray): array {
+        return array_values($normalizeArray($value));
+    };
+
+    $tenant->makeCurrent();
+    try {
+        $event = \Belluga\Events\Models\Tenants\Event::query()
+            ->where('_id', $eventId)
+            ->first();
+        if (! $event) {
+            $this->error("Event not found for id [{$eventId}].");
+
+            return 1;
+        }
+
+        $profile = AccountProfile::query()
+            ->where('_id', $profileId)
+            ->first();
+        if (! $profile instanceof AccountProfile) {
+            $this->error("Account profile not found for id [{$profileId}].");
+
+            return 1;
+        }
+
+        $groups = $normalizeDocumentArray($event->profile_groups ?? []);
+        if (! isset($groups[0])) {
+            $this->error('Missing first profile group for diagnostic mutation.');
+
+            return 1;
+        }
+
+        $memberIds = $normalizeScalarArray($groups[0]['account_profile_ids'] ?? []);
+        if (! in_array($profileId, $memberIds, true)) {
+            $memberIds[] = $profileId;
+        }
+        $groups[0]['account_profile_ids'] = $memberIds;
+        $event->profile_groups = $groups;
+
+        if ((bool) $this->option('with-event-party')) {
+            $eventParties = $normalizeDocumentArray($event->event_parties ?? []);
+            $canonicalParty = [
+                'party_type' => trim((string) ($profile->profile_type ?? '')),
+                'party_ref_id' => (string) $profile->getKey(),
+                'permissions' => [
+                    'can_edit' => false,
+                ],
+                'metadata' => [
+                    'display_name' => trim((string) ($profile->display_name ?? '')),
+                    'slug' => trim((string) ($profile->slug ?? '')),
+                    'profile_type' => trim((string) ($profile->profile_type ?? '')),
+                    'avatar_url' => $profile->avatar_url ?? null,
+                    'cover_url' => $profile->cover_url ?? null,
+                    'taxonomy_terms' => $normalizeDocumentArray($profile->taxonomy_terms ?? []),
+                ],
+            ];
+
+            if ($canonicalParty['party_type'] === '' || $canonicalParty['metadata']['display_name'] === '') {
+                $this->error('Canonical event-party mutation requires a profile with non-empty profile_type and display_name.');
+
+                return 1;
+            }
+
+            $replaced = false;
+            foreach ($eventParties as $index => $row) {
+                if ((string) ($row['party_ref_id'] ?? '') !== $profileId) {
+                    continue;
+                }
+
+                $eventParties[$index] = $canonicalParty;
+                $replaced = true;
+                break;
+            }
+
+            if (! $replaced) {
+                $eventParties[] = $canonicalParty;
+            }
+
+            $event->event_parties = $eventParties;
+        }
+
+        $event->save();
+        $event = $event->fresh() ?? $event;
+        app(EventOccurrenceReconciliationService::class)->reconcileEvent($event);
+
+        $this->line(json_encode([
+            'tenant_ref' => $tenantRef,
+            'event_id' => $eventId,
+            'profile_id' => $profileId,
+            'with_event_party' => (bool) $this->option('with-event-party'),
+            'occurrence_projections_repaired' => true,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return 0;
+    } finally {
+        $tenant->forgetCurrent();
+    }
+})->purpose('Append a profile id to the first event profile group, optionally mirror a canonical event-party payload, and resync occurrence projections for local diagnostics.');
 
 Artisan::command('push:topics:repair {tenant_slug?} {--all} {--chunk=200}', function (PushTopicMembershipService $memberships) {
     $chunkSize = max(1, min((int) $this->option('chunk'), 1000));

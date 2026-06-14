@@ -15,11 +15,8 @@ final class EventPayloadFanoutGuard
         $occurrences = self::list($payload['occurrences'] ?? []);
         $errors = [];
 
-        if (count(self::list($payload['tags'] ?? [])) > InputConstraints::EVENT_TAGS_MAX) {
-            $errors['tags'] = sprintf(
-                'The event may not contain more than %d tags.',
-                InputConstraints::EVENT_TAGS_MAX
-            );
+        if (array_key_exists('tags', $payload)) {
+            $errors['tags'] = 'The legacy tags field is not accepted; use taxonomy_terms.';
         }
 
         if (count(self::list($payload['categories'] ?? [])) > InputConstraints::EVENT_CATEGORIES_MAX) {
@@ -54,12 +51,21 @@ final class EventPayloadFanoutGuard
         $programmingItemCount = 0;
         $programmingReferenceCount = 0;
 
-        foreach ($occurrences as $occurrence) {
+        foreach ($occurrences as $occurrenceIndex => $occurrence) {
             if (! is_array($occurrence)) {
                 continue;
             }
 
-            $occurrencePartyCount += count(self::list($occurrence['event_parties'] ?? []));
+            $occurrenceParties = self::list($occurrence['event_parties'] ?? []);
+            $occurrencePartyCount += count($occurrenceParties);
+            foreach (self::validateOccurrenceProfileGroups(
+                $occurrence,
+                $occurrenceParties,
+                (int) $occurrenceIndex
+            ) as $field => $message) {
+                $errors[$field] = $message;
+            }
+
             $taxonomyTerms = self::list($occurrence['taxonomy_terms'] ?? []);
             $occurrenceTaxonomyTermCount += count($taxonomyTerms);
             foreach ($taxonomyTerms as $term) {
@@ -123,11 +129,89 @@ final class EventPayloadFanoutGuard
     }
 
     /**
+     * @param  array<string, mixed>  $occurrence
+     * @param  array<int, mixed>  $occurrenceParties
+     * @return array<string, string>
+     */
+    private static function validateOccurrenceProfileGroups(
+        array $occurrence,
+        array $occurrenceParties,
+        int $occurrenceIndex
+    ): array {
+        $partyRefIds = self::partyRefIds($occurrenceParties);
+        if ($partyRefIds === []) {
+            return [];
+        }
+
+        $field = "occurrences.{$occurrenceIndex}.profile_groups";
+        $groups = self::list($occurrence['profile_groups'] ?? []);
+        if ($groups === []) {
+            return [
+                $field => 'Occurrence related profiles must be assigned through profile_groups.',
+            ];
+        }
+
+        $memberIds = self::profileGroupMemberIds($groups);
+        sort($partyRefIds);
+        sort($memberIds);
+
+        if ($partyRefIds !== $memberIds) {
+            return [
+                $field => 'Occurrence profile_groups must contain every occurrence event_parties profile exactly once.',
+            ];
+        }
+
+        return [];
+    }
+
+    /**
      * @return array<int, mixed>
      */
     private static function list(mixed $value): array
     {
         return is_array($value) ? array_values($value) : [];
+    }
+
+    /**
+     * @param  array<int, mixed>  $parties
+     * @return array<int, string>
+     */
+    private static function partyRefIds(array $parties): array
+    {
+        $ids = [];
+        foreach ($parties as $party) {
+            if (! is_array($party)) {
+                continue;
+            }
+            $id = trim((string) ($party['party_ref_id'] ?? ''));
+            if ($id !== '') {
+                $ids[] = $id;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * @param  array<int, mixed>  $groups
+     * @return array<int, string>
+     */
+    private static function profileGroupMemberIds(array $groups): array
+    {
+        $ids = [];
+        foreach ($groups as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+            foreach (self::list($group['account_profile_ids'] ?? []) as $rawId) {
+                $id = trim((string) $rawId);
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
+            }
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /**

@@ -225,6 +225,15 @@ class TenantEnvironmentSnapshotService
             ? $currentTenantId
             : trim((string) ($previousTenantId ?? ''));
 
+        $dispatchTenant = $previousCurrentTenant instanceof Tenant
+            && (string) $previousCurrentTenant->getKey() === $tenantId
+            ? $previousCurrentTenant
+            : Tenant::query()->find($tenantId);
+
+        if ($dispatchTenant instanceof Tenant) {
+            $dispatchTenant->makeCurrent();
+        }
+
         Context::add($contextKey, $tenantId);
 
         try {

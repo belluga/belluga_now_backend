@@ -6,16 +6,37 @@ use Illuminate\Testing\TestResponse;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AdminAuthFunctions;
 use Tests\Api\Traits\AdminRoleFunctions;
+use Tests\Api\Traits\TenantAdminMiddlewareFixtureSeeder;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;
 
 abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
 {
-    use AccountAuthFunctions, AdminAuthFunctions, AdminRoleFunctions;
+    use AccountAuthFunctions, AdminAuthFunctions, AdminRoleFunctions, TenantAdminMiddlewareFixtureSeeder;
+
+    protected static array $seededFixtures = [];
 
     abstract protected TenantLabels $tenant_cross {
         get;
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if (! array_key_exists(static::class, static::$seededFixtures)) {
+            $tenant = $this->resolveOrCreateTenant($this->tenant);
+            $crossTenant = $this->resolveOrCreateTenant($this->tenant_cross);
+
+            $this->seedTenantUsers($tenant, $this->tenant);
+            $this->seedTenantUsers($crossTenant, $this->tenant_cross);
+            $this->seedAccountFixtures($tenant, $this->tenant->account_primary);
+            $this->seedAccountFixtures($crossTenant, $this->tenant_cross->account_primary);
+
+            $tenant->makeCurrent();
+            static::$seededFixtures[static::class] = true;
+        }
     }
 
     public function testLoginAllAdminUsers(): void
