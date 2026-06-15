@@ -40,8 +40,8 @@ trait RefreshLandlordAndTenantDatabases
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
 
-        // Atlas drops can hang or fail; prefer non-destructive migrate in that case.
-        if ($dsn !== '' && str_contains($dsn, 'mongodb+srv://')) {
+        // Avoid migrate:fresh on Mongo; database drops can race subsequent migrations.
+        if ($dsn !== '' && str_contains($dsn, 'mongodb')) {
             return 'migrate';
         }
 
@@ -57,6 +57,7 @@ trait RefreshLandlordAndTenantDatabases
         $this->resetRuntimeState();
 
         $tenantDatabaseNames = Tenant::query()
+            ->withTrashed()
             ->pluck('database')
             ->filter()
             ->unique()
@@ -68,6 +69,7 @@ trait RefreshLandlordAndTenantDatabases
         $landlordDsn = (string) env('DB_URI_LANDLORD', '');
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
+        $isMongo = $dsn !== '' && str_contains($dsn, 'mongodb');
         $isAtlas = $dsn !== '' && str_contains($dsn, 'mongodb+srv://');
 
         Log::info('Tests: landlord collections before wipe', [
@@ -78,30 +80,12 @@ trait RefreshLandlordAndTenantDatabases
         Log::info('Tests: tenant collections before wipe', [
             'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
         ]);
-        if ($isAtlas) {
-            foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
-                $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
-            }
-
-            foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
-                $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
-            }
-
-            LandlordUser::query()->forceDelete();
+        if ($isMongo) {
+            $this->wipeMongoCollectionsForRefresh($landlordDatabase, $tenantDatabase, $tenantDatabaseNames, $isAtlas);
+            LandlordUser::withTrashed()->forceDelete();
             Landlord::query()->delete();
-            Tenant::query()->forceDelete();
-
-            if (! empty($tenantDatabaseNames)) {
-                $tenantClient = DB::connection('tenant')->getMongoClient();
-
-                foreach ($tenantDatabaseNames as $databaseName) {
-                    $database = $tenantClient->selectDatabase($databaseName);
-
-                    foreach ($database->listCollectionNames() as $collectionName) {
-                        $database->selectCollection($collectionName)->deleteMany([]);
-                    }
-                }
-            }
+            Tenant::withTrashed()->forceDelete();
+            static::$migrationsRan = false;
         } else {
             $landlordDatabase->drop();
             $tenantDatabase->drop();
@@ -146,9 +130,9 @@ trait RefreshLandlordAndTenantDatabases
             $tenantPaths
         ));
 
-        LandlordUser::query()->forceDelete();
+        LandlordUser::withTrashed()->forceDelete();
         Landlord::query()->delete();
-        Tenant::query()->forceDelete();
+        Tenant::withTrashed()->forceDelete();
 
         $this->resetRuntimeState();
 
@@ -176,6 +160,45 @@ trait RefreshLandlordAndTenantDatabases
         global $params;
 
         $params = [];
+    }
+
+    /**
+     * @param  array<int, string>  $tenantDatabaseNames
+     */
+    private function wipeMongoCollectionsForRefresh(
+        object $landlordDatabase,
+        object $tenantDatabase,
+        array $tenantDatabaseNames,
+        bool $deleteOnly
+    ): void {
+        $this->wipeMongoDatabaseCollectionsForRefresh($landlordDatabase, $deleteOnly);
+        $this->wipeMongoDatabaseCollectionsForRefresh($tenantDatabase, $deleteOnly);
+
+        if ($tenantDatabaseNames === []) {
+            return;
+        }
+
+        $tenantClient = DB::connection('tenant')->getMongoClient();
+
+        foreach ($tenantDatabaseNames as $databaseName) {
+            $this->wipeMongoDatabaseCollectionsForRefresh(
+                $tenantClient->selectDatabase($databaseName),
+                $deleteOnly
+            );
+        }
+    }
+
+    private function wipeMongoDatabaseCollectionsForRefresh(object $database, bool $deleteOnly): void
+    {
+        foreach ($database->listCollectionNames() as $collectionName) {
+            if ($deleteOnly) {
+                $database->selectCollection($collectionName)->deleteMany([]);
+
+                continue;
+            }
+
+            $database->dropCollection($collectionName);
+        }
     }
 
     protected function tenantMigrationPathArgs(): string

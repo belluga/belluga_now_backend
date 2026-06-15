@@ -67,7 +67,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.name', 'Org Alpha');
 
-        $orgId = $response->json('data._id') ?? $response->json('data.id');
+        $orgId = $response->json('data.id');
         $this->assertNotEmpty($orgId);
 
         $show = $this->getJson("{$this->base_tenant_api_admin}organizations/{$orgId}", $this->getHeaders());
@@ -116,7 +116,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         );
 
         $created->assertStatus(201);
-        $orgId = $created->json('data._id') ?? $created->json('data.id');
+        $orgId = $created->json('data.id');
 
         $updated = $this->patchJson(
             "{$this->base_tenant_api_admin}organizations/{$orgId}",
@@ -137,7 +137,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         );
 
         $created->assertStatus(201);
-        $orgId = $created->json('data._id') ?? $created->json('data.id');
+        $orgId = $created->json('data.id');
 
         $this->deleteJson("{$this->base_tenant_api_admin}organizations/{$orgId}", [], $this->getHeaders())
             ->assertStatus(200);
@@ -161,7 +161,7 @@ class OrganizationsControllerTest extends TestCaseTenant
         );
 
         $created->assertStatus(201);
-        $orgId = $created->json('data._id') ?? $created->json('data.id');
+        $orgId = $created->json('data.id');
 
         $this->deleteJson("{$this->base_tenant_api_admin}organizations/{$orgId}", [], $this->getHeaders())
             ->assertStatus(200);

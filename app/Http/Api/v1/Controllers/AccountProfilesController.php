@@ -43,9 +43,9 @@ class AccountProfilesController extends Controller
         $validated = $request->validated();
 
         $perPage = (int) ($validated['per_page'] ?? $validated['page_size'] ?? 15);
-        $paginator = $this->profileQueryService->publicPaginate($validated, $perPage);
-
-        return response()->json($paginator->toArray());
+        return response()->json(
+            $this->profileQueryService->publicPageEnvelope($validated, $perPage)
+        );
     }
 
     public function publicNear(AccountProfileNearRequest $request): JsonResponse

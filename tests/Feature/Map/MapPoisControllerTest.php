@@ -854,6 +854,44 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
     }
 
+    public function test_map_filters_exposes_configured_visual_when_marker_override_is_off(): void
+    {
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'poi_time_window_days' => [
+                    'past' => 0,
+                    'future' => 0,
+                ],
+                'filters' => [
+                    [
+                        'key' => 'events',
+                        'label' => 'Eventos',
+                        'override_marker' => false,
+                        'marker_override' => [
+                            'mode' => 'icon',
+                            'icon' => 'music',
+                            'color' => '#C6141F',
+                            'icon_color' => '#FFFFFF',
+                        ],
+                        'query' => [
+                            'source' => 'event',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('categories.0.key', 'events');
+        $response->assertJsonPath('categories.0.override_marker', false);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
+        $response->assertJsonPath('categories.0.marker_override.color', '#C6141F');
+        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
+    }
+
     public function test_map_filters_normalize_bson_marker_override_image_uri(): void
     {
         $location = $this->point(-40.0, -20.0);
@@ -976,6 +1014,13 @@ class MapPoisControllerTest extends TestCaseTenant
                     [
                         'key' => 'legacy',
                         'label' => 'Legacy',
+                        'override_marker' => true,
+                        'marker_override' => [
+                            'mode' => 'icon',
+                            'icon' => 'store',
+                            'color' => '#111111',
+                            'icon_color' => '#EEEEEE',
+                        ],
                         'query' => [
                             'source' => 'account_profile',
                         ],
@@ -1046,9 +1091,67 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertContains('events', $keys);
         $this->assertNotContains('legacy', $keys);
         $response->assertJsonPath('categories.0.key', 'events');
+        $response->assertJsonPath('categories.0.label', 'Eventos');
+        $response->assertJsonPath('categories.0.override_marker', true);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
+        $response->assertJsonPath('categories.0.marker_override.color', '#D71920');
+        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
         $response->assertJsonPath('categories.0.query.source', 'event');
         $response->assertJsonPath('categories.0.query.types.0', 'show');
         $response->assertJsonPath('categories.0.query.taxonomy.0', 'music_genre:rock');
+    }
+
+    public function test_map_filters_preserve_canonical_visual_when_marker_override_is_disabled(): void
+    {
+        TenantSettings::query()->firstOrFail()->update([
+            'map_ui' => [
+                'filters' => [
+                    [
+                        'key' => 'legacy-events',
+                        'label' => 'Legacy Events',
+                        'override_marker' => true,
+                        'marker_override' => [
+                            'mode' => 'icon',
+                            'icon' => 'event',
+                            'color' => '#111111',
+                            'icon_color' => '#EEEEEE',
+                        ],
+                    ],
+                ],
+            ],
+            'discovery_filters' => [
+                'surfaces' => [
+                    'public_map.primary' => [
+                        'filters' => [
+                            [
+                                'key' => 'agenda-custom',
+                                'target' => 'map_poi',
+                                'label' => 'Agenda Custom',
+                                'icon' => 'music_note',
+                                'color' => '#0F766E',
+                                'override_marker' => false,
+                                'query' => [
+                                    'entities' => ['event'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
+        $response->assertStatus(200);
+
+        $response->assertJsonPath('categories.0.key', 'agenda-custom');
+        $response->assertJsonPath('categories.0.label', 'Agenda Custom');
+        $response->assertJsonPath('categories.0.override_marker', false);
+        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
+        $response->assertJsonPath('categories.0.marker_override.icon', 'music_note');
+        $response->assertJsonPath('categories.0.marker_override.color', '#0F766E');
+        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
+        $response->assertJsonPath('categories.0.query.source', 'event');
     }
 
     public function test_discovery_filters_backfill_map_ui_filters_is_idempotent(): void
@@ -1133,6 +1236,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'allowed_taxonomies' => ['music_genre'],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_queryable' => true,
                 'is_publicly_discoverable' => true,
             ],
         ]);
@@ -1591,6 +1695,8 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
             ],
         ]);
         TenantProfileType::query()
@@ -1632,6 +1738,7 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'capabilities' => [
                 'is_favoritable' => true,
+                'is_queryable' => true,
                 'is_publicly_discoverable' => true,
             ],
         ]);
@@ -1706,6 +1813,7 @@ class MapPoisControllerTest extends TestCaseTenant
                 'allowed_taxonomies' => [],
                 'capabilities' => [
                     'is_favoritable' => true,
+                    'is_queryable' => true,
                     'is_publicly_discoverable' => true,
                 ],
             ]);

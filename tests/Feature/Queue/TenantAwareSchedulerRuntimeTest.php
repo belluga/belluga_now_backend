@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Tests\Feature\Queue;
 
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Str;
 use Tests\TestCaseAuthenticated;
 
 class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
@@ -40,24 +45,13 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
         $primaryTenant = $this->primaryTenant();
         $secondaryTenant = $this->secondaryTenant();
 
-        $processedJobs = $this->captureProcessedTenantJobsForJob(
-            CleanupOrphanedMapPoisJob::class,
-            fn () => $this->runScheduledCallbackByName('map_pois:cleanup_orphaned')
-        );
+        $primaryFixture = $this->createProfileCleanupScheduleFixture($primaryTenant, 'primary');
+        $secondaryFixture = $this->createProfileCleanupScheduleFixture($secondaryTenant, 'secondary');
 
-        $this->assertCount(2, $processedJobs);
-        $this->assertEqualsCanonicalizing(
-            [
-                (string) $primaryTenant->getAttribute('_id'),
-                (string) $secondaryTenant->getAttribute('_id'),
-            ],
-            array_column($processedJobs, 'tenant_id')
-        );
+        $this->runScheduledCallbackByName('map_pois:cleanup_orphaned');
 
-        foreach ($processedJobs as $processedJob) {
-            $this->assertSame(['account_profile', 'static'], $processedJob['job']->refTypes());
-            $this->assertSame(60, $processedJob['job']->deletedSinceMinutes());
-        }
+        $this->assertProfileCleanupScheduleFixture($primaryTenant, $primaryFixture);
+        $this->assertProfileCleanupScheduleFixture($secondaryTenant, $secondaryFixture);
     }
 
     private function runScheduledCallbackByName(string $name): void
@@ -89,7 +83,7 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
                 return;
             }
 
-            $tenantId = (string) (Tenant::current()?->getAttribute('_id') ?? '');
+            $tenantId = self::resolveTenantIdForProcessedJob($payload);
             if ($tenantId !== '') {
                 $tenantIds[] = $tenantId;
             }
@@ -101,45 +95,30 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
     }
 
     /**
-     * @return array<int, array{tenant_id: string, job: CleanupOrphanedMapPoisJob}>
+     * @param  array<string, mixed>  $payload
      */
-    private function captureProcessedTenantJobsForJob(string $jobClass, callable $runner): array
+    private static function resolveTenantIdForProcessedJob(array $payload): string
     {
-        $processedJobs = [];
+        $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
 
-        $this->app['events']->listen(JobProcessing::class, static function (JobProcessing $event) use (&$processedJobs, $jobClass): void {
-            $payload = $event->job->payload();
-            $displayName = (string) ($payload['displayName'] ?? '');
-            $commandName = (string) ($payload['data']['commandName'] ?? '');
+        $contextTenantId = trim((string) Context::get($contextKey, ''));
+        if ($contextTenantId !== '') {
+            return $contextTenantId;
+        }
 
-            if ($displayName !== $jobClass && $commandName !== $jobClass) {
-                return;
+        $serializedTenantId = $payload['illuminate:log:context']['data'][$contextKey] ?? null;
+        if (is_string($serializedTenantId) && $serializedTenantId !== '') {
+            try {
+                $hydratedTenantId = trim((string) unserialize($serializedTenantId));
+                if ($hydratedTenantId !== '') {
+                    return $hydratedTenantId;
+                }
+            } catch (\Throwable) {
+                // Ignore malformed context payload and continue to the final fallback.
             }
+        }
 
-            $tenantId = (string) (Tenant::current()?->getAttribute('_id') ?? '');
-            if ($tenantId === '') {
-                return;
-            }
-
-            $command = $payload['data']['command'] ?? null;
-            if (! is_string($command)) {
-                return;
-            }
-
-            $job = unserialize($command);
-            if (! $job instanceof $jobClass) {
-                return;
-            }
-
-            $processedJobs[] = [
-                'tenant_id' => $tenantId,
-                'job' => $job,
-            ];
-        });
-
-        $runner();
-
-        return $processedJobs;
+        return trim((string) (Tenant::current()?->getAttribute('_id') ?? ''));
     }
 
     private function createScheduledPublishEvent(Tenant $tenant, string $suffix): string
@@ -159,6 +138,83 @@ class TenantAwareSchedulerRuntimeTest extends TestCaseAuthenticated
         } finally {
             $tenant->forgetCurrent();
         }
+    }
+
+    /**
+     * @return array{live_poi_id: string, recent_deleted_poi_id: string, old_deleted_poi_id: string}
+     */
+    private function createProfileCleanupScheduleFixture(Tenant $tenant, string $suffix): array
+    {
+        $tenant->makeCurrent();
+
+        try {
+            $liveProfile = $this->createAccountProfileFixture(sprintf('%s-live', $suffix));
+            $recentDeletedProfile = $this->createAccountProfileFixture(sprintf('%s-recent', $suffix));
+            $oldDeletedProfile = $this->createAccountProfileFixture(sprintf('%s-old', $suffix));
+
+            $livePoi = $this->createMapPoiFixture((string) $liveProfile->getAttribute('_id'), sprintf('%s-live-poi', $suffix));
+            $recentDeletedPoi = $this->createMapPoiFixture((string) $recentDeletedProfile->getAttribute('_id'), sprintf('%s-recent-poi', $suffix));
+            $oldDeletedPoi = $this->createMapPoiFixture((string) $oldDeletedProfile->getAttribute('_id'), sprintf('%s-old-poi', $suffix));
+
+            $recentDeletedProfile->delete();
+            $oldDeletedProfile->delete();
+            $oldDeletedProfile->forceFill([
+                'deleted_at' => Carbon::now()->subHours(2),
+            ])->save();
+
+            return [
+                'live_poi_id' => (string) $livePoi->getAttribute('_id'),
+                'recent_deleted_poi_id' => (string) $recentDeletedPoi->getAttribute('_id'),
+                'old_deleted_poi_id' => (string) $oldDeletedPoi->getAttribute('_id'),
+            ];
+        } finally {
+            $tenant->forgetCurrent();
+        }
+    }
+
+    /**
+     * @param  array{live_poi_id: string, recent_deleted_poi_id: string, old_deleted_poi_id: string}  $fixture
+     */
+    private function assertProfileCleanupScheduleFixture(Tenant $tenant, array $fixture): void
+    {
+        $tenant->makeCurrent();
+
+        try {
+            $this->assertTrue(MapPoi::query()->where('_id', $fixture['live_poi_id'])->exists());
+            $this->assertFalse(MapPoi::query()->where('_id', $fixture['recent_deleted_poi_id'])->exists());
+            $this->assertTrue(MapPoi::query()->where('_id', $fixture['old_deleted_poi_id'])->exists());
+        } finally {
+            $tenant->forgetCurrent();
+        }
+    }
+
+    private function createAccountProfileFixture(string $suffix): AccountProfile
+    {
+        $account = Account::query()->create([
+            'name' => sprintf('scheduler-runtime-%s-%s', $suffix, Str::uuid()->toString()),
+            'document' => strtoupper(substr(str_replace('-', '', Str::uuid()->toString()), 0, 14)),
+        ]);
+
+        return AccountProfile::query()->create([
+            'account_id' => (string) $account->getAttribute('_id'),
+            'profile_type' => 'artist',
+            'display_name' => sprintf('Scheduler Runtime %s', $suffix),
+            'is_active' => true,
+        ]);
+    }
+
+    private function createMapPoiFixture(string $profileId, string $name): MapPoi
+    {
+        return MapPoi::query()->create([
+            'ref_type' => 'account_profile',
+            'ref_id' => $profileId,
+            'name' => $name,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
     }
 
     private function assertPublishedStatus(Tenant $tenant, string $eventId): void

@@ -16,10 +16,15 @@ use MongoDB\Driver\Exception\BulkWriteException;
 
 class AccountProfileManagementService
 {
+    private const LAST_PROFILE_ERROR_KEY = 'account_profile_lifecycle';
+
+    private const LAST_PROFILE_ERROR_MESSAGE = 'A live account must keep at least one active account profile. Delete the account aggregate instead.';
+
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
+        private readonly AccountProfileNestedGroupService $nestedGroupService,
     ) {}
 
     /**
@@ -74,6 +79,16 @@ class AccountProfileManagementService
         } elseif (array_key_exists('taxonomy_terms', $payload)) {
             $payload['taxonomy_terms'] = [];
             $payload['taxonomy_terms_flat'] = [];
+        }
+
+        if (array_key_exists('nested_profile_groups', $payload)) {
+            $this->assertNestedProfileGroupsAllowed(
+                $profileType,
+                $payload['nested_profile_groups']
+            );
+            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
+                $payload['nested_profile_groups']
+            );
         }
 
         try {
@@ -149,6 +164,17 @@ class AccountProfileManagementService
             $attributes['location'] = $this->formatLocation($attributes['location']);
         }
 
+        if (array_key_exists('nested_profile_groups', $attributes)) {
+            $this->assertNestedProfileGroupsAllowed(
+                $profileType,
+                $attributes['nested_profile_groups']
+            );
+            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
+                $attributes['nested_profile_groups'],
+                (string) $profile->getKey()
+            );
+        }
+
         try {
             $profile->fill($attributes);
             $profile->save();
@@ -172,8 +198,14 @@ class AccountProfileManagementService
 
     public function delete(AccountProfile $profile): void
     {
-        $profile->delete();
-        DeleteMapPoiByRefJob::dispatch('account_profile', (string) $profile->_id);
+        $profileId = (string) $profile->_id;
+
+        DB::connection('tenant')->transaction(function () use ($profile): void {
+            $this->assertProfileMayBeSoftDeleted($profile);
+            $profile->delete();
+        });
+
+        $this->queueMapPoiDeleteAfterCommit($profileId);
     }
 
     public function restore(AccountProfile $profile): AccountProfile
@@ -188,8 +220,136 @@ class AccountProfileManagementService
 
     public function forceDelete(AccountProfile $profile): void
     {
-        $profile->forceDelete();
-        DeleteMapPoiByRefJob::dispatch('account_profile', (string) $profile->_id);
+        $profileId = (string) $profile->_id;
+
+        DB::connection('tenant')->transaction(function () use ($profile): void {
+            $this->assertProfileMayBeForceDeleted($profile);
+            $profile->forceDelete();
+        });
+
+        $this->queueMapPoiDeleteAfterCommit($profileId);
+    }
+
+    private function assertNestedProfileGroupsAllowed(string $profileType, mixed $rawGroups): void
+    {
+        if ($this->registryService->hasNestedProfileGroups($profileType)) {
+            return;
+        }
+
+        if ($this->nestedProfileGroupsPayloadIsEmpty($rawGroups)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'nested_profile_groups' => ['Nested profile groups are not enabled for this profile type.'],
+        ]);
+    }
+
+    private function nestedProfileGroupsPayloadIsEmpty(mixed $rawGroups): bool
+    {
+        if (! is_array($rawGroups)) {
+            return true;
+        }
+
+        foreach ($rawGroups as $rawGroup) {
+            if (! is_array($rawGroup)) {
+                continue;
+            }
+            $label = trim((string) ($rawGroup['label'] ?? ''));
+            $memberIds = $rawGroup['account_profile_ids'] ?? $rawGroup['profile_ids'] ?? [];
+            if ($label !== '' || (is_array($memberIds) && $memberIds !== [])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function assertProfileMayBeSoftDeleted(AccountProfile $profile): void
+    {
+        if (! $this->isActiveProfile($profile)) {
+            return;
+        }
+
+        $account = $this->liveAccountForProfile($profile);
+        if (! $account) {
+            return;
+        }
+
+        $this->touchAccountLifecycleGuard($account);
+
+        if ($this->activeProfileCount((string) $account->_id) <= 1) {
+            $this->throwLastProfileValidationException();
+        }
+    }
+
+    private function assertProfileMayBeForceDeleted(AccountProfile $profile): void
+    {
+        $account = $this->liveAccountForProfile($profile);
+        if (! $account) {
+            return;
+        }
+
+        $this->touchAccountLifecycleGuard($account);
+
+        $accountId = (string) $account->_id;
+        $activeCount = $this->activeProfileCount($accountId);
+
+        if ($this->isActiveProfile($profile) && $activeCount <= 1) {
+            $this->throwLastProfileValidationException();
+        }
+
+        if ($this->isTrashedProfile($profile) && $activeCount === 0 && $this->restorableProfileCount($accountId) <= 1) {
+            $this->throwLastProfileValidationException();
+        }
+    }
+
+    private function liveAccountForProfile(AccountProfile $profile): ?Account
+    {
+        $accountId = trim((string) $profile->account_id);
+        if ($accountId === '') {
+            return null;
+        }
+
+        return Account::query()->where('_id', $accountId)->first();
+    }
+
+    private function touchAccountLifecycleGuard(Account $account): void
+    {
+        $account->setAttribute('profile_lifecycle_guarded_at', now()->toJSON());
+        $account->save();
+    }
+
+    private function activeProfileCount(string $accountId): int
+    {
+        return AccountProfile::query()
+            ->where('account_id', $accountId)
+            ->where('is_active', true)
+            ->count();
+    }
+
+    private function restorableProfileCount(string $accountId): int
+    {
+        return AccountProfile::onlyTrashed()
+            ->where('account_id', $accountId)
+            ->count();
+    }
+
+    private function isActiveProfile(AccountProfile $profile): bool
+    {
+        return ! $this->isTrashedProfile($profile) && (bool) $profile->is_active;
+    }
+
+    private function isTrashedProfile(AccountProfile $profile): bool
+    {
+        return $profile->deleted_at !== null;
+    }
+
+    private function throwLastProfileValidationException(): void
+    {
+        throw ValidationException::withMessages([
+            self::LAST_PROFILE_ERROR_KEY => [self::LAST_PROFILE_ERROR_MESSAGE],
+        ]);
     }
 
     /**
@@ -218,6 +378,13 @@ class AccountProfileManagementService
     {
         DB::connection('tenant')->afterCommit(
             static fn () => UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id)
+        );
+    }
+
+    private function queueMapPoiDeleteAfterCommit(string $profileId): void
+    {
+        DB::connection('tenant')->afterCommit(
+            static fn () => DeleteMapPoiByRefJob::dispatch('account_profile', $profileId)
         );
     }
 

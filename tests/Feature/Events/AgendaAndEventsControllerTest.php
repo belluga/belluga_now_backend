@@ -9,9 +9,11 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AttendanceCommitment;
 use App\Models\Tenants\EventType;
+use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantSettings;
@@ -22,6 +24,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event as EventBus;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -495,6 +498,39 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('Event Taxonomy Match', $response->json('items.0.title'));
     }
 
+    public function test_agenda_taxonomy_filters_require_all_selected_groups(): void
+    {
+        $this->createEvent([
+            'title' => 'Both Groups Match',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+                ['type' => 'audience', 'value' => 'family'],
+            ],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Only Mood Match',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+            ],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Only Audience Match',
+            'taxonomy_terms' => [
+                ['type' => 'audience', 'value' => 'family'],
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=mood&taxonomy[0][value]=sunset&taxonomy[1][type]=audience&taxonomy[1][value]=family&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('items'));
+        $this->assertSame('Both Groups Match', $response->json('items.0.title'));
+    }
+
     public function test_agenda_taxonomy_filter_uses_effective_occurrence_taxonomy_overrides(): void
     {
         $sportTaxonomy = Taxonomy::query()->create([
@@ -562,6 +598,117 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame(
             (string) data_get($event->occurrence_refs, '0.occurrence_id'),
             (string) ($items[0]['occurrence_id'] ?? '')
+        );
+    }
+
+    public function test_agenda_returns_runtime_facets_for_the_full_filtered_universe_before_pagination(): void
+    {
+        $this->createEvent([
+            'title' => 'Universe First Page',
+            'type' => [
+                'id' => 'type-show',
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Show desc',
+            ],
+            'categories' => ['culture'],
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Universe Second Page',
+            'type' => [
+                'id' => 'type-fair',
+                'name' => 'Fair',
+                'slug' => 'fair',
+                'description' => 'Fair desc',
+            ],
+            'categories' => ['sports'],
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'night'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(2),
+            'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=1");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('items.0.title', 'Universe First Page');
+        $response->assertJsonPath('discovery_filter_facets.surface', 'home.events');
+
+        $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
+        $this->assertContains('show', $filterKeys);
+        $this->assertContains('fair', $filterKeys);
+        $this->assertContains('culture', $filterKeys);
+        $this->assertContains('sports', $filterKeys);
+
+        $moodTerms = collect($response->json('discovery_filter_facets.taxonomy_options.mood.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['night', 'sunset'], $moodTerms);
+    }
+
+    public function test_agenda_runtime_taxonomy_facets_are_self_excluding_for_the_selected_group(): void
+    {
+        $this->createEvent([
+            'title' => 'Mood Sunset Event',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'sunset'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Mood Night Event',
+            'taxonomy_terms' => [
+                ['type' => 'mood', 'value' => 'night'],
+            ],
+            'date_time_start' => Carbon::now()->addDays(2),
+            'date_time_end' => Carbon::now()->addDays(2)->addHours(2),
+        ]);
+
+        $aggregateCalls = [];
+        EventBus::listen(
+            'belluga.events.public_agenda_aggregate',
+            static function (string $purpose, array $pipeline) use (&$aggregateCalls): void {
+                $aggregateCalls[] = [
+                    'purpose' => $purpose,
+                    'pipeline' => $pipeline,
+                ];
+            }
+        );
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=mood&taxonomy[0][value]=sunset&page=1&page_size=10"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'items');
+        $response->assertJsonPath('items.0.title', 'Mood Sunset Event');
+
+        $moodTerms = collect($response->json('discovery_filter_facets.taxonomy_options.mood.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['night', 'sunset'], $moodTerms);
+
+        $this->assertCount(1, $aggregateCalls);
+        $this->assertSame(
+            'public_agenda_page_with_runtime_facets',
+            $aggregateCalls[0]['purpose'],
+        );
+        $this->assertTrue(
+            collect($aggregateCalls[0]['pipeline'])->contains(
+                static fn (array $stage): bool => array_key_exists('$facet', $stage)
+            ),
+            'Public agenda runtime facets must be computed through a single $facet aggregate.'
         );
     }
 
@@ -978,6 +1125,52 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame($targetOccurrenceId, (string) ($items[0]['occurrence_id'] ?? ''));
     }
 
+    public function test_agenda_excludes_orphan_occurrences_and_only_returns_resolvable_public_detail_rows(): void
+    {
+        $validEvent = $this->createEvent([
+            'title' => 'Resolvable Public Event',
+            'date_time_start' => Carbon::now()->addDays(3),
+            'date_time_end' => Carbon::now()->addDays(3)->addHours(2),
+        ]);
+        $validOccurrenceId = $this->firstOccurrenceId($validEvent);
+
+        $orphanEvent = $this->createEvent([
+            'title' => 'Orphaned Public Occurrence',
+            'date_time_start' => Carbon::now()->addDays(4),
+            'date_time_end' => Carbon::now()->addDays(4)->addHours(2),
+        ]);
+        $orphanOccurrenceId = $this->firstOccurrenceId($orphanEvent);
+        $orphanEvent->forceDelete();
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $items = $response->json('items', []);
+        $titles = array_map(static fn (array $item): string => (string) ($item['title'] ?? ''), $items);
+
+        $this->assertContains('Resolvable Public Event', $titles);
+        $this->assertNotContains('Orphaned Public Occurrence', $titles);
+
+        $this->assertFalse(
+            collect($items)->contains(
+                static fn (array $item): bool => (string) ($item['occurrence_id'] ?? '') === $orphanOccurrenceId
+            ),
+            'Agenda must hard-cut orphan occurrences instead of exposing broken public detail routes.'
+        );
+
+        $validAgendaRow = collect($items)->first(
+            static fn (array $item): bool => (string) ($item['occurrence_id'] ?? '') === $validOccurrenceId
+        );
+        $this->assertIsArray($validAgendaRow);
+
+        $detailRouteRef = (string) ($validAgendaRow['slug'] ?? '');
+        $this->assertNotSame('', $detailRouteRef, 'Returned agenda rows must expose a resolvable route reference.');
+
+        $this->getJson(
+            "{$this->base_api_tenant}events/{$detailRouteRef}?occurrence={$validOccurrenceId}"
+        )->assertStatus(200);
+    }
+
     public function test_occurrence_ids_are_applied_in_initial_agenda_and_stream_pipeline_stages(): void
     {
         $occurrenceId = '507f1f77bcf86cd799439011';
@@ -1018,6 +1211,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 $occurrenceId
             )
         );
+        $this->assertTrue(
+            $this->pipelineUsesIndexedPublicParentEventLookup($searchAgendaPipeline),
+            'Public agenda pipeline must exclude orphan occurrences through indexed parent-event lookup.'
+        );
 
         $geoStreamPipeline = $this->buildStreamPipelineForTest($baseFilters, true);
         $this->assertTrue(
@@ -1029,6 +1226,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $streamPipeline = $this->buildStreamPipelineForTest([
             ...$baseFilters,
+            'search' => 'Solar',
             'origin_lat' => null,
             'origin_lng' => null,
             'max_distance_meters' => null,
@@ -1040,6 +1238,28 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 $occurrenceId
             )
         );
+        $this->assertTrue(
+            $this->pipelineUsesIndexedPublicParentEventLookup($streamPipeline),
+            'Public stream pipeline must exclude orphan occurrences through indexed parent-event lookup.'
+        );
+
+        $agendaSearchIndex = $this->findStageIndex(
+            $searchAgendaPipeline,
+            fn (array $stage): bool => $this->stageSearchesField(
+                $stage,
+                'taxonomy_terms.value'
+            )
+        );
+        $streamSearchIndex = $this->findStageIndex(
+            $streamPipeline,
+            fn (array $stage): bool => $this->stageSearchesField(
+                $stage,
+                'taxonomy_terms.value'
+            )
+        );
+
+        $this->assertNotNull($agendaSearchIndex);
+        $this->assertNotNull($streamSearchIndex);
     }
 
     public function test_agenda_confirmed_only_ignores_geo_distance_filtering(): void
@@ -1099,8 +1319,217 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(404);
     }
 
+    public function test_public_event_payloads_omit_legacy_tags_field(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Canonical Taxonomy Event',
+            'tags' => ['legacy-music'],
+            'taxonomy_terms' => [
+                [
+                    'type' => 'event_style',
+                    'value' => 'showcase',
+                    'name' => 'Showcase',
+                    'taxonomy_name' => 'Event Style',
+                ],
+            ],
+        ]);
+
+        $detail = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+        $detail->assertStatus(200);
+        $this->assertArrayNotHasKey('tags', $detail->json('data'));
+        $detail->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
+
+        $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+        $agenda->assertStatus(200);
+        $items = $agenda->json('items');
+        $this->assertIsArray($items);
+        $matching = collect($items)->firstWhere('event_id', (string) $event->_id);
+        $this->assertIsArray($matching);
+        $this->assertArrayNotHasKey('tags', $matching);
+        $this->assertSame('showcase', data_get($matching, 'taxonomy_terms.0.value'));
+    }
+
+    public function test_agenda_rejects_legacy_tags_query_parameter(): void
+    {
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10&tags[]=legacy");
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['tags']);
+    }
+
+    public function test_public_event_payloads_do_not_synthesize_taxonomy_terms_from_legacy_tags(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Legacy Tag Event',
+            'tags' => ['legacy-music'],
+            'taxonomy_terms' => [],
+        ]);
+
+        $detail = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+        $detail->assertStatus(200);
+        $detail->assertJsonMissingPath('data.tags');
+        $detail->assertJsonPath('data.taxonomy_terms', []);
+
+        $agenda = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+        $agenda->assertStatus(200);
+        $matching = collect($agenda->json('items'))->firstWhere('event_id', (string) $event->_id);
+        $this->assertIsArray($matching);
+        $this->assertArrayNotHasKey('tags', $matching);
+        $this->assertSame([], data_get($matching, 'taxonomy_terms', []));
+    }
+
+    public function test_public_event_occurrence_detail_does_not_fall_back_to_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
+    {
+        $now = Carbon::now();
+        $event = $this->createEvent([
+            'title' => 'Legacy Tag Occurrence Event',
+            'tags' => ['legacy-music'],
+            'taxonomy_terms' => [],
+            'date_time_start' => $now->copy()->addDays(1),
+            'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+        ]);
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event->fresh(), [
+            [
+                'date_time_start' => $now->copy()->addDays(1),
+                'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2),
+                'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+            ],
+        ]);
+
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->skip(1)
+            ->firstOrFail();
+
+        $occurrence->forceFill([
+            'taxonomy_terms' => [],
+            'tags' => [],
+        ])->save();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events/{$event->_id}?occurrence={$occurrence->_id}"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonMissingPath('data.tags');
+        $response->assertJsonPath('data.occurrence_id', (string) $occurrence->_id);
+        $response->assertJsonPath('data.taxonomy_terms', []);
+    }
+
+    public function test_agenda_runtime_facets_exclude_legacy_tags_when_snapshots_are_missing(): void
+    {
+        $this->createEvent([
+            'title' => 'Legacy Facet Event',
+            'tags' => ['legacy-music'],
+            'taxonomy_terms' => [],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $this->assertNull($response->json('discovery_filter_facets.taxonomy_options.legacy_tag'));
+
+        $filtered = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=legacy_tag&taxonomy[0][value]=legacy-music&page=1&page_size=10"
+        );
+        $filtered->assertStatus(200);
+        $filtered->assertJsonCount(0, 'items');
+    }
+
+    public function test_agenda_runtime_facets_do_not_include_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Parent Legacy Facet Event',
+            'tags' => ['legacy-parent-music'],
+            'taxonomy_terms' => [],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $occurrence->forceFill([
+            'tags' => [],
+            'taxonomy_terms' => [],
+        ])->save();
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $this->assertNull($response->json('discovery_filter_facets.taxonomy_options.legacy_tag'));
+
+        $filtered = $this->getJson(
+            "{$this->base_api_tenant}agenda?taxonomy[0][type]=legacy_tag&taxonomy[0][value]=legacy-parent-music&page=1&page_size=10"
+        );
+        $filtered->assertStatus(200);
+        $filtered->assertJsonCount(0, 'items');
+    }
+
+    public function test_agenda_search_does_not_match_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Parent Legacy Search Event',
+            'tags' => ['legacy-parent-search'],
+            'taxonomy_terms' => [],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $occurrence->forceFill([
+            'tags' => [],
+            'taxonomy_terms' => [],
+        ])->save();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?search=legacy-parent-search&page=1&page_size=10"
+        );
+        $response->assertStatus(200);
+        $response->assertJsonCount(0, 'items');
+    }
+
     public function test_event_detail_exposes_linked_account_profiles_for_dynamic_category_tabs(): void
     {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Band',
+                'labels' => [
+                    'singular' => 'Band',
+                    'plural' => 'Bands',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'band',
+            'display_name' => 'Ananda Torres',
+            'avatar_url' => 'https://example.org/artist-avatar.jpg',
+            'cover_url' => 'https://example.org/artist-cover.jpg',
+            'taxonomy_terms' => [
+                ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
+            ],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
         $event = $this->createEvent([
             'venue' => [
                 'id' => 'venue-1',
@@ -1120,11 +1549,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'event_parties' => [
                 [
                     'party_type' => 'band',
-                    'party_ref_id' => 'artist-1',
+                    'party_ref_id' => (string) $profile->_id,
                     'permissions' => ['can_edit' => true],
                     'metadata' => [
                         'display_name' => 'Ananda Torres',
-                        'slug' => 'ananda-torres',
+                        'slug' => (string) $profile->slug,
                         'profile_type' => 'band',
                         'avatar_url' => 'https://example.org/artist-avatar.jpg',
                         'cover_url' => 'https://example.org/artist-cover.jpg',
@@ -1139,9 +1568,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.linked_account_profiles');
-        $response->assertJsonPath('data.linked_account_profiles.0.id', 'artist-1');
+        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $profile->_id);
         $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'band');
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', 'ananda-torres');
+        $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $profile->slug);
+        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
         $response->assertJsonPath(
             'data.linked_account_profiles.0.taxonomy_terms.0.name',
             'Showcase'
@@ -1698,6 +2129,69 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             if (is_array($value) && $this->matchExpressionContainsDocumentId($value, $documentId)) {
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     */
+    private function findStageIndex(array $pipeline, callable $predicate): ?int
+    {
+        foreach ($pipeline as $index => $stage) {
+            if ($predicate($stage)) {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $stage
+     */
+    private function stageSearchesField(array $stage, string $field): bool
+    {
+        $orExpressions = data_get($stage, '$match.$or');
+        if (! is_array($orExpressions)) {
+            return false;
+        }
+
+        foreach ($orExpressions as $expression) {
+            if (is_array($expression) && array_key_exists($field, $expression)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $pipeline
+     */
+    private function pipelineUsesIndexedPublicParentEventLookup(array $pipeline): bool
+    {
+        foreach ($pipeline as $index => $operation) {
+            if (! is_array($operation) || ! isset($operation['$lookup']) || ! is_array($operation['$lookup'])) {
+                continue;
+            }
+
+            $lookup = $operation['$lookup'];
+            if (($lookup['from'] ?? null) !== 'events'
+                || ($lookup['localField'] ?? null) !== 'event_object_id'
+                || ($lookup['foreignField'] ?? null) !== '_id'
+                || array_key_exists('pipeline', $lookup)) {
+                continue;
+            }
+
+            $previousOperation = $pipeline[$index - 1] ?? [];
+            $nextOperation = $pipeline[$index + 1] ?? [];
+            $matchAfterUnwind = $pipeline[$index + 2]['$match'] ?? [];
+
+            return isset($previousOperation['$addFields']['event_object_id'])
+                && ($nextOperation['$unwind'] ?? null) === '$event'
+                && ($matchAfterUnwind['event.deleted_at'] ?? null) === null;
         }
 
         return false;

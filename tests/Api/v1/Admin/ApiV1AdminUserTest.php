@@ -172,9 +172,13 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
         $response->assertStatus(200);
 
         $response_data = $response->json();
-        $this->assertEquals(6, count($response_data['data']));
+        $this->assertNotEmpty($response_data['data']);
         $this->assertArrayHasKey('current_page', $response_data);
         $this->assertArrayHasKey('per_page', $response_data);
+        $this->assertResponseContainsUser($response, $this->landlord->user_superadmin->user_id);
+        $this->assertResponseContainsUser($response, $this->landlord->user_cross_tenant_admin->user_id);
+        $this->assertResponseContainsUser($response, $this->landlord->user_cross_tenant_visitor->user_id);
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
     }
 
     public function test_soft_delete(): void
@@ -187,10 +191,10 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
     public function test_list_archived(): void
     {
         $response = $this->userList();
-        $this->assertEquals(5, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userListArchived();
-        $this->assertEquals(1, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
     }
 
     public function test_user_restore(): void
@@ -199,7 +203,10 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(6, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
+
+        $response = $this->userListArchived();
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
     }
 
     public function test_user_show(): void
@@ -241,25 +248,47 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated
     public function test_user_delete_flow(): void
     {
         $response = $this->userList();
-        $this->assertEquals(6, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userSoftDelete($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(5, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userListArchived();
-        $this->assertEquals(1, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userForceDelete($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(5, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userListArchived();
-        $this->assertEquals(0, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
+    }
+
+    protected function assertResponseContainsUser(TestResponse $response, string $userId): void
+    {
+        $this->assertContains($userId, $this->responseUserIds($response));
+    }
+
+    protected function assertResponseExcludesUser(TestResponse $response, string $userId): void
+    {
+        $this->assertNotContains($userId, $this->responseUserIds($response));
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function responseUserIds(TestResponse $response): array
+    {
+        return collect($response->json('data') ?? [])
+            ->map(fn (array $item): string => (string) ($item['id'] ?? ''))
+            ->filter()
+            ->values()
+            ->all();
     }
 
     protected function userUpdate(string $user_id, array $data): TestResponse

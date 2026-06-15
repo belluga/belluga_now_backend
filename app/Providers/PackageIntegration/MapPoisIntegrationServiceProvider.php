@@ -7,13 +7,13 @@ namespace App\Providers\PackageIntegration;
 use App\Integration\MapPois\MapPoiRegistryAdapter;
 use App\Integration\MapPois\MapPoiSettingsAdapter;
 use App\Integration\MapPois\MapPoiSourceReaderAdapter;
-use App\Integration\MapPois\MapPoiTenantContextAdapter;
 use App\Integration\MapPois\MapPoiTaxonomySnapshotResolverAdapter;
+use App\Integration\MapPois\MapPoiTenantContextAdapter;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
-use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
+use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Support\ServiceProvider;
@@ -69,17 +69,6 @@ class MapPoisIntegrationServiceProvider extends ServiceProvider
                 'default_origin.lat' => ['type' => 'number', 'nullable' => true, 'label' => 'Default Origin Latitude', 'default' => null, 'order' => 60],
                 'default_origin.lng' => ['type' => 'number', 'nullable' => true, 'label' => 'Default Origin Longitude', 'default' => null, 'order' => 70],
                 'default_origin.label' => ['type' => 'string', 'nullable' => true, 'label' => 'Default Origin Label', 'default' => null, 'order' => 80],
-                'filters' => [
-                    'type' => 'array',
-                    'nullable' => false,
-                    'label' => 'Map Filters',
-                    'label_i18n_key' => 'settings.map_ui.filters.label',
-                    'group' => 'filters',
-                    'group_label' => 'Filters',
-                    'group_label_i18n_key' => 'settings.map_ui.group.filters.label',
-                    'default' => [],
-                    'order' => 90,
-                ],
             ],
             order: 10,
             labelI18nKey: 'settings.map_ui.namespace.label',

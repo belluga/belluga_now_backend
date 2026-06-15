@@ -22,6 +22,8 @@ class AccountProfileRegistrySeeder
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
                 'capabilities' => [
+                    'is_queryable' => false,
+                    'is_publicly_navigable' => false,
                     'is_favoritable' => true,
                     'is_inviteable' => true,
                     'is_publicly_discoverable' => false,
@@ -35,6 +37,8 @@ class AccountProfileRegistrySeeder
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
                 'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
                     'is_favoritable' => true,
                     'is_inviteable' => false,
                     'is_publicly_discoverable' => true,
@@ -52,6 +56,8 @@ class AccountProfileRegistrySeeder
                     'color' => '#E53935',
                 ],
                 'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
                     'is_favoritable' => true,
                     'is_inviteable' => false,
                     'is_publicly_discoverable' => true,
@@ -96,6 +102,8 @@ class AccountProfileRegistrySeeder
         $next = $current + $defaults;
 
         if ((string) $type->type === 'personal') {
+            $next['is_queryable'] = false;
+            $next['is_publicly_navigable'] = false;
             $next['is_favoritable'] = true;
             $next['is_inviteable'] = true;
             $next['is_publicly_discoverable'] = false;

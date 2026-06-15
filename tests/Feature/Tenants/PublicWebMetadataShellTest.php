@@ -11,6 +11,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\DeepLinks\Application\WebToAppPromotionService;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Invites\Application\Mutations\InviteShareService;
@@ -105,6 +106,9 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'restaurant',
             'label' => 'Restaurante',
             'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
                 'is_favoritable' => true,
                 'is_poi_enabled' => true,
             ],
@@ -134,6 +138,59 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<meta property="og:description" content="Massa fresca e carta de vinhos curada.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/casa-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/parceiro/casa-marracini">', false);
+    }
+
+    public function test_android_direct_public_fallback_cookie_renders_shell_once_without_retriggering_open_app(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $this->applyPublicWebMetadata([
+            'default_title' => 'Fallback tenant title',
+            'default_description' => 'Fallback tenant description.',
+            'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenant->app_domains = array_merge($tenant->app_domains ?? [], [
+            [
+                'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+                'domain' => 'com.guarappari.direct',
+            ],
+        ]);
+        $tenant->save();
+
+        $openAppResponse = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+            ->get("{$tenantOrigin}/open-app?path=%2F&store_channel=web_direct&platform_target=android&fallback=target");
+        $openAppResponse->assertRedirect();
+
+        $bypassCookie = collect($openAppResponse->headers->getCookies())->first(
+            fn ($cookie) => $cookie->getName() === WebToAppPromotionService::WEB_DIRECT_FALLBACK_BYPASS_COOKIE
+        );
+        $this->assertNotNull($bypassCookie);
+
+        $response = $this->call(
+            'GET',
+            '/',
+            [],
+            [
+                $bypassCookie->getName() => $bypassCookie->getValue(),
+            ],
+            [],
+            [
+                'HTTP_HOST' => parse_url($tenantOrigin, PHP_URL_HOST) ?? '',
+                'HTTP_USER_AGENT' => 'Mozilla/5.0 (Linux; Android 14; Pixel 8)',
+                'HTTPS' => 'on',
+            ],
+        );
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $response->assertDontSee('/open-app?', false);
+        $this->assertTrue(
+            collect($response->headers->getCookies())->contains(
+                fn ($cookie) => $cookie->getName() === WebToAppPromotionService::WEB_DIRECT_FALLBACK_BYPASS_COOKIE
+                    && $cookie->getExpiresTime() <= time()
+            )
+        );
     }
 
     public function test_event_public_route_injects_event_metadata_with_event_party_profile_cover_fallback(): void

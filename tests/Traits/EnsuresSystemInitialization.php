@@ -17,6 +17,11 @@ trait EnsuresSystemInitialization
 {
     protected static bool $systemInitialized = false;
 
+    protected function canonicalInitializationPassword(): string
+    {
+        return 'Belluga!123';
+    }
+
     protected function ensureSystemInitialized(): void
     {
         $hasLandlordUser = LandlordUser::query()->exists();
@@ -61,6 +66,7 @@ trait EnsuresSystemInitialization
 
         $this->landlord->user_superadmin->name = $data['user']['name'];
         $this->landlord->user_superadmin->email_1 = $data['user']['emails'][0] ?? 'admin@example.org';
+        $this->landlord->user_superadmin->password = $this->canonicalInitializationPassword();
         $this->landlord->user_superadmin->user_id = $data['user']['id'];
         $this->landlord->user_superadmin->token = $data['user']['token'];
         $this->landlord->role_superadmin->name = $data['role']['name'] ?? 'Super Admin';
@@ -142,14 +148,20 @@ trait EnsuresSystemInitialization
             ? $this->resolveCanonicalTenant(allowSingleTenantContext: true)
             : null;
         $role = LandlordRole::query()->first();
+        /** @var LandlordUserAccessService $accessService */
+        $accessService = app(LandlordUserAccessService::class);
+        $superadminPassword = $this->canonicalInitializationPassword();
 
         if ($user) {
+            $accessService->syncPasswordCredentialsForEmails($user, Hash::make($superadminPassword));
+            $accessService->removeLegacyPasswordState($user);
             $token = $user->createToken(
                 'Test Token',
                 $this->sanitizeAbilities($user->getPermissions())
             )->plainTextToken;
             $this->landlord->user_superadmin->name = $user->name;
             $this->landlord->user_superadmin->email_1 = $user->emails[0] ?? $user->email ?? '';
+            $this->landlord->user_superadmin->password = $superadminPassword;
             $this->landlord->user_superadmin->user_id = (string) $user->_id;
             $this->landlord->user_superadmin->token = $token;
 
@@ -198,7 +210,7 @@ trait EnsuresSystemInitialization
             'user' => [
                 'name' => 'Admin User',
                 'email' => 'admin@belluga.test',
-                'password' => 'Belluga!123',
+                'password' => $this->canonicalInitializationPassword(),
             ],
             'tenant' => [
                 'name' => 'Belluga Solutions Test',

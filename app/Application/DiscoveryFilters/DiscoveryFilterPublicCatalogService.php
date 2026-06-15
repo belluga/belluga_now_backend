@@ -411,7 +411,7 @@ final class DiscoveryFilterPublicCatalogService
     private function publiclyDiscoverableAccountProfileTypeOptions(?string $baseUrl = null): array
     {
         return TenantProfileType::query()
-            ->publicCatalog()
+            ->publicDiscoverySurface()
             ->orderBy('label')
             ->limit(self::TYPE_OPTIONS_MAX)
             ->get(['_id', 'type', 'label', 'visual', 'poi_visual', 'allowed_taxonomies', 'type_asset_url'])

@@ -152,6 +152,9 @@ class FavoritesControllerTest extends TestCaseTenant
         ], [
             'display_name' => 'Profile Default Registry',
             'slug' => 'profile-default-registry',
+            'profile_type' => 'artist',
+            'can_open_public_detail' => true,
+            'public_detail_path' => '/parceiro/profile-default-registry',
         ]);
 
         $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
@@ -164,6 +167,10 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertCount(1, $items);
         $this->assertSame((string) $profile->_id, (string) ($items[0]['target_id'] ?? ''));
         $this->assertSame('account_profile', (string) ($items[0]['registry_key'] ?? ''));
+        $response->assertJsonPath('items.0.target.can_open_public_detail', true);
+        $response->assertJsonPath('items.0.target.public_detail_path', '/parceiro/profile-default-registry');
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', true);
+        $response->assertJsonPath('items.0.navigation.target_path', '/parceiro/profile-default-registry');
     }
 
     public function test_favorites_returns_edges_for_anonymous_identity(): void
@@ -217,6 +224,10 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('items.0.target.cover_url', 'https://cdn.test/profile-cover.png');
         $response->assertJsonPath('items.0.target.profile_type', 'restaurant');
+        $response->assertJsonPath('items.0.target.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.target.public_detail_path', null);
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.navigation.target_path', null);
         $response->assertJsonPath('items.0.snapshot.live_now_event_occurrence_id', 'occ-live');
     }
 
@@ -392,13 +403,20 @@ class FavoritesControllerTest extends TestCaseTenant
 
     /**
      * @param  array{next_event_occurrence_id:?string,next_event_occurrence_at:mixed,last_event_occurrence_at:mixed,live_now_event_occurrence_id?:?string,live_now_event_occurrence_at?:mixed}  $snapshot
-     * @param  array{display_name:string,slug:string,avatar_url?:?string,cover_url?:?string,profile_type?:?string}  $target
+     * @param  array{display_name:string,slug:string,avatar_url?:?string,cover_url?:?string,profile_type?:?string,can_open_public_detail?:bool,public_detail_path?:?string}  $target
      */
     private function insertSnapshot(string $profileId, array $snapshot, array $target): void
     {
         $collection = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('favoritable_account_profile_snapshots');
+
+        $canOpenPublicDetail = (bool) ($target['can_open_public_detail'] ?? false);
+        $explicitPublicDetailPath = trim((string) ($target['public_detail_path'] ?? ''));
+        $publicDetailPath = $canOpenPublicDetail
+            ? ($explicitPublicDetailPath !== '' ? $explicitPublicDetailPath : null)
+            : null;
+        $canOpenPublicDetail = $canOpenPublicDetail && $publicDetailPath !== null;
 
         $toUtcDateTime = static function (mixed $value): ?UTCDateTime {
             if (! $value instanceof \DateTimeInterface) {
@@ -430,6 +448,8 @@ class FavoritesControllerTest extends TestCaseTenant
                         'avatar_url' => $target['avatar_url'] ?? null,
                         'cover_url' => $target['cover_url'] ?? null,
                         'profile_type' => $target['profile_type'] ?? null,
+                        'can_open_public_detail' => $canOpenPublicDetail,
+                        'public_detail_path' => $publicDetailPath,
                     ],
                     'snapshot' => [
                         ...$snapshot,
@@ -445,6 +465,8 @@ class FavoritesControllerTest extends TestCaseTenant
                     'navigation' => [
                         'kind' => 'account_profile',
                         'target_slug' => $target['slug'],
+                        'target_path' => $publicDetailPath,
+                        'can_open_public_detail' => $canOpenPublicDetail,
                     ],
                     'updated_at' => Carbon::now(),
                 ],

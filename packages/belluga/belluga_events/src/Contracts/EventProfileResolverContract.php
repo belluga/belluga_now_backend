@@ -42,6 +42,12 @@ interface EventProfileResolverContract
      */
     public function resolveAccountIdsForProfileIds(array $profileIds): array;
 
+    /**
+     * @param  array<int, string>  $types
+     * @return array<string, string>
+     */
+    public function resolveProfileTypePluralLabelsByTypes(array $types): array;
+
     public function accountOwnsProfile(string $accountId, string $profileId): bool;
 
     public function paginateAccountProfileCandidates(
@@ -51,4 +57,8 @@ interface EventProfileResolverContract
         int $perPage = 15,
         ?string $accountId = null
     ): LengthAwarePaginator;
+
+    public function isProfileTypeQueryable(string $profileType): bool;
+
+    public function isProfileTypePubliclyNavigable(string $profileType): bool;
 }

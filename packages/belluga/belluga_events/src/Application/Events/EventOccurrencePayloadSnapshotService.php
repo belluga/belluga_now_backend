@@ -98,6 +98,7 @@ class EventOccurrencePayloadSnapshotService
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $this->normalizeArray($occurrence->own_event_parties ?? []),
+                'profile_groups' => $this->normalizeArray($occurrence->own_profile_groups ?? []),
                 'has_location_override' => false,
                 'location_override' => null,
                 'taxonomy_terms' => $this->normalizeArray($occurrence->own_taxonomy_terms ?? []),

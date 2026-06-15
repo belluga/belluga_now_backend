@@ -65,6 +65,7 @@ trait MigrateFreshSeedOnce
     protected function wipeMongoCollections(): void
     {
         $tenantDatabaseNames = Tenant::query()
+            ->withTrashed()
             ->pluck('database')
             ->filter()
             ->unique()

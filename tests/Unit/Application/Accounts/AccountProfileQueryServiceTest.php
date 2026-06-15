@@ -6,6 +6,7 @@ namespace Tests\Unit\Application\Accounts;
 
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use MongoDB\BSON\ObjectId;
@@ -20,6 +21,7 @@ class AccountProfileQueryServiceTest extends TestCase
             $this->createMock(AccountOwnershipStateService::class),
             $this->createMock(AccountProfileMediaService::class),
             $this->createMock(TaxonomyTermSummaryResolverService::class),
+            new AccountProfileTypeSetProvider,
         );
 
         $resolver = new ReflectionMethod($service, 'resolveAggregateRowId');

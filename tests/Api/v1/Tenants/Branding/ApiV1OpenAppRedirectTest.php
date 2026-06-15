@@ -100,6 +100,39 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame('/invite?code=CODE123', $fallbackQuery['redirect'] ?? null);
     }
 
+    public function test_open_app_redirect_ignores_target_fallback_outside_web_direct(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.openapp');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.openapp',
+                ],
+            ],
+        ]);
+
+        $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+            ->get("{$this->base_tenant_url}open-app?path=/invite&code=CODE123&store_channel=web_cta&fallback=target");
+
+        $response->assertRedirect();
+
+        $location = $response->headers->get('Location');
+        $this->assertNotNull($location);
+
+        $intent = $this->parseAndroidIntentLocation((string) $location);
+        $fallback = parse_url($intent['fallback_url']);
+        parse_str((string) ($fallback['query'] ?? ''), $fallbackQuery);
+
+        $tenantOrigin = rtrim((string) $this->base_tenant_url, '/');
+        $this->assertSame(parse_url($tenantOrigin, PHP_URL_HOST), $fallback['host'] ?? null);
+        $this->assertSame('/baixe-o-app', $fallback['path'] ?? null);
+        $this->assertSame('/invite?code=CODE123', $fallbackQuery['redirect'] ?? null);
+    }
+
     public function test_open_app_redirect_for_android_invite_without_code_falls_back_to_home(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
@@ -135,7 +168,7 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame('/', $fallbackQuery['redirect'] ?? null);
     }
 
-    public function test_android_public_routes_redirect_through_open_app_intent_on_direct_navigation(): void
+    public function test_android_public_routes_redirect_through_open_app_intent_with_original_route_browser_fallback(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.direct');
@@ -174,10 +207,20 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
             $response->assertRedirect();
             $openAppLocation = (string) $response->headers->get('Location');
             $this->assertStringStartsWith($tenantOrigin.'/open-app?', $openAppLocation);
+            $openAppQuery = [];
+            parse_str((string) parse_url($openAppLocation, PHP_URL_QUERY), $openAppQuery);
+            $this->assertSame('web_direct', $openAppQuery['store_channel'] ?? null);
+            $this->assertSame('android', $openAppQuery['platform_target'] ?? null);
+            $this->assertSame('target', $openAppQuery['fallback'] ?? null);
 
             $intentResponse = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
                 ->get($openAppLocation);
             $intentResponse->assertRedirect();
+            $this->assertTrue(
+                collect($intentResponse->headers->getCookies())->contains(
+                    fn ($cookie) => $cookie->getName() === 'belluga_web_direct_fallback_target'
+                )
+            );
 
             $intent = $this->parseAndroidIntentLocation(
                 (string) $intentResponse->headers->get('Location')
@@ -190,13 +233,13 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
             $this->assertSame($case['expected_target_path'], $intentTarget);
 
             $fallback = parse_url($intent['fallback_url']);
-            parse_str((string) ($fallback['query'] ?? ''), $fallbackQuery);
             $this->assertSame(
                 parse_url($tenantOrigin, PHP_URL_HOST),
                 $fallback['host'] ?? null
             );
-            $this->assertSame('/baixe-o-app', $fallback['path'] ?? null);
-            $this->assertSame($case['expected_target_path'], $fallbackQuery['redirect'] ?? null);
+            $fallbackTarget = ($fallback['path'] ?? '/')
+                .(isset($fallback['query']) ? '?'.$fallback['query'] : '');
+            $this->assertSame($case['expected_target_path'], $fallbackTarget);
         }
     }
 

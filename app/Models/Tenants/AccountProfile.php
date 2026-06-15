@@ -7,6 +7,8 @@ namespace App\Models\Tenants;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsTo;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
@@ -27,6 +29,7 @@ class AccountProfile extends Model
         'taxonomy_terms',
         'taxonomy_terms_flat',
         'location',
+        'nested_profile_groups',
         'bio',
         'content',
         'avatar_url',
@@ -64,5 +67,35 @@ class AccountProfile extends Model
             ->generateSlugsFrom('display_name')
             ->saveSlugsTo('slug')
             ->doNotGenerateSlugsOnUpdate();
+    }
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    public function getNestedProfileGroupsAttribute(mixed $value): array
+    {
+        return $this->normalizeNestedArray($value);
+    }
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    private function normalizeNestedArray(mixed $value): array
+    {
+        if ($value instanceof BSONArray || $value instanceof BSONDocument) {
+            $value = $value->getArrayCopy();
+        } elseif ($value instanceof \Traversable) {
+            $value = iterator_to_array($value);
+        } elseif (! is_array($value)) {
+            return [];
+        }
+
+        foreach ($value as $key => $item) {
+            if ($item instanceof BSONArray || $item instanceof BSONDocument || $item instanceof \Traversable) {
+                $value[$key] = $this->normalizeNestedArray($item);
+            }
+        }
+
+        return $value;
     }
 }

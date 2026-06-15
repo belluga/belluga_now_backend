@@ -173,19 +173,18 @@ class AccountManagementService
     public function delete(Account $account): void
     {
         $this->assertUnmanagedAccountForDelete($account);
-        $tenantConnection = DB::connection('tenant');
+        $this->deleteInsideAccountAggregateDeletionBoundary($account);
+    }
 
-        $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
-            $profileIds = $this->allAccountProfileIds($account);
+    public function deleteRepairApprovedTestSeedAggregate(Account $account): void
+    {
+        if (! app()->environment(['local', 'testing'])) {
+            throw ValidationException::withMessages([
+                'account' => ['Repair-owned test-seed aggregate deletion is local-only.'],
+            ]);
+        }
 
-            $account->accountProfiles()->delete();
-            $account->roleTemplates()->delete();
-            $account->delete();
-
-            $tenantConnection->afterCommit(
-                fn (): bool => $this->deleteMapPoiProjections($profileIds)
-            );
-        });
+        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account);
     }
 
     public function restore(Account $account): Account
@@ -198,12 +197,34 @@ class AccountManagementService
     public function forceDelete(Account $account): void
     {
         $this->assertUnmanagedAccountForDelete($account);
+        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account);
+    }
+
+    private function deleteInsideAccountAggregateDeletionBoundary(Account $account): void
+    {
         $tenantConnection = DB::connection('tenant');
 
         $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
             $profileIds = $this->allAccountProfileIds($account);
 
-            $account->accountProfiles()->withTrashed()->forceDelete();
+            $this->deleteProfilesInsideAccountAggregateDeletionBoundary($account);
+            $account->roleTemplates()->delete();
+            $account->delete();
+
+            $tenantConnection->afterCommit(
+                fn (): bool => $this->deleteMapPoiProjections($profileIds)
+            );
+        });
+    }
+
+    private function forceDeleteInsideAccountAggregateDeletionBoundary(Account $account): void
+    {
+        $tenantConnection = DB::connection('tenant');
+
+        $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
+            $profileIds = $this->allAccountProfileIds($account);
+
+            $this->forceDeleteProfilesInsideAccountAggregateDeletionBoundary($account);
             $account->roleTemplates()->withTrashed()->forceDelete();
             $account->forceDelete();
 
@@ -223,6 +244,16 @@ class AccountManagementService
         throw ValidationException::withMessages([
             'account' => ['Only unmanaged accounts can be deleted.'],
         ]);
+    }
+
+    private function deleteProfilesInsideAccountAggregateDeletionBoundary(Account $account): void
+    {
+        $account->accountProfiles()->delete();
+    }
+
+    private function forceDeleteProfilesInsideAccountAggregateDeletionBoundary(Account $account): void
+    {
+        $account->accountProfiles()->withTrashed()->forceDelete();
     }
 
     public function attachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void
