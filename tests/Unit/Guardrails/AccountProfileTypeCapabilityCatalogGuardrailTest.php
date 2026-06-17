@@ -138,6 +138,15 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             ],
         ));
 
+        $this->assertTrue($catalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_GALLERY,
+            [
+                AccountProfileTypeCapabilityCatalog::HAS_GALLERY => true,
+                AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => false,
+                AccountProfileTypeCapabilityCatalog::HAS_EVENTS => false,
+            ],
+        ));
+
         $this->assertFalse($catalog->isEnabled(
             AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
             [
@@ -348,6 +357,10 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 'default' => false,
                 'requires' => [],
             ],
+            AccountProfileTypeCapabilityCatalog::HAS_GALLERY => [
+                'default' => false,
+                'requires' => [],
+            ],
             AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS => [
                 'default' => false,
                 'requires' => [],
@@ -362,6 +375,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     {
         return [
             'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
+            'app/Application/AccountProfiles/AccountProfileGalleryService.php',
             'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php',
             'app/Application/AccountProfiles/AccountProfileRegistryService.php',
             'app/Application/ProximityPreferences/ProximityPreferenceService.php',

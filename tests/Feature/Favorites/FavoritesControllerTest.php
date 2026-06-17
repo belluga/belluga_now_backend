@@ -82,42 +82,66 @@ class FavoritesControllerTest extends TestCaseTenant
         Sanctum::actingAs($this->user, ['account-users:view']);
     }
 
-    public function test_favorites_orders_by_next_then_last_then_favorited_at(): void
+    public function test_favorites_orders_live_now_then_upcoming_then_fallback_by_favorited_at(): void
     {
-        $profileNext = $this->createProfile('Profile Next', 'profile-next');
-        $profileLast = $this->createProfile('Profile Last', 'profile-last');
-        $profileFallback = $this->createProfile('Profile Fallback', 'profile-fallback');
+        $profileLiveNow = $this->createProfile('Profile Live Now', 'profile-live-now');
+        $profileUpcomingSoon = $this->createProfile('Profile Upcoming Soon', 'profile-upcoming-soon');
+        $profileUpcomingLater = $this->createProfile('Profile Upcoming Later', 'profile-upcoming-later');
+        $profilePastOnly = $this->createProfile('Profile Past Only', 'profile-past-only');
+        $profileNoEvent = $this->createProfile('Profile No Event', 'profile-no-event');
 
-        $this->insertSnapshot((string) $profileNext->_id, [
-            'next_event_occurrence_id' => 'occ-next',
+        $this->insertSnapshot((string) $profileLiveNow->_id, [
+            'next_event_occurrence_id' => null,
+            'next_event_occurrence_at' => null,
+            'last_event_occurrence_at' => null,
+            'live_now_event_occurrence_id' => 'occ-live',
+            'live_now_event_occurrence_at' => Carbon::parse('2026-03-20T12:00:00Z'),
+        ], [
+            'display_name' => 'Profile Live Now',
+            'slug' => 'profile-live-now',
+        ]);
+
+        $this->insertSnapshot((string) $profileUpcomingSoon->_id, [
+            'next_event_occurrence_id' => 'occ-upcoming-soon',
+            'next_event_occurrence_at' => Carbon::parse('2026-03-21T12:00:00Z'),
+            'last_event_occurrence_at' => null,
+        ], [
+            'display_name' => 'Profile Upcoming Soon',
+            'slug' => 'profile-upcoming-soon',
+        ]);
+
+        $this->insertSnapshot((string) $profileUpcomingLater->_id, [
+            'next_event_occurrence_id' => 'occ-upcoming-later',
             'next_event_occurrence_at' => Carbon::parse('2026-03-25T12:00:00Z'),
             'last_event_occurrence_at' => null,
         ], [
-            'display_name' => 'Profile Next',
-            'slug' => 'profile-next',
+            'display_name' => 'Profile Upcoming Later',
+            'slug' => 'profile-upcoming-later',
         ]);
 
-        $this->insertSnapshot((string) $profileLast->_id, [
+        $this->insertSnapshot((string) $profilePastOnly->_id, [
             'next_event_occurrence_id' => null,
             'next_event_occurrence_at' => null,
             'last_event_occurrence_at' => Carbon::parse('2026-03-18T12:00:00Z'),
         ], [
-            'display_name' => 'Profile Last',
-            'slug' => 'profile-last',
+            'display_name' => 'Profile Past Only',
+            'slug' => 'profile-past-only',
         ]);
 
-        $this->insertSnapshot((string) $profileFallback->_id, [
+        $this->insertSnapshot((string) $profileNoEvent->_id, [
             'next_event_occurrence_id' => null,
             'next_event_occurrence_at' => null,
             'last_event_occurrence_at' => null,
         ], [
-            'display_name' => 'Profile Fallback',
-            'slug' => 'profile-fallback',
+            'display_name' => 'Profile No Event',
+            'slug' => 'profile-no-event',
         ]);
 
-        $this->createEdge((string) $profileNext->_id, Carbon::parse('2026-03-10T12:00:00Z'));
-        $this->createEdge((string) $profileLast->_id, Carbon::parse('2026-03-19T12:00:00Z'));
-        $this->createEdge((string) $profileFallback->_id, Carbon::parse('2026-03-17T12:00:00Z'));
+        $this->createEdge((string) $profileLiveNow->_id, Carbon::parse('2026-03-10T12:00:00Z'));
+        $this->createEdge((string) $profileUpcomingSoon->_id, Carbon::parse('2026-03-11T12:00:00Z'));
+        $this->createEdge((string) $profileUpcomingLater->_id, Carbon::parse('2026-03-12T12:00:00Z'));
+        $this->createEdge((string) $profilePastOnly->_id, Carbon::parse('2026-03-13T12:00:00Z'));
+        $this->createEdge((string) $profileNoEvent->_id, Carbon::parse('2026-03-19T12:00:00Z'));
 
         $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
 
@@ -125,11 +149,13 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertJsonPath('has_more', false);
 
         $items = $response->json('items');
-        $this->assertCount(3, $items);
+        $this->assertCount(5, $items);
 
-        $this->assertSame((string) $profileNext->_id, (string) ($items[0]['target_id'] ?? ''));
-        $this->assertSame((string) $profileLast->_id, (string) ($items[1]['target_id'] ?? ''));
-        $this->assertSame((string) $profileFallback->_id, (string) ($items[2]['target_id'] ?? ''));
+        $this->assertSame((string) $profileLiveNow->_id, (string) ($items[0]['target_id'] ?? ''));
+        $this->assertSame((string) $profileUpcomingSoon->_id, (string) ($items[1]['target_id'] ?? ''));
+        $this->assertSame((string) $profileUpcomingLater->_id, (string) ($items[2]['target_id'] ?? ''));
+        $this->assertSame((string) $profileNoEvent->_id, (string) ($items[3]['target_id'] ?? ''));
+        $this->assertSame((string) $profilePastOnly->_id, (string) ($items[4]['target_id'] ?? ''));
     }
 
     public function test_favorites_returns_empty_payload_when_user_has_no_edges(): void

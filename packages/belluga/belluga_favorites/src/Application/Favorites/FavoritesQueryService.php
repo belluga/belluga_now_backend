@@ -94,13 +94,26 @@ class FavoritesQueryService
                 '$addFields' => [
                     'sort_block' => [
                         '$cond' => [
-                            ['$eq' => [['$type' => '$snapshot_doc.next_event_occurrence_at'], 'date']],
+                            ['$eq' => [['$type' => '$snapshot_doc.live_now_event_occurrence_at'], 'date']],
                             0,
                             [
                                 '$cond' => [
-                                    ['$eq' => [['$type' => '$snapshot_doc.last_event_occurrence_at'], 'date']],
+                                    ['$eq' => [['$type' => '$snapshot_doc.next_event_occurrence_at'], 'date']],
                                     1,
                                     2,
+                                ],
+                            ],
+                        ],
+                    ],
+                    'sort_upcoming_occurrence_at' => [
+                        '$cond' => [
+                            ['$eq' => [['$type' => '$snapshot_doc.live_now_event_occurrence_at'], 'date']],
+                            null,
+                            [
+                                '$cond' => [
+                                    ['$eq' => [['$type' => '$snapshot_doc.next_event_occurrence_at'], 'date']],
+                                    '$snapshot_doc.next_event_occurrence_at',
+                                    null,
                                 ],
                             ],
                         ],
@@ -110,8 +123,7 @@ class FavoritesQueryService
             [
                 '$sort' => [
                     'sort_block' => 1,
-                    'snapshot_doc.next_event_occurrence_at' => 1,
-                    'snapshot_doc.last_event_occurrence_at' => -1,
+                    'sort_upcoming_occurrence_at' => 1,
                     'favorited_at' => -1,
                     '_id' => 1,
                 ],

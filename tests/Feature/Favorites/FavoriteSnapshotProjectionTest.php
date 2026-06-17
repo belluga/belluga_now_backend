@@ -165,6 +165,77 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $this->assertNull($navigation['target_path']);
         $this->assertSame((string) $liveOccurrence->_id, (string) ($snapshot['live_now_event_occurrence_id'] ?? ''));
         $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
+        $this->assertNotNull($snapshot['live_now_event_occurrence_at'] ?? null);
+        $this->assertNotNull($snapshot['next_event_occurrence_at'] ?? null);
+    }
+
+    public function test_snapshot_rebuilds_immediately_without_a_queue_worker(): void
+    {
+        config([
+            'queue.default' => 'mongodb',
+            'queue.connections.mongodb.connection' => 'mongodb',
+            'queue.connections.mongodb.collection' => 'jobs',
+        ]);
+
+        $profile = $this->createProfile(
+            displayName: 'Profile Immediate Snapshot',
+            slug: 'profile-immediate-snapshot',
+        );
+
+        $liveOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->subMinutes(10),
+            endsAt: Carbon::now()->addMinutes(50),
+        );
+        $futureOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->addHours(4),
+            endsAt: Carbon::now()->addHours(6),
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame((string) $liveOccurrence->_id, (string) ($snapshot['live_now_event_occurrence_id'] ?? ''));
+        $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
+    }
+
+    public function test_snapshot_rebuild_clears_live_now_but_preserves_next_event_for_home_ordering(): void
+    {
+        $profile = $this->createProfile(
+            displayName: 'Profile Live Snapshot',
+            slug: 'profile-live-snapshot',
+        );
+
+        $liveOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->subMinutes(20),
+            endsAt: Carbon::now()->addMinutes(40),
+        );
+        $futureOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->addHours(6),
+            endsAt: Carbon::now()->addHours(8),
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+        $this->assertNotNull($snapshot);
+        $this->assertSame((string) $liveOccurrence->_id, (string) ($snapshot['live_now_event_occurrence_id'] ?? ''));
+        $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
+
+        $liveOccurrence->forceFill([
+            'starts_at' => Carbon::now()->subHours(4),
+            'ends_at' => Carbon::now()->subHours(2),
+            'effective_ends_at' => Carbon::now()->subHours(2),
+        ]);
+        $liveOccurrence->save();
+
+        $snapshotAfterUpdate = $this->loadSnapshot((string) $profile->_id);
+        $this->assertNotNull($snapshotAfterUpdate);
+        $this->assertNull($snapshotAfterUpdate['live_now_event_occurrence_id'] ?? null);
+        $this->assertNull($snapshotAfterUpdate['live_now_event_occurrence_at'] ?? null);
+        $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshotAfterUpdate['next_event_occurrence_id'] ?? ''));
+        $this->assertNotNull($snapshotAfterUpdate['next_event_occurrence_at'] ?? null);
     }
 
     public function test_snapshot_materializes_public_navigation_contract_from_profile_type_capabilities(): void

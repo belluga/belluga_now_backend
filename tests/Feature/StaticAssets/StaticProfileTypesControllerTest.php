@@ -176,6 +176,11 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $typeAssetUrl = $response->json('data.visual.image_url');
         $this->assertIsString($typeAssetUrl);
         $this->assertStringContainsString('/api/v1/media/static-profile-types/', $typeAssetUrl);
+        $typeAssetUri = (string) parse_url($typeAssetUrl, PHP_URL_PATH);
+        $typeAssetQuery = parse_url($typeAssetUrl, PHP_URL_QUERY);
+        if (is_string($typeAssetQuery) && $typeAssetQuery !== '') {
+            $typeAssetUri .= '?'.$typeAssetQuery;
+        }
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
         $model = StaticProfileType::query()->where('type', 'landmark')->firstOrFail();
@@ -715,7 +720,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $projection = $projectionQuery->firstOrFail();
 
         $this->assertSame('image', data_get($projection->visual, 'mode'));
-        $this->assertSame($typeAssetUrl, data_get($projection->visual, 'image_uri'));
+        $this->assertSame($typeAssetUri, data_get($projection->visual, 'image_uri'));
         $this->assertSame('type_definition', data_get($projection->visual, 'source'));
     }
 

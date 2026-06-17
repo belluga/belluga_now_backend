@@ -101,6 +101,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
+                'has_gallery' => true,
                 'has_nested_profile_groups' => true,
             ],
         ]);
@@ -2343,6 +2344,90 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNull($removeResponse->json('data.cover_url'));
         Storage::disk('public')->assertMissing($avatarPath);
         Storage::disk('public')->assertMissing($coverPath);
+    }
+
+    public function test_account_profile_show_and_public_detail_include_gallery_readback_while_avatar_cover_and_gallery_share_the_canonical_media_directory(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Profile Gallery Surface',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 240, 240),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1800, 900),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $slug = (string) $createResponse->json('data.account_profile.slug');
+        $this->assertNotSame('', $slug);
+        $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.avatar_url'));
+        $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.cover_url'));
+
+        $galleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            [
+                '_method' => 'PATCH',
+                'gallery_groups' => json_encode([
+                    [
+                        'group_id' => 'ambientes',
+                        'subtitle' => 'Ambientes',
+                        'items' => [
+                            [
+                                'item_id' => 'hall-principal',
+                                'description' => 'Hall principal',
+                                'upload' => 'upload_hall',
+                            ],
+                        ],
+                    ],
+                ], JSON_THROW_ON_ERROR),
+                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+            ],
+        );
+
+        $galleryResponse->assertOk();
+        $galleryResponse->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
+        $galleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+
+        $adminShow = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            $this->getHeaders()
+        );
+        $adminShow->assertOk();
+        $adminShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
+        $adminShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+
+        $publicShow = $this->getJson("{$this->base_api_tenant}account_profiles/{$slug}");
+        $publicShow->assertOk();
+        $publicShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
+        $publicShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $publicShow->assertJsonPath(
+            'data.gallery_groups.0.items.0.modal_url',
+            $adminShow->json('data.gallery_groups.0.items.0.modal_url')
+        );
+
+        $tenant = Tenant::current();
+        $tenantSlug = $tenant?->slug ?? $this->tenant->subdomain;
+        $directory = "tenants/{$tenantSlug}/account_profiles/{$profileId}";
+        $files = Storage::disk('public')->files($directory);
+
+        $this->assertNotEmpty(
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'avatar.'))
+        );
+        $this->assertNotEmpty(
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'cover.'))
+        );
+        $this->assertNotEmpty(
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'gallery-item-hall-principal.'))
+        );
     }
 
     public function test_account_profile_create_rejects_unknown_profile_type(): void

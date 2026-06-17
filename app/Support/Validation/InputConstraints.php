@@ -22,6 +22,12 @@ final class InputConstraints
 
     public const ACCOUNT_PROFILE_NESTED_GROUP_KEY_MAX = 64;
 
+    public const ACCOUNT_PROFILE_GALLERY_GROUPS_MAX = 6;
+
+    public const ACCOUNT_PROFILE_GALLERY_ITEMS_MAX = 12;
+
+    public const ACCOUNT_PROFILE_GALLERY_KEY_MAX = 64;
+
     public const EMAIL_MAX = 255;
 
     public const EMAIL_ARRAY_MAX = 10;
