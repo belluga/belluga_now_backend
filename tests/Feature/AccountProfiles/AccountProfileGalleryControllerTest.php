@@ -311,6 +311,17 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $this->assertNotNull($persistedItem);
         $this->assertSame('Entrada principal', $persistedItem['description'] ?? null);
 
+        $disabledMutation = $this->patchGallery($profile, []);
+        $disabledMutation->assertStatus(422);
+        $disabledMutation->assertJsonValidationErrors(['gallery_groups']);
+
+        $dormantProfile = AccountProfile::query()->findOrFail($profile->getKey());
+        $dormantItem = $this->storedGalleryItem($dormantProfile, 'entrada');
+        $this->assertNotNull($dormantItem);
+        $this->assertSame('Entrada principal', $dormantItem['description'] ?? null);
+        $this->assertGalleryVariantStored($dormantProfile, 'entrada', null);
+        $this->assertGalleryVariantStored($dormantProfile, 'entrada', 'modal');
+
         $publicReadback = $this->getJson(
             "{$this->base_api_tenant}account_profiles/gallery-hidden-parent",
             $this->getHeaders()
@@ -613,8 +624,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         string $displayName,
         string $slug,
         string $profileType = 'venue',
-    ): AccountProfile
-    {
+    ): AccountProfile {
         return AccountProfile::query()->create([
             'account_id' => (string) $this->account->getKey(),
             'profile_type' => $profileType,

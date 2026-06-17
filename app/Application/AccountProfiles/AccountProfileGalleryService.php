@@ -32,7 +32,7 @@ final class AccountProfileGalleryService
         array $actorContext = [],
     ): AccountProfile {
         $baseUrl = $request->getSchemeAndHttpHost();
-        $this->assertGalleryAllowed((string) ($profile->profile_type ?? ''), $rawGroups);
+        $this->assertGalleryAllowed((string) ($profile->profile_type ?? ''));
         $existingItems = $this->existingItemsById($profile->gallery_groups ?? []);
         [$plannedGroups, $removedItemIds] = $this->planReplacement($rawGroups, $existingItems, $request);
 
@@ -363,16 +363,9 @@ final class AccountProfileGalleryService
         ];
     }
 
-    /**
-     * @param  array<int, mixed>  $rawGroups
-     */
-    private function assertGalleryAllowed(string $profileType, array $rawGroups): void
+    private function assertGalleryAllowed(string $profileType): void
     {
         if ($this->profileTypeAllowsGallery($profileType)) {
-            return;
-        }
-
-        if ($this->galleryPayloadIsEmpty($rawGroups)) {
             return;
         }
 
@@ -384,26 +377,6 @@ final class AccountProfileGalleryService
     private function profileTypeAllowsGallery(string $profileType): bool
     {
         return $this->typeSetProvider->hasGalleryEnabled($profileType);
-    }
-
-    /**
-     * @param  array<int, mixed>  $rawGroups
-     */
-    private function galleryPayloadIsEmpty(array $rawGroups): bool
-    {
-        foreach ($rawGroups as $rawGroup) {
-            if (! is_array($rawGroup)) {
-                continue;
-            }
-
-            $subtitle = trim((string) ($rawGroup['subtitle'] ?? ''));
-            $items = $this->arrayFrom($rawGroup['items'] ?? []);
-            if ($subtitle !== '' || $items !== []) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /**

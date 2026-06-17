@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -65,6 +66,51 @@ class AccountProfileRegistryServiceTest extends TestCase
 
         $this->assertFalse((bool) data_get($hotel, 'capabilities.is_reference_location_enabled'));
         $this->assertTrue((bool) data_get($venue, 'capabilities.is_reference_location_enabled'));
+    }
+
+    public function test_ensure_defaults_repairs_gallery_capability_for_canonical_public_types(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_inviteable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_content' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_inviteable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => true,
+                'has_content' => false,
+            ],
+        ]);
+
+        $this->app->make(AccountProfileRegistrySeeder::class)->ensureDefaults();
+
+        $this->assertFalse($this->service->hasGallery('personal'));
+        $this->assertTrue($this->service->hasGallery('artist'));
+        $this->assertTrue($this->service->hasGallery('venue'));
+
+        $artist = TenantProfileType::query()->where('type', 'artist')->firstOrFail();
+        $venue = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+
+        $this->assertTrue((bool) data_get($artist->capabilities, 'has_gallery', false));
+        $this->assertTrue((bool) data_get($venue->capabilities, 'has_gallery', false));
     }
 
     private function initializeSystem(): void
