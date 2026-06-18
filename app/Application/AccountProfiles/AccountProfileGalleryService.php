@@ -6,7 +6,6 @@ namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
 use App\Support\Validation\InputConstraints;
-use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -28,13 +27,13 @@ final class AccountProfileGalleryService
     public function replace(
         AccountProfile $profile,
         array $rawGroups,
-        Request $request,
+        string $baseUrl,
+        array $uploads = [],
         array $actorContext = [],
     ): AccountProfile {
-        $baseUrl = $request->getSchemeAndHttpHost();
         $this->assertGalleryAllowed((string) ($profile->profile_type ?? ''));
         $existingItems = $this->existingItemsById($profile->gallery_groups ?? []);
-        [$plannedGroups, $removedItemIds] = $this->planReplacement($rawGroups, $existingItems, $request);
+        [$plannedGroups, $removedItemIds] = $this->planReplacement($rawGroups, $existingItems, $uploads);
 
         $persistedGroups = [];
         foreach ($plannedGroups as $groupOrder => $plannedGroup) {
@@ -227,9 +226,10 @@ final class AccountProfileGalleryService
     /**
      * @param  array<int, mixed>  $rawGroups
      * @param  array<string, array{media_path:string,version:string}>  $existingItems
+     * @param  array<string, mixed>  $uploads
      * @return array{0: array<int, array<string, mixed>>, 1: array<int, string>}
      */
-    private function planReplacement(array $rawGroups, array $existingItems, Request $request): array
+    private function planReplacement(array $rawGroups, array $existingItems, array $uploads): array
     {
         if (count($rawGroups) > InputConstraints::ACCOUNT_PROFILE_GALLERY_GROUPS_MAX) {
             throw ValidationException::withMessages([
@@ -307,7 +307,7 @@ final class AccountProfileGalleryService
 
                 $uploadFile = null;
                 if ($uploadKey !== null) {
-                    $uploadFile = $request->file($uploadKey);
+                    $uploadFile = $uploads[$uploadKey] ?? null;
                     $this->assertValidUpload(
                         $uploadKey,
                         $uploadFile,

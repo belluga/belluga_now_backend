@@ -30,7 +30,8 @@ final class AccountProfileGalleryController extends Controller
         $updatedProfile = $this->galleryService->replace(
             $profile,
             $request->validated()['gallery_groups'] ?? [],
-            $request,
+            $request->getSchemeAndHttpHost(),
+            $request->allFiles(),
             $actor
                 ? [
                     'updated_by' => (string) $actor->getKey(),
