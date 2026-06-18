@@ -543,16 +543,117 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'discovery_filter_facets.surface',
             'discovery.account_profiles',
         );
+        $response->assertJsonPath(
+            'discovery_filter_catalog.surface',
+            'discovery.account_profiles',
+        );
 
         $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
         $this->assertContains('artist_public', $filterKeys);
         $this->assertContains('venue', $filterKeys);
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains('artist_public', $catalogFilterKeys);
+        $this->assertContains('venue', $catalogFilterKeys);
 
         $cuisineTerms = collect($response->json('discovery_filter_facets.taxonomy_options.cuisine.terms') ?? [])
             ->pluck('value')
             ->values()
             ->all();
         $this->assertSame(['italian', 'japanese'], $cuisineTerms);
+        $catalogCuisineTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $catalogCuisineTerms);
+    }
+
+    public function test_public_account_profile_index_runtime_catalog_hides_empty_and_non_discoverable_types(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'visible_runtime_type',
+            'label' => 'Visible Runtime Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'empty_runtime_type',
+            'label' => 'Empty Runtime Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'hidden_runtime_type',
+            'label' => 'Hidden Runtime Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => false,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'visible_runtime_type',
+            'display_name' => 'Visible Runtime Profile',
+            'taxonomy_terms' => [],
+            'taxonomy_terms_flat' => [],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Hidden Runtime Account',
+            'document' => 'DOC-HIDDEN-RUNTIME',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'hidden_runtime_type',
+            'display_name' => 'Hidden Runtime Profile',
+            'taxonomy_terms' => [],
+            'taxonomy_terms_flat' => [],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles?page=1&per_page=1");
+
+        $response->assertStatus(200);
+
+        $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
+        $this->assertContains('visible_runtime_type', $filterKeys);
+        $this->assertNotContains('empty_runtime_type', $filterKeys);
+        $this->assertNotContains('hidden_runtime_type', $filterKeys);
+
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains('visible_runtime_type', $catalogFilterKeys);
+        $this->assertNotContains('empty_runtime_type', $catalogFilterKeys);
+        $this->assertNotContains('hidden_runtime_type', $catalogFilterKeys);
     }
 
     public function test_public_account_profile_index_runtime_facets_are_self_excluding_for_selected_filters(): void
@@ -647,12 +748,26 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $filterKeys,
             'Type facets must exclude only the active type selection, not collapse to the selected type.'
         );
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains(
+            'artist_public',
+            $catalogFilterKeys,
+            'Canonical discovery catalog must preserve the backend-pruned compatible type universe.'
+        );
 
         $cuisineTerms = collect($response->json('discovery_filter_facets.taxonomy_options.cuisine.terms') ?? [])
             ->pluck('value')
             ->values()
             ->all();
         $this->assertSame(['italian', 'japanese'], $cuisineTerms);
+        $catalogCuisineTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $catalogCuisineTerms);
 
         $this->assertCount(1, $aggregateCalls);
         $this->assertSame(

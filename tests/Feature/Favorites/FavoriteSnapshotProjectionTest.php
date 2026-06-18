@@ -160,9 +160,16 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $this->assertArrayHasKey('public_detail_path', $target);
         $this->assertNull($target['public_detail_path']);
         $navigation = $this->toArray($snapshot['navigation'] ?? []);
+        $expectedEventPath = '/agenda/evento/event-slug?occurrence='.(string) $liveOccurrence->_id;
+        $this->assertSame('event', $navigation['kind'] ?? null);
+        $this->assertSame('event-slug', $navigation['target_slug'] ?? null);
+        $this->assertSame($expectedEventPath, $navigation['target_path'] ?? null);
         $this->assertFalse((bool) ($navigation['can_open_public_detail'] ?? true));
-        $this->assertArrayHasKey('target_path', $navigation);
-        $this->assertNull($navigation['target_path']);
+        $this->assertArrayHasKey('profile_target_path', $navigation);
+        $this->assertNull($navigation['profile_target_path']);
+        $this->assertSame($expectedEventPath, $navigation['event_target_path'] ?? null);
+        $this->assertSame('event-slug', $navigation['event_target_slug'] ?? null);
+        $this->assertSame((string) $liveOccurrence->_id, (string) ($navigation['event_occurrence_id'] ?? ''));
         $this->assertSame((string) $liveOccurrence->_id, (string) ($snapshot['live_now_event_occurrence_id'] ?? ''));
         $this->assertSame((string) $futureOccurrence->_id, (string) ($snapshot['next_event_occurrence_id'] ?? ''));
         $this->assertNotNull($snapshot['live_now_event_occurrence_at'] ?? null);
@@ -251,11 +258,11 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
             profileType: 'personal',
         );
 
-        $this->createOccurrence(
+        $publicOccurrence = $this->createOccurrence(
             profileId: (string) $publicProfile->_id,
             startsAt: Carbon::now()->addDay(),
         );
-        $this->createOccurrence(
+        $hiddenOccurrence = $this->createOccurrence(
             profileId: (string) $hiddenProfile->_id,
             startsAt: Carbon::now()->addDays(2),
         );
@@ -270,17 +277,37 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $publicNavigation = $this->toArray($publicSnapshot['navigation'] ?? []);
         $this->assertTrue((bool) ($publicTarget['can_open_public_detail'] ?? false));
         $this->assertSame('/parceiro/profile-public-snapshot', $publicTarget['public_detail_path'] ?? null);
+        $this->assertSame('event', $publicNavigation['kind'] ?? null);
         $this->assertTrue((bool) ($publicNavigation['can_open_public_detail'] ?? false));
-        $this->assertSame('/parceiro/profile-public-snapshot', $publicNavigation['target_path'] ?? null);
+        $this->assertSame(
+            '/agenda/evento/event-slug?occurrence='.(string) $publicOccurrence->_id,
+            $publicNavigation['target_path'] ?? null,
+        );
+        $this->assertSame('/parceiro/profile-public-snapshot', $publicNavigation['profile_target_path'] ?? null);
+        $this->assertSame(
+            '/agenda/evento/event-slug?occurrence='.(string) $publicOccurrence->_id,
+            $publicNavigation['event_target_path'] ?? null,
+        );
+        $this->assertSame((string) $publicOccurrence->_id, (string) ($publicNavigation['event_occurrence_id'] ?? ''));
 
         $hiddenTarget = $this->toArray($hiddenSnapshot['target'] ?? []);
         $hiddenNavigation = $this->toArray($hiddenSnapshot['navigation'] ?? []);
         $this->assertFalse((bool) ($hiddenTarget['can_open_public_detail'] ?? true));
         $this->assertArrayHasKey('public_detail_path', $hiddenTarget);
         $this->assertNull($hiddenTarget['public_detail_path']);
+        $this->assertSame('event', $hiddenNavigation['kind'] ?? null);
         $this->assertFalse((bool) ($hiddenNavigation['can_open_public_detail'] ?? true));
-        $this->assertArrayHasKey('target_path', $hiddenNavigation);
-        $this->assertNull($hiddenNavigation['target_path']);
+        $this->assertSame(
+            '/agenda/evento/event-slug?occurrence='.(string) $hiddenOccurrence->_id,
+            $hiddenNavigation['target_path'] ?? null,
+        );
+        $this->assertArrayHasKey('profile_target_path', $hiddenNavigation);
+        $this->assertNull($hiddenNavigation['profile_target_path']);
+        $this->assertSame(
+            '/agenda/evento/event-slug?occurrence='.(string) $hiddenOccurrence->_id,
+            $hiddenNavigation['event_target_path'] ?? null,
+        );
+        $this->assertSame((string) $hiddenOccurrence->_id, (string) ($hiddenNavigation['event_occurrence_id'] ?? ''));
     }
 
     public function test_snapshot_rebuilds_from_linked_account_profiles_without_artists_or_venue(): void

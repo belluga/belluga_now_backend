@@ -603,6 +603,15 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
     public function test_agenda_returns_runtime_facets_for_the_full_filtered_universe_before_pagination(): void
     {
+        EventType::query()->updateOrCreate(['slug' => 'fair'], [
+            'name' => 'Fair',
+            'allowed_taxonomies' => ['mood'],
+        ]);
+        EventType::query()->updateOrCreate(['slug' => 'show'], [
+            'name' => 'Show',
+            'allowed_taxonomies' => ['mood'],
+        ]);
+
         $this->createEvent([
             'title' => 'Universe First Page',
             'type' => [
@@ -640,22 +649,41 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('items.0.title', 'Universe First Page');
         $response->assertJsonPath('discovery_filter_facets.surface', 'home.events');
+        $response->assertJsonPath('discovery_filter_catalog.surface', 'home.events');
 
         $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
         $this->assertContains('show', $filterKeys);
         $this->assertContains('fair', $filterKeys);
         $this->assertContains('culture', $filterKeys);
         $this->assertContains('sports', $filterKeys);
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains('show', $catalogFilterKeys);
+        $this->assertContains('fair', $catalogFilterKeys);
+        $this->assertNotContains('culture', $catalogFilterKeys);
+        $this->assertNotContains('sports', $catalogFilterKeys);
 
         $moodTerms = collect($response->json('discovery_filter_facets.taxonomy_options.mood.terms') ?? [])
             ->pluck('value')
             ->values()
             ->all();
         $this->assertSame(['night', 'sunset'], $moodTerms);
+        $catalogMoodTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.mood.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['night', 'sunset'], $catalogMoodTerms);
     }
 
     public function test_agenda_runtime_taxonomy_facets_are_self_excluding_for_the_selected_group(): void
     {
+        EventType::query()->updateOrCreate(['slug' => 'show'], [
+            'name' => 'Show',
+            'allowed_taxonomies' => ['mood'],
+        ]);
+
         $this->createEvent([
             'title' => 'Mood Sunset Event',
             'taxonomy_terms' => [
@@ -698,6 +726,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->values()
             ->all();
         $this->assertSame(['night', 'sunset'], $moodTerms);
+        $catalogMoodTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.mood.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['night', 'sunset'], $catalogMoodTerms);
 
         $this->assertCount(1, $aggregateCalls);
         $this->assertSame(

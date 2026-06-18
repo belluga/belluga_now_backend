@@ -195,8 +195,52 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertSame('account_profile', (string) ($items[0]['registry_key'] ?? ''));
         $response->assertJsonPath('items.0.target.can_open_public_detail', true);
         $response->assertJsonPath('items.0.target.public_detail_path', '/parceiro/profile-default-registry');
+        $response->assertJsonPath('items.0.navigation.kind', 'account_profile');
         $response->assertJsonPath('items.0.navigation.can_open_public_detail', true);
         $response->assertJsonPath('items.0.navigation.target_path', '/parceiro/profile-default-registry');
+        $response->assertJsonPath('items.0.navigation.profile_target_path', '/parceiro/profile-default-registry');
+        $response->assertJsonPath('items.0.navigation.event_target_path', null);
+    }
+
+    public function test_favorites_prefers_canonical_event_navigation_target_when_future_event_exists(): void
+    {
+        $profile = $this->createProfile('Profile Event Preferred', 'profile-event-preferred');
+
+        $this->insertSnapshot((string) $profile->_id, [
+            'next_event_occurrence_id' => 'occ-next',
+            'next_event_occurrence_at' => Carbon::parse('2026-03-22T12:00:00Z'),
+            'last_event_occurrence_at' => null,
+        ], [
+            'display_name' => 'Profile Event Preferred',
+            'slug' => 'profile-event-preferred',
+            'profile_type' => 'artist',
+            'can_open_public_detail' => true,
+            'public_detail_path' => '/parceiro/profile-event-preferred',
+        ], [
+            'kind' => 'event',
+            'target_slug' => 'event-preferred-slug',
+            'target_path' => '/agenda/evento/event-preferred-slug?occurrence=occ-next',
+            'profile_target_path' => '/parceiro/profile-event-preferred',
+            'event_target_path' => '/agenda/evento/event-preferred-slug?occurrence=occ-next',
+            'event_target_slug' => 'event-preferred-slug',
+            'event_occurrence_id' => 'occ-next',
+            'can_open_public_detail' => true,
+        ]);
+
+        $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
+
+        $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('items.0.target.public_detail_path', '/parceiro/profile-event-preferred');
+        $response->assertJsonPath('items.0.navigation.kind', 'event');
+        $response->assertJsonPath('items.0.navigation.target_slug', 'event-preferred-slug');
+        $response->assertJsonPath('items.0.navigation.target_path', '/agenda/evento/event-preferred-slug?occurrence=occ-next');
+        $response->assertJsonPath('items.0.navigation.profile_target_path', '/parceiro/profile-event-preferred');
+        $response->assertJsonPath('items.0.navigation.event_target_path', '/agenda/evento/event-preferred-slug?occurrence=occ-next');
+        $response->assertJsonPath('items.0.navigation.event_target_slug', 'event-preferred-slug');
+        $response->assertJsonPath('items.0.navigation.event_occurrence_id', 'occ-next');
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', true);
     }
 
     public function test_favorites_returns_edges_for_anonymous_identity(): void
@@ -241,6 +285,15 @@ class FavoritesControllerTest extends TestCaseTenant
             'avatar_url' => null,
             'cover_url' => 'https://cdn.test/profile-cover.png',
             'profile_type' => 'restaurant',
+        ], [
+            'kind' => 'event',
+            'target_slug' => 'event-visual-payload',
+            'target_path' => '/agenda/evento/event-visual-payload?occurrence=occ-live',
+            'profile_target_path' => null,
+            'event_target_path' => '/agenda/evento/event-visual-payload?occurrence=occ-live',
+            'event_target_slug' => 'event-visual-payload',
+            'event_occurrence_id' => 'occ-live',
+            'can_open_public_detail' => false,
         ]);
 
         $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
@@ -252,8 +305,14 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertJsonPath('items.0.target.profile_type', 'restaurant');
         $response->assertJsonPath('items.0.target.can_open_public_detail', false);
         $response->assertJsonPath('items.0.target.public_detail_path', null);
+        $response->assertJsonPath('items.0.navigation.kind', 'event');
         $response->assertJsonPath('items.0.navigation.can_open_public_detail', false);
-        $response->assertJsonPath('items.0.navigation.target_path', null);
+        $response->assertJsonPath('items.0.navigation.target_slug', 'event-visual-payload');
+        $response->assertJsonPath('items.0.navigation.target_path', '/agenda/evento/event-visual-payload?occurrence=occ-live');
+        $response->assertJsonPath('items.0.navigation.profile_target_path', null);
+        $response->assertJsonPath('items.0.navigation.event_target_path', '/agenda/evento/event-visual-payload?occurrence=occ-live');
+        $response->assertJsonPath('items.0.navigation.event_target_slug', 'event-visual-payload');
+        $response->assertJsonPath('items.0.navigation.event_occurrence_id', 'occ-live');
         $response->assertJsonPath('items.0.snapshot.live_now_event_occurrence_id', 'occ-live');
     }
 
@@ -430,8 +489,9 @@ class FavoritesControllerTest extends TestCaseTenant
     /**
      * @param  array{next_event_occurrence_id:?string,next_event_occurrence_at:mixed,last_event_occurrence_at:mixed,live_now_event_occurrence_id?:?string,live_now_event_occurrence_at?:mixed}  $snapshot
      * @param  array{display_name:string,slug:string,avatar_url?:?string,cover_url?:?string,profile_type?:?string,can_open_public_detail?:bool,public_detail_path?:?string}  $target
+     * @param  array{kind?:string,target_slug?:?string,target_path?:?string,profile_target_path?:?string,event_target_path?:?string,event_target_slug?:?string,event_occurrence_id?:?string,can_open_public_detail?:bool}  $navigationOverrides
      */
-    private function insertSnapshot(string $profileId, array $snapshot, array $target): void
+    private function insertSnapshot(string $profileId, array $snapshot, array $target, array $navigationOverrides = []): void
     {
         $collection = DB::connection('tenant')
             ->getDatabase()
@@ -455,6 +515,16 @@ class FavoritesControllerTest extends TestCaseTenant
         $nextOccurrenceAt = $toUtcDateTime($snapshot['next_event_occurrence_at'] ?? null);
         $lastOccurrenceAt = $toUtcDateTime($snapshot['last_event_occurrence_at'] ?? null);
         $liveNowOccurrenceAt = $toUtcDateTime($snapshot['live_now_event_occurrence_at'] ?? null);
+        $navigation = array_replace([
+            'kind' => 'account_profile',
+            'target_slug' => $target['slug'],
+            'target_path' => $publicDetailPath,
+            'profile_target_path' => $publicDetailPath,
+            'event_target_path' => null,
+            'event_target_slug' => null,
+            'event_occurrence_id' => null,
+            'can_open_public_detail' => $canOpenPublicDetail,
+        ], $navigationOverrides);
 
         $selector = [
             'registry_key' => 'account_profile',
@@ -488,12 +558,7 @@ class FavoritesControllerTest extends TestCaseTenant
                     'last_event_occurrence_at' => $lastOccurrenceAt,
                     'live_now_event_occurrence_id' => $snapshot['live_now_event_occurrence_id'] ?? null,
                     'live_now_event_occurrence_at' => $liveNowOccurrenceAt,
-                    'navigation' => [
-                        'kind' => 'account_profile',
-                        'target_slug' => $target['slug'],
-                        'target_path' => $publicDetailPath,
-                        'can_open_public_detail' => $canOpenPublicDetail,
-                    ],
+                    'navigation' => $navigation,
                     'updated_at' => Carbon::now(),
                 ],
             ],

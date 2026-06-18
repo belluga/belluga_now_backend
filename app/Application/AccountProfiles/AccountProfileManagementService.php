@@ -8,8 +8,8 @@ use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
-use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -25,6 +25,7 @@ class AccountProfileManagementService
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly MapPoiProjectionService $mapPoiProjectionService,
     ) {}
 
     /**
@@ -191,7 +192,7 @@ class AccountProfileManagementService
         }
 
         $profile = $profile->fresh();
-        UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
+        $this->syncMapPoiProjectionById((string) $profile->_id);
 
         return $profile;
     }
@@ -213,7 +214,7 @@ class AccountProfileManagementService
         $profile->restore();
 
         $profile = $profile->fresh();
-        $this->queueMapPoiSyncAfterCommit($profile);
+        $this->syncMapPoiProjectionById((string) $profile->_id);
 
         return $profile;
     }
@@ -376,8 +377,9 @@ class AccountProfileManagementService
 
     private function queueMapPoiSyncAfterCommit(AccountProfile $profile): void
     {
+        $profileId = (string) $profile->_id;
         DB::connection('tenant')->afterCommit(
-            static fn () => UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id)
+            fn () => $this->syncMapPoiProjectionById($profileId)
         );
     }
 
@@ -386,6 +388,18 @@ class AccountProfileManagementService
         DB::connection('tenant')->afterCommit(
             static fn () => DeleteMapPoiByRefJob::dispatch('account_profile', $profileId)
         );
+    }
+
+    private function syncMapPoiProjectionById(string $profileId): void
+    {
+        $profile = AccountProfile::query()->find($profileId);
+        if (! $profile) {
+            $this->mapPoiProjectionService->deleteByRef('account_profile', $profileId);
+
+            return;
+        }
+
+        $this->mapPoiProjectionService->upsertFromAccountProfile($profile);
     }
 
     /**

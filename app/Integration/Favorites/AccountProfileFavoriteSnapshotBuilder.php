@@ -51,11 +51,22 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
         $nextOccurrenceId = $nextOccurrence ? (string) $nextOccurrence->getAttribute('_id') : null;
         $nextOccurrenceAt = $nextOccurrence?->starts_at;
         $lastOccurrenceAt = $lastOccurrence?->starts_at;
+        $eventNavigationOccurrence = $liveNowOccurrence ?? $nextOccurrence;
+        $eventTargetOccurrenceId = $eventNavigationOccurrence
+            ? (string) $eventNavigationOccurrence->getAttribute('_id')
+            : null;
+        $eventTargetSlug = $eventNavigationOccurrence?->slug
+            ? trim((string) $eventNavigationOccurrence->slug)
+            : null;
         $slug = $profile->slug ? (string) $profile->slug : null;
         $normalizedSlug = trim((string) $slug);
         $canOpenPublicDetail = $normalizedSlug !== ''
             && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
         $publicDetailPath = $canOpenPublicDetail ? '/parceiro/'.$normalizedSlug : null;
+        $eventTargetPath = $this->buildEventTargetPath(
+            $eventTargetSlug,
+            $eventTargetOccurrenceId,
+        );
 
         return [
             'target' => [
@@ -81,12 +92,28 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
             'next_event_occurrence_at' => $nextOccurrenceAt,
             'last_event_occurrence_at' => $lastOccurrenceAt,
             'navigation' => [
-                'kind' => 'account_profile',
-                'target_slug' => $slug,
-                'target_path' => $publicDetailPath,
+                'kind' => $eventTargetPath !== null ? 'event' : 'account_profile',
+                'target_slug' => $eventTargetPath !== null ? $eventTargetSlug : $slug,
+                'target_path' => $eventTargetPath ?? $publicDetailPath,
+                'profile_target_path' => $publicDetailPath,
+                'event_target_path' => $eventTargetPath,
+                'event_target_slug' => $eventTargetSlug,
+                'event_occurrence_id' => $eventTargetOccurrenceId,
                 'can_open_public_detail' => $canOpenPublicDetail,
             ],
         ];
+    }
+
+    private function buildEventTargetPath(?string $eventSlug, ?string $occurrenceId): ?string
+    {
+        $normalizedSlug = trim((string) $eventSlug);
+        $normalizedOccurrenceId = trim((string) $occurrenceId);
+
+        if ($normalizedSlug === '' || $normalizedOccurrenceId === '') {
+            return null;
+        }
+
+        return '/agenda/evento/'.$normalizedSlug.'?occurrence='.rawurlencode($normalizedOccurrenceId);
     }
 
     private function baseOccurrenceQuery(string $profileId): Builder

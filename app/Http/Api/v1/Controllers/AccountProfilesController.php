@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
@@ -23,6 +24,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
+        private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -43,9 +45,17 @@ class AccountProfilesController extends Controller
         $validated = $request->validated();
 
         $perPage = (int) ($validated['per_page'] ?? $validated['page_size'] ?? 15);
-        return response()->json(
-            $this->profileQueryService->publicPageEnvelope($validated, $perPage)
-        );
+        $payload = $this->profileQueryService->publicPageEnvelope($validated, $perPage);
+        $payload['discovery_filter_catalog'] = $this->runtimeDiscoveryFilterCatalogService
+            ->buildCanonicalCatalog(
+                'discovery.account_profiles',
+                is_array($payload['discovery_filter_facets'] ?? null)
+                    ? $payload['discovery_filter_facets']
+                    : null,
+                $request->getSchemeAndHttpHost()
+            );
+
+        return response()->json($payload);
     }
 
     public function publicNear(AccountProfileNearRequest $request): JsonResponse

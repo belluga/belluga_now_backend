@@ -78,6 +78,45 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.0.description', null);
     }
 
+    public function test_event_type_index_exposes_absolute_type_asset_urls_for_image_visuals(): void
+    {
+        $type = EventType::query()->create([
+            'name' => 'Festival',
+            'slug' => 'festival',
+            'visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+            ],
+            'poi_visual' => [
+                'mode' => 'image',
+                'image_source' => 'type_asset',
+            ],
+        ]);
+
+        $relativeTypeAssetUrl = sprintf(
+            '/api/v1/media/event-types/%s/type_asset?v=123',
+            (string) $type->getKey()
+        );
+        $type->forceFill([
+            'type_asset_url' => $relativeTypeAssetUrl,
+        ])->save();
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}event_types",
+            $this->getHeaders()
+        );
+
+        $absoluteTypeAssetUrl = sprintf(
+            '%smedia/event-types/%s/type_asset?v=123',
+            $this->base_api_tenant,
+            (string) $type->getKey()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.0.visual.image_url', $absoluteTypeAssetUrl);
+        $response->assertJsonPath('data.0.poi_visual.image_url', $absoluteTypeAssetUrl);
+    }
+
     public function test_event_type_index_allows_create_ability_token(): void
     {
         EventType::query()->create([
