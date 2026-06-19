@@ -654,7 +654,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $tooManyItemsBeforeUploadValidation->assertStatus(422);
         $tooManyItemsBeforeUploadValidation->assertJsonValidationErrors(['gallery_groups']);
         $this->assertArrayNotHasKey(
-            'gallery_groups.0.items.0.upload',
+            'gallery_groups.0.items.12.upload',
             $tooManyItemsBeforeUploadValidation->json('errors') ?? []
         );
     }
