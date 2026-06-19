@@ -12,6 +12,9 @@ use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistryService
 {
+    /** @var array<string, array<string, mixed>|null> */
+    private array $typeDefinitionCache = [];
+
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly AccountProfileTypeMediaService $mediaService,
@@ -57,12 +60,22 @@ class AccountProfileRegistryService
      */
     public function typeDefinition(string $profileType, ?string $baseUrl = null): ?array
     {
+        $normalizedType = trim($profileType);
+        if ($normalizedType === '') {
+            return null;
+        }
+
+        $cacheKey = sprintf('%s|%s', $baseUrl ?? '__null__', $normalizedType);
+        if (array_key_exists($cacheKey, $this->typeDefinitionCache)) {
+            return $this->typeDefinitionCache[$cacheKey];
+        }
+
         $type = TenantProfileType::query()
-            ->where('type', $profileType)
+            ->where('type', $normalizedType)
             ->first();
 
         if (! $type instanceof TenantProfileType) {
-            return null;
+            return $this->typeDefinitionCache[$cacheKey] = null;
         }
 
         $visual = $this->resolveVisualPayload($type, $baseUrl);
@@ -71,7 +84,7 @@ class AccountProfileRegistryService
             $this->arrayFrom($type->capabilities ?? [])
         );
 
-        return [
+        return $this->typeDefinitionCache[$cacheKey] = [
             'type' => $type->type,
             'label' => $labels['singular'],
             'labels' => $labels,

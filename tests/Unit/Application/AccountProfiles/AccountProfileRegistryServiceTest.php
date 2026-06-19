@@ -10,6 +10,7 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -111,6 +112,40 @@ class AccountProfileRegistryServiceTest extends TestCase
 
         $this->assertTrue((bool) data_get($artist->capabilities, 'has_gallery', false));
         $this->assertTrue((bool) data_get($venue->capabilities, 'has_gallery', false));
+    }
+
+    public function test_type_definition_is_memoized_across_capability_helpers_within_one_request(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_inviteable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => true,
+                'has_gallery' => true,
+            ],
+        ]);
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $this->assertTrue($this->service->hasGallery('artist'));
+        $this->assertTrue($this->service->hasEvents('artist'));
+        $this->assertFalse($this->service->isPoiEnabled('artist'));
+
+        $this->assertCount(
+            1,
+            $connection->getQueryLog(),
+            'Repeated capability helpers must reuse the memoized type definition within the request.'
+        );
     }
 
     private function initializeSystem(): void
