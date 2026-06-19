@@ -81,6 +81,11 @@ class AccountProfileMediaController extends Controller
 
         $accountProfileId = trim($profileId);
         $profile = $this->profileQueryService->findOrFail($accountProfileId);
+        if ((bool) ($profile->is_active ?? false) === false
+            || trim((string) ($profile->visibility ?? '')) !== 'public') {
+            abort(404);
+        }
+
         $path = $this->mediaService->resolveMediaPathForBaseUrl(
             $profile,
             $kind,

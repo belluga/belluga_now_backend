@@ -2280,6 +2280,80 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaStored($profileId, 'cover');
     }
 
+    public function test_public_avatar_and_cover_media_require_active_public_visibility_but_not_public_detail_navigation(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Profile Media Gate',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $profileId = (string) $response->json('data.account_profile.id');
+        $avatarUrl = $response->json('data.account_profile.avatar_url');
+        $coverUrl = $response->json('data.account_profile.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+
+        $profile->visibility = 'friends_only';
+        $profile->save();
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
+
+        $profile->visibility = 'public';
+        $profile->is_active = false;
+        $profile->save();
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
+
+        $profile->is_active = true;
+        $profile->save();
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'personal'],
+            ['label' => 'Personal',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => false,
+                    'is_favoritable' => true,
+                    'is_publicly_discoverable' => false,
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                ],
+            ],
+        );
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'personal'],
+            ['label' => 'Personal',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_publicly_discoverable' => false,
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                ],
+            ],
+        );
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+    }
+
     public function test_account_profile_create_rejects_unknown_taxonomy(): void
     {
         $response = $this->postJson(
@@ -3196,8 +3270,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $this->assertStringContainsString('v=', $url);
 
+        $this->assertMediaUrlAccess($url, 200);
+    }
+
+    private function assertMediaUrlAccess(?string $url, int $expectedStatus): void
+    {
+        $this->assertNotEmpty($url);
+
         $canonicalResponse = $this->get($url);
-        $canonicalResponse->assertStatus(200);
+        $canonicalResponse->assertStatus($expectedStatus);
 
         $path = parse_url((string) $url, PHP_URL_PATH);
         $this->assertTrue(is_string($path) && $path !== '');
@@ -3212,7 +3293,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
 
         $legacyResponse = $this->get($legacyUrl);
-        $legacyResponse->assertStatus(200);
+        $legacyResponse->assertStatus($expectedStatus);
     }
 
     private function assertMediaStored(string $profileId, string $kind): string

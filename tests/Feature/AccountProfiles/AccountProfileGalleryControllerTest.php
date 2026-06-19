@@ -43,7 +43,10 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        Tenant::query()
+            ->where('slug', $this->tenant->slug)
+            ->firstOrFail()
+            ->makeCurrent();
         AccountProfile::query()->delete();
         TenantProfileType::query()->delete();
 
@@ -618,6 +621,42 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $tooManyItems = $this->patchGallery($profile, $tooManyItemsPayload, $tooManyItemFiles);
         $tooManyItems->assertStatus(422);
         $tooManyItems->assertJsonValidationErrors(['gallery_groups']);
+
+        $tooManyItemsBeforeUploadValidationItems = [];
+        $tooManyItemsBeforeUploadValidationFiles = [];
+        foreach (range(0, 12) as $index) {
+            $item = [
+                'item_id' => "too-many-before-upload-validation-{$index}",
+            ];
+
+            if ($index < 12) {
+                $uploadKey = "too_many_before_upload_validation_{$index}";
+                $item['upload'] = $uploadKey;
+                $tooManyItemsBeforeUploadValidationFiles[$uploadKey] =
+                    UploadedFile::fake()->image("too-many-before-upload-validation-{$index}.png", 900, 600);
+            }
+
+            $tooManyItemsBeforeUploadValidationItems[] = $item;
+        }
+        $tooManyItemsBeforeUploadValidationPayload = [
+            [
+                'group_id' => 'too-many-before-upload-validation',
+                'subtitle' => 'Too Many Before Upload Validation',
+                'items' => $tooManyItemsBeforeUploadValidationItems,
+            ],
+        ];
+
+        $tooManyItemsBeforeUploadValidation = $this->patchGallery(
+            $profile,
+            $tooManyItemsBeforeUploadValidationPayload,
+            $tooManyItemsBeforeUploadValidationFiles,
+        );
+        $tooManyItemsBeforeUploadValidation->assertStatus(422);
+        $tooManyItemsBeforeUploadValidation->assertJsonValidationErrors(['gallery_groups']);
+        $this->assertArrayNotHasKey(
+            'gallery_groups.0.items.0.upload',
+            $tooManyItemsBeforeUploadValidation->json('errors') ?? []
+        );
     }
 
     private function createPublicProfile(

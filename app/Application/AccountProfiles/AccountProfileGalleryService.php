@@ -295,6 +295,11 @@ final class AccountProfileGalleryService
                 }
                 $seenItemIds[$itemId] = true;
                 $totalItems++;
+                if ($totalItems > InputConstraints::ACCOUNT_PROFILE_GALLERY_ITEMS_MAX) {
+                    throw ValidationException::withMessages([
+                        'gallery_groups' => ['Gallery items exceed the configured limit.'],
+                    ]);
+                }
 
                 $uploadKey = $this->normalizeUploadKey($rawItem['upload'] ?? null);
                 $existingItem = $existingItems[$itemId] ?? null;
@@ -334,12 +339,6 @@ final class AccountProfileGalleryService
                 'order' => $this->normalizeOrder($rawGroup['order'] ?? null, $groupIndex),
                 'items' => $plannedItems,
             ];
-        }
-
-        if ($totalItems > InputConstraints::ACCOUNT_PROFILE_GALLERY_ITEMS_MAX) {
-            throw ValidationException::withMessages([
-                'gallery_groups' => ['Gallery items exceed the configured limit.'],
-            ]);
         }
 
         usort(
