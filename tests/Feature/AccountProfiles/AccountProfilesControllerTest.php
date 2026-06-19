@@ -2280,7 +2280,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaStored($profileId, 'cover');
     }
 
-    public function test_public_avatar_and_cover_media_require_active_public_visibility_but_not_public_detail_navigation(): void
+    public function test_avatar_and_cover_media_remain_available_for_admin_readback_even_when_profile_is_not_publicly_exposed(): void
     {
         Storage::fake('public');
 
@@ -2308,14 +2308,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $profile->visibility = 'friends_only';
         $profile->save();
-        $this->assertMediaUrlAccess($avatarUrl, 404);
-        $this->assertMediaUrlAccess($coverUrl, 404);
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
 
         $profile->visibility = 'public';
         $profile->is_active = false;
         $profile->save();
-        $this->assertMediaUrlAccess($avatarUrl, 404);
-        $this->assertMediaUrlAccess($coverUrl, 404);
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
 
         $profile->is_active = true;
         $profile->save();
