@@ -705,6 +705,11 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $typeAssetUrl = $response->json('data.visual.image_url');
         $this->assertIsString($typeAssetUrl);
         $this->assertStringContainsString('/api/v1/media/static-profile-types/', $typeAssetUrl);
+        $typeAssetUri = (string) parse_url($typeAssetUrl, PHP_URL_PATH);
+        $typeAssetQuery = parse_url($typeAssetUrl, PHP_URL_QUERY);
+        if (is_string($typeAssetQuery) && $typeAssetQuery !== '') {
+            $typeAssetUri .= '?'.$typeAssetQuery;
+        }
 
         $model = StaticProfileType::query()->where('type', 'beach')->firstOrFail();
         $this->assertTypeAssetStored((string) $model->getKey(), 'static_profile_types');
