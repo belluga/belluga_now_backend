@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
@@ -116,8 +116,20 @@ class AccountProfilesController extends Controller
             $validated['updated_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
         }
 
-        $updated = $this->profileService->update($profile, $validated);
+        $hasMediaMutation = $request->hasFile('avatar')
+            || $request->hasFile('cover')
+            || $request->boolean('remove_avatar')
+            || $request->boolean('remove_cover');
+
+        $updated = $this->profileService->update(
+            $profile,
+            $validated,
+            syncMapPoiProjection: ! $hasMediaMutation
+        );
         $this->mediaService->applyUploads($request, $updated);
+        if ($hasMediaMutation) {
+            $this->profileService->syncMapPoiProjection($updated);
+        }
 
         return response()->json([
             'data' => $this->formatter->format($updated),

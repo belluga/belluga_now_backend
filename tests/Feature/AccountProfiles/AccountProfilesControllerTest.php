@@ -2499,6 +2499,124 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
+    public function test_account_profile_update_media_uploads_refresh_map_poi_projection_urls(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'POI Media Refresh',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertNull($projection?->avatar_url);
+        $this->assertNull($projection?->cover_url);
+
+        $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                '_method' => 'PATCH',
+                'avatar' => UploadedFile::fake()->image('avatar.jpg', 220, 220),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1400, 700),
+            ],
+        );
+
+        $updateResponse->assertStatus(200);
+        $avatarUrl = $updateResponse->json('data.avatar_url');
+        $coverUrl = $updateResponse->json('data.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+        $profile = AccountProfile::query()->findOrFail($profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame($profile->avatar_url, $projection?->avatar_url);
+        $this->assertSame($profile->cover_url, $projection?->cover_url);
+        $this->assertStringEndsWith((string) $projection?->avatar_url, (string) $avatarUrl);
+        $this->assertStringEndsWith((string) $projection?->cover_url, (string) $coverUrl);
+    }
+
+    public function test_account_profile_update_media_removals_refresh_map_poi_projection_urls(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'POI Media Remove',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $avatarUrl = $createResponse->json('data.account_profile.avatar_url');
+        $coverUrl = $createResponse->json('data.account_profile.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+        $profile = AccountProfile::query()->findOrFail($profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame($profile->avatar_url, $projection?->avatar_url);
+        $this->assertSame($profile->cover_url, $projection?->cover_url);
+        $this->assertStringEndsWith((string) $projection?->avatar_url, (string) $avatarUrl);
+        $this->assertStringEndsWith((string) $projection?->cover_url, (string) $coverUrl);
+
+        $removeResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'remove_avatar' => true,
+                'remove_cover' => true,
+            ],
+            $this->getHeaders()
+        );
+
+        $removeResponse->assertStatus(200);
+        $removeResponse->assertJsonPath('data.avatar_url', null);
+        $removeResponse->assertJsonPath('data.cover_url', null);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertNull($projection?->avatar_url);
+        $this->assertNull($projection?->cover_url);
+    }
+
     public function test_account_profile_remove_avatar_and_cover_clears_media(): void
     {
         Storage::fake('public');
