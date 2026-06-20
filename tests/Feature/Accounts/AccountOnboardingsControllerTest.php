@@ -14,6 +14,8 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
@@ -150,6 +152,45 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertNotEmpty($errors['location'] ?? null);
         $this->assertNotEmpty($errors['location.lat'] ?? null);
         $this->assertNotEmpty($errors['location.lng'] ?? null);
+    }
+
+    public function test_poi_enabled_onboarding_projects_map_poi_without_queue_worker_dependency(): void
+    {
+        Queue::fake();
+        $this->actingAsAdmin(['account-users:create']);
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Venue Projection '.Str::random(6),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.671339,
+                'lng' => -40.495395,
+            ],
+        ]);
+
+        $response->assertCreated();
+        $profileId = (string) $response->json('data.account_profile.id');
+        $this->assertNotSame('', $profileId);
+
+        $this->assertDatabaseHas('map_pois', [
+            'ref_type' => 'account_profile',
+            'ref_id' => $profileId,
+        ], 'tenant');
+
+        $lookupUrl = str_replace('/admin/api/v1/account_onboardings', '', $this->tenantOnboardingsUrl)
+            ."/api/v1/map/pois/lookup?ref_type=account_profile&ref_id={$profileId}";
+        $lookupResponse = $this->getJson($lookupUrl);
+        $lookupResponse->assertOk();
+        $lookupResponse->assertJsonPath('poi.ref_type', 'account_profile');
+        $lookupResponse->assertJsonPath('poi.ref_id', $profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+        $this->assertNotNull($projection);
+        $this->assertSame('venue', (string) $projection->category);
     }
 
     public function test_onboarding_media_failure_rolls_back_all_documents(): void

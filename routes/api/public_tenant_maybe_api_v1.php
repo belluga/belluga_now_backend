@@ -37,6 +37,10 @@ Route::middleware('tenant')->group(function () {
         [AccountProfileMediaController::class, 'cover']
     );
     Route::get(
+        '/media/account-profiles/{account_profile_id}/gallery/{gallery_item_id}',
+        [AccountProfileMediaController::class, 'gallery']
+    );
+    Route::get(
         '/media/account-profile-types/{account_profile_type_id}/type_asset',
         [AccountProfileTypeMediaController::class, 'typeAsset']
     );

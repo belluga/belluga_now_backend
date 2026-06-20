@@ -19,6 +19,7 @@ final class AccountProfileTypeCapabilityCatalog
     public const HAS_AVATAR = 'has_avatar';
     public const HAS_COVER = 'has_cover';
     public const HAS_EVENTS = 'has_events';
+    public const HAS_GALLERY = 'has_gallery';
     public const HAS_NESTED_PROFILE_GROUPS = 'has_nested_profile_groups';
 
     /**
@@ -40,6 +41,7 @@ final class AccountProfileTypeCapabilityCatalog
             $this->definition(self::HAS_AVATAR),
             $this->definition(self::HAS_COVER),
             $this->definition(self::HAS_EVENTS),
+            $this->definition(self::HAS_GALLERY),
             $this->definition(self::HAS_NESTED_PROFILE_GROUPS),
         ];
     }
