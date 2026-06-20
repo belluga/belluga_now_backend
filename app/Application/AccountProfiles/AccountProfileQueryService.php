@@ -789,6 +789,21 @@ class AccountProfileQueryService extends AbstractQueryService
         return $profile;
     }
 
+    public function isPubliclyExposed(AccountProfile $profile): bool
+    {
+        if ((bool) ($profile->is_active ?? false) === false) {
+            return false;
+        }
+
+        if (trim((string) ($profile->visibility ?? '')) !== 'public') {
+            return false;
+        }
+
+        return $this->typeSetProvider->isPubliclyNavigable(
+            trim((string) ($profile->profile_type ?? ''))
+        );
+    }
+
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
     {
         $query = $onlyTrashed ? AccountProfile::onlyTrashed() : AccountProfile::query();
@@ -1394,7 +1409,7 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         return array_values(array_diff(
             (new AccountProfile)->getFillable(),
-            ['nested_profile_groups']
+            ['nested_profile_groups', 'gallery_groups']
         ));
     }
 

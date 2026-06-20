@@ -130,6 +130,59 @@ class AccountProfileTypeSetProviderTest extends TestCase
         $this->assertFalse($provider->isPubliclyNavigable('venue'));
     }
 
+    public function test_has_gallery_enabled_refreshes_after_profile_type_update_without_recreating_provider(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'has_gallery' => true,
+            ],
+        ]);
+
+        $provider = new AccountProfileTypeSetProvider;
+        $this->assertTrue($provider->hasGalleryEnabled('venue'));
+
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $venueType->capabilities = [
+            'is_queryable' => true,
+            'is_publicly_navigable' => true,
+            'is_publicly_discoverable' => true,
+            'has_gallery' => false,
+        ];
+        $venueType->save();
+
+        $this->assertFalse($provider->hasGalleryEnabled('venue'));
+    }
+
+    public function test_has_gallery_enabled_refreshes_after_profile_type_deletion_without_recreating_provider(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'has_gallery' => true,
+            ],
+        ]);
+
+        $provider = new AccountProfileTypeSetProvider;
+        $this->assertTrue($provider->hasGalleryEnabled('venue'));
+
+        TenantProfileType::query()->where('type', 'venue')->firstOrFail()->delete();
+
+        $this->assertFalse($provider->hasGalleryEnabled('venue'));
+    }
+
     private function initializeSystem(): void
     {
         /** @var SystemInitializationService $service */

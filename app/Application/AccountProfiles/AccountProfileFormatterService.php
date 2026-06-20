@@ -17,6 +17,7 @@ class AccountProfileFormatterService
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
@@ -56,6 +57,9 @@ class AccountProfileFormatterService
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),
+            'gallery_groups' => $includeAgendaOccurrences
+                ? $this->galleryService->formatForPublicDetail($profile, $baseUrl)
+                : $this->galleryService->formatForRead($profile, $baseUrl),
             'nested_profile_groups' => $includeAgendaOccurrences
                 ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl)
                 : $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []),

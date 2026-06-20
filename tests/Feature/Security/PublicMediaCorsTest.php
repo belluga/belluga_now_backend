@@ -112,6 +112,21 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
         $this->assertSame(['86400'], $response->headers->all('Access-Control-Max-Age'));
     }
 
+    public function test_gallery_media_route_allows_origin_from_same_tenant_custom_domain(): void
+    {
+        $tenant = $this->currentTenant();
+        $customDomain = $this->customDomain();
+        $this->registerTenantWebDomain($tenant, $customDomain);
+        $profile = $this->createProfile(withGallery: true);
+
+        $response = $this->withHeaders([
+            'Origin' => "https://{$customDomain}",
+        ])->get($this->tenantUrl($tenant, "api/v1/media/account-profiles/{$profile->getKey()}/gallery/gallery-item-01?variant=modal"));
+
+        $response->assertStatus(404);
+        $this->assertCorsResponse($response, "https://{$customDomain}");
+    }
+
     public function test_public_media_rejects_origin_outside_tenant_domain_set(): void
     {
         $tenant = $this->currentTenant();
@@ -174,19 +189,40 @@ final class PublicMediaCorsTest extends TestCaseAuthenticated
         return 'guarappari-'.str_replace('.', '-', uniqid('', true)).'.example.test';
     }
 
-    private function createProfile(): AccountProfile
+    private function createProfile(bool $withGallery = false): AccountProfile
     {
         $account = Account::query()->create([
             'name' => 'Public Media CORS Account '.uniqid('', true),
             'document' => 'cors-'.uniqid('', true),
         ]);
 
-        return AccountProfile::query()->create([
+        $profile = AccountProfile::query()->create([
             'account_id' => (string) $account->getKey(),
             'profile_type' => 'venue',
             'display_name' => 'Public Media CORS Probe',
             'is_active' => true,
         ]);
+
+        if ($withGallery) {
+            $profile->gallery_groups = [
+                [
+                    'group_id' => 'gallery',
+                    'subtitle' => 'Gallery',
+                    'order' => 0,
+                    'items' => [
+                        [
+                            'item_id' => 'gallery-item-01',
+                            'order' => 0,
+                            'media_path' => '/api/v1/media/account-profiles/'.$profile->getKey().'/gallery/gallery-item-01',
+                            'version' => 'v1',
+                        ],
+                    ],
+                ],
+            ];
+            $profile->save();
+        }
+
+        return $profile->fresh();
     }
 
     private function clearDarkLogoUris(Tenant $tenant): void

@@ -30,6 +30,7 @@ class AccountProfile extends Model
         'taxonomy_terms_flat',
         'location',
         'nested_profile_groups',
+        'gallery_groups',
         'bio',
         'content',
         'avatar_url',
@@ -73,6 +74,14 @@ class AccountProfile extends Model
      * @return array<int|string, mixed>
      */
     public function getNestedProfileGroupsAttribute(mixed $value): array
+    {
+        return $this->normalizeNestedArray($value);
+    }
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    public function getGalleryGroupsAttribute(mixed $value): array
     {
         return $this->normalizeNestedArray($value);
     }

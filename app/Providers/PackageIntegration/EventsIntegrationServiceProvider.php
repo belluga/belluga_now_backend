@@ -10,6 +10,7 @@ use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\AttendanceCommitmentReadAdapter;
 use App\Integration\Events\EventContentSanitizerAdapter;
+use App\Integration\Events\EventDiscoveryFilterCatalogAdapter;
 use App\Integration\Events\EventParties\AccountProfileEventPartyMapper;
 use App\Integration\Events\EventTaxonomySnapshotResolverAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
@@ -28,6 +29,7 @@ use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
+use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -92,6 +94,11 @@ class EventsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             EventContentSanitizerContract::class,
             EventContentSanitizerAdapter::class
+        );
+
+        $this->app->bind(
+            EventDiscoveryFilterCatalogContract::class,
+            EventDiscoveryFilterCatalogAdapter::class
         );
 
         $this->app->bind(

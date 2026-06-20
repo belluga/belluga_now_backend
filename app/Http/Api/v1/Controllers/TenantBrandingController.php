@@ -50,6 +50,11 @@ class TenantBrandingController
             $uploadedLogos,
             $pwaVariants
         );
+        $brandingData = $this->brandingPublicWebMediaService->materializeBrandingData(
+            $request->getSchemeAndHttpHost(),
+            $tenant,
+            $brandingData
+        );
 
         $this->tenantEnvironmentSnapshotService->repair(
             $tenant->fresh() ?? $tenant,

@@ -75,6 +75,33 @@ class BrandingPublicWebMediaService
         return $legacyNormalized;
     }
 
+    /**
+     * @param  array<string, mixed>  $brandingData
+     * @return array<string, mixed>
+     */
+    public function materializeBrandingData(
+        string $baseUrl,
+        Tenant|Landlord $brandable,
+        array $brandingData,
+    ): array {
+        $metadata = $brandingData['public_web_metadata'] ?? null;
+        if (! is_array($metadata)) {
+            return $brandingData;
+        }
+
+        $defaultImage = trim((string) ($metadata['default_image'] ?? ''));
+        if ($defaultImage === '') {
+            return $brandingData;
+        }
+
+        $metadata['default_image'] = (string) (
+            $this->normalizePublicUrl($baseUrl, $brandable, $defaultImage) ?? ''
+        );
+        $brandingData['public_web_metadata'] = $metadata;
+
+        return $brandingData;
+    }
+
     public function resolveMediaPathForBaseUrl(
         Tenant|Landlord $brandable,
         ?string $baseUrl,

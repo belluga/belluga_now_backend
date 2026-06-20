@@ -50,22 +50,26 @@ class AccountOnboardingService
 
                 $this->assertLocationKeysForPoiProfile($payload);
 
-                $profile = $this->profileService->createWithinCurrentTransaction([
-                    'account_id' => (string) $account->_id,
-                    'profile_type' => $payload['profile_type'],
-                    'display_name' => $payload['name'],
-                    'location' => $payload['location'] ?? null,
-                    'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
-                    'bio' => $payload['bio'] ?? null,
-                    'content' => $payload['content'] ?? null,
-                    'nested_profile_groups' => $payload['nested_profile_groups'] ?? [],
-                    'created_by' => $payload['created_by'] ?? null,
-                    'created_by_type' => $payload['created_by_type'] ?? null,
-                    'updated_by' => $payload['updated_by'] ?? null,
-                    'updated_by_type' => $payload['updated_by_type'] ?? null,
-                ]);
+                $profile = $this->profileService->createWithinCurrentTransaction(
+                    [
+                        'account_id' => (string) $account->_id,
+                        'profile_type' => $payload['profile_type'],
+                        'display_name' => $payload['name'],
+                        'location' => $payload['location'] ?? null,
+                        'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
+                        'bio' => $payload['bio'] ?? null,
+                        'content' => $payload['content'] ?? null,
+                        'nested_profile_groups' => $payload['nested_profile_groups'] ?? [],
+                        'created_by' => $payload['created_by'] ?? null,
+                        'created_by_type' => $payload['created_by_type'] ?? null,
+                        'updated_by' => $payload['updated_by'] ?? null,
+                        'updated_by_type' => $payload['updated_by_type'] ?? null,
+                    ],
+                    queueMapPoiSyncAfterCommit: false,
+                );
 
                 $this->mediaService->applyUploads($request, $profile);
+                $this->profileService->queueMapPoiSyncAfterCommit($profile);
 
                 return [
                     'account' => $account->fresh(),

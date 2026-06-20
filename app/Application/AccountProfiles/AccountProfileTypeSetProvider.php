@@ -99,6 +99,21 @@ final class AccountProfileTypeSetProvider
     /**
      * @return array<int, string>
      */
+    public function galleryEnabledTypes(): array
+    {
+        return $this->remember('gallery_enabled', static fn (): array => TenantProfileType::query()
+            ->galleryEnabled()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all());
+    }
+
+    /**
+     * @return array<int, string>
+     */
     public function queryablePoiEnabledTypes(): array
     {
         return $this->remember('queryable_poi_enabled', static fn (): array => TenantProfileType::query()
@@ -130,6 +145,16 @@ final class AccountProfileTypeSetProvider
         }
 
         return in_array($normalized, $this->publiclyNavigableTypes(), true);
+    }
+
+    public function hasGalleryEnabled(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->galleryEnabledTypes(), true);
     }
 
     /**

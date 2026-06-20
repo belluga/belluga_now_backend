@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Http\Api\v1\Controllers;
 
 use Belluga\Events\Application\Events\EventQueryService;
+use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Http\Api\v1\Requests\AgendaIndexRequest;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +15,8 @@ class AgendaController extends Controller
 {
     public function __construct(
         private readonly EventQueryService $eventQueryService,
-        private readonly EventTenantContextContract $tenantContext
+        private readonly EventTenantContextContract $tenantContext,
+        private readonly EventDiscoveryFilterCatalogContract $eventDiscoveryFilterCatalog,
     ) {}
 
     public function index(AgendaIndexRequest $request): JsonResponse
@@ -28,6 +30,14 @@ class AgendaController extends Controller
             'items' => $payload['items'],
             'has_more' => $payload['has_more'],
             'discovery_filter_facets' => $payload['discovery_filter_facets'] ?? null,
+            'discovery_filter_catalog' => $this->eventDiscoveryFilterCatalog
+                ->buildCanonicalCatalog(
+                    'home.events',
+                    is_array($payload['discovery_filter_facets'] ?? null)
+                        ? $payload['discovery_filter_facets']
+                        : null,
+                    $request->getSchemeAndHttpHost()
+                ),
         ]);
     }
 }

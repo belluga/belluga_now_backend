@@ -16,7 +16,12 @@ final class ModelMediaService
 {
     public function __construct(
         private readonly TenantMediaScopeResolverContract $tenantScopeResolver,
-    ) {}
+        ?CanonicalImageProcessor $canonicalImageProcessor = null,
+    ) {
+        $this->canonicalImageProcessor = $canonicalImageProcessor ?? new CanonicalImageProcessor;
+    }
+
+    private readonly CanonicalImageProcessor $canonicalImageProcessor;
 
     /**
      * @return array<string, string|null>
@@ -60,7 +65,7 @@ final class ModelMediaService
 
     public function resolveMediaPath(object $model, string $kind, MediaModelDefinition $definition): ?string
     {
-        return $this->resolveMediaPathForBaseUrl($model, $kind, $definition, null);
+        return $this->resolveVariantMediaPathForBaseUrl($model, $kind, null, $definition, null);
     }
 
     public function resolveMediaPathForBaseUrl(
@@ -69,9 +74,31 @@ final class ModelMediaService
         MediaModelDefinition $definition,
         ?string $baseUrl,
     ): ?string {
+        return $this->resolveVariantMediaPathForBaseUrl($model, $kind, null, $definition, $baseUrl);
+    }
+
+    public function resolveVariantMediaPath(
+        object $model,
+        string $kind,
+        ?string $variant,
+        MediaModelDefinition $definition,
+    ): ?string {
+        return $this->resolveVariantMediaPathForBaseUrl($model, $kind, $variant, $definition, null);
+    }
+
+    public function resolveVariantMediaPathForBaseUrl(
+        object $model,
+        string $kind,
+        ?string $variant,
+        MediaModelDefinition $definition,
+        ?string $baseUrl,
+    ): ?string {
         $baseDir = $this->baseDirectory($model, $definition, $baseUrl);
         foreach ($definition->allowedExtensions as $extension) {
-            $path = "{$baseDir}/{$kind}.{$extension}";
+            $fileName = $variant === null || trim($variant) === ''
+                ? "{$kind}.{$extension}"
+                : "{$kind}.{$variant}.{$extension}";
+            $path = "{$baseDir}/{$fileName}";
             if (Storage::disk('public')->exists($path)) {
                 return $path;
             }
@@ -106,12 +133,29 @@ final class ModelMediaService
         MediaModelDefinition $definition,
         string|int|null $version = null,
     ): string {
-        $modelId = $this->resolveModelId($model);
         $base = rtrim($baseUrl, '/');
-        $resolvedVersion = $version ?? $this->resolveModelVersion($model);
+
+        return $base.$this->buildPublicPath(
+            model: $model,
+            kind: $kind,
+            definition: $definition,
+            version: $version,
+        );
+    }
+
+    public function buildPublicPath(
+        object $model,
+        string $kind,
+        MediaModelDefinition $definition,
+        string|int|null $version = null,
+    ): string {
+        $modelId = $this->resolveModelId($model);
+        $resolvedVersion = $version
+            ?? $this->resolveCurrentMediaVersion($model, $kind, $definition)
+            ?? $this->resolveModelVersion($model);
         $canonicalPrefix = $this->normalizePrefix($definition->canonicalPublicPathPrefix);
 
-        return "{$base}{$canonicalPrefix}/{$modelId}/{$kind}?v={$resolvedVersion}";
+        return "{$canonicalPrefix}/{$modelId}/{$kind}?v={$resolvedVersion}";
     }
 
     public function normalizePublicUrl(
@@ -138,9 +182,48 @@ final class ModelMediaService
             return $value;
         }
 
-        $version = $this->extractVersionFromUri($value) ?? $this->resolveModelVersion($model);
+        $version = $this->extractVersionFromUri($value)
+            ?? $this->resolveCurrentMediaVersion($model, $kind, $definition)
+            ?? $this->resolveModelVersion($model);
 
         return $this->buildPublicUrl($baseUrl, $model, $kind, $definition, $version);
+    }
+
+    public function resolveModelBaseDirectory(
+        object $model,
+        MediaModelDefinition $definition,
+        ?string $baseUrl = null,
+    ): string {
+        return $this->baseDirectory($model, $definition, $baseUrl);
+    }
+
+    public function resolveCurrentMediaVersion(
+        object $model,
+        string $kind,
+        MediaModelDefinition $definition,
+        ?string $baseUrl = null,
+    ): ?string {
+        $path = $this->resolveMediaPathForBaseUrl($model, $kind, $definition, $baseUrl);
+        if ($path === null) {
+            return null;
+        }
+
+        return $this->resolveFileVersion($path);
+    }
+
+    public function resolveFileVersion(string $relativePath): ?string
+    {
+        if (! Storage::disk('public')->exists($relativePath)) {
+            return null;
+        }
+
+        $absolutePath = Storage::disk('public')->path($relativePath);
+        $fingerprint = @md5_file($absolutePath);
+        if (is_string($fingerprint) && $fingerprint !== '') {
+            return substr($fingerprint, 0, 16);
+        }
+
+        return (string) Storage::disk('public')->lastModified($relativePath);
     }
 
     private function storeFile(
@@ -150,21 +233,31 @@ final class ModelMediaService
         string $baseUrl,
         MediaModelDefinition $definition,
     ): string {
-        $extension = strtolower(trim((string) $file->getClientOriginalExtension()));
-        if ($extension === '') {
-            $extension = 'png';
-        }
-        $fileName = "{$kind}.{$extension}";
-
         $this->deleteExisting($model, $kind, $baseUrl, $definition);
+        $processed = $this->canonicalImageProcessor->processUpload($file);
+        $extension = strtolower(trim((string) ($processed['extension'] ?? 'jpg')));
+        $baseDir = $this->baseDirectory($model, $definition, $baseUrl);
 
-        Storage::disk('public')->putFileAs(
-            $this->baseDirectory($model, $definition, $baseUrl),
-            $file,
-            $fileName
+        Storage::disk('public')->put(
+            "{$baseDir}/{$kind}.{$extension}",
+            (string) ($processed['master'] ?? ''),
         );
 
-        return $this->buildPublicUrl($baseUrl, $model, $kind, $definition);
+        $variants = $processed['variants'] ?? [];
+        if (is_array($variants)) {
+            foreach ($variants as $variant => $content) {
+                if (! is_string($variant) || trim($variant) === '' || ! is_string($content)) {
+                    continue;
+                }
+
+                Storage::disk('public')->put(
+                    "{$baseDir}/{$kind}.{$variant}.{$extension}",
+                    $content,
+                );
+            }
+        }
+
+        return $this->buildPublicPath($model, $kind, $definition);
     }
 
     private function deleteExisting(
@@ -175,11 +268,27 @@ final class ModelMediaService
     ): void {
         $baseDir = $this->baseDirectory($model, $definition, $baseUrl);
         foreach ($definition->allowedExtensions as $extension) {
-            $path = "{$baseDir}/{$kind}.{$extension}";
-            if (Storage::disk('public')->exists($path)) {
-                Storage::disk('public')->delete($path);
+            foreach ($this->candidateFileNames($kind, $extension) as $fileName) {
+                $path = "{$baseDir}/{$fileName}";
+                if (Storage::disk('public')->exists($path)) {
+                    Storage::disk('public')->delete($path);
+                }
             }
         }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function candidateFileNames(string $kind, string $extension): array
+    {
+        $normalizedExtension = strtolower(trim($extension));
+        $candidates = ["{$kind}.{$normalizedExtension}"];
+        foreach (array_keys(CanonicalImageProcessor::DEFAULT_PUBLIC_VARIANTS) as $variant) {
+            $candidates[] = "{$kind}.{$variant}.{$normalizedExtension}";
+        }
+
+        return $candidates;
     }
 
     private function baseDirectory(object $model, MediaModelDefinition $definition, ?string $baseUrl): string

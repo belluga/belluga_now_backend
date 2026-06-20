@@ -18,6 +18,7 @@ use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilityRegistryContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
+use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
@@ -55,6 +56,7 @@ class EventsServiceProvider extends ServiceProvider
         $this->ensureHostBinding(EventAttendanceReadContract::class);
         $this->ensureHostBinding(EventCapabilitySettingsContract::class);
         $this->ensureHostBinding(EventContentSanitizerContract::class);
+        $this->ensureHostBinding(EventDiscoveryFilterCatalogContract::class);
         $this->ensureHostBinding(EventPartyMapperRegistryContract::class);
         $this->ensureHostBinding(EventTenantContextContract::class);
         $this->ensureHostBinding(EventRadiusSettingsContract::class);
