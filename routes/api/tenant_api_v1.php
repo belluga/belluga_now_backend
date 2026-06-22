@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
+use App\Http\Api\v1\Controllers\AccountProfileGalleryController;
 use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\AccountProfileTypesController;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
@@ -209,6 +210,9 @@ Route::prefix('account_profiles')
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
                 Route::patch('/', [AccountProfilesController::class, 'update'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::patch('/gallery', [AccountProfileGalleryController::class, 'update'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
                 Route::delete('/', [AccountProfilesController::class, 'destroy'])

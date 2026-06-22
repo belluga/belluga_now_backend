@@ -47,6 +47,11 @@ class LandlordBrandingController
             $uploadedLogoUrls,
             $pwaVariants
         );
+        $brandingData = $this->brandingPublicWebMediaService->materializeBrandingData(
+            $request->getSchemeAndHttpHost(),
+            $landlord,
+            $brandingData
+        );
 
         return response()->json([
             'message' => 'Branding data updated successfully.',

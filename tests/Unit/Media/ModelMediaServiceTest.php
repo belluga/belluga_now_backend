@@ -201,9 +201,9 @@ class ModelMediaServiceTest extends TestCase
             definition: $definition,
         );
 
-        $this->assertSame(
-            'https://tenant-zeta.test/api/v1/media/branding-public-web/brand-123/default_image?v='.time(),
-            preg_replace('/\?v=\d+$/', '?v='.time(), $storedUrl),
+        $this->assertMatchesRegularExpression(
+            '#^/api/v1/media/branding-public-web/brand-123/default_image\?v=[A-Za-z0-9]+$#',
+            $storedUrl,
         );
         Storage::disk('public')->assertExists(
             'tenants/tenant-zeta/branding_public_web/brand-123/default_image.jpg'
@@ -244,6 +244,61 @@ class ModelMediaServiceTest extends TestCase
 
         Storage::disk('public')->assertMissing(
             'tenants/tenant-zeta/branding_public_web/brand-456/default_image.png'
+        );
+    }
+
+    public function test_resolve_variant_media_path_for_base_url_supports_gallery_variants(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/account-profiles',
+            canonicalPublicPathPrefix: '/api/v1/media/account-profiles',
+            storageDirectory: 'account_profiles',
+            slots: ['avatar', 'cover'],
+        );
+
+        Storage::disk('public')->put(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.jpg',
+            'master'
+        );
+        Storage::disk('public')->put(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.thumb.jpg',
+            'thumb'
+        );
+
+        $model = new FakeMediaModel('profile-123');
+
+        $masterPath = $service->resolveVariantMediaPathForBaseUrl(
+            $model,
+            'gallery-item-main',
+            null,
+            $definition,
+            'https://tenant-zeta.test',
+        );
+        $thumbPath = $service->resolveVariantMediaPathForBaseUrl(
+            $model,
+            'gallery-item-main',
+            'thumb',
+            $definition,
+            'https://tenant-zeta.test',
+        );
+
+        $this->assertSame(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.jpg',
+            $masterPath
+        );
+        $this->assertSame(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.thumb.jpg',
+            $thumbPath
         );
     }
 }

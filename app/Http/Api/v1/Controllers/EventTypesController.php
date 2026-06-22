@@ -22,7 +22,7 @@ class EventTypesController extends Controller
     public function index(): JsonResponse
     {
         return response()->json([
-            'data' => $this->registryService->registry(),
+            'data' => $this->registryService->registry(request()->getSchemeAndHttpHost()),
         ]);
     }
 

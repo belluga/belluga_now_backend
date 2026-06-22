@@ -1062,6 +1062,11 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $typeAssetUrl = $response->json('data.visual.image_url');
         $this->assertIsString($typeAssetUrl);
         $this->assertStringContainsString('/api/v1/media/account-profile-types/', $typeAssetUrl);
+        $typeAssetUri = (string) parse_url($typeAssetUrl, PHP_URL_PATH);
+        $typeAssetQuery = parse_url($typeAssetUrl, PHP_URL_QUERY);
+        if (is_string($typeAssetQuery) && $typeAssetQuery !== '') {
+            $typeAssetUri .= '?'.$typeAssetQuery;
+        }
 
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $this->assertTypeAssetStored((string) $model->getKey(), 'account_profile_types');
@@ -1077,7 +1082,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $projection = $projectionQuery->firstOrFail();
 
         $this->assertSame('image', data_get($projection->visual, 'mode'));
-        $this->assertSame($typeAssetUrl, data_get($projection->visual, 'image_uri'));
+        $this->assertSame($typeAssetUri, data_get($projection->visual, 'image_uri'));
         $this->assertSame('type_definition', data_get($projection->visual, 'source'));
     }
 

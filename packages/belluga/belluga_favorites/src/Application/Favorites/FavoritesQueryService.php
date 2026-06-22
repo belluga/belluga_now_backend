@@ -94,13 +94,26 @@ class FavoritesQueryService
                 '$addFields' => [
                     'sort_block' => [
                         '$cond' => [
-                            ['$eq' => [['$type' => '$snapshot_doc.next_event_occurrence_at'], 'date']],
+                            ['$eq' => [['$type' => '$snapshot_doc.live_now_event_occurrence_at'], 'date']],
                             0,
                             [
                                 '$cond' => [
-                                    ['$eq' => [['$type' => '$snapshot_doc.last_event_occurrence_at'], 'date']],
+                                    ['$eq' => [['$type' => '$snapshot_doc.next_event_occurrence_at'], 'date']],
                                     1,
                                     2,
+                                ],
+                            ],
+                        ],
+                    ],
+                    'sort_upcoming_occurrence_at' => [
+                        '$cond' => [
+                            ['$eq' => [['$type' => '$snapshot_doc.live_now_event_occurrence_at'], 'date']],
+                            null,
+                            [
+                                '$cond' => [
+                                    ['$eq' => [['$type' => '$snapshot_doc.next_event_occurrence_at'], 'date']],
+                                    '$snapshot_doc.next_event_occurrence_at',
+                                    null,
                                 ],
                             ],
                         ],
@@ -110,8 +123,7 @@ class FavoritesQueryService
             [
                 '$sort' => [
                     'sort_block' => 1,
-                    'snapshot_doc.next_event_occurrence_at' => 1,
-                    'snapshot_doc.last_event_occurrence_at' => -1,
+                    'sort_upcoming_occurrence_at' => 1,
                     'favorited_at' => -1,
                     '_id' => 1,
                 ],
@@ -151,6 +163,23 @@ class FavoritesQueryService
         $lastOccurrenceAt = $snapshotDoc['last_event_occurrence_at'] ?? ($snapshot['last_event_occurrence_at'] ?? null);
         $liveNowOccurrenceId = $snapshotDoc['live_now_event_occurrence_id'] ?? ($snapshot['live_now_event_occurrence_id'] ?? null);
         $liveNowOccurrenceAt = $snapshotDoc['live_now_event_occurrence_at'] ?? ($snapshot['live_now_event_occurrence_at'] ?? null);
+        $kind = isset($navigation['kind']) ? (string) $navigation['kind'] : (string) ($row['target_type'] ?? '');
+        $targetSlug = isset($navigation['target_slug']) ? (string) $navigation['target_slug'] : (isset($target['slug']) ? (string) $target['slug'] : null);
+        $profileTargetPath = isset($navigation['profile_target_path'])
+            ? (string) $navigation['profile_target_path']
+            : (isset($target['public_detail_path']) ? (string) $target['public_detail_path'] : null);
+        $eventTargetPath = isset($navigation['event_target_path'])
+            ? (string) $navigation['event_target_path']
+            : ($kind === 'event' && isset($navigation['target_path']) ? (string) $navigation['target_path'] : null);
+        $eventTargetSlug = isset($navigation['event_target_slug'])
+            ? (string) $navigation['event_target_slug']
+            : ($kind === 'event' ? $targetSlug : null);
+        $eventOccurrenceId = isset($navigation['event_occurrence_id'])
+            ? (string) $navigation['event_occurrence_id']
+            : null;
+        $targetPath = isset($navigation['target_path'])
+            ? (string) $navigation['target_path']
+            : ($kind === 'event' ? $eventTargetPath : $profileTargetPath);
 
         return [
             'favorite_id' => $this->stringifyId($row['_id'] ?? null),
@@ -176,9 +205,13 @@ class FavoritesQueryService
                 'last_event_occurrence_at' => $this->formatDate($lastOccurrenceAt),
             ],
             'navigation' => [
-                'kind' => isset($navigation['kind']) ? (string) $navigation['kind'] : (string) ($row['target_type'] ?? ''),
-                'target_slug' => isset($navigation['target_slug']) ? (string) $navigation['target_slug'] : (isset($target['slug']) ? (string) $target['slug'] : null),
-                'target_path' => isset($navigation['target_path']) ? (string) $navigation['target_path'] : (isset($target['public_detail_path']) ? (string) $target['public_detail_path'] : null),
+                'kind' => $kind,
+                'target_slug' => $targetSlug,
+                'target_path' => $targetPath,
+                'profile_target_path' => $profileTargetPath,
+                'event_target_path' => $eventTargetPath,
+                'event_target_slug' => $eventTargetSlug,
+                'event_occurrence_id' => $eventOccurrenceId,
                 'can_open_public_detail' => (bool) ($navigation['can_open_public_detail'] ?? ($target['can_open_public_detail'] ?? false)),
             ],
         ];

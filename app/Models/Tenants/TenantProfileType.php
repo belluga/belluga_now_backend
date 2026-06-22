@@ -80,6 +80,11 @@ class TenantProfileType extends Model
             ->where('capabilities.is_poi_enabled', true);
     }
 
+    public function scopeGalleryEnabled($query)
+    {
+        return $query->whereRaw(self::galleryEnabledCapabilityExpression());
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -115,5 +120,13 @@ class TenantProfileType extends Model
     public static function favoritableCapabilityExpression(): array
     {
         return ['capabilities.is_favoritable' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function galleryEnabledCapabilityExpression(): array
+    {
+        return ['capabilities.has_gallery' => true];
     }
 }

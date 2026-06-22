@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
@@ -23,6 +24,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
+        private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -43,9 +45,17 @@ class AccountProfilesController extends Controller
         $validated = $request->validated();
 
         $perPage = (int) ($validated['per_page'] ?? $validated['page_size'] ?? 15);
-        return response()->json(
-            $this->profileQueryService->publicPageEnvelope($validated, $perPage)
-        );
+        $payload = $this->profileQueryService->publicPageEnvelope($validated, $perPage);
+        $payload['discovery_filter_catalog'] = $this->runtimeDiscoveryFilterCatalogService
+            ->buildCanonicalCatalog(
+                'discovery.account_profiles',
+                is_array($payload['discovery_filter_facets'] ?? null)
+                    ? $payload['discovery_filter_facets']
+                    : null,
+                $request->getSchemeAndHttpHost()
+            );
+
+        return response()->json($payload);
     }
 
     public function publicNear(AccountProfileNearRequest $request): JsonResponse
@@ -106,8 +116,20 @@ class AccountProfilesController extends Controller
             $validated['updated_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
         }
 
-        $updated = $this->profileService->update($profile, $validated);
+        $hasMediaMutation = $request->hasFile('avatar')
+            || $request->hasFile('cover')
+            || $request->boolean('remove_avatar')
+            || $request->boolean('remove_cover');
+
+        $updated = $this->profileService->update(
+            $profile,
+            $validated,
+            syncMapPoiProjection: ! $hasMediaMutation
+        );
         $this->mediaService->applyUploads($request, $updated);
+        if ($hasMediaMutation) {
+            $this->profileService->syncMapPoiProjection($updated);
+        }
 
         return response()->json([
             'data' => $this->formatter->format($updated),

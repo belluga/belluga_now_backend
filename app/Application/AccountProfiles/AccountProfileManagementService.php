@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
+use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
-use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -25,6 +25,7 @@ class AccountProfileManagementService
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly MapPoiProjectionService $mapPoiProjectionService,
     ) {}
 
     /**
@@ -40,8 +41,10 @@ class AccountProfileManagementService
     /**
      * @param  array<string, mixed>  $payload
      */
-    public function createWithinCurrentTransaction(array $payload): AccountProfile
-    {
+    public function createWithinCurrentTransaction(
+        array $payload,
+        bool $queueMapPoiSyncAfterCommit = true,
+    ): AccountProfile {
         $payload = AccountProfileRichTextSanitizer::sanitizePayload($payload);
 
         $profileType = (string) $payload['profile_type'];
@@ -111,7 +114,9 @@ class AccountProfileManagementService
             ]);
         }
 
-        $this->queueMapPoiSyncAfterCommit($profile);
+        if ($queueMapPoiSyncAfterCommit) {
+            $this->queueMapPoiSyncAfterCommit($profile);
+        }
 
         return $profile;
     }
@@ -119,8 +124,11 @@ class AccountProfileManagementService
     /**
      * @param  array<string, mixed>  $attributes
      */
-    public function update(AccountProfile $profile, array $attributes): AccountProfile
-    {
+    public function update(
+        AccountProfile $profile,
+        array $attributes,
+        bool $syncMapPoiProjection = true,
+    ): AccountProfile {
         $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
 
         $profileType = $profile->profile_type;
@@ -191,9 +199,17 @@ class AccountProfileManagementService
         }
 
         $profile = $profile->fresh();
-        UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id);
+        if ($syncMapPoiProjection) {
+            $this->syncMapPoiProjectionById((string) $profile->_id);
+            $profile = $profile->fresh();
+        }
 
         return $profile;
+    }
+
+    public function syncMapPoiProjection(AccountProfile $profile): void
+    {
+        $this->syncMapPoiProjectionById((string) $profile->_id);
     }
 
     public function delete(AccountProfile $profile): void
@@ -213,7 +229,7 @@ class AccountProfileManagementService
         $profile->restore();
 
         $profile = $profile->fresh();
-        $this->queueMapPoiSyncAfterCommit($profile);
+        $this->syncMapPoiProjectionById((string) $profile->_id);
 
         return $profile;
     }
@@ -374,10 +390,11 @@ class AccountProfileManagementService
         ];
     }
 
-    private function queueMapPoiSyncAfterCommit(AccountProfile $profile): void
+    public function queueMapPoiSyncAfterCommit(AccountProfile $profile): void
     {
+        $profileId = (string) $profile->_id;
         DB::connection('tenant')->afterCommit(
-            static fn () => UpsertMapPoiFromAccountProfileJob::dispatch((string) $profile->_id)
+            fn () => $this->syncMapPoiProjectionById($profileId)
         );
     }
 
@@ -386,6 +403,18 @@ class AccountProfileManagementService
         DB::connection('tenant')->afterCommit(
             static fn () => DeleteMapPoiByRefJob::dispatch('account_profile', $profileId)
         );
+    }
+
+    private function syncMapPoiProjectionById(string $profileId): void
+    {
+        $profile = AccountProfile::query()->find($profileId);
+        if (! $profile) {
+            $this->mapPoiProjectionService->deleteByRef('account_profile', $profileId);
+
+            return;
+        }
+
+        $this->mapPoiProjectionService->upsertFromAccountProfile($profile);
     }
 
     /**

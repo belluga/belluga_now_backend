@@ -101,6 +101,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
+                'has_gallery' => true,
                 'has_nested_profile_groups' => true,
             ],
         ]);
@@ -542,16 +543,117 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'discovery_filter_facets.surface',
             'discovery.account_profiles',
         );
+        $response->assertJsonPath(
+            'discovery_filter_catalog.surface',
+            'discovery.account_profiles',
+        );
 
         $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
         $this->assertContains('artist_public', $filterKeys);
         $this->assertContains('venue', $filterKeys);
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains('artist_public', $catalogFilterKeys);
+        $this->assertContains('venue', $catalogFilterKeys);
 
         $cuisineTerms = collect($response->json('discovery_filter_facets.taxonomy_options.cuisine.terms') ?? [])
             ->pluck('value')
             ->values()
             ->all();
         $this->assertSame(['italian', 'japanese'], $cuisineTerms);
+        $catalogCuisineTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $catalogCuisineTerms);
+    }
+
+    public function test_public_account_profile_index_runtime_catalog_hides_empty_and_non_discoverable_types(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'visible_runtime_type',
+            'label' => 'Visible Runtime Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'empty_runtime_type',
+            'label' => 'Empty Runtime Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'hidden_runtime_type',
+            'label' => 'Hidden Runtime Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => false,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'visible_runtime_type',
+            'display_name' => 'Visible Runtime Profile',
+            'taxonomy_terms' => [],
+            'taxonomy_terms_flat' => [],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Hidden Runtime Account',
+            'document' => 'DOC-HIDDEN-RUNTIME',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'hidden_runtime_type',
+            'display_name' => 'Hidden Runtime Profile',
+            'taxonomy_terms' => [],
+            'taxonomy_terms_flat' => [],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles?page=1&per_page=1");
+
+        $response->assertStatus(200);
+
+        $filterKeys = $response->json('discovery_filter_facets.filter_keys') ?? [];
+        $this->assertContains('visible_runtime_type', $filterKeys);
+        $this->assertNotContains('empty_runtime_type', $filterKeys);
+        $this->assertNotContains('hidden_runtime_type', $filterKeys);
+
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains('visible_runtime_type', $catalogFilterKeys);
+        $this->assertNotContains('empty_runtime_type', $catalogFilterKeys);
+        $this->assertNotContains('hidden_runtime_type', $catalogFilterKeys);
     }
 
     public function test_public_account_profile_index_runtime_facets_are_self_excluding_for_selected_filters(): void
@@ -646,12 +748,26 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $filterKeys,
             'Type facets must exclude only the active type selection, not collapse to the selected type.'
         );
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertContains(
+            'artist_public',
+            $catalogFilterKeys,
+            'Canonical discovery catalog must preserve the backend-pruned compatible type universe.'
+        );
 
         $cuisineTerms = collect($response->json('discovery_filter_facets.taxonomy_options.cuisine.terms') ?? [])
             ->pluck('value')
             ->values()
             ->all();
         $this->assertSame(['italian', 'japanese'], $cuisineTerms);
+        $catalogCuisineTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $catalogCuisineTerms);
 
         $this->assertCount(1, $aggregateCalls);
         $this->assertSame(
@@ -2164,6 +2280,80 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaStored($profileId, 'cover');
     }
 
+    public function test_avatar_and_cover_media_remain_available_for_admin_readback_even_when_profile_is_not_publicly_exposed(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Profile Media Gate',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $profileId = (string) $response->json('data.account_profile.id');
+        $avatarUrl = $response->json('data.account_profile.avatar_url');
+        $coverUrl = $response->json('data.account_profile.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+
+        $profile->visibility = 'friends_only';
+        $profile->save();
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+
+        $profile->visibility = 'public';
+        $profile->is_active = false;
+        $profile->save();
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+
+        $profile->is_active = true;
+        $profile->save();
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'personal'],
+            ['label' => 'Personal',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => false,
+                    'is_favoritable' => true,
+                    'is_publicly_discoverable' => false,
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                ],
+            ],
+        );
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'personal'],
+            ['label' => 'Personal',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_publicly_discoverable' => false,
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                ],
+            ],
+        );
+        $this->assertMediaUrlAccess($avatarUrl, 200);
+        $this->assertMediaUrlAccess($coverUrl, 200);
+    }
+
     public function test_account_profile_create_rejects_unknown_taxonomy(): void
     {
         $response = $this->postJson(
@@ -2309,6 +2499,124 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
+    public function test_account_profile_update_media_uploads_refresh_map_poi_projection_urls(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'POI Media Refresh',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertNull($projection?->avatar_url);
+        $this->assertNull($projection?->cover_url);
+
+        $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                '_method' => 'PATCH',
+                'avatar' => UploadedFile::fake()->image('avatar.jpg', 220, 220),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1400, 700),
+            ],
+        );
+
+        $updateResponse->assertStatus(200);
+        $avatarUrl = $updateResponse->json('data.avatar_url');
+        $coverUrl = $updateResponse->json('data.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+        $profile = AccountProfile::query()->findOrFail($profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame($profile->avatar_url, $projection?->avatar_url);
+        $this->assertSame($profile->cover_url, $projection?->cover_url);
+        $this->assertStringEndsWith((string) $projection?->avatar_url, (string) $avatarUrl);
+        $this->assertStringEndsWith((string) $projection?->cover_url, (string) $coverUrl);
+    }
+
+    public function test_account_profile_update_media_removals_refresh_map_poi_projection_urls(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'POI Media Remove',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $avatarUrl = $createResponse->json('data.account_profile.avatar_url');
+        $coverUrl = $createResponse->json('data.account_profile.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+        $profile = AccountProfile::query()->findOrFail($profileId);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertSame($profile->avatar_url, $projection?->avatar_url);
+        $this->assertSame($profile->cover_url, $projection?->cover_url);
+        $this->assertStringEndsWith((string) $projection?->avatar_url, (string) $avatarUrl);
+        $this->assertStringEndsWith((string) $projection?->cover_url, (string) $coverUrl);
+
+        $removeResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'remove_avatar' => true,
+                'remove_cover' => true,
+            ],
+            $this->getHeaders()
+        );
+
+        $removeResponse->assertStatus(200);
+        $removeResponse->assertJsonPath('data.avatar_url', null);
+        $removeResponse->assertJsonPath('data.cover_url', null);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+
+        $this->assertNotNull($projection);
+        $this->assertNull($projection?->avatar_url);
+        $this->assertNull($projection?->cover_url);
+    }
+
     public function test_account_profile_remove_avatar_and_cover_clears_media(): void
     {
         Storage::fake('public');
@@ -2343,6 +2651,90 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNull($removeResponse->json('data.cover_url'));
         Storage::disk('public')->assertMissing($avatarPath);
         Storage::disk('public')->assertMissing($coverPath);
+    }
+
+    public function test_account_profile_show_and_public_detail_include_gallery_readback_while_avatar_cover_and_gallery_share_the_canonical_media_directory(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Profile Gallery Surface',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+                'avatar' => UploadedFile::fake()->image('avatar.png', 240, 240),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1800, 900),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $slug = (string) $createResponse->json('data.account_profile.slug');
+        $this->assertNotSame('', $slug);
+        $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.avatar_url'));
+        $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.cover_url'));
+
+        $galleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            [
+                '_method' => 'PATCH',
+                'gallery_groups' => json_encode([
+                    [
+                        'group_id' => 'ambientes',
+                        'subtitle' => 'Ambientes',
+                        'items' => [
+                            [
+                                'item_id' => 'hall-principal',
+                                'description' => 'Hall principal',
+                                'upload' => 'upload_hall',
+                            ],
+                        ],
+                    ],
+                ], JSON_THROW_ON_ERROR),
+                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+            ],
+        );
+
+        $galleryResponse->assertOk();
+        $galleryResponse->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
+        $galleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+
+        $adminShow = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            $this->getHeaders()
+        );
+        $adminShow->assertOk();
+        $adminShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
+        $adminShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+
+        $publicShow = $this->getJson("{$this->base_api_tenant}account_profiles/{$slug}");
+        $publicShow->assertOk();
+        $publicShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
+        $publicShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $publicShow->assertJsonPath(
+            'data.gallery_groups.0.items.0.modal_url',
+            $adminShow->json('data.gallery_groups.0.items.0.modal_url')
+        );
+
+        $tenant = Tenant::current();
+        $tenantSlug = $tenant?->slug ?? $this->tenant->subdomain;
+        $directory = "tenants/{$tenantSlug}/account_profiles/{$profileId}";
+        $files = Storage::disk('public')->files($directory);
+
+        $this->assertNotEmpty(
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'avatar.'))
+        );
+        $this->assertNotEmpty(
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'cover.'))
+        );
+        $this->assertNotEmpty(
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'gallery-item-hall-principal.'))
+        );
     }
 
     public function test_account_profile_create_rejects_unknown_profile_type(): void
@@ -2996,23 +3388,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $this->assertStringContainsString('v=', $url);
 
+        $this->assertMediaUrlAccess($url, 200);
+    }
+
+    private function assertMediaUrlAccess(?string $url, int $expectedStatus): void
+    {
+        $this->assertNotEmpty($url);
+
         $canonicalResponse = $this->get($url);
-        $canonicalResponse->assertStatus(200);
-
-        $path = parse_url((string) $url, PHP_URL_PATH);
-        $this->assertTrue(is_string($path) && $path !== '');
-        preg_match('#^/api/v1/media/account-profiles/([^/]+)/(avatar|cover)$#', (string) $path, $matches);
-        $this->assertCount(3, $matches);
-
-        $legacyPath = "account-profiles/{$matches[1]}/{$matches[2]}";
-        $query = parse_url((string) $url, PHP_URL_QUERY);
-        $legacyUrl = "{$this->base_tenant_url}{$legacyPath}";
-        if (is_string($query) && trim($query) !== '') {
-            $legacyUrl .= "?{$query}";
-        }
-
-        $legacyResponse = $this->get($legacyUrl);
-        $legacyResponse->assertStatus(200);
+        $canonicalResponse->assertStatus($expectedStatus);
     }
 
     private function assertMediaStored(string $profileId, string $kind): string

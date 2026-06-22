@@ -56,34 +56,44 @@ class FavoritesIntegrationServiceProvider extends ServiceProvider
         }
 
         AccountProfile::saved(function (AccountProfile $profile): void {
-            RebuildFavoriteSnapshotJob::dispatch('account_profile', (string) $profile->getAttribute('_id'));
+            self::rebuildAccountProfileSnapshot((string) $profile->getAttribute('_id'));
         });
 
         AccountProfile::deleted(function (AccountProfile $profile): void {
-            RebuildFavoriteSnapshotJob::dispatch('account_profile', (string) $profile->getAttribute('_id'));
+            self::rebuildAccountProfileSnapshot((string) $profile->getAttribute('_id'));
         });
 
         AccountProfile::restored(function (AccountProfile $profile): void {
-            RebuildFavoriteSnapshotJob::dispatch('account_profile', (string) $profile->getAttribute('_id'));
+            self::rebuildAccountProfileSnapshot((string) $profile->getAttribute('_id'));
         });
 
         EventOccurrence::saved(function (EventOccurrence $occurrence): void {
             foreach (self::extractAccountProfileIdsFromOccurrence($occurrence) as $profileId) {
-                RebuildFavoriteSnapshotJob::dispatch('account_profile', $profileId);
+                self::rebuildAccountProfileSnapshot($profileId);
             }
         });
 
         EventOccurrence::deleted(function (EventOccurrence $occurrence): void {
             foreach (self::extractAccountProfileIdsFromOccurrence($occurrence) as $profileId) {
-                RebuildFavoriteSnapshotJob::dispatch('account_profile', $profileId);
+                self::rebuildAccountProfileSnapshot($profileId);
             }
         });
 
         EventOccurrence::restored(function (EventOccurrence $occurrence): void {
             foreach (self::extractAccountProfileIdsFromOccurrence($occurrence) as $profileId) {
-                RebuildFavoriteSnapshotJob::dispatch('account_profile', $profileId);
+                self::rebuildAccountProfileSnapshot($profileId);
             }
         });
+    }
+
+    private static function rebuildAccountProfileSnapshot(string $profileId): void
+    {
+        $resolvedProfileId = trim($profileId);
+        if ($resolvedProfileId === '') {
+            return;
+        }
+
+        RebuildFavoriteSnapshotJob::dispatchSync('account_profile', $resolvedProfileId);
     }
 
     /**
