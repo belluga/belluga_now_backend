@@ -2833,6 +2833,76 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.display_name', 'Bela');
     }
 
+    public function test_account_profile_edit_journey_preserves_display_name_through_gallery_follow_through(): void
+    {
+        Storage::fake('public');
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Gallery Journey Venue',
+            'slug' => 'gallery-journey-venue',
+            'visibility' => 'public',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+        $this->assertNotEmpty($profileId);
+
+        $seedGalleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            [
+                '_method' => 'PATCH',
+                'gallery_groups' => json_encode([
+                    [
+                        'group_id' => 'ambientes',
+                        'subtitle' => 'Ambientes',
+                        'items' => [
+                            [
+                                'item_id' => 'hall-principal',
+                                'description' => 'Hall principal',
+                                'upload' => 'upload_hall',
+                            ],
+                        ],
+                    ],
+                ], JSON_THROW_ON_ERROR),
+                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+            ],
+        );
+        $seedGalleryResponse->assertOk();
+        $seedGalleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+
+        $updateResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'display_name' => 'Renamed Journey Venue',
+            ],
+            $this->getHeaders()
+        );
+
+        $updateResponse->assertOk();
+        $updateResponse->assertJsonPath('data.display_name', 'Renamed Journey Venue');
+
+        $clearGalleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            [
+                '_method' => 'PATCH',
+                'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
+            ],
+        );
+
+        $clearGalleryResponse->assertOk();
+        $clearGalleryResponse->assertJsonPath('data.display_name', 'Renamed Journey Venue');
+        $clearGalleryResponse->assertJsonPath('data.gallery_groups', []);
+
+        $adminShow = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            $this->getHeaders()
+        );
+        $adminShow->assertOk();
+        $adminShow->assertJsonPath('data.display_name', 'Renamed Journey Venue');
+        $adminShow->assertJsonPath('data.gallery_groups', []);
+    }
+
     public function test_account_profile_update_rejects_display_name_shorter_than_three_visible_characters(): void
     {
         $profile = AccountProfile::create([
