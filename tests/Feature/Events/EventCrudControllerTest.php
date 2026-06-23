@@ -978,6 +978,15 @@ class EventCrudControllerTest extends TestCaseTenant
         $externalHost->cover_url = 'https://cdn.example.com/candidate-external-cover.png';
         $externalHost->save();
 
+        $relativeLegacyHost = $this->createAccountProfile('restaurant', 'Candidate Relative Legacy Host');
+        $relativeLegacyHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.125, -20.125],
+        ];
+        $relativeLegacyHost->avatar_url = "account-profiles/{$relativeLegacyHost->_id}/avatar?v=5";
+        $relativeLegacyHost->cover_url = "account-profiles/{$relativeLegacyHost->_id}/cover?v=6";
+        $relativeLegacyHost->save();
+
         $invalidNoLocationHost = $this->createAccountProfile('restaurant', 'Candidate Broken Location Host');
         $invalidNoLocationHost->location = null;
         $invalidNoLocationHost->save();
@@ -998,7 +1007,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $hosts = collect($response->json('data') ?? [])
             ->keyBy(static fn (array $host): string => (string) ($host['id'] ?? ''));
 
-        $this->assertCount(3, $hosts);
+        $this->assertCount(4, $hosts);
 
         $relativeHost = $hosts->get((string) $this->venue->_id);
         $this->assertNotNull($relativeHost);
@@ -1031,6 +1040,17 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame(
             'https://cdn.example.com/candidate-external-cover.png',
             data_get($externalCandidate, 'cover_url')
+        );
+
+        $relativeLegacyCandidate = $hosts->get((string) $relativeLegacyHost->_id);
+        $this->assertNotNull($relativeLegacyCandidate);
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$relativeLegacyHost->_id}/avatar?v=5",
+            data_get($relativeLegacyCandidate, 'avatar_url')
+        );
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$relativeLegacyHost->_id}/cover?v=6",
+            data_get($relativeLegacyCandidate, 'cover_url')
         );
 
         $this->assertFalse($hosts->has((string) $invalidNoLocationHost->_id));

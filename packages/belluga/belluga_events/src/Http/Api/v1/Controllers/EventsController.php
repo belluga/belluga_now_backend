@@ -70,9 +70,16 @@ class EventsController extends Controller
             $search,
             $page,
             $perPage,
-            $accountContextId,
-            $baseUrl !== '' ? $baseUrl : null
+            $accountContextId
         );
+        if ($baseUrl !== '') {
+            $candidates->setCollection(
+                $candidates->getCollection()
+                    ->map(fn (mixed $candidate): mixed => is_array($candidate)
+                        ? $this->normalizeCandidateMediaFields($candidate, $baseUrl)
+                        : $candidate)
+            );
+        }
 
         return response()->json($candidates->toArray());
     }
@@ -218,6 +225,90 @@ class EventsController extends Controller
         $user = $request->user();
 
         return $user ? (string) $user->getAuthIdentifier() : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $candidate
+     * @return array<string, mixed>
+     */
+    private function normalizeCandidateMediaFields(array $candidate, string $baseUrl): array
+    {
+        $candidateId = is_scalar($candidate['id'] ?? null)
+            ? trim((string) $candidate['id'])
+            : '';
+
+        foreach (['avatar_url', 'cover_url'] as $field) {
+            $candidate[$field] = $this->normalizeCandidateMediaUrl(
+                $candidate[$field] ?? null,
+                $baseUrl,
+                $candidateId,
+                str_replace('_url', '', $field)
+            );
+        }
+
+        return $candidate;
+    }
+
+    private function normalizeCandidateMediaUrl(
+        mixed $rawUrl,
+        string $baseUrl,
+        string $candidateId,
+        string $kind,
+    ): ?string
+    {
+        if (! is_scalar($rawUrl)) {
+            return null;
+        }
+
+        $normalized = trim((string) $rawUrl);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $legacySameTenantUrl = $this->normalizeLegacyCandidateMediaUrl(
+            $normalized,
+            $baseUrl,
+            $candidateId,
+            $kind,
+        );
+        if ($legacySameTenantUrl !== null) {
+            return $legacySameTenantUrl;
+        }
+
+        if (preg_match('#^https?://#i', $normalized) === 1 || str_starts_with($normalized, '//')) {
+            return $normalized;
+        }
+
+        return $baseUrl.'/'.ltrim($normalized, '/');
+    }
+
+    private function normalizeLegacyCandidateMediaUrl(
+        string $rawUrl,
+        string $baseUrl,
+        string $candidateId,
+        string $kind,
+    ): ?string {
+        if ($candidateId === '' || $kind === '') {
+            return null;
+        }
+
+        $path = parse_url($rawUrl, PHP_URL_PATH);
+        if (! is_string($path) || trim($path) === '') {
+            return null;
+        }
+
+        $normalizedPath = '/'.ltrim(trim($path), '/');
+        $legacyPath = "/account-profiles/{$candidateId}/{$kind}";
+        if ($normalizedPath !== $legacyPath) {
+            return null;
+        }
+
+        $query = parse_url($rawUrl, PHP_URL_QUERY);
+        $canonicalUrl = "{$baseUrl}/api/v1/media/account-profiles/{$candidateId}/{$kind}";
+
+        return is_string($query) && trim($query) !== ''
+            ? $canonicalUrl.'?'.$query
+            : $canonicalUrl;
     }
 
     /**
