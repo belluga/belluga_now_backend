@@ -14,6 +14,7 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
@@ -225,6 +226,92 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $this->assertFalse(
             $this->arrayContainsScalar($firstMatch['$and'], (string) $profile->_id),
             'Account-scoped occurrence queries must not fan out into all profile ids before $group.'
+        );
+    }
+
+    public function test_event_account_profile_candidates_physical_host_request_stays_within_cold_query_budget(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'labels' => [
+                    'singular' => 'Venue',
+                    'plural' => 'Venues',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        foreach (range(1, 3) as $index) {
+            $account = Account::query()->create([
+                'name' => sprintf('Budget Venue Account %02d', $index),
+                'document' => sprintf('DOC-BUDGET-VENUE-%02d', $index),
+            ]);
+
+            AccountProfile::query()->create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => 'venue',
+                'display_name' => sprintf('Budget Venue %02d', $index),
+                'taxonomy_terms' => [],
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.0 - ($index / 100), -20.0 - ($index / 100)],
+                ],
+                'is_active' => true,
+                'is_verified' => false,
+            ]);
+        }
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=budget&page=1&page_size=2"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(2, 'data');
+
+        $queries = collect($connection->getQueryLog());
+        $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
+        $profileTypeQueries = $queries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'tenant_profile_types'
+            )
+        );
+        $accountProfileQueries = $queries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+
+        $this->assertLessThanOrEqual(
+            3,
+            $queries->count(),
+            "Candidate endpoint must stay within the cold <=3 statement ceiling. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(
+            1,
+            $profileTypeQueries,
+            "Candidate endpoint must resolve POI/queryable types with a single tenant_profile_types lookup. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(
+            2,
+            $accountProfileQueries,
+            "Candidate endpoint must issue exactly one count and one page-row account_profiles query. Queries: {$queryLogJson}"
         );
     }
 
