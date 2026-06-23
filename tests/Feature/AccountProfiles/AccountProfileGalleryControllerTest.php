@@ -235,6 +235,81 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['gallery_groups']);
     }
 
+    public function test_gallery_subresource_accepts_empty_array_to_clear_all_for_gallery_enabled_profile(): void
+    {
+        Storage::fake('public');
+
+        $profile = $this->createPublicProfile('Gallery Clear Parent', 'gallery-clear-parent');
+
+        $seedResponse = $this->patchGallery(
+            $profile,
+            [
+                [
+                    'group_id' => 'facade',
+                    'subtitle' => 'Fachada',
+                    'items' => [
+                        [
+                            'item_id' => 'entrada',
+                            'upload' => 'upload_entrada',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'upload_entrada' => UploadedFile::fake()->image('entrada.png', 1200, 800),
+            ],
+        );
+        $seedResponse->assertOk();
+        $seedResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'entrada');
+
+        $clearResponse = $this->patchGallery($profile, []);
+
+        $clearResponse->assertOk();
+        $clearResponse->assertJsonPath('data.gallery_groups', []);
+
+        $freshProfile = AccountProfile::query()->findOrFail($profile->getKey());
+        $this->assertSame([], $freshProfile->gallery_groups ?? []);
+
+        $publicReadback = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/gallery-clear-parent",
+            $this->getHeaders()
+        );
+        $publicReadback->assertOk();
+        $publicReadback->assertJsonPath('data.gallery_groups', []);
+    }
+
+    public function test_gallery_subresource_rejects_empty_clear_all_when_type_capability_is_disabled(): void
+    {
+        Storage::fake('public');
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'plain'],
+            ['label' => 'Plain',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                    'has_events' => false,
+                    'has_gallery' => false,
+                ],
+            ],
+        );
+
+        $profile = $this->createPublicProfile(
+            'Gallery Disabled Clear Parent',
+            'gallery-disabled-clear-parent',
+            profileType: 'plain',
+        );
+
+        $response = $this->patchGallery($profile, []);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['gallery_groups']);
+    }
+
     public function test_public_detail_hides_gallery_when_type_capability_is_disabled(): void
     {
         Storage::fake('public');

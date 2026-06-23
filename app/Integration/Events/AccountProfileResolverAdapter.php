@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
+use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
@@ -21,6 +22,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfileMediaService $accountProfileMediaService,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -270,7 +272,8 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         ?string $search = null,
         int $page = 1,
         int $perPage = 15,
-        ?string $accountId = null
+        ?string $accountId = null,
+        ?string $baseUrl = null
     ): LengthAwarePaginator {
         $normalizedPage = max(1, $page);
         $normalizedPerPage = max(1, min($perPage, 50));
@@ -299,7 +302,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $paginator->setCollection(
             $paginator->getCollection()
                 ->filter(static fn ($profile): bool => $profile instanceof AccountProfile)
-                ->map(fn (AccountProfile $profile): array => $this->mapCandidate($profile))
+                ->map(fn (AccountProfile $profile): array => $this->mapCandidate($profile, $baseUrl))
                 ->values()
         );
 
@@ -486,7 +489,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @return array<string, mixed>
      */
-    private function mapCandidate(AccountProfile $profile): array
+    private function mapCandidate(AccountProfile $profile, ?string $baseUrl = null): array
     {
         return [
             'id' => (string) $profile->_id,
@@ -494,9 +497,34 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             'profile_type' => (string) $profile->profile_type,
             'display_name' => (string) ($profile->display_name ?? ''),
             'slug' => $this->normalizeSlug($profile->slug ?? null),
-            'avatar_url' => $profile->avatar_url ?? null,
-            'cover_url' => $profile->cover_url ?? null,
+            'avatar_url' => $this->normalizeCandidateMediaUrl($profile, 'avatar', $baseUrl),
+            'cover_url' => $this->normalizeCandidateMediaUrl($profile, 'cover', $baseUrl),
         ];
+    }
+
+    private function normalizeCandidateMediaUrl(AccountProfile $profile, string $kind, ?string $baseUrl): ?string
+    {
+        $rawUrl = match ($kind) {
+            'avatar' => $profile->avatar_url ?? null,
+            'cover' => $profile->cover_url ?? null,
+            default => null,
+        };
+
+        if (! is_string($rawUrl) || trim($rawUrl) === '') {
+            return is_scalar($rawUrl) ? trim((string) $rawUrl) : null;
+        }
+
+        $normalizedBaseUrl = trim((string) $baseUrl);
+        if ($normalizedBaseUrl === '') {
+            return $rawUrl;
+        }
+
+        return $this->accountProfileMediaService->normalizePublicUrl(
+            rtrim($normalizedBaseUrl, '/'),
+            $profile,
+            $kind,
+            $rawUrl,
+        );
     }
 
     private function normalizeSlug(mixed $slug): ?string
