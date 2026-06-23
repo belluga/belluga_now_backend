@@ -15,8 +15,8 @@ use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
-use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
@@ -288,7 +288,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $profileTypeQueries = $queries->filter(
             static fn (array $query): bool => str_contains(
                 json_encode($query, JSON_UNESCAPED_SLASHES),
-                'tenant_profile_types'
+                'account_profile_types'
             )
         );
         $accountProfileQueries = $queries->filter(
@@ -306,7 +306,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $this->assertCount(
             1,
             $profileTypeQueries,
-            "Candidate endpoint must resolve POI/queryable types with a single tenant_profile_types lookup. Queries: {$queryLogJson}"
+            "Candidate endpoint must resolve POI/queryable types with a single account_profile_types lookup. Queries: {$queryLogJson}"
         );
         $this->assertCount(
             2,
