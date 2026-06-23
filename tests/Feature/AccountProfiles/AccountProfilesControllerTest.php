@@ -2810,6 +2810,75 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('errors.profile_type'));
     }
 
+    public function test_account_profile_update_accepts_four_character_public_display_name(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile A',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+        $this->assertNotEmpty($profileId);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'display_name' => 'Bela',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.display_name', 'Bela');
+    }
+
+    public function test_account_profile_update_rejects_display_name_shorter_than_three_visible_characters(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile A',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+        $this->assertNotEmpty($profileId);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'display_name' => 'An',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['display_name']);
+    }
+
+    public function test_account_profile_update_rejects_whitespace_only_display_name(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Profile A',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+        $this->assertNotEmpty($profileId);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'display_name' => '   ',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['display_name']);
+    }
+
     public function test_account_profile_update_allows_slug_change(): void
     {
         $profile = AccountProfile::create([
