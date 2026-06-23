@@ -63,13 +63,15 @@ class EventsController extends Controller
         $accountContextId = $candidateType === 'physical_host'
             ? $this->resolveAccountFromRoute($request)
             : null;
+        $baseUrl = rtrim($request->getSchemeAndHttpHost(), '/');
 
         $candidates = $this->profileResolver->paginateAccountProfileCandidates(
             $candidateType,
             $search,
             $page,
             $perPage,
-            $accountContextId
+            $accountContextId,
+            $baseUrl !== '' ? $baseUrl : null
         );
 
         return response()->json($candidates->toArray());

@@ -102,6 +102,21 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
     }
 
+    public function test_onboarding_accepts_three_character_public_display_name(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Ane',
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.account.name', 'Ane');
+        $response->assertJsonPath('data.account_profile.display_name', 'Ane');
+    }
+
     public function test_onboarding_profile_validation_failure_rolls_back_account_creation(): void
     {
         $this->actingAsAdmin(['account-users:create']);
@@ -133,6 +148,42 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertNotEmpty($response->json('errors.name'));
+        $this->assertSame($accountsBefore, Account::query()->count());
+        $this->assertSame($profilesBefore, AccountProfile::query()->count());
+    }
+
+    public function test_onboarding_rejects_name_shorter_than_three_visible_characters(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        $profilesBefore = AccountProfile::query()->count();
+        $accountsBefore = Account::query()->count();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'An',
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['name']);
+        $this->assertSame($accountsBefore, Account::query()->count());
+        $this->assertSame($profilesBefore, AccountProfile::query()->count());
+    }
+
+    public function test_onboarding_rejects_whitespace_only_public_display_name(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        $profilesBefore = AccountProfile::query()->count();
+        $accountsBefore = Account::query()->count();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => '   ',
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['name']);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }

@@ -6,11 +6,14 @@ namespace App\Http\Api\v1\Requests;
 
 use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileRichText;
 use App\Support\Validation\InputConstraints;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AccountProfileUpdateRequest extends FormRequest
 {
     use ValidatesAccountProfileRichText;
+
+    private const MIN_VISIBLE_PUBLIC_NAME_LENGTH = 3;
 
     public function authorize(): bool
     {
@@ -24,7 +27,7 @@ class AccountProfileUpdateRequest extends FormRequest
     {
         return [
             'profile_type' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'display_name' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'display_name' => $this->publicVisibleNameRules(required: false),
             'slug' => 'sometimes|string|max:'.InputConstraints::NAME_MAX.'|regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             'location' => 'sometimes|array',
             'location.lat' => 'required_with:location.lng|numeric',
@@ -47,6 +50,28 @@ class AccountProfileUpdateRequest extends FormRequest
             'cover_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'remove_avatar' => 'sometimes|boolean',
             'remove_cover' => 'sometimes|boolean',
+        ];
+    }
+
+    /**
+     * @return array<int, \Illuminate\Contracts\Validation\ValidationRule|string|Closure>
+     */
+    private function publicVisibleNameRules(bool $required): array
+    {
+        return [
+            $required ? 'required' : 'sometimes',
+            'string',
+            'max:'.InputConstraints::NAME_MAX,
+            function (string $attribute, mixed $value, Closure $fail): void {
+                if (! is_string($value)) {
+                    return;
+                }
+
+                $trimmed = trim($value);
+                if ($trimmed === '' || mb_strlen($trimmed) < self::MIN_VISIBLE_PUBLIC_NAME_LENGTH) {
+                    $fail("The {$attribute} must be at least ".self::MIN_VISIBLE_PUBLIC_NAME_LENGTH.' visible characters.');
+                }
+            },
         ];
     }
 }
