@@ -130,7 +130,29 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
     public function resolveEventPartyProfilesByIds(array $profileIds): array
     {
-        if ($profileIds === []) {
+        $requestedIds = $this->normalizeProfileIds($profileIds);
+        if ($requestedIds === []) {
+            return [];
+        }
+
+        $profilesById = $this->resolveExistingEventPartyProfilesByIds($requestedIds);
+        $missing = array_diff($requestedIds, array_keys($profilesById));
+        if ($missing !== []) {
+            $this->throwEventPartyEligibilityError($requestedIds, $missing);
+        }
+
+        $resolved = [];
+        foreach ($requestedIds as $profileId) {
+            $resolved[] = $profilesById[$profileId];
+        }
+
+        return $resolved;
+    }
+
+    public function resolveExistingEventPartyProfilesByIds(array $profileIds): array
+    {
+        $requestedIds = $this->normalizeProfileIds($profileIds);
+        if ($requestedIds === []) {
             return [];
         }
 
@@ -139,58 +161,17 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             static fn (string $type): bool => $type !== 'venue'
         ));
         $profiles = AccountProfile::query()
-            ->whereIn('_id', array_values($profileIds))
+            ->whereIn('_id', $requestedIds)
             ->whereIn('profile_type', $eligibleTypes)
             ->get();
 
-        $profilesById = $profiles->keyBy(
-            static fn (AccountProfile $profile): string => (string) $profile->_id
-        );
-
-        $missing = array_diff($profileIds, array_keys($profilesById->all()));
-        if ($missing !== []) {
-            $this->throwEventPartyEligibilityError($profileIds, $missing);
-        }
-
         $resolved = [];
-        foreach ($profileIds as $profileId) {
-            /** @var AccountProfile $profile */
-            $profile = $profilesById[$profileId];
-            $profileType = trim((string) ($profile->profile_type ?? ''));
-            if (! $this->isProfileTypeQueryable($profileType) || $profileType === 'venue') {
-                throw ValidationException::withMessages([
-                    'event_parties' => ['Related account profile type is not selectable.'],
-                ]);
-            }
-            $taxonomy = $profile->taxonomy_terms ?? [];
-            $genres = [];
-
-            if (is_array($taxonomy)) {
-                foreach ($taxonomy as $term) {
-                    if (! is_array($term)) {
-                        continue;
-                    }
-
-                    $type = $term['type'] ?? '';
-                    if (in_array($type, ['music_genre', 'genre'], true)) {
-                        $genres[] = (string) ($term['value'] ?? '');
-                    }
-                }
+        foreach ($profiles as $profile) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
             }
 
-            $resolved[] = [
-                'id' => (string) $profile->_id,
-                'display_name' => $profile->display_name,
-                'slug' => $this->normalizeSlug($profile->slug ?? null),
-                'profile_type' => (string) ($profile->profile_type ?? ''),
-                'avatar_url' => $profile->avatar_url ?? null,
-                'cover_url' => $profile->cover_url ?? null,
-                'highlight' => false,
-                'genres' => array_values(array_filter($genres, static fn ($item): bool => $item !== '')),
-                'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
-                    is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
-                ),
-            ];
+            $resolved[(string) $profile->_id] = $this->formatEventPartyProfile($profile);
         }
 
         return $resolved;
@@ -404,6 +385,18 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     }
 
     /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string>
+     */
+    private function normalizeProfileIds(array $profileIds): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds
+        ), static fn (string $profileId): bool => $profileId !== '')));
+    }
+
+    /**
      * @return array<int, string>
      */
     private function resolvePubliclyNavigableProfileTypes(): array
@@ -481,6 +474,42 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         throw ValidationException::withMessages([
             'event_parties' => ['Some event parties were not found.'],
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatEventPartyProfile(AccountProfile $profile): array
+    {
+        $taxonomy = $profile->taxonomy_terms ?? [];
+        $genres = [];
+
+        if (is_array($taxonomy)) {
+            foreach ($taxonomy as $term) {
+                if (! is_array($term)) {
+                    continue;
+                }
+
+                $type = $term['type'] ?? '';
+                if (in_array($type, ['music_genre', 'genre'], true)) {
+                    $genres[] = (string) ($term['value'] ?? '');
+                }
+            }
+        }
+
+        return [
+            'id' => (string) $profile->_id,
+            'display_name' => $profile->display_name,
+            'slug' => $this->normalizeSlug($profile->slug ?? null),
+            'profile_type' => (string) ($profile->profile_type ?? ''),
+            'avatar_url' => $profile->avatar_url ?? null,
+            'cover_url' => $profile->cover_url ?? null,
+            'highlight' => false,
+            'genres' => array_values(array_filter($genres, static fn ($item): bool => $item !== '')),
+            'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
+                is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
+            ),
+        ];
     }
 
     /**

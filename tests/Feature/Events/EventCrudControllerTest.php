@@ -5334,15 +5334,63 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.profile_groups.1.profiles.0.id', (string) $this->band->_id);
     }
 
+    public function test_public_event_detail_repairs_stale_event_party_media_snapshots_from_live_profiles(): void
+    {
+        $this->artist->avatar_url = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=211";
+        $this->artist->cover_url = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=212";
+        $this->artist->save();
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'event_parties' => [[
+                'party_ref_id' => (string) $this->artist->_id,
+            ]],
+            'profile_groups' => [[
+                'id' => 'artistas',
+                'label' => 'Artistas',
+                'order' => 0,
+                'account_profile_ids' => [(string) $this->artist->_id],
+            ]],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $eventParties = $event->event_parties ?? [];
+        $eventParties[0]['metadata']['avatar_url'] = null;
+        $eventParties[0]['metadata']['cover_url'] = null;
+        $event->event_parties = $eventParties;
+        $event->save();
+
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+
+        $public->assertStatus(200);
+        $expectedAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=211";
+        $expectedCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/cover?v=212";
+        $public->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedAvatarUrl);
+        $public->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', $expectedAvatarUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', $expectedCoverUrl);
+    }
+
     public function test_public_event_detail_repairs_partial_occurrence_linked_profiles_when_aggregating_groups(): void
     {
         $secondArtist = $this->createAccountProfile('artist', 'DJ Aggregate Two');
         $secondArtist->slug = 'dj-aggregate-two-'.Str::lower(Str::random(6));
+        $secondArtist->avatar_url = "/api/v1/media/account-profiles/{$secondArtist->_id}/avatar?v=303";
+        $secondArtist->cover_url = "/api/v1/media/account-profiles/{$secondArtist->_id}/cover?v=304";
         $secondArtist->save();
 
         $guestArtist = $this->createAccountProfile('artist', 'DJ Aggregate Three');
         $guestArtist->slug = 'dj-aggregate-three-'.Str::lower(Str::random(6));
+        $guestArtist->avatar_url = "/api/v1/media/account-profiles/{$guestArtist->_id}/avatar?v=305";
+        $guestArtist->cover_url = "/api/v1/media/account-profiles/{$guestArtist->_id}/cover?v=306";
         $guestArtist->save();
+        $this->artist->avatar_url = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=301";
+        $this->artist->cover_url = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=302";
+        $this->artist->save();
+        $this->band->avatar_url = "/api/v1/media/account-profiles/{$this->band->_id}/avatar?v=307";
+        $this->band->cover_url = "/api/v1/media/account-profiles/{$this->band->_id}/cover?v=308";
+        $this->band->save();
 
         $occurrences = $this->makeOccurrences(2);
         $occurrences[1]['event_parties'] = [
@@ -5371,10 +5419,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $eventId = (string) $created->json('data.event_id');
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
         $secondOccurrence->forceFill([
-            'own_linked_account_profiles' => array_values(array_slice(
-                $secondOccurrence->own_linked_account_profiles ?? [],
-                0,
-                2
+            'own_linked_account_profiles' => array_values(array_map(
+                static function (array $profile): array {
+                    $profile['avatar_url'] = null;
+                    $profile['cover_url'] = null;
+
+                    return $profile;
+                },
+                array_slice($secondOccurrence->own_linked_account_profiles ?? [], 0, 2)
+            )),
+            'own_event_parties' => array_values(array_map(
+                static function (array $party): array {
+                    $metadata = isset($party['metadata']) && is_array($party['metadata'])
+                        ? $party['metadata']
+                        : [];
+                    $metadata['avatar_url'] = null;
+                    $metadata['cover_url'] = null;
+                    $party['metadata'] = $metadata;
+
+                    return $party;
+                },
+                $secondOccurrence->own_event_parties ?? []
             )),
         ])->save();
 
@@ -5408,6 +5473,18 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->values()
                 ->all()
         );
+        $expectedArtistAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=301";
+        $expectedArtistCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/cover?v=302";
+        $expectedGuestAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$guestArtist->_id}/avatar?v=305";
+        $expectedGuestCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$guestArtist->_id}/cover?v=306";
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', $expectedArtistAvatarUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', $expectedArtistCoverUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.3.avatar_url', $expectedGuestAvatarUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.3.cover_url', $expectedGuestCoverUrl);
+        $public->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedArtistAvatarUrl);
+        $public->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedArtistCoverUrl);
+        $public->assertJsonPath('data.linked_account_profiles.3.avatar_url', $expectedGuestAvatarUrl);
+        $public->assertJsonPath('data.linked_account_profiles.3.cover_url', $expectedGuestCoverUrl);
     }
 
     public function test_public_event_detail_keeps_explicit_occurrence_group_when_profiles_overlap_with_event_group(): void

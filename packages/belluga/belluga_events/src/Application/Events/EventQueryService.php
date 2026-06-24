@@ -2373,8 +2373,16 @@ class EventQueryService
                 'display_name' => $this->scalarString($metadata['display_name'] ?? null) ?? '',
                 'slug' => $this->scalarString($metadata['slug'] ?? null),
                 'profile_type' => $profileType,
-                'avatar_url' => $this->absoluteUrlString($metadata['avatar_url'] ?? null),
-                'cover_url' => $this->absoluteUrlString($metadata['cover_url'] ?? null),
+                'avatar_url' => $this->accountProfileMediaUrlString(
+                    $metadata['avatar_url'] ?? null,
+                    $this->scalarString($party['party_ref_id'] ?? null),
+                    'avatar'
+                ),
+                'cover_url' => $this->accountProfileMediaUrlString(
+                    $metadata['cover_url'] ?? null,
+                    $this->scalarString($party['party_ref_id'] ?? null),
+                    'cover'
+                ),
                 'highlight' => false,
                 'genres' => array_values($this->normalizeStringArray($metadata['genres'] ?? [])),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($metadata['taxonomy_terms'] ?? []),
@@ -2399,6 +2407,10 @@ class EventQueryService
      */
     private function resolveLinkedAccountProfiles(array $eventParties): array
     {
+        $liveProfilesById = $this->resolveLiveEventPartyProfileLookup(array_values(array_filter(array_map(
+            fn (array $party): string => trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? '')),
+            $eventParties
+        ), static fn (string $profileId): bool => $profileId !== '')));
         $items = [];
         $seenIds = [];
 
@@ -2417,8 +2429,8 @@ class EventQueryService
                 'slug' => $this->scalarString($payload['slug'] ?? null),
                 'profile_type' => $profileType,
                 'party_type' => $this->scalarString($payload['party_type'] ?? null),
-                'avatar_url' => $this->absoluteUrlString($payload['avatar_url'] ?? null),
-                'cover_url' => $this->absoluteUrlString($payload['cover_url'] ?? null),
+                'avatar_url' => $this->accountProfileMediaUrlString($payload['avatar_url'] ?? null, $id, 'avatar'),
+                'cover_url' => $this->accountProfileMediaUrlString($payload['cover_url'] ?? null, $id, 'cover'),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($payload['taxonomy_terms'] ?? []),
             ]);
             if ($normalized === null) {
@@ -2433,8 +2445,9 @@ class EventQueryService
             $metadata = isset($party['metadata']) && is_array($party['metadata'])
                 ? $party['metadata']
                 : [];
+            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
 
-            $push([
+            $push($this->fillMissingLinkedProfileMediaFromLiveProfile([
                 'id' => $party['party_ref_id'] ?? '',
                 'display_name' => $metadata['display_name'] ?? '',
                 'slug' => $metadata['slug'] ?? null,
@@ -2443,10 +2456,50 @@ class EventQueryService
                 'avatar_url' => $metadata['avatar_url'] ?? null,
                 'cover_url' => $metadata['cover_url'] ?? null,
                 'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
-            ]);
+            ], $liveProfilesById[$profileId] ?? null));
         }
 
         return $items;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array<string, mixed>>
+     */
+    private function resolveLiveEventPartyProfileLookup(array $profileIds): array
+    {
+        $normalizedIds = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds
+        ), static fn (string $profileId): bool => $profileId !== '')));
+
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        return $this->eventProfileResolver->resolveExistingEventPartyProfilesByIds($normalizedIds);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>|null  $liveProfile
+     * @return array<string, mixed>
+     */
+    private function fillMissingLinkedProfileMediaFromLiveProfile(array $payload, ?array $liveProfile): array
+    {
+        if (! is_array($liveProfile)) {
+            return $payload;
+        }
+
+        foreach (['avatar_url', 'cover_url'] as $field) {
+            if ($this->absoluteUrlString($payload[$field] ?? null) !== null) {
+                continue;
+            }
+
+            $payload[$field] = $liveProfile[$field] ?? null;
+        }
+
+        return $payload;
     }
 
     /**
@@ -2841,9 +2894,27 @@ class EventQueryService
      */
     private function normalizeManagementLinkedAccountProfiles(mixed $linkedProfiles, array $eventParties): array
     {
+        $liveProfileIds = [];
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            if ($profileId !== '' && ! in_array($profileId, $liveProfileIds, true)) {
+                $liveProfileIds[] = $profileId;
+            }
+        }
+        foreach ($eventParties as $party) {
+            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
+            if ($profileId !== '' && ! in_array($profileId, $liveProfileIds, true)) {
+                $liveProfileIds[] = $profileId;
+            }
+        }
+        $liveProfilesById = $this->resolveLiveEventPartyProfileLookup($liveProfileIds);
+
         $normalizedById = [];
         foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
-            $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary($profile);
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary(
+                $this->fillMissingLinkedProfileMediaFromLiveProfile($profile, $liveProfilesById[$profileId] ?? null)
+            );
             if ($profilePayload === null) {
                 continue;
             }
@@ -2865,7 +2936,9 @@ class EventQueryService
             $metadata = isset($party['metadata']) && is_array($party['metadata'])
                 ? $party['metadata']
                 : [];
-            $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary([
+            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
+            $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary(
+                $this->fillMissingLinkedProfileMediaFromLiveProfile([
                 'id' => $party['party_ref_id'] ?? '',
                 'display_name' => $metadata['display_name'] ?? '',
                 'slug' => $metadata['slug'] ?? null,
@@ -2874,7 +2947,8 @@ class EventQueryService
                 'avatar_url' => $metadata['avatar_url'] ?? null,
                 'cover_url' => $metadata['cover_url'] ?? null,
                 'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
-            ]);
+                ], $liveProfilesById[$profileId] ?? null)
+            );
             if ($profilePayload === null) {
                 continue;
             }
@@ -2920,7 +2994,24 @@ class EventQueryService
      */
     private function normalizeManagementLinkedAccountProfileSummary(mixed $profile): ?array
     {
-        return $this->normalizeLinkedAccountProfileSummary($profile);
+        $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
+        if ($normalized === null) {
+            return null;
+        }
+
+        $profileId = trim((string) ($this->scalarString($normalized['id'] ?? null) ?? ''));
+        $normalized['avatar_url'] = $this->accountProfileMediaUrlString(
+            $normalized['avatar_url'] ?? null,
+            $profileId,
+            'avatar'
+        );
+        $normalized['cover_url'] = $this->accountProfileMediaUrlString(
+            $normalized['cover_url'] ?? null,
+            $profileId,
+            'cover'
+        );
+
+        return $normalized;
     }
 
     /**
@@ -3174,8 +3265,8 @@ class EventQueryService
                 'party_type' => $this->scalarString($normalized['party_type'] ?? null),
                 'can_open_public_detail' => (bool) ($normalized['can_open_public_detail'] ?? false),
                 'public_detail_path' => $this->scalarString($normalized['public_detail_path'] ?? null),
-                'avatar_url' => $this->absoluteUrlString($normalized['avatar_url'] ?? null),
-                'cover_url' => $this->absoluteUrlString($normalized['cover_url'] ?? null),
+                'avatar_url' => $this->accountProfileMediaUrlString($normalized['avatar_url'] ?? null, $id, 'avatar'),
+                'cover_url' => $this->accountProfileMediaUrlString($normalized['cover_url'] ?? null, $id, 'cover'),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($normalized['taxonomy_terms'] ?? []),
             ];
             $seenIds[$id] = true;
@@ -3207,13 +3298,15 @@ class EventQueryService
     private function resolveArtistsReadProjectionFromLinkedProfiles(array $linkedProfiles): array
     {
         return array_values(array_map(function (array $profile): array {
+            $profileId = $this->scalarString($profile['id'] ?? null) ?? '';
+
             return [
-                'id' => $this->scalarString($profile['id'] ?? null) ?? '',
+                'id' => $profileId,
                 'display_name' => $this->scalarString($profile['display_name'] ?? null) ?? '',
                 'slug' => $this->scalarString($profile['slug'] ?? null),
                 'profile_type' => $this->scalarString($profile['profile_type'] ?? null) ?? '',
-                'avatar_url' => $this->absoluteUrlString($profile['avatar_url'] ?? null),
-                'cover_url' => $this->absoluteUrlString($profile['cover_url'] ?? null),
+                'avatar_url' => $this->accountProfileMediaUrlString($profile['avatar_url'] ?? null, $profileId, 'avatar'),
+                'cover_url' => $this->accountProfileMediaUrlString($profile['cover_url'] ?? null, $profileId, 'cover'),
                 'highlight' => false,
                 'genres' => [],
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($profile['taxonomy_terms'] ?? []),
@@ -3437,6 +3530,49 @@ class EventQueryService
         }
 
         return $normalized;
+    }
+
+    private function accountProfileMediaUrlString(mixed $value, ?string $profileId, string $kind): ?string
+    {
+        $absolute = $this->absoluteUrlString($value);
+        if ($absolute !== null) {
+            return $absolute;
+        }
+
+        $normalized = $this->scalarString($value);
+        $resolvedProfileId = trim((string) ($profileId ?? ''));
+        $resolvedKind = trim($kind);
+        if ($normalized === null || $resolvedProfileId === '' || $resolvedKind === '') {
+            return null;
+        }
+
+        $baseUrl = $this->currentRequestBaseUrl();
+        if ($baseUrl === null) {
+            return null;
+        }
+
+        $path = parse_url($normalized, PHP_URL_PATH);
+        if (! is_string($path) || trim($path) === '') {
+            return null;
+        }
+
+        $normalizedPath = '/'.ltrim(trim($path), '/');
+        $canonicalPath = "/api/v1/media/account-profiles/{$resolvedProfileId}/{$resolvedKind}";
+        $legacyPath = "/account-profiles/{$resolvedProfileId}/{$resolvedKind}";
+        if ($normalizedPath !== $canonicalPath && $normalizedPath !== $legacyPath) {
+            return null;
+        }
+
+        $query = parse_url($normalized, PHP_URL_QUERY);
+
+        return $baseUrl.$canonicalPath.(is_string($query) && trim($query) !== '' ? '?'.$query : '');
+    }
+
+    private function currentRequestBaseUrl(): ?string
+    {
+        $baseUrl = trim((string) request()->getSchemeAndHttpHost());
+
+        return $baseUrl === '' ? null : rtrim($baseUrl, '/');
     }
 
     private function extractRawAttribute(mixed $model, string $attribute): mixed
