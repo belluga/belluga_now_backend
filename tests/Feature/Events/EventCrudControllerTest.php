@@ -987,6 +987,16 @@ class EventCrudControllerTest extends TestCaseTenant
         $relativeLegacyHost->cover_url = "account-profiles/{$relativeLegacyHost->_id}/cover?v=6";
         $relativeLegacyHost->save();
 
+        $noVersionHost = $this->createAccountProfile('restaurant', 'Candidate No Version Host');
+        $noVersionHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.126, -20.126],
+        ];
+        $noVersionHost->avatar_url = "/api/v1/media/account-profiles/{$noVersionHost->_id}/avatar";
+        $noVersionHost->cover_url = "account-profiles/{$noVersionHost->_id}/cover";
+        $noVersionHost->save();
+        $noVersionHost = $noVersionHost->fresh();
+
         $invalidNoLocationHost = $this->createAccountProfile('restaurant', 'Candidate Broken Location Host');
         $invalidNoLocationHost->location = null;
         $invalidNoLocationHost->save();
@@ -1007,7 +1017,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $hosts = collect($response->json('data') ?? [])
             ->keyBy(static fn (array $host): string => (string) ($host['id'] ?? ''));
 
-        $this->assertCount(4, $hosts);
+        $this->assertCount(5, $hosts);
 
         $relativeHost = $hosts->get((string) $this->venue->_id);
         $this->assertNotNull($relativeHost);
@@ -1051,6 +1061,19 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame(
             "{$this->base_tenant_url}api/v1/media/account-profiles/{$relativeLegacyHost->_id}/cover?v=6",
             data_get($relativeLegacyCandidate, 'cover_url')
+        );
+
+        $noVersionCandidate = $hosts->get((string) $noVersionHost->_id);
+        $this->assertNotNull($noVersionCandidate);
+        $expectedNoVersion = $noVersionHost->updated_at?->getTimestamp();
+        $this->assertNotNull($expectedNoVersion);
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$noVersionHost->_id}/avatar?v={$expectedNoVersion}",
+            data_get($noVersionCandidate, 'avatar_url')
+        );
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$noVersionHost->_id}/cover?v={$expectedNoVersion}",
+            data_get($noVersionCandidate, 'cover_url')
         );
 
         $this->assertFalse($hosts->has((string) $invalidNoLocationHost->_id));
@@ -5370,6 +5393,55 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
         $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', $expectedAvatarUrl);
         $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', $expectedCoverUrl);
+    }
+
+    public function test_event_detail_and_management_readback_preserve_relative_snapshot_media_when_live_profile_is_blank(): void
+    {
+        $relativeAvatarUrl = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=411";
+        $relativeCoverUrl = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=412";
+        $this->artist->avatar_url = $relativeAvatarUrl;
+        $this->artist->cover_url = $relativeCoverUrl;
+        $this->artist->save();
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'event_parties' => [[
+                'party_ref_id' => (string) $this->artist->_id,
+            ]],
+            'profile_groups' => [[
+                'id' => 'artistas',
+                'label' => 'Artistas',
+                'order' => 0,
+                'account_profile_ids' => [(string) $this->artist->_id],
+            ]],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $eventParties = $event->event_parties ?? [];
+        $eventParties[0]['metadata']['avatar_url'] = $relativeAvatarUrl;
+        $eventParties[0]['metadata']['cover_url'] = $relativeCoverUrl;
+        $event->event_parties = $eventParties;
+        $event->save();
+
+        $this->artist->avatar_url = null;
+        $this->artist->cover_url = null;
+        $this->artist->save();
+
+        $expectedAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=411";
+        $expectedCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/cover?v=412";
+
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedAvatarUrl);
+        $public->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', $expectedAvatarUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', $expectedCoverUrl);
+
+        $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $management->assertStatus(200);
+        $management->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedAvatarUrl);
+        $management->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
     }
 
     public function test_public_event_detail_repairs_partial_occurrence_linked_profiles_when_aggregating_groups(): void

@@ -474,6 +474,102 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
     }
 
+    public function test_event_detail_and_management_readback_batch_live_profile_repairs_into_single_account_profiles_query(): void
+    {
+        $profiles = collect([
+            $this->createAccountProfileFixture('artist', 'Performance Linked Artist 01', 511),
+            $this->createAccountProfileFixture('band', 'Performance Linked Band 02', 521),
+            $this->createAccountProfileFixture('artist', 'Performance Linked Artist 03', 531),
+            $this->createAccountProfileFixture('band', 'Performance Linked Band 04', 541),
+        ]);
+        $eventParties = $profiles
+            ->map(fn (AccountProfile $profile): array => $this->eventPartyForProfile($profile))
+            ->values()
+            ->all();
+
+        $event = $this->createEventFixture(
+            'Performance Guard Live Profile Lookup Event',
+            Carbon::now()->startOfDay()->addDays(4)->setHour(10),
+            $eventParties
+        );
+
+        $groupPayload = [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+            'account_profile_ids' => $profiles
+                ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+                ->values()
+                ->all(),
+        ]];
+
+        foreach (EventOccurrence::query()->where('event_id', (string) $event->_id)->get() as $occurrence) {
+            $occurrence->forceFill([
+                'own_event_parties' => $eventParties,
+                'own_linked_account_profiles' => array_map(
+                    static fn (array $party): array => [
+                        'id' => (string) ($party['party_ref_id'] ?? ''),
+                        'display_name' => (string) data_get($party, 'metadata.display_name', ''),
+                        'profile_type' => (string) data_get($party, 'metadata.profile_type', ''),
+                    ],
+                    array_slice($eventParties, 0, 2)
+                ),
+                'profile_groups' => $groupPayload,
+            ])->save();
+        }
+
+        $selectedOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->skip(1)
+            ->firstOrFail();
+
+        $service = app(EventQueryService::class);
+        $connection = DB::connection('tenant');
+
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+        $detailPayload = $service->formatEventDetail(
+            $event->fresh(),
+            null,
+            (string) $selectedOccurrence->_id
+        );
+        $detailQueries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+
+        $this->assertSame((string) $event->_id, $detailPayload['event_id'] ?? null);
+        $detailAccountProfileQueries = $detailQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+        $this->assertCount(
+            1,
+            $detailAccountProfileQueries,
+            'Public event detail live-profile repair must batch account profile lookups into a single query per formatter run.'
+        );
+
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+        $managementPayload = $service->formatManagementEvent($event->fresh());
+        $managementQueries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+
+        $this->assertSame((string) $event->_id, $managementPayload['event_id'] ?? null);
+        $managementAccountProfileQueries = $managementQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+        $this->assertCount(
+            1,
+            $managementAccountProfileQueries,
+            'Management event readback live-profile repair must batch account profile lookups into a single query per formatter run.'
+        );
+    }
+
     public function test_taxonomy_snapshot_runtime_resolver_caches_legacy_term_resolution(): void
     {
         $taxonomy = Taxonomy::query()->create([
@@ -646,6 +742,40 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'is_visible' => true,
             ],
         ];
+    }
+
+    private function createAccountProfileFixture(
+        string $profileType,
+        string $displayName,
+        int $versionSeed,
+    ): AccountProfile {
+        $account = Account::query()->create([
+            'name' => $displayName.' Account',
+            'document' => 'DOC-'.uniqid('perf-', true),
+        ]);
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => $profileType,
+            'display_name' => $displayName,
+            'slug' => strtolower(str_replace(' ', '-', $displayName)).'-'.uniqid(),
+            'taxonomy_terms' => [],
+            'is_active' => true,
+        ]);
+
+        $profile->avatar_url = sprintf(
+            '/api/v1/media/account-profiles/%s/avatar?v=%d',
+            $profile->_id,
+            $versionSeed
+        );
+        $profile->cover_url = sprintf(
+            '/api/v1/media/account-profiles/%s/cover?v=%d',
+            $profile->_id,
+            $versionSeed + 1
+        );
+        $profile->save();
+
+        return $profile->fresh();
     }
 
     private function arrayContainsScalar(mixed $value, string $needle): bool
