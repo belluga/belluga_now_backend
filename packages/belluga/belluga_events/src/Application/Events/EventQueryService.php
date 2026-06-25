@@ -3258,18 +3258,28 @@ class EventQueryService
     {
         $merged = $primary;
 
-        foreach ([
+        $fallbackScalarFields = [
             'display_name',
             'slug',
             'profile_type',
             'party_type',
-            'avatar_url',
-            'cover_url',
-        ] as $field) {
+        ];
+
+        foreach ($fallbackScalarFields as $field) {
             $value = $this->scalarString($merged[$field] ?? null);
             if ($value === null || $value === '') {
                 $merged[$field] = $fallback[$field] ?? null;
             }
+        }
+
+        $avatarUrl = $this->scalarString($merged['avatar_url'] ?? null);
+        if ($avatarUrl === null || $avatarUrl === '') {
+            $merged['avatar_url'] = $fallback['avatar_url'] ?? null;
+        }
+
+        $coverUrl = $this->scalarString($merged['cover_url'] ?? null);
+        if ($coverUrl === null || $coverUrl === '') {
+            $merged['cover_url'] = $fallback['cover_url'] ?? null;
         }
 
         if ((bool) ($merged['can_open_public_detail'] ?? false) === false
