@@ -1098,6 +1098,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.agenda_occurrences.0.venue.cover_url', $venueCoverUrl);
         $response->assertJsonPath('data.agenda_occurrences.1.event_id', (string) $futureEvent->_id);
         $response->assertJsonPath('data.agenda_occurrences.1.title', 'Future Venue Event');
+        $firstAgendaItem = $response->json('data.agenda_occurrences.0');
+        $this->assertIsArray($firstAgendaItem);
+        $this->assertArrayNotHasKey('occurrences', $firstAgendaItem);
+        $this->assertArrayNotHasKey('event_parties', $firstAgendaItem);
+        $this->assertArrayNotHasKey('profile_groups', $firstAgendaItem);
+        $this->assertArrayNotHasKey('programming_items', $firstAgendaItem);
+        $this->assertArrayNotHasKey('capabilities', $firstAgendaItem);
+        $this->assertArrayNotHasKey('created_by', $firstAgendaItem);
         $this->assertNotSame(
             $response->json('data.agenda_occurrences.0.venue.cover_url'),
             $response->json('data.agenda_occurrences.0.hero_image_url')

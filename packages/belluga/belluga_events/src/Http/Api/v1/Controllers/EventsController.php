@@ -71,7 +71,7 @@ class EventsController extends Controller
             $page,
             $perPage,
             $accountContextId,
-            $baseUrl !== '' ? $baseUrl : null
+            $baseUrl !== '' ? $baseUrl : null,
         );
 
         return response()->json($candidates->toArray());
