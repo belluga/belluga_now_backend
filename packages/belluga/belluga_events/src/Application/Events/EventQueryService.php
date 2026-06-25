@@ -505,6 +505,7 @@ class EventQueryService
         return $this->withCanonicalHeroImage([
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
             'title' => $this->scalarString($event->title ?? null) ?? '',
+            'content' => $this->scalarString($event->content ?? null) ?? '',
             'location' => $location === [] ? null : $location,
             'place_ref' => $placeRef === [] ? null : $placeRef,
             'venue' => $venuePayload,
