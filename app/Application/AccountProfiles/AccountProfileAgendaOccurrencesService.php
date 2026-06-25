@@ -54,7 +54,7 @@ class AccountProfileAgendaOccurrencesService
             ->limit(InputConstraints::PUBLIC_PAGE_SIZE_MAX)
             ->get();
 
-        return $this->eventQueryService->formatEvents($occurrences);
+        return $this->eventQueryService->formatAgendaEvents($occurrences, null);
     }
 
     private function profileHasAgendaCapability(AccountProfile $profile): bool

@@ -125,7 +125,7 @@ class PublicWebMetadataService
             }
 
             $this->eventQueryService->assertPublicVisible($event);
-            $payload = $this->eventQueryService->formatEvent($event);
+            $payload = $this->eventQueryService->formatMetadataEvent($event);
         } catch (ModelNotFoundException|EventNotPubliclyVisibleException) {
             return $metadata;
         }

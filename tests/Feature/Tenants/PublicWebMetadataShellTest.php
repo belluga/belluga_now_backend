@@ -259,7 +259,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $eventQueryService->shouldReceive('assertPublicVisible')
             ->with($event)
             ->andReturnNull();
-        $eventQueryService->shouldReceive('formatEvent')
+        $eventQueryService->shouldReceive('formatMetadataEvent')
             ->with($event)
             ->andReturn([
                 'slug' => 'festival-linked',
@@ -311,7 +311,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $eventQueryService->shouldReceive('assertPublicVisible')
             ->with($event)
             ->andReturnNull();
-        $eventQueryService->shouldReceive('formatEvent')
+        $eventQueryService->shouldReceive('formatMetadataEvent')
             ->with($event)
             ->andReturn([
                 'slug' => 'festival-no-artists',

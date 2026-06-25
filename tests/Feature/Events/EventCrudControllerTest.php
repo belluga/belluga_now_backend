@@ -658,6 +658,37 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['page']);
     }
 
+    public function test_public_event_index_exposes_event_taxonomy_term_display_snapshots(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Public Event List Taxonomy Snapshot',
+            'taxonomy_terms' => [[
+                'type' => 'event_style',
+                'value' => 'showcase',
+                'name' => 'Showcase',
+                'taxonomy_name' => 'Event Style',
+                'label' => 'Showcase',
+            ]],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}events?page=1&page_size=".InputConstraints::PUBLIC_PAGE_SIZE_MAX
+        );
+
+        $response->assertStatus(200);
+
+        $matching = collect($response->json('data') ?? [])
+            ->firstWhere('event_id', (string) $event->_id);
+
+        $this->assertIsArray($matching);
+        $this->assertArrayNotHasKey('tags', $matching);
+        $this->assertSame('event_style', data_get($matching, 'taxonomy_terms.0.type'));
+        $this->assertSame('showcase', data_get($matching, 'taxonomy_terms.0.value'));
+        $this->assertSame('Showcase', data_get($matching, 'taxonomy_terms.0.name'));
+        $this->assertSame('Event Style', data_get($matching, 'taxonomy_terms.0.taxonomy_name'));
+        $this->assertSame('Showcase', data_get($matching, 'taxonomy_terms.0.label'));
+    }
+
     public function test_event_index_uses_stable_tie_break_order_for_matching_start_times(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -1880,6 +1911,103 @@ class EventCrudControllerTest extends TestCaseTenant
             ->firstWhere('event_id', (string) $event->_id);
         $this->assertIsArray($matching);
         $this->assertSame([], data_get($matching, 'taxonomy_terms', []));
+    }
+
+    public function test_tenant_admin_event_index_omits_taxonomy_terms_even_when_show_has_them(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Admin Index Omits Taxonomy Terms',
+            'taxonomy_terms' => [[
+                'type' => 'event_style',
+                'value' => 'showcase',
+                'name' => 'Showcase',
+                'taxonomy_name' => 'Event Style',
+                'label' => 'Showcase',
+            ]],
+        ]);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $show = $this->getJson("{$this->tenantAdminEventsBase}/{$event->_id}");
+        $show->assertStatus(200);
+        $show->assertJsonPath('data.taxonomy_terms.0.type', 'event_style');
+        $show->assertJsonPath('data.taxonomy_terms.0.value', 'showcase');
+
+        $list = $this->getJson("{$this->tenantAdminEventsBase}?page=1&page_size=10");
+        $list->assertStatus(200);
+
+        $matching = collect($list->json('data') ?? [])
+            ->firstWhere('event_id', (string) $event->_id);
+
+        $this->assertIsArray($matching);
+        $this->assertArrayNotHasKey('taxonomy_terms', $matching);
+    }
+
+    public function test_tenant_admin_event_list_uses_bounded_manager_projection_while_show_keeps_readback_fields(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Bounded manager projection event',
+            'content' => 'Detailed readback content',
+            'taxonomy_terms' => [[
+                'type' => 'event_style',
+                'value' => 'showcase',
+                'name' => 'Showcase',
+                'taxonomy_name' => 'Event Style',
+                'label' => 'Showcase',
+            ]],
+            'profile_groups' => [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [(string) $this->artist->_id],
+            ]],
+            'capabilities' => [
+                'map_poi' => [
+                    'enabled' => true,
+                ],
+            ],
+        ]);
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $show = $this->getJson("{$this->tenantAdminEventsBase}/{$event->_id}");
+        $show->assertStatus(200);
+        $showPayload = $show->json('data');
+        $this->assertIsArray($showPayload);
+        $this->assertArrayHasKey('content', $showPayload);
+        $this->assertArrayHasKey('location', $showPayload);
+        $this->assertArrayHasKey('event_parties', $showPayload);
+        $this->assertArrayHasKey('profile_groups', $showPayload);
+        $this->assertArrayHasKey('capabilities', $showPayload);
+        $this->assertArrayHasKey('taxonomy_terms', $showPayload);
+
+        $list = $this->getJson("{$this->tenantAdminEventsBase}?page=1&page_size=10");
+        $list->assertStatus(200);
+
+        $matching = collect($list->json('data') ?? [])
+            ->firstWhere('event_id', (string) $event->_id);
+
+        $this->assertIsArray($matching);
+        foreach ([
+            'content',
+            'location',
+            'latitude',
+            'longitude',
+            'created_by',
+            'event_parties',
+            'profile_groups',
+            'capabilities',
+            'taxonomy_terms',
+        ] as $field) {
+            $this->assertArrayNotHasKey($field, $matching);
+        }
+
+        $this->assertArrayHasKey('occurrences', $matching);
+        $this->assertArrayHasKey('linked_account_profiles', $matching);
+        $this->assertCount(1, $matching['occurrences'] ?? []);
+        $this->assertCount(1, $matching['linked_account_profiles'] ?? []);
     }
 
     public function test_event_create_persists_programming_item_end_time_in_admin_and_public_payloads(): void
@@ -5357,7 +5485,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.profile_groups.1.profiles.0.id', (string) $this->band->_id);
     }
 
-    public function test_public_event_detail_repairs_stale_event_party_media_snapshots_from_live_profiles(): void
+    public function test_public_event_detail_keeps_blank_snapshot_media_without_live_profile_repair(): void
     {
         $this->artist->avatar_url = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=211";
         $this->artist->cover_url = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=212";
@@ -5387,12 +5515,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
 
         $public->assertStatus(200);
-        $expectedAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=211";
-        $expectedCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/cover?v=212";
-        $public->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedAvatarUrl);
-        $public->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
-        $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', $expectedAvatarUrl);
-        $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', $expectedCoverUrl);
+        $public->assertJsonPath('data.linked_account_profiles.0.id', (string) $this->artist->_id);
+        $public->assertJsonPath('data.linked_account_profiles.0.avatar_url', null);
+        $public->assertJsonPath('data.linked_account_profiles.0.cover_url', null);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.id', (string) $this->artist->_id);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', null);
+        $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', null);
     }
 
     public function test_event_detail_and_management_readback_preserve_relative_snapshot_media_when_live_profile_is_blank(): void
@@ -5444,7 +5572,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $management->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
     }
 
-    public function test_public_event_detail_repairs_partial_occurrence_linked_profiles_when_aggregating_groups(): void
+    public function test_public_event_detail_keeps_partial_occurrence_linked_profiles_snapshot_only_when_aggregating_groups(): void
     {
         $secondArtist = $this->createAccountProfile('artist', 'DJ Aggregate Two');
         $secondArtist->slug = 'dj-aggregate-two-'.Str::lower(Str::random(6));
@@ -5547,16 +5675,14 @@ class EventCrudControllerTest extends TestCaseTenant
         );
         $expectedArtistAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=301";
         $expectedArtistCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/cover?v=302";
-        $expectedGuestAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$guestArtist->_id}/avatar?v=305";
-        $expectedGuestCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$guestArtist->_id}/cover?v=306";
         $public->assertJsonPath('data.profile_groups.0.profiles.0.avatar_url', $expectedArtistAvatarUrl);
         $public->assertJsonPath('data.profile_groups.0.profiles.0.cover_url', $expectedArtistCoverUrl);
-        $public->assertJsonPath('data.profile_groups.0.profiles.3.avatar_url', $expectedGuestAvatarUrl);
-        $public->assertJsonPath('data.profile_groups.0.profiles.3.cover_url', $expectedGuestCoverUrl);
+        $public->assertJsonPath('data.profile_groups.0.profiles.3.avatar_url', null);
+        $public->assertJsonPath('data.profile_groups.0.profiles.3.cover_url', null);
         $public->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedArtistAvatarUrl);
         $public->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedArtistCoverUrl);
-        $public->assertJsonPath('data.linked_account_profiles.3.avatar_url', $expectedGuestAvatarUrl);
-        $public->assertJsonPath('data.linked_account_profiles.3.cover_url', $expectedGuestCoverUrl);
+        $public->assertJsonPath('data.linked_account_profiles.3.avatar_url', null);
+        $public->assertJsonPath('data.linked_account_profiles.3.cover_url', null);
     }
 
     public function test_public_event_detail_keeps_explicit_occurrence_group_when_profiles_overlap_with_event_group(): void
@@ -6161,22 +6287,17 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->values()
                 ->all()
         );
-        $this->assertSame(
-            [(string) $this->artist->_id, (string) $this->band->_id],
-            collect($firstItem['event_parties'] ?? [])
-                ->pluck('party_ref_id')
-                ->map(static fn ($id) => (string) $id)
-                ->values()
-                ->all()
-        );
-        $this->assertSame(
-            [(string) $this->artist->_id, (string) $guestArtist->_id],
-            collect($secondItem['event_parties'] ?? [])
-                ->pluck('party_ref_id')
-                ->map(static fn ($id) => (string) $id)
-                ->values()
-                ->all()
-        );
+        foreach ([
+            'content',
+            'occurrences',
+            'event_parties',
+            'profile_groups',
+            'programming_items',
+            'capabilities',
+        ] as $field) {
+            $this->assertArrayNotHasKey($field, $firstItem);
+            $this->assertArrayNotHasKey($field, $secondItem);
+        }
         $this->assertFalse(
             collect($firstItem['linked_account_profiles'] ?? [])
                 ->pluck('id')

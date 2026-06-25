@@ -37,9 +37,6 @@ class EventQueryService
     /** @var array<string, mixed>|null */
     private ?array $tenantCapabilitiesCache = null;
 
-    /** @var array<string, array<string, mixed>|null> */
-    private array $liveEventPartyProfilesByIdCache = [];
-
     private readonly EventManagementOccurrenceQuery $managementOccurrenceQuery;
 
     public function __construct(
@@ -77,7 +74,7 @@ class EventQueryService
         $pageSlice = array_slice($pageRows, 0, $pageSize);
 
         return [
-            'items' => $this->formatEvents($pageSlice, $userId),
+            'items' => $this->formatAgendaEvents($pageSlice, $userId),
             'has_more' => $hasMore,
             'discovery_filter_facets' => $raw['discovery_filter_facets']
                 ?? $this->emptyAgendaDiscoveryFilterFacetsPayload(),
@@ -165,7 +162,11 @@ class EventQueryService
         );
 
         $paginator->setCollection(
-            $events->map(fn (Event $event): array => $this->formatManagementEvent($event, $occurrencesByEventId))
+            $events->map(
+                fn (Event $event): array => $isAdminContext
+                    ? $this->formatManagementEventList($event, $occurrencesByEventId)
+                    : $this->formatPublicEventList($event, $occurrencesByEventId)
+            )
         );
 
         return $paginator;
@@ -322,7 +323,9 @@ class EventQueryService
         $occurrencesByEventId = $this->loadOccurrencesByEventIds($eventIds);
         $items = collect($eventIds)
             ->map(fn (string $eventId): ?array => $eventsById->has($eventId)
-                ? $this->formatManagementEvent($eventsById->get($eventId), $occurrencesByEventId)
+                ? ($isAdminContext
+                    ? $this->formatManagementEventList($eventsById->get($eventId), $occurrencesByEventId)
+                    : $this->formatPublicEventList($eventsById->get($eventId), $occurrencesByEventId))
                 : null)
             ->filter()
             ->values();
@@ -415,44 +418,100 @@ class EventQueryService
      */
     public function formatEventDetail(Event $event, ?string $userId = null, ?string $occurrenceRef = null): array
     {
-        return $this->withFreshLiveEventPartyProfileLookupCache(function () use ($event, $userId, $occurrenceRef): array {
-            $preloadedOccurrences = $this->loadEventOccurrenceDocuments($event);
-            $selectedOccurrence = $this->resolveSelectedOccurrence($event, $occurrenceRef, $preloadedOccurrences);
-            if (! $selectedOccurrence) {
-                return $this->formatEvent($event, $userId);
-            }
+        $preloadedOccurrences = $this->loadEventOccurrenceDocuments($event);
+        $selectedOccurrence = $this->resolveSelectedOccurrence($event, $occurrenceRef, $preloadedOccurrences);
+        if (! $selectedOccurrence) {
+            return $this->formatPublicDetailPayload($event, $userId);
+        }
 
-            $selectedOccurrenceId = (string) $selectedOccurrence->_id;
-            $payload = $this->formatEvent($selectedOccurrence, $userId, true, $event);
-            $payload['event_id'] = (string) $event->_id;
-            $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
-            $payload['thumb'] = $this->normalizeThumbPayload(
-                $this->normalizeArray($event->thumb ?? null)
+        $selectedOccurrenceId = (string) $selectedOccurrence->_id;
+        $payload = $this->formatPublicDetailPayload($selectedOccurrence, $userId, true, $event);
+        $payload['event_id'] = (string) $event->_id;
+        $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
+        $payload['thumb'] = $this->normalizeThumbPayload(
+            $this->normalizeArray($event->thumb ?? null)
+        );
+        $payload['occurrences'] = $this->resolveEventOccurrences(
+            $event,
+            $selectedOccurrenceId,
+            $preloadedOccurrences,
+            true
+        );
+        $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
+            $this->resolveLinkedAccountProfiles(
+                $this->normalizeEventParties($event->event_parties ?? [])
+            ),
+            $payload['occurrences']
+        );
+        $payload['profile_groups'] = $this->formatAggregateProfileGroupsForPublic(
+            $event,
+            $preloadedOccurrences
+        );
+        $payload['profile_groups'] = $this->hydratePublicProfileGroupsFromLinkedProfiles(
+            $payload['profile_groups'],
+            $payload['linked_account_profiles']
+        );
+        if (array_key_exists('artists', $payload)) {
+            $payload['artists'] = $this->resolveArtistsReadProjectionFromLinkedProfiles(
+                $payload['linked_account_profiles']
             );
-            $payload['occurrences'] = $this->resolveEventOccurrences(
-                $event,
-                $selectedOccurrenceId,
-                $preloadedOccurrences,
-                true
-            );
-            $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
-                $this->resolveLinkedAccountProfiles(
-                    $this->normalizeEventParties($event->event_parties ?? [])
-                ),
-                $payload['occurrences']
-            );
-            $payload['profile_groups'] = $this->formatAggregateProfileGroupsForPublic(
-                $event,
-                $preloadedOccurrences
-            );
-            if (array_key_exists('artists', $payload)) {
-                $payload['artists'] = $this->resolveArtistsReadProjectionFromLinkedProfiles(
-                    $payload['linked_account_profiles']
-                );
-            }
+        }
 
-            return $this->withCanonicalHeroImage($payload);
-        });
+        return $this->withCanonicalHeroImage($payload);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function formatMetadataEvent(Event $event): array
+    {
+        $location = $this->normalizeArray($event->location ?? []);
+        $placeRef = $this->normalizePlaceRefPayload(
+            $this->normalizeArray($event->place_ref ?? null)
+        );
+        $venue = $this->normalizeArray($event->venue ?? null);
+        $thumb = $this->normalizeThumbPayload(
+            $this->normalizeArray($event->thumb ?? null)
+        );
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+
+        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
+            ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
+        $venuePayload = $venue === [] ? null : [
+            'id' => $this->resolveLegacyDocumentId($venue),
+            'display_name' => $venueDisplay ?? '',
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
+            'tagline' => $this->scalarString($venue['tagline'] ?? null),
+            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
+        ];
+
+        return $this->withCanonicalHeroImage([
+            'slug' => $this->scalarString($event->slug ?? null) ?? '',
+            'title' => $this->scalarString($event->title ?? null) ?? '',
+            'location' => $location === [] ? null : $location,
+            'place_ref' => $placeRef === [] ? null : $placeRef,
+            'venue' => $venuePayload,
+            'thumb' => $thumb,
+            'event_parties' => $eventParties,
+            'linked_account_profiles' => $linkedAccountProfiles,
+        ]);
     }
 
     /**
@@ -461,137 +520,399 @@ class EventQueryService
      */
     public function formatManagementEvent(Event $event, ?array $occurrencesByEventId = null): array
     {
-        return $this->withFreshLiveEventPartyProfileLookupCache(function () use ($event, $occurrencesByEventId): array {
-            $eventId = isset($event->_id) ? (string) $event->_id : '';
-            $preloadedOccurrences = $eventId !== '' && $occurrencesByEventId !== null
-                ? ($occurrencesByEventId[$eventId] ?? [])
-                : null;
-            $type = $this->normalizeArray($event->type ?? null);
-            $location = $this->normalizeArray($event->location ?? []);
-            $placeRef = $this->normalizePlaceRefPayload(
-                $this->normalizeArray($event->place_ref ?? null)
-            );
-            $venue = $this->normalizeArray($event->venue ?? null);
-            $thumb = $this->normalizeThumbPayload(
-                $this->normalizeArray($event->thumb ?? null)
-            );
-            $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-            $effectiveEventParties = $this->mergeEventParties(
-                $eventParties,
-                $this->resolveOccurrenceOwnedEventParties($event, $preloadedOccurrences)
-            );
-            $eventLinkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
-            $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($effectiveEventParties);
-            $taxonomyTerms = $this->ensureTaxonomySnapshots(
-                $event->taxonomy_terms ?? []
-            );
-            $typeVisual = $this->normalizeEventTypeVisual(
-                $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
-            );
-            $publication = $event->publication ?? null;
-            $publication = is_array($publication) ? $publication : (array) $publication;
-            $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
-                ?? $this->scalarString($venue['name'] ?? null);
-            $venueSlug = $this->scalarString($venue['slug'] ?? null);
-            $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
-            $venueCanOpenPublicDetail = $venueSlug !== null
-                && $venueSlug !== ''
-                && $venueProfileType !== null
-                && $venueProfileType !== ''
-                && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
-            $venuePayload = $venue === [] ? null : [
-                'id' => $this->resolveLegacyDocumentId($venue),
-                'display_name' => $venueDisplay ?? '',
-                'slug' => $venueSlug,
-                'can_open_public_detail' => $venueCanOpenPublicDetail,
-                'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
-                'profile_type' => $venueProfileType,
-                'tagline' => $this->scalarString($venue['tagline'] ?? null),
-                'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-                'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
-                'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
-                    ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
-                'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
-                    ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-                'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
-            ];
-            $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
-            $coordinates = $geo['coordinates'] ?? null;
-            $lat = null;
-            $lng = null;
-            if (is_array($coordinates) && count($coordinates) >= 2) {
-                $lng = (float) $coordinates[0];
-                $lat = (float) $coordinates[1];
-            }
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        $preloadedOccurrences = $eventId !== '' && $occurrencesByEventId !== null
+            ? ($occurrencesByEventId[$eventId] ?? [])
+            : null;
+        $occurrenceDocuments = $preloadedOccurrences;
+        if ($occurrenceDocuments === null && $eventId !== '') {
+            $occurrenceDocuments = EventOccurrence::query()
+                ->where('event_id', $eventId)
+                ->orderBy('starts_at')
+                ->get();
+        }
+        $type = $this->normalizeArray($event->type ?? null);
+        $location = $this->normalizeArray($event->location ?? []);
+        $placeRef = $this->normalizePlaceRefPayload(
+            $this->normalizeArray($event->place_ref ?? null)
+        );
+        $venue = $this->normalizeArray($event->venue ?? null);
+        $thumb = $this->normalizeThumbPayload(
+            $this->normalizeArray($event->thumb ?? null)
+        );
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $effectiveEventParties = $this->mergeEventParties(
+            $eventParties,
+            $this->resolveOccurrenceOwnedEventParties($event, $occurrenceDocuments)
+        );
+        $eventLinkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($effectiveEventParties);
+        $taxonomyTerms = $this->ensureTaxonomySnapshots(
+            $event->taxonomy_terms ?? []
+        );
+        $typeVisual = $this->normalizeEventTypeVisual(
+            $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
+        );
+        $publication = $event->publication ?? null;
+        $publication = is_array($publication) ? $publication : (array) $publication;
+        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
+            ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
+        $venuePayload = $venue === [] ? null : [
+            'id' => $this->resolveLegacyDocumentId($venue),
+            'display_name' => $venueDisplay ?? '',
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
+            'tagline' => $this->scalarString($venue['tagline'] ?? null),
+            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
+        ];
+        $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
+        $coordinates = $geo['coordinates'] ?? null;
+        $lat = null;
+        $lng = null;
+        if (is_array($coordinates) && count($coordinates) >= 2) {
+            $lng = (float) $coordinates[0];
+            $lat = (float) $coordinates[1];
+        }
 
-            $resolvedOccurrences = $this->resolveEventOccurrences($event, null, $preloadedOccurrences);
-            $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'));
-            $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'));
-            if (count($resolvedOccurrences) > 0) {
-                $occurrences = $resolvedOccurrences;
-                $dateTimeStart ??= $resolvedOccurrences[0]['date_time_start'] ?? null;
-                $dateTimeEnd ??= $resolvedOccurrences[0]['date_time_end'] ?? null;
-            } elseif ($dateTimeStart !== null) {
-                $occurrences = [[
-                    'occurrence_id' => null,
-                    'occurrence_slug' => null,
-                    'date_time_start' => $dateTimeStart,
-                    'date_time_end' => $dateTimeEnd,
-                ]];
-            } else {
-                $occurrences = $resolvedOccurrences;
-                $dateTimeStart = $resolvedOccurrences[0]['date_time_start'] ?? null;
-                $dateTimeEnd = $resolvedOccurrences[0]['date_time_end'] ?? null;
-            }
-            $createdBy = $this->normalizeArray($event->created_by ?? []);
-
-            return [
-                'event_id' => isset($event->_id) ? (string) $event->_id : '',
+        $resolvedOccurrences = $this->resolveEventOccurrences($event, null, $occurrenceDocuments);
+        $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'));
+        $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'));
+        if (count($resolvedOccurrences) > 0) {
+            $occurrences = $resolvedOccurrences;
+            $dateTimeStart ??= $resolvedOccurrences[0]['date_time_start'] ?? null;
+            $dateTimeEnd ??= $resolvedOccurrences[0]['date_time_end'] ?? null;
+        } elseif ($dateTimeStart !== null) {
+            $occurrences = [[
                 'occurrence_id' => null,
-                'slug' => $this->scalarString($event->slug ?? null) ?? '',
-                'type' => [
-                    'id' => $this->resolveLegacyDocumentId($type),
-                    'name' => $this->scalarString($type['name'] ?? null) ?? '',
-                    'slug' => $this->scalarString($type['slug'] ?? null) ?? '',
-                    'description' => $this->scalarString($type['description'] ?? null),
-                    'visual' => $typeVisual,
-                    'poi_visual' => $typeVisual,
-                    'icon' => $this->scalarString($type['icon'] ?? null),
-                    'color' => $this->scalarString($type['color'] ?? null),
-                    'icon_color' => $this->scalarString($type['icon_color'] ?? null),
-                ],
-                'title' => $this->scalarString($event->title ?? null) ?? '',
-                'content' => $this->scalarString($event->content ?? null) ?? '',
-                'location' => $location === [] ? null : $location,
-                'place_ref' => $placeRef === [] ? null : $placeRef,
-                'venue' => $venuePayload,
-                'latitude' => $lat,
-                'longitude' => $lng,
-                'thumb' => $thumb,
+                'occurrence_slug' => null,
                 'date_time_start' => $dateTimeStart,
                 'date_time_end' => $dateTimeEnd,
-                'occurrences' => $occurrences,
-                'created_by' => [
-                    'type' => $this->scalarString($createdBy['type'] ?? null) ?? '',
-                    'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
-                ],
-                'event_parties' => $eventParties,
-                'linked_account_profiles' => $linkedAccountProfiles,
-                'profile_groups' => $this->formatProfileGroupsForManagement(
-                    $event->profile_groups ?? [],
-                    $eventLinkedAccountProfiles
-                ),
-                'capabilities' => $this->resolveEventCapabilities($event),
-                'taxonomy_terms' => $taxonomyTerms,
-                'publication' => [
-                    'status' => $this->scalarString($publication['status'] ?? null) ?? 'draft',
-                    'publish_at' => $this->formatDate($publication['publish_at'] ?? null),
-                ],
-                'created_at' => $event->created_at?->toJSON(),
-                'updated_at' => $event->updated_at?->toJSON(),
-                'deleted_at' => $event->deleted_at?->toJSON(),
-            ];
-        });
+            ]];
+        } else {
+            $occurrences = $resolvedOccurrences;
+            $dateTimeStart = $resolvedOccurrences[0]['date_time_start'] ?? null;
+            $dateTimeEnd = $resolvedOccurrences[0]['date_time_end'] ?? null;
+        }
+        $createdBy = $this->normalizeArray($event->created_by ?? []);
+
+        return [
+            'event_id' => isset($event->_id) ? (string) $event->_id : '',
+            'occurrence_id' => null,
+            'slug' => $this->scalarString($event->slug ?? null) ?? '',
+            'type' => [
+                'id' => $this->resolveLegacyDocumentId($type),
+                'name' => $this->scalarString($type['name'] ?? null) ?? '',
+                'slug' => $this->scalarString($type['slug'] ?? null) ?? '',
+                'description' => $this->scalarString($type['description'] ?? null),
+                'visual' => $typeVisual,
+                'poi_visual' => $typeVisual,
+                'icon' => $this->scalarString($type['icon'] ?? null),
+                'color' => $this->scalarString($type['color'] ?? null),
+                'icon_color' => $this->scalarString($type['icon_color'] ?? null),
+            ],
+            'title' => $this->scalarString($event->title ?? null) ?? '',
+            'content' => $this->scalarString($event->content ?? null) ?? '',
+            'location' => $location === [] ? null : $location,
+            'place_ref' => $placeRef === [] ? null : $placeRef,
+            'venue' => $venuePayload,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'thumb' => $thumb,
+            'date_time_start' => $dateTimeStart,
+            'date_time_end' => $dateTimeEnd,
+            'occurrences' => $occurrences,
+            'created_by' => [
+                'type' => $this->scalarString($createdBy['type'] ?? null) ?? '',
+                'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
+            ],
+            'event_parties' => $eventParties,
+            'linked_account_profiles' => $linkedAccountProfiles,
+            'profile_groups' => $this->formatProfileGroupsForManagement(
+                $event->profile_groups ?? [],
+                $eventLinkedAccountProfiles
+            ),
+            'capabilities' => $this->resolveEventCapabilities($event),
+            'taxonomy_terms' => $taxonomyTerms,
+            'publication' => [
+                'status' => $this->scalarString($publication['status'] ?? null) ?? 'draft',
+                'publish_at' => $this->formatDate($publication['publish_at'] ?? null),
+            ],
+            'created_at' => $event->created_at?->toJSON(),
+            'updated_at' => $event->updated_at?->toJSON(),
+            'deleted_at' => $event->deleted_at?->toJSON(),
+        ];
+    }
+
+    /**
+     * @param  iterable<int, mixed>  $events
+     * @return array<int, array<string, mixed>>
+     */
+    public function formatAgendaEvents(
+        iterable $events,
+        ?string $userId = null,
+        bool $includeArtists = true
+    ): array {
+        $items = is_array($events) ? array_values($events) : iterator_to_array($events, false);
+        $parentEventsById = $this->loadParentEventsForOccurrences($items);
+
+        return array_values(array_map(
+            fn (mixed $event): array => $this->formatAgendaEvent(
+                $event,
+                $userId,
+                $includeArtists,
+                $this->resolveParentEventContext($event, $parentEventsById)
+            ),
+            $items
+        ));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatAgendaEvent(
+        mixed $event,
+        ?string $userId = null,
+        bool $includeArtists = true,
+        ?Event $parentEvent = null
+    ): array {
+        $isOccurrence = $this->isOccurrencePayload($event);
+        $type = $this->normalizeArray($event->type ?? null);
+        $location = $this->normalizeArray($event->location ?? []);
+        $placeRef = $this->normalizePlaceRefPayload(
+            $this->normalizeArray($event->place_ref ?? null)
+        );
+        $venue = $this->normalizeArray($event->venue ?? null);
+        $thumb = $this->normalizeThumbPayload(
+            $this->normalizeArray(
+                $parentEvent !== null && $isOccurrence
+                    ? ($parentEvent->thumb ?? null)
+                    : ($event->thumb ?? null)
+            )
+        );
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
+            $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
+        }
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+        $taxonomyTerms = $this->resolvePublicEventTaxonomyTerms($event);
+        $artists = $includeArtists
+            ? $this->resolveArtistsReadProjectionFromLinkedProfiles($linkedAccountProfiles)
+            : [];
+        $typeVisual = $this->normalizeEventTypeVisual(
+            $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
+        );
+        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
+            ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
+        $venuePayload = $venue === [] ? null : [
+            'id' => $this->resolveLegacyDocumentId($venue),
+            'display_name' => $venueDisplay ?? '',
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
+            'tagline' => $this->scalarString($venue['tagline'] ?? null),
+            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
+        ];
+        $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
+        $coordinates = $geo['coordinates'] ?? null;
+        $lat = null;
+        $lng = null;
+        if (is_array($coordinates) && count($coordinates) >= 2) {
+            $lng = (float) $coordinates[0];
+            $lat = (float) $coordinates[1];
+        }
+
+        $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
+        $occurrenceId = $isOccurrence && isset($event->_id) ? (string) $event->_id : null;
+
+        $payload = [
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'slug' => $this->scalarString($event->slug ?? null)
+                ?? ($parentEvent !== null ? $this->scalarString($parentEvent->slug ?? null) : null)
+                ?? '',
+            'type' => [
+                'id' => $this->resolveLegacyDocumentId($type),
+                'name' => $this->scalarString($type['name'] ?? null) ?? '',
+                'slug' => $this->scalarString($type['slug'] ?? null) ?? '',
+                'description' => $this->scalarString($type['description'] ?? null),
+                'visual' => $typeVisual,
+                'poi_visual' => $typeVisual,
+                'icon' => $this->scalarString($type['icon'] ?? null),
+                'color' => $this->scalarString($type['color'] ?? null),
+                'icon_color' => $this->scalarString($type['icon_color'] ?? null),
+            ],
+            'title' => $this->scalarString($event->title ?? null) ?? '',
+            'location' => $location === [] ? null : $location,
+            'place_ref' => $placeRef === [] ? null : $placeRef,
+            'venue' => $venuePayload,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'thumb' => $thumb,
+            'date_time_start' => $isOccurrence
+                ? $this->formatDate($this->extractRawAttribute($event, 'starts_at'))
+                : $this->formatDate($this->extractRawAttribute($event, 'date_time_start')),
+            'date_time_end' => $isOccurrence
+                ? $this->formatDate($this->extractRawAttribute($event, 'ends_at'))
+                : $this->formatDate($this->extractRawAttribute($event, 'date_time_end')),
+            'linked_account_profiles' => $linkedAccountProfiles,
+            'taxonomy_terms' => $taxonomyTerms,
+        ];
+
+        if ($includeArtists) {
+            $payload['artists'] = $artists;
+        }
+
+        return $this->withCanonicalHeroImage($payload);
+    }
+
+    /**
+     * @param  array<string, iterable<int, EventOccurrence>>|null  $occurrencesByEventId
+     * @return array<string, mixed>
+     */
+    public function formatManagementEventList(Event $event, ?array $occurrencesByEventId = null): array
+    {
+        return $this->formatEventListPayload($event, $occurrencesByEventId, false);
+    }
+
+    /**
+     * @param  array<string, iterable<int, EventOccurrence>>|null  $occurrencesByEventId
+     * @return array<string, mixed>
+     */
+    private function formatPublicEventList(Event $event, ?array $occurrencesByEventId = null): array
+    {
+        return $this->formatEventListPayload($event, $occurrencesByEventId, true);
+    }
+
+    /**
+     * @param  array<string, iterable<int, EventOccurrence>>|null  $occurrencesByEventId
+     * @return array<string, mixed>
+     */
+    private function formatEventListPayload(
+        Event $event,
+        ?array $occurrencesByEventId = null,
+        bool $includeTaxonomyTerms = false
+    ): array
+    {
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        $preloadedOccurrences = $eventId !== '' && $occurrencesByEventId !== null
+            ? ($occurrencesByEventId[$eventId] ?? [])
+            : null;
+        $type = $this->normalizeArray($event->type ?? null);
+        $placeRef = $this->normalizePlaceRefPayload(
+            $this->normalizeArray($event->place_ref ?? null)
+        );
+        $venue = $this->normalizeArray($event->venue ?? null);
+        $thumb = $this->normalizeThumbPayload(
+            $this->normalizeArray($event->thumb ?? null)
+        );
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $effectiveEventParties = $this->mergeEventParties(
+            $eventParties,
+            $this->resolveOccurrenceOwnedEventParties($event, $preloadedOccurrences)
+        );
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($effectiveEventParties);
+        $typeVisual = $this->normalizeEventTypeVisual(
+            $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
+        );
+        $publication = $event->publication ?? null;
+        $publication = is_array($publication) ? $publication : (array) $publication;
+        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
+            ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
+        $venuePayload = $venue === [] ? null : [
+            'id' => $this->resolveLegacyDocumentId($venue),
+            'display_name' => $venueDisplay ?? '',
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
+            'tagline' => $this->scalarString($venue['tagline'] ?? null),
+            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
+            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
+                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
+        ];
+        $occurrences = $this->resolveManagementListOccurrences($event, $preloadedOccurrences);
+        $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'))
+            ?? ($occurrences[0]['date_time_start'] ?? null);
+        $dateTimeEnd = $this->formatDate($this->extractRawAttribute($event, 'date_time_end'))
+            ?? ($occurrences[0]['date_time_end'] ?? null);
+
+        $payload = [
+            'event_id' => $eventId,
+            'occurrence_id' => null,
+            'slug' => $this->scalarString($event->slug ?? null) ?? '',
+            'type' => [
+                'id' => $this->resolveLegacyDocumentId($type),
+                'name' => $this->scalarString($type['name'] ?? null) ?? '',
+                'slug' => $this->scalarString($type['slug'] ?? null) ?? '',
+                'description' => $this->scalarString($type['description'] ?? null),
+                'visual' => $typeVisual,
+                'poi_visual' => $typeVisual,
+                'icon' => $this->scalarString($type['icon'] ?? null),
+                'color' => $this->scalarString($type['color'] ?? null),
+                'icon_color' => $this->scalarString($type['icon_color'] ?? null),
+            ],
+            'title' => $this->scalarString($event->title ?? null) ?? '',
+            'place_ref' => $placeRef === [] ? null : $placeRef,
+            'venue' => $venuePayload,
+            'thumb' => $thumb,
+            'date_time_start' => $dateTimeStart,
+            'date_time_end' => $dateTimeEnd,
+            'occurrences' => $occurrences,
+            'linked_account_profiles' => $linkedAccountProfiles,
+            'publication' => [
+                'status' => $this->scalarString($publication['status'] ?? null) ?? 'draft',
+                'publish_at' => $this->formatDate($publication['publish_at'] ?? null),
+            ],
+            'created_at' => $event->created_at?->toJSON(),
+            'updated_at' => $event->updated_at?->toJSON(),
+            'deleted_at' => $event->deleted_at?->toJSON(),
+        ];
+
+        if ($includeTaxonomyTerms) {
+            $payload['taxonomy_terms'] = $this->resolvePublicEventTaxonomyTerms($event);
+        }
+
+        return $payload;
     }
 
     public function eventBelongsToAccount(Event $event, string $accountId): bool
@@ -1596,29 +1917,7 @@ class EventQueryService
      * @param  iterable<int, mixed>  $events
      * @return array<int, array<string, mixed>>
      */
-    public function formatEvents(
-        iterable $events,
-        ?string $userId = null,
-        bool $includeArtists = true
-    ): array {
-        $items = is_array($events) ? array_values($events) : iterator_to_array($events, false);
-        $parentEventsById = $this->loadParentEventsForOccurrences($items);
-
-        return array_values(array_map(
-            fn (mixed $event): array => $this->formatEvent(
-                $event,
-                $userId,
-                $includeArtists,
-                $this->resolveParentEventContext($event, $parentEventsById)
-            ),
-            $items
-        ));
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function formatEvent(
+    private function formatPublicDetailPayload(
         mixed $event,
         ?string $userId = null,
         bool $includeArtists = true,
@@ -2412,10 +2711,6 @@ class EventQueryService
      */
     private function resolveLinkedAccountProfiles(array $eventParties): array
     {
-        $liveProfilesById = $this->resolveLiveEventPartyProfileLookup(array_values(array_filter(array_map(
-            fn (array $party): string => trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? '')),
-            $eventParties
-        ), static fn (string $profileId): bool => $profileId !== '')));
         $items = [];
         $seenIds = [];
 
@@ -2450,9 +2745,7 @@ class EventQueryService
             $metadata = isset($party['metadata']) && is_array($party['metadata'])
                 ? $party['metadata']
                 : [];
-            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
-
-            $push($this->fillMissingLinkedProfileMediaFromLiveProfile([
+            $push([
                 'id' => $party['party_ref_id'] ?? '',
                 'display_name' => $metadata['display_name'] ?? '',
                 'slug' => $metadata['slug'] ?? null,
@@ -2461,98 +2754,59 @@ class EventQueryService
                 'avatar_url' => $metadata['avatar_url'] ?? null,
                 'cover_url' => $metadata['cover_url'] ?? null,
                 'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
-            ], $liveProfilesById[$profileId] ?? null));
+            ]);
         }
 
         return $items;
     }
 
     /**
-     * @param  array<int, string>  $profileIds
-     * @return array<string, array<string, mixed>>
+     * @return array<int, array<string, mixed>>
      */
-    private function resolveLiveEventPartyProfileLookup(array $profileIds): array
-    {
-        $normalizedIds = array_values(array_unique(array_filter(array_map(
-            static fn (mixed $profileId): string => trim((string) $profileId),
-            $profileIds
-        ), static fn (string $profileId): bool => $profileId !== '')));
+    private function resolveManagementListOccurrences(
+        mixed $event,
+        ?iterable $preloadedOccurrences = null
+    ): array {
+        if (isset($event->event_id) && (string) $event->event_id !== '') {
+            $start = $this->formatDate($this->extractRawAttribute($event, 'starts_at'));
+            if ($start === null) {
+                return [];
+            }
 
-        if ($normalizedIds === []) {
+            return [[
+                'occurrence_id' => isset($event->_id) ? (string) $event->_id : null,
+                'occurrence_slug' => isset($event->occurrence_slug) ? (string) $event->occurrence_slug : null,
+                'date_time_start' => $start,
+                'date_time_end' => $this->formatDate($this->extractRawAttribute($event, 'ends_at')),
+            ]];
+        }
+
+        $eventId = isset($event->_id) ? (string) $event->_id : '';
+        if ($eventId === '') {
             return [];
         }
 
-        $missingIds = array_values(array_filter(
-            $normalizedIds,
-            fn (string $profileId): bool => ! array_key_exists($profileId, $this->liveEventPartyProfilesByIdCache)
-        ));
+        $documents = $preloadedOccurrences === null
+            ? EventOccurrence::query()
+                ->where('event_id', $eventId)
+                ->orderBy('starts_at')
+                ->get()
+            : collect($preloadedOccurrences);
 
-        if ($missingIds !== []) {
-            foreach ($this->eventProfileResolver->resolveExistingEventPartyProfilesByIds($missingIds) as $profileId => $payload) {
-                $this->liveEventPartyProfilesByIdCache[(string) $profileId] = $payload;
-            }
-
-            foreach ($missingIds as $profileId) {
-                if (! array_key_exists($profileId, $this->liveEventPartyProfilesByIdCache)) {
-                    $this->liveEventPartyProfilesByIdCache[$profileId] = null;
-                }
-            }
+        if ($documents->isEmpty()) {
+            return [];
         }
 
-        $resolved = [];
-        foreach ($normalizedIds as $profileId) {
-            if (! array_key_exists($profileId, $this->liveEventPartyProfilesByIdCache)) {
-                continue;
-            }
-
-            if (! is_array($this->liveEventPartyProfilesByIdCache[$profileId])) {
-                continue;
-            }
-
-            $resolved[$profileId] = $this->liveEventPartyProfilesByIdCache[$profileId];
-        }
-
-        return $resolved;
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     * @param  array<string, mixed>|null  $liveProfile
-     * @return array<string, mixed>
-     */
-    private function fillMissingLinkedProfileMediaFromLiveProfile(array $payload, ?array $liveProfile): array
-    {
-        if (! is_array($liveProfile)) {
-            return $payload;
-        }
-
-        foreach (['avatar_url', 'cover_url'] as $field) {
-            if ($this->nonEmptyString($payload[$field] ?? null) !== null) {
-                continue;
-            }
-
-            $payload[$field] = $this->nonEmptyString($liveProfile[$field] ?? null) ?? ($payload[$field] ?? null);
-        }
-
-        return $payload;
-    }
-
-    /**
-     * @template TValue
-     *
-     * @param  callable(): TValue  $callback
-     * @return TValue
-     */
-    private function withFreshLiveEventPartyProfileLookupCache(callable $callback): mixed
-    {
-        $previous = $this->liveEventPartyProfilesByIdCache;
-        $this->liveEventPartyProfilesByIdCache = [];
-
-        try {
-            return $callback();
-        } finally {
-            $this->liveEventPartyProfilesByIdCache = $previous;
-        }
+        return $documents->map(function (EventOccurrence $occurrence): array {
+            return [
+                'occurrence_id' => isset($occurrence->_id) ? (string) $occurrence->_id : null,
+                'occurrence_slug' => isset($occurrence->occurrence_slug) ? (string) $occurrence->occurrence_slug : null,
+                'date_time_start' => $this->formatDate($this->extractRawAttribute($occurrence, 'starts_at')),
+                'date_time_end' => $this->formatDate($this->extractRawAttribute($occurrence, 'ends_at')),
+            ];
+        })->filter(static fn (array $occurrence): bool => $occurrence['date_time_start'] !== null)
+            ->values()
+            ->all();
     }
 
     private function nonEmptyString(mixed $value): ?string
@@ -2952,31 +3206,118 @@ class EventQueryService
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @return array<int, array<string, mixed>>
+     */
+    private function hydratePublicProfileGroupsFromLinkedProfiles(array $groups, array $linkedProfiles): array
+    {
+        if ($groups === [] || $linkedProfiles === []) {
+            return $groups;
+        }
+
+        $profilesById = [];
+        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            if ($profileId === '' || isset($profilesById[$profileId])) {
+                continue;
+            }
+
+            $profilesById[$profileId] = $profile;
+        }
+
+        if ($profilesById === []) {
+            return $groups;
+        }
+
+        $hydrated = [];
+        foreach ($groups as $group) {
+            $profiles = [];
+            foreach ($this->normalizeLinkedAccountProfileSummaries($group['profiles'] ?? []) as $profile) {
+                $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+                $aggregateProfile = $profileId === '' ? null : ($profilesById[$profileId] ?? null);
+                $profiles[] = is_array($aggregateProfile)
+                    ? $this->mergePublicLinkedAccountProfileSummaries($profile, $aggregateProfile)
+                    : $profile;
+            }
+
+            $group['profiles'] = $profiles;
+            $hydrated[] = $group;
+        }
+
+        return $hydrated;
+    }
+
+    /**
+     * @param  array<string, mixed>  $primary
+     * @param  array<string, mixed>  $fallback
+     * @return array<string, mixed>
+     */
+    private function mergePublicLinkedAccountProfileSummaries(array $primary, array $fallback): array
+    {
+        $merged = $primary;
+
+        foreach ([
+            'display_name',
+            'slug',
+            'profile_type',
+            'party_type',
+            'avatar_url',
+            'cover_url',
+        ] as $field) {
+            $value = $this->scalarString($merged[$field] ?? null);
+            if ($value === null || $value === '') {
+                $merged[$field] = $fallback[$field] ?? null;
+            }
+        }
+
+        if ((bool) ($merged['can_open_public_detail'] ?? false) === false
+            && (bool) ($fallback['can_open_public_detail'] ?? false) === true) {
+            $merged['can_open_public_detail'] = true;
+        }
+
+        $publicDetailPath = $this->scalarString($merged['public_detail_path'] ?? null);
+        if ($publicDetailPath === null || $publicDetailPath === '') {
+            $merged['public_detail_path'] = $fallback['public_detail_path'] ?? null;
+        }
+
+        $taxonomyTerms = $this->normalizeArray($merged['taxonomy_terms'] ?? []);
+        if ($taxonomyTerms === []) {
+            $merged['taxonomy_terms'] = $fallback['taxonomy_terms'] ?? [];
+        }
+
+        $normalized = $this->normalizeLinkedAccountProfileSummary($merged);
+        if ($normalized === null) {
+            return $fallback;
+        }
+
+        $profileId = trim((string) ($this->scalarString($normalized['id'] ?? null) ?? ''));
+        $normalized['avatar_url'] = $this->accountProfileMediaUrlString(
+            $merged['avatar_url'] ?? null,
+            $profileId,
+            'avatar'
+        );
+        $normalized['cover_url'] = $this->accountProfileMediaUrlString(
+            $merged['cover_url'] ?? null,
+            $profileId,
+            'cover'
+        );
+        $normalized['taxonomy_terms'] = $this->ensureTaxonomySnapshots($merged['taxonomy_terms'] ?? []);
+
+        return $normalized;
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $eventParties
      * @return array<int, array<string, mixed>>
      */
     private function normalizeManagementLinkedAccountProfiles(mixed $linkedProfiles, array $eventParties): array
     {
-        $liveProfileIds = [];
-        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
-            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            if ($profileId !== '' && ! in_array($profileId, $liveProfileIds, true)) {
-                $liveProfileIds[] = $profileId;
-            }
-        }
-        foreach ($eventParties as $party) {
-            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
-            if ($profileId !== '' && ! in_array($profileId, $liveProfileIds, true)) {
-                $liveProfileIds[] = $profileId;
-            }
-        }
-        $liveProfilesById = $this->resolveLiveEventPartyProfileLookup($liveProfileIds);
-
         $normalizedById = [];
         foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
             $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
             $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary(
-                $this->fillMissingLinkedProfileMediaFromLiveProfile($profile, $liveProfilesById[$profileId] ?? null)
+                $profile
             );
             if ($profilePayload === null) {
                 continue;
@@ -2999,9 +3340,8 @@ class EventQueryService
             $metadata = isset($party['metadata']) && is_array($party['metadata'])
                 ? $party['metadata']
                 : [];
-            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
             $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary(
-                $this->fillMissingLinkedProfileMediaFromLiveProfile([
+                [
                     'id' => $party['party_ref_id'] ?? '',
                     'display_name' => $metadata['display_name'] ?? '',
                     'slug' => $metadata['slug'] ?? null,
@@ -3010,7 +3350,7 @@ class EventQueryService
                     'avatar_url' => $metadata['avatar_url'] ?? null,
                     'cover_url' => $metadata['cover_url'] ?? null,
                     'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
-                ], $liveProfilesById[$profileId] ?? null)
+                ]
             );
             if ($profilePayload === null) {
                 continue;
