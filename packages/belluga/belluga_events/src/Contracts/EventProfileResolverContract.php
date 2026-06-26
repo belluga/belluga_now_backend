@@ -32,6 +32,12 @@ interface EventProfileResolverContract
     public function resolveEventPartyProfilesByIds(array $profileIds): array;
 
     /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array<string, mixed>>
+     */
+    public function resolveExistingEventPartyProfilesByIds(array $profileIds): array;
+
+    /**
      * @return array<int, string>
      */
     public function listProfileIdsForAccount(string $accountId): array;
@@ -56,7 +62,7 @@ interface EventProfileResolverContract
         int $page = 1,
         int $perPage = 15,
         ?string $accountId = null,
-        ?string $baseUrl = null
+        ?string $baseUrl = null,
     ): LengthAwarePaginator;
 
     public function isProfileTypeQueryable(string $profileType): bool;
