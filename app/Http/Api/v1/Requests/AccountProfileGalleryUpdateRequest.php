@@ -37,7 +37,7 @@ final class AccountProfileGalleryUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'gallery_groups' => 'required|array|max:'.InputConstraints::ACCOUNT_PROFILE_GALLERY_GROUPS_MAX,
+            'gallery_groups' => 'present|array|max:'.InputConstraints::ACCOUNT_PROFILE_GALLERY_GROUPS_MAX,
             'gallery_groups.*.group_id' => 'sometimes|nullable|string|max:'.InputConstraints::ACCOUNT_PROFILE_GALLERY_KEY_MAX.'|regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             'gallery_groups.*.subtitle' => 'required_with:gallery_groups|string|max:'.InputConstraints::NAME_MAX,
             'gallery_groups.*.order' => 'sometimes|integer|min:0',

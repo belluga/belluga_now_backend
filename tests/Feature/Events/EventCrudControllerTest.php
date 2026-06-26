@@ -914,6 +914,129 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertStatus(200);
     }
 
+    public function test_event_account_profile_candidates_endpoint_normalizes_mixed_media_shapes_and_skips_invalid_physical_hosts_without_failing_response(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'restaurant'],
+            [
+                'label' => 'Restaurant',
+                'labels' => [
+                    'singular' => 'Restaurant',
+                    'plural' => 'Restaurants',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hidden_restaurant'],
+            [
+                'label' => 'Hidden Restaurant',
+                'labels' => [
+                    'singular' => 'Hidden Restaurant',
+                    'plural' => 'Hidden Restaurants',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        $this->venue->display_name = 'Candidate Relative Host';
+        $this->venue->avatar_url = "/api/v1/media/account-profiles/{$this->venue->_id}/avatar?v=9";
+        $this->venue->cover_url = "/api/v1/media/account-profiles/{$this->venue->_id}/cover?v=10";
+        $this->venue->save();
+
+        $absoluteHost = $this->createAccountProfile('restaurant', 'Candidate Absolute Host');
+        $absoluteHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.11, -20.11],
+        ];
+        $absoluteHost->avatar_url = "{$this->base_tenant_url}account-profiles/{$absoluteHost->_id}/avatar?v=3";
+        $absoluteHost->cover_url = "{$this->base_tenant_url}account-profiles/{$absoluteHost->_id}/cover?v=4";
+        $absoluteHost->save();
+
+        $externalHost = $this->createAccountProfile('restaurant', 'Candidate External Host');
+        $externalHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.12, -20.12],
+        ];
+        $externalHost->avatar_url = 'https://cdn.example.com/candidate-external-avatar.png';
+        $externalHost->cover_url = 'https://cdn.example.com/candidate-external-cover.png';
+        $externalHost->save();
+
+        $invalidNoLocationHost = $this->createAccountProfile('restaurant', 'Candidate Broken Location Host');
+        $invalidNoLocationHost->location = null;
+        $invalidNoLocationHost->save();
+
+        $hiddenHost = $this->createAccountProfile('hidden_restaurant', 'Candidate Hidden Host');
+        $hiddenHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.13, -20.13],
+        ];
+        $hiddenHost->save();
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=candidate&page=1&page_size=20");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('current_page', 1);
+        $response->assertJsonPath('per_page', 20);
+
+        $hosts = collect($response->json('data') ?? [])
+            ->keyBy(static fn (array $host): string => (string) ($host['id'] ?? ''));
+
+        $this->assertCount(3, $hosts);
+
+        $relativeHost = $hosts->get((string) $this->venue->_id);
+        $this->assertNotNull($relativeHost);
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->venue->_id}/avatar?v=9",
+            data_get($relativeHost, 'avatar_url')
+        );
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->venue->_id}/cover?v=10",
+            data_get($relativeHost, 'cover_url')
+        );
+
+        $absoluteCandidate = $hosts->get((string) $absoluteHost->_id);
+        $this->assertNotNull($absoluteCandidate);
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$absoluteHost->_id}/avatar?v=3",
+            data_get($absoluteCandidate, 'avatar_url')
+        );
+        $this->assertSame(
+            "{$this->base_tenant_url}api/v1/media/account-profiles/{$absoluteHost->_id}/cover?v=4",
+            data_get($absoluteCandidate, 'cover_url')
+        );
+
+        $externalCandidate = $hosts->get((string) $externalHost->_id);
+        $this->assertNotNull($externalCandidate);
+        $this->assertSame(
+            'https://cdn.example.com/candidate-external-avatar.png',
+            data_get($externalCandidate, 'avatar_url')
+        );
+        $this->assertSame(
+            'https://cdn.example.com/candidate-external-cover.png',
+            data_get($externalCandidate, 'cover_url')
+        );
+
+        $this->assertFalse($hosts->has((string) $invalidNoLocationHost->_id));
+        $this->assertFalse($hosts->has((string) $hiddenHost->_id));
+    }
+
     public function test_event_account_profile_candidates_endpoint_paginates_related_account_profiles_beyond_one_hundred_results(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
