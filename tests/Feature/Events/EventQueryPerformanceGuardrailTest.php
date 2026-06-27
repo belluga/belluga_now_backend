@@ -118,6 +118,10 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'Management occurrence pagination must combine count and page rows through a single $facet pipeline.'
         );
         $this->assertTrue(
+            $this->pipelineContainsStage($aggregateCalls[0]['pipeline'], '$lookup'),
+            'Management occurrence pagination must include a single event lookup stage before its lookup shape is validated.'
+        );
+        $this->assertTrue(
             $this->pipelineUsesIndexedEventLookup($aggregateCalls[0]['pipeline']),
             'Management occurrence pagination must use localField/foreignField event lookup, not string expression lookup.'
         );
@@ -150,6 +154,27 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $this->assertStringNotContainsString('listProfileIdsForAccount($accountContextId)', $occurrenceQuerySource);
         $this->assertStringContainsString("'account_context_ids' => \$accountContextId", $occurrenceQuerySource);
         $this->assertStringNotContainsString('formatManagementEvent($event));', $source);
+    }
+
+    public function test_event_query_service_exposes_only_surface_specific_formatters(): void
+    {
+        $source = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventQueryService.php');
+        $reflection = new \ReflectionClass(EventQueryService::class);
+
+        $this->assertFalse(
+            $reflection->hasMethod('formatEvent'),
+            'Generic formatEvent formatter must not exist; callers must choose an explicit read surface.'
+        );
+        $this->assertFalse(
+            $reflection->hasMethod('formatEvents'),
+            'Generic formatEvents formatter must not exist; callers must choose an explicit read surface.'
+        );
+        $this->assertStringNotContainsString('function formatEvent(', $source);
+        $this->assertStringNotContainsString('function formatEvents(', $source);
+        $this->assertTrue($reflection->hasMethod('formatMetadataEvent'));
+        $this->assertTrue($reflection->hasMethod('formatManagementEvent'));
+        $this->assertTrue($reflection->hasMethod('formatManagementEventList'));
+        $this->assertTrue($reflection->hasMethod('formatAgendaEvents'));
     }
 
     public function test_account_scoped_management_occurrence_query_filters_profile_snapshots_before_grouping(): void
@@ -474,6 +499,180 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
     }
 
+    public function test_event_detail_and_management_readback_stay_snapshot_only_without_live_account_profiles_queries(): void
+    {
+        $profiles = collect([
+            $this->createAccountProfileFixture('artist', 'Performance Linked Artist 01', 511),
+            $this->createAccountProfileFixture('band', 'Performance Linked Band 02', 521),
+            $this->createAccountProfileFixture('artist', 'Performance Linked Artist 03', 531),
+            $this->createAccountProfileFixture('band', 'Performance Linked Band 04', 541),
+        ]);
+        $eventParties = $profiles
+            ->map(fn (AccountProfile $profile): array => $this->eventPartyForProfile($profile))
+            ->values()
+            ->all();
+
+        $event = $this->createEventFixture(
+            'Performance Guard Live Profile Lookup Event',
+            Carbon::now()->startOfDay()->addDays(4)->setHour(10),
+            $eventParties
+        );
+
+        $groupPayload = [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+            'account_profile_ids' => $profiles
+                ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+                ->values()
+                ->all(),
+        ]];
+
+        foreach (EventOccurrence::query()->where('event_id', (string) $event->_id)->get() as $occurrence) {
+            $occurrence->forceFill([
+                'own_event_parties' => $eventParties,
+                'own_linked_account_profiles' => array_map(
+                    static fn (array $party): array => [
+                        'id' => (string) ($party['party_ref_id'] ?? ''),
+                        'display_name' => (string) data_get($party, 'metadata.display_name', ''),
+                        'profile_type' => (string) data_get($party, 'metadata.profile_type', ''),
+                    ],
+                    array_slice($eventParties, 0, 2)
+                ),
+                'profile_groups' => $groupPayload,
+            ])->save();
+        }
+
+        $selectedOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->skip(1)
+            ->firstOrFail();
+
+        $service = app(EventQueryService::class);
+        $connection = DB::connection('tenant');
+
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+        $detailPayload = $service->formatEventDetail(
+            $event->fresh(),
+            null,
+            (string) $selectedOccurrence->_id
+        );
+        $detailQueries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+
+        $this->assertSame((string) $event->_id, $detailPayload['event_id'] ?? null);
+        $detailAccountProfileQueries = $detailQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+        $this->assertCount(
+            0,
+            $detailAccountProfileQueries,
+            'Public event detail must stay snapshot-only and avoid live account profile queries during read formatting.'
+        );
+
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+        $managementPayload = $service->formatManagementEvent($event->fresh());
+        $managementQueries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+
+        $this->assertSame((string) $event->_id, $managementPayload['event_id'] ?? null);
+        $managementAccountProfileQueries = $managementQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+        $this->assertCount(
+            0,
+            $managementAccountProfileQueries,
+            'Management event readback must stay snapshot-only and avoid live account profile queries during read formatting.'
+        );
+        $managementOccurrenceQueries = $managementQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'event_occurrences'
+            )
+        );
+        $this->assertCount(
+            1,
+            $managementOccurrenceQueries,
+            'Management event readback must load event_occurrences once and reuse that collection across formatter steps.'
+        );
+    }
+
+    public function test_agenda_and_management_list_paths_stay_snapshot_only_without_live_account_profiles_queries(): void
+    {
+        $profiles = collect([
+            $this->createAccountProfileFixture('artist', 'Performance List Artist 01', 611),
+            $this->createAccountProfileFixture('band', 'Performance List Band 02', 621),
+        ]);
+        $eventParties = $profiles
+            ->map(fn (AccountProfile $profile): array => $this->eventPartyForProfile($profile))
+            ->values()
+            ->all();
+
+        $this->createEventFixture(
+            'Performance Guard List Snapshot Event',
+            Carbon::now()->startOfDay()->addDays(6)->setHour(10),
+            $eventParties
+        );
+
+        $service = app(EventQueryService::class);
+        $connection = DB::connection('tenant');
+
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+        $agendaPayload = $service->fetchAgenda([
+            'page' => 1,
+            'page_size' => 10,
+        ], null);
+        $agendaQueries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+
+        $this->assertNotEmpty($agendaPayload['items'] ?? []);
+        $agendaAccountProfileQueries = $agendaQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+        $this->assertCount(
+            0,
+            $agendaAccountProfileQueries,
+            'Public agenda list formatting must stay snapshot-only and avoid live account profile queries.'
+        );
+
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+        $managementPaginator = $service->paginateManagement(
+            ['temporal' => 'future', 'page' => 1, 'page_size' => 10],
+            false,
+            10,
+            true
+        );
+        $managementQueries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+
+        $this->assertNotEmpty($managementPaginator->items());
+        $managementAccountProfileQueries = $managementQueries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+        $this->assertCount(
+            0,
+            $managementAccountProfileQueries,
+            'Management event list formatting must stay snapshot-only and avoid live account profile queries.'
+        );
+    }
+
     public function test_taxonomy_snapshot_runtime_resolver_caches_legacy_term_resolution(): void
     {
         $taxonomy = Taxonomy::query()->create([
@@ -646,6 +845,40 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'is_visible' => true,
             ],
         ];
+    }
+
+    private function createAccountProfileFixture(
+        string $profileType,
+        string $displayName,
+        int $versionSeed,
+    ): AccountProfile {
+        $account = Account::query()->create([
+            'name' => $displayName.' Account',
+            'document' => 'DOC-'.uniqid('perf-', true),
+        ]);
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => $profileType,
+            'display_name' => $displayName,
+            'slug' => strtolower(str_replace(' ', '-', $displayName)).'-'.uniqid(),
+            'taxonomy_terms' => [],
+            'is_active' => true,
+        ]);
+
+        $profile->avatar_url = sprintf(
+            '/api/v1/media/account-profiles/%s/avatar?v=%d',
+            $profile->_id,
+            $versionSeed
+        );
+        $profile->cover_url = sprintf(
+            '/api/v1/media/account-profiles/%s/cover?v=%d',
+            $profile->_id,
+            $versionSeed + 1
+        );
+        $profile->save();
+
+        return $profile->fresh();
     }
 
     private function arrayContainsScalar(mixed $value, string $needle): bool
