@@ -63,18 +63,36 @@ class ApiV1DeferredDeepLinkResolverTest extends TestCaseTenant
         $response->assertJsonPath('data.failure_reason', null);
     }
 
-    public function test_deferred_resolver_reports_ios_as_not_supported_for_v1(): void
+    public function test_deferred_resolver_captures_ios_deferred_payload(): void
     {
         $response = $this->postJson("{$this->base_api_tenant}deep-links/deferred/resolve", [
             'platform' => 'ios',
-            'store_channel' => 'app_store',
+            'deferred_payload' => http_build_query([
+                'target_path' => '/profile',
+                'store_channel' => 'web_gate',
+            ]),
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.status', 'captured');
+        $response->assertJsonPath('data.code', null);
+        $response->assertJsonPath('data.target_path', '/profile');
+        $response->assertJsonPath('data.store_channel', 'web_gate');
+        $response->assertJsonPath('data.failure_reason', null);
+    }
+
+    public function test_deferred_resolver_returns_not_captured_for_ios_when_payload_is_missing(): void
+    {
+        $response = $this->postJson("{$this->base_api_tenant}deep-links/deferred/resolve", [
+            'platform' => 'ios',
+            'store_channel' => 'web',
         ]);
 
         $response->assertOk();
         $response->assertJsonPath('data.status', 'not_captured');
         $response->assertJsonPath('data.code', null);
         $response->assertJsonPath('data.target_path', '/');
-        $response->assertJsonPath('data.store_channel', 'app_store');
-        $response->assertJsonPath('data.failure_reason', 'unsupported_platform');
+        $response->assertJsonPath('data.store_channel', 'web');
+        $response->assertJsonPath('data.failure_reason', 'referrer_unavailable');
     }
 }
