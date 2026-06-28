@@ -33,6 +33,6 @@ Typical host routes:
 
 ## Notes
 
-- Android deferred flow is MVP-first; iOS deferred capture can reuse the same resolver contract later.
+- Android install-referrer capture and iOS deferred payload capture both resolve through the same `/api/v1/deep-links/deferred/resolve` contract. iOS may send a clipboard/pasteboard-seeded `deferred_payload` while Android continues to send `install_referrer`.
 - iOS/Android store publication is tenant-configurable in `settings.app_links`: each platform uses an explicit active flag plus URL (`android.enabled`, `android.store_url`, `ios.enabled`, `ios.store_url`). Inactive platforms fall back to the web target and must not be offered as live store CTAs.
 - `GET /open-app` supports optional `platform_target=android|ios` override for multi-store web promotion surfaces; when omitted, the package falls back to user-agent detection.
