@@ -20,24 +20,17 @@ class DeferredDeepLinkResolverController extends Controller
         $validated = $request->validate([
             'platform' => ['required', 'string', 'in:android,ios'],
             'install_referrer' => ['nullable', 'string'],
+            'deferred_payload' => ['nullable', 'string'],
             'store_channel' => ['nullable', 'string'],
         ]);
 
-        $platform = (string) ($validated['platform'] ?? 'android');
-        if ($platform !== 'android') {
-            return response()->json([
-                'data' => [
-                    'status' => 'not_captured',
-                    'code' => null,
-                    'target_path' => '/',
-                    'store_channel' => $validated['store_channel'] ?? null,
-                    'failure_reason' => 'unsupported_platform',
-                ],
-            ]);
+        $payload = isset($validated['deferred_payload']) ? (string) $validated['deferred_payload'] : null;
+        if ($payload === null && isset($validated['install_referrer'])) {
+            $payload = (string) $validated['install_referrer'];
         }
 
-        $result = $this->resolver->resolveAndroidInstallReferrer(
-            installReferrer: isset($validated['install_referrer']) ? (string) $validated['install_referrer'] : null,
+        $result = $this->resolver->resolveDeferredPayload(
+            payload: $payload,
             fallbackStoreChannel: isset($validated['store_channel']) ? (string) $validated['store_channel'] : null,
         );
 

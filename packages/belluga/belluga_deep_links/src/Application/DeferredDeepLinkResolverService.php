@@ -11,7 +11,18 @@ class DeferredDeepLinkResolverService
      */
     public function resolveAndroidInstallReferrer(?string $installReferrer, ?string $fallbackStoreChannel = null): array
     {
-        $normalizedReferrer = $this->normalizeText($installReferrer);
+        return $this->resolveDeferredPayload(
+            payload: $installReferrer,
+            fallbackStoreChannel: $fallbackStoreChannel,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function resolveDeferredPayload(?string $payload, ?string $fallbackStoreChannel = null): array
+    {
+        $normalizedReferrer = $this->normalizeText($payload);
         $storeChannelFallback = $this->normalizeText($fallbackStoreChannel);
         if ($normalizedReferrer === null) {
             return [
