@@ -310,7 +310,7 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $this->assertSame((string) $hiddenOccurrence->_id, (string) ($hiddenNavigation['event_occurrence_id'] ?? ''));
     }
 
-    public function test_snapshot_rebuilds_from_linked_account_profiles_without_artists_or_venue(): void
+    public function test_snapshot_ignores_legacy_linked_account_profiles_projection_without_canonical_profile_association(): void
     {
         $profile = $this->createProfile(
             displayName: 'Profile Linked Snapshot',
@@ -337,8 +337,105 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         $snapshot = $this->loadSnapshot((string) $profile->_id);
 
         $this->assertNotNull($snapshot);
+        $this->assertSame('account_profile', data_get($snapshot, 'navigation.kind'));
+        $this->assertNull(data_get($snapshot, 'navigation.event_target_path'));
+        $this->assertNull(data_get($snapshot, 'next_event_occurrence_id'));
+        $this->assertNull(data_get($snapshot, 'live_now_event_occurrence_id'));
+    }
+
+    public function test_snapshot_rebuilds_from_canonical_place_ref_with_nested_id_shape(): void
+    {
+        $profile = $this->createProfile(
+            displayName: 'Profile Place Ref Snapshot',
+            slug: 'profile-place-ref-snapshot',
+            profileType: 'restaurant',
+        );
+
+        $occurrence = $this->createOccurrence(
+            profileId: 'legacy-venue-placeholder',
+            startsAt: Carbon::now()->addHour(),
+            endsAt: Carbon::now()->addHours(2),
+            includeVenue: false,
+            placeRef: [
+                'type' => 'account_profile',
+                '_id' => (string) $profile->_id,
+            ],
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+
+        $this->assertNotNull($snapshot);
         $this->assertSame((string) $profile->_id, (string) data_get($snapshot, 'target.id'));
-        $this->assertSame((string) $profile->slug, (string) data_get($snapshot, 'target.slug'));
+        $this->assertSame(
+            '/agenda/evento/event-slug?occurrence='.(string) $occurrence->_id,
+            data_get($snapshot, 'navigation.target_path'),
+        );
+    }
+
+    public function test_snapshot_rebuilds_from_canonical_event_parties_without_linked_profiles_or_artists(): void
+    {
+        $profile = $this->createProfile(
+            displayName: 'Profile Event Party Snapshot',
+            slug: 'profile-event-party-snapshot',
+        );
+
+        $occurrence = $this->createOccurrence(
+            profileId: 'legacy-venue-placeholder',
+            startsAt: Carbon::now()->addHour(),
+            endsAt: Carbon::now()->addHours(2),
+            includeVenue: false,
+            eventParties: [
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $profile->_id,
+                    'metadata' => [
+                        'display_name' => (string) $profile->display_name,
+                        'slug' => (string) $profile->slug,
+                        'profile_type' => (string) $profile->profile_type,
+                    ],
+                ],
+            ],
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame((string) $profile->_id, (string) data_get($snapshot, 'target.id'));
+        $this->assertSame(
+            '/agenda/evento/event-slug?occurrence='.(string) $occurrence->_id,
+            data_get($snapshot, 'navigation.target_path'),
+        );
+    }
+
+    public function test_snapshot_ignores_legacy_artists_projection_without_canonical_profile_association(): void
+    {
+        $profile = $this->createProfile(
+            displayName: 'Profile Legacy Artists Snapshot',
+            slug: 'profile-legacy-artists-snapshot',
+        );
+
+        $this->createOccurrence(
+            profileId: 'legacy-venue-placeholder',
+            startsAt: Carbon::now()->addHour(),
+            endsAt: Carbon::now()->addHours(2),
+            includeVenue: false,
+            artists: [
+                [
+                    'id' => (string) $profile->_id,
+                    'display_name' => (string) $profile->display_name,
+                    'slug' => (string) $profile->slug,
+                    'profile_type' => (string) $profile->profile_type,
+                ],
+            ],
+        );
+
+        $snapshot = $this->loadSnapshot((string) $profile->_id);
+
+        $this->assertNotNull($snapshot);
+        $this->assertSame('account_profile', data_get($snapshot, 'navigation.kind'));
+        $this->assertNull(data_get($snapshot, 'navigation.event_target_path'));
+        $this->assertNull(data_get($snapshot, 'next_event_occurrence_id'));
+        $this->assertNull(data_get($snapshot, 'live_now_event_occurrence_id'));
     }
 
     private function createProfile(
@@ -371,11 +468,23 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
         ?Carbon $endsAt = null,
         array $linkedAccountProfiles = [],
         bool $includeVenue = true,
+        ?array $placeRef = null,
+        array $eventParties = [],
+        array $artists = [],
+        ?array $venue = null,
     ): EventOccurrence
     {
         $eventId = 'event-'.uniqid('', true);
         $occurrenceSlug = str_replace('.', '-', $eventId).'-occ-1';
         $resolvedEndsAt = $endsAt ?? $startsAt->copy()->addHours(2);
+        $resolvedPlaceRef = $placeRef ?? ($includeVenue ? [
+            'type' => 'account_profile',
+            'id' => $profileId,
+        ] : []);
+        $resolvedVenue = $venue ?? ($includeVenue ? [
+            'id' => $profileId,
+            'display_name' => 'Profile Venue',
+        ] : []);
 
         return EventOccurrence::query()->create([
             'event_id' => $eventId,
@@ -390,12 +499,11 @@ class FavoriteSnapshotProjectionTest extends TestCaseTenant
                     'coordinates' => [-40.0, -20.0],
                 ],
             ],
-            'venue' => $includeVenue ? [
-                'id' => $profileId,
-                'display_name' => 'Profile Venue',
-            ] : [],
+            'place_ref' => $resolvedPlaceRef,
+            'venue' => $resolvedVenue,
+            'event_parties' => $eventParties,
             'linked_account_profiles' => $linkedAccountProfiles,
-            'artists' => [],
+            'artists' => $artists,
             'publication' => [
                 'status' => 'published',
                 'publish_at' => Carbon::now()->subMinute(),
