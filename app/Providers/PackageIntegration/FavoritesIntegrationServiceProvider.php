@@ -103,60 +103,71 @@ class FavoritesIntegrationServiceProvider extends ServiceProvider
     {
         $profileIds = [];
 
-        $venue = $occurrence->getAttribute('venue');
-        if ($venue instanceof \MongoDB\Model\BSONDocument || $venue instanceof \MongoDB\Model\BSONArray) {
-            $venue = $venue->getArrayCopy();
-        }
-        if (is_array($venue) && isset($venue['id']) && trim((string) $venue['id']) !== '') {
-            $profileIds[] = trim((string) $venue['id']);
-        }
-
-        $linkedAccountProfiles = $occurrence->getAttribute('linked_account_profiles');
-        if ($linkedAccountProfiles instanceof \MongoDB\Model\BSONDocument || $linkedAccountProfiles instanceof \MongoDB\Model\BSONArray) {
-            $linkedAccountProfiles = $linkedAccountProfiles->getArrayCopy();
-        }
-
-        if (is_array($linkedAccountProfiles)) {
-            foreach ($linkedAccountProfiles as $profile) {
-                if ($profile instanceof \MongoDB\Model\BSONDocument || $profile instanceof \MongoDB\Model\BSONArray) {
-                    $profile = $profile->getArrayCopy();
-                }
-
-                if (! is_array($profile)) {
-                    continue;
-                }
-
-                $profileId = isset($profile['id']) ? trim((string) $profile['id']) : '';
-                if ($profileId !== '') {
-                    $profileIds[] = $profileId;
-                }
+        $placeRef = self::normalizeArray($occurrence->getAttribute('place_ref'));
+        if (($placeRef['type'] ?? null) === 'account_profile') {
+            $placeRefId = self::extractEmbeddedId($placeRef);
+            if ($placeRefId !== '') {
+                $profileIds[] = $placeRefId;
             }
         }
 
-        $artists = $occurrence->getAttribute('artists');
-        if ($artists instanceof \MongoDB\Model\BSONDocument || $artists instanceof \MongoDB\Model\BSONArray) {
-            $artists = $artists->getArrayCopy();
-        }
-
-        if (is_array($artists)) {
-            foreach ($artists as $artist) {
-                if ($artist instanceof \MongoDB\Model\BSONDocument || $artist instanceof \MongoDB\Model\BSONArray) {
-                    $artist = $artist->getArrayCopy();
-                }
-
-                if (! is_array($artist)) {
-                    continue;
-                }
-
-                $artistId = isset($artist['id']) ? trim((string) $artist['id']) : '';
-                if ($artistId !== '') {
-                    $profileIds[] = $artistId;
-                }
+        foreach (self::normalizeList($occurrence->getAttribute('event_parties')) as $eventParty) {
+            $partyRefId = trim((string) ($eventParty['party_ref_id'] ?? ''));
+            if ($partyRefId !== '') {
+                $profileIds[] = $partyRefId;
             }
         }
 
         $profileIds = array_values(array_unique(array_filter($profileIds, static fn (string $id): bool => $id !== '')));
 
         return $profileIds;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function normalizeArray(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            $value = $value->getArrayCopy();
+        }
+
+        return is_array($value) ? $value : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private static function normalizeList(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            $value = $value->getArrayCopy();
+        }
+
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($value as $item) {
+            $normalized[] = self::normalizeArray($item);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Accept both legacy `id` and production-shaped `_id` embedded references.
+     */
+    private static function extractEmbeddedId(array $payload): string
+    {
+        foreach (['id', '_id'] as $key) {
+            $value = trim((string) ($payload[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
     }
 }
