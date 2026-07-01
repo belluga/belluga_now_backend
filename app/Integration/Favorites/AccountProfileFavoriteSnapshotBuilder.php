@@ -11,6 +11,7 @@ use Belluga\Favorites\Contracts\FavoriteSnapshotBuilderContract;
 use Belluga\Favorites\Support\FavoriteRegistryDefinition;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use MongoDB\BSON\ObjectId;
 
 class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderContract
 {
@@ -118,13 +119,44 @@ class AccountProfileFavoriteSnapshotBuilder implements FavoriteSnapshotBuilderCo
 
     private function baseOccurrenceQuery(string $profileId): Builder
     {
+        $profileIdCandidates = $this->buildProfileIdCandidates($profileId);
+
         return EventOccurrence::query()
             ->where('deleted_at', null)
             ->where('is_event_published', true)
-            ->where(static function (Builder $query) use ($profileId): void {
-                $query->where('venue.id', $profileId)
-                    ->orWhere('linked_account_profiles.id', $profileId)
-                    ->orWhere('artists.id', $profileId);
+            ->where(static function (Builder $query) use ($profileIdCandidates): void {
+                $query->where(static function (Builder $query) use ($profileIdCandidates): void {
+                    $query->where('place_ref.type', 'account_profile')
+                        ->where(static function (Builder $query) use ($profileIdCandidates): void {
+                            $query->whereIn('place_ref.id', $profileIdCandidates)
+                                ->orWhereIn('place_ref._id', $profileIdCandidates);
+                        });
+                })->orWhereRaw([
+                    'event_parties' => [
+                        '$elemMatch' => [
+                            'party_ref_id' => ['$in' => $profileIdCandidates],
+                        ],
+                    ],
+                ]);
             });
+    }
+
+    /**
+     * @return array<int, string|ObjectId>
+     */
+    private function buildProfileIdCandidates(string $profileId): array
+    {
+        $candidates = [$profileId];
+
+        if ($this->looksLikeObjectId($profileId)) {
+            $candidates[] = new ObjectId($profileId);
+        }
+
+        return $candidates;
+    }
+
+    private function looksLikeObjectId(string $value): bool
+    {
+        return (bool) preg_match('/^[a-f0-9]{24}$/i', $value);
     }
 }
