@@ -19,10 +19,10 @@ class TaxonomiesController extends Controller
         private readonly TaxonomyManagementService $managementService,
     ) {}
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return response()->json([
-            'data' => $this->queryService->list(),
+            'data' => $this->queryService->list($request->query()),
         ]);
     }
 
