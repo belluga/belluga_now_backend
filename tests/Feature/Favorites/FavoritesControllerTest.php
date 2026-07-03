@@ -140,6 +140,57 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertSame((string) $profilePastOnly->_id, (string) ($items[4]['target_id'] ?? ''));
     }
 
+    public function test_favorites_paginates_without_duplicate_or_order_drift_across_page_boundary(): void
+    {
+        $profiles = [];
+        for ($index = 0; $index < 12; $index++) {
+            $profile = $this->createProfile(
+                displayName: 'Profile Page '.($index + 1),
+                slug: 'profile-page-'.($index + 1),
+            );
+            $profiles[] = $profile;
+            $this->createEdge(
+                (string) $profile->_id,
+                Carbon::parse('2026-03-20T12:00:00Z')->subMinutes($index),
+            );
+        }
+
+        $pageOne = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+        $pageTwo = $this->getJson("{$this->base_api_tenant}favorites?page=2&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $pageOne->assertStatus(200);
+        $pageOne->assertJsonPath('has_more', true);
+        $pageTwo->assertStatus(200);
+        $pageTwo->assertJsonPath('has_more', false);
+
+        $pageOneItems = $pageOne->json('items');
+        $pageTwoItems = $pageTwo->json('items');
+
+        $this->assertCount(10, $pageOneItems);
+        $this->assertCount(2, $pageTwoItems);
+
+        $orderedIds = array_map(
+            static fn (AccountProfile $profile): string => (string) $profile->_id,
+            $profiles,
+        );
+
+        $this->assertSame(
+            array_slice($orderedIds, 0, 10),
+            array_map(static fn (array $item): string => (string) ($item['target_id'] ?? ''), $pageOneItems),
+        );
+        $this->assertSame(
+            array_slice($orderedIds, 10),
+            array_map(static fn (array $item): string => (string) ($item['target_id'] ?? ''), $pageTwoItems),
+        );
+        $this->assertSame(
+            [],
+            array_values(array_intersect(
+                array_map(static fn (array $item): string => (string) ($item['target_id'] ?? ''), $pageOneItems),
+                array_map(static fn (array $item): string => (string) ($item['target_id'] ?? ''), $pageTwoItems),
+            )),
+        );
+    }
+
     public function test_favorites_returns_empty_payload_when_user_has_no_edges(): void
     {
         $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10");
@@ -236,6 +287,12 @@ class FavoritesControllerTest extends TestCaseTenant
             endsAt: Carbon::now()->copy()->addHours(8),
             eventSlug: 'event-visual-payload-future',
         );
+        $pastOccurrence = $this->createOccurrence(
+            profileId: (string) $profile->_id,
+            startsAt: Carbon::now()->copy()->subDays(2),
+            endsAt: Carbon::now()->copy()->subDays(2)->addHours(2),
+            eventSlug: 'event-visual-payload-past',
+        );
 
         $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
 
@@ -256,6 +313,78 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertJsonPath('items.0.navigation.event_occurrence_id', (string) $liveOccurrence->_id);
         $response->assertJsonPath('items.0.occurrence_state.live_now_event_occurrence_id', (string) $liveOccurrence->_id);
         $response->assertJsonPath('items.0.occurrence_state.next_event_occurrence_id', (string) $futureOccurrence->_id);
+        $response->assertJsonPath('items.0.occurrence_state.last_event_occurrence_at', $pastOccurrence->starts_at->format(DATE_ATOM));
+    }
+
+    public function test_favorites_use_canonical_association_fields_and_ignore_legacy_only_relationships(): void
+    {
+        $profilePlaceRefObjectId = $this->createProfile('Profile PlaceRef ObjectId', 'profile-place-ref-objectid');
+        $profileEventParty = $this->createProfile('Profile Event Party', 'profile-event-party');
+        $profileLegacyOnly = $this->createProfile('Profile Legacy Only', 'profile-legacy-only');
+
+        $placeRefOccurrence = $this->createOccurrence(
+            profileId: (string) $profilePlaceRefObjectId->_id,
+            startsAt: Carbon::now()->copy()->addDay(),
+            includeVenue: false,
+            placeRef: [
+                'type' => 'account_profile',
+                '_id' => (string) $profilePlaceRefObjectId->_id,
+            ],
+            eventSlug: 'event-place-ref-objectid',
+        );
+        $eventPartyOccurrence = $this->createOccurrence(
+            profileId: (string) $profileEventParty->_id,
+            startsAt: Carbon::now()->copy()->addDays(2),
+            includeVenue: false,
+            placeRef: [],
+            eventParties: [
+                [
+                    'party_ref_id' => (string) $profileEventParty->_id,
+                ],
+            ],
+            eventSlug: 'event-party-ref-id',
+        );
+        $this->createOccurrence(
+            profileId: (string) $profileLegacyOnly->_id,
+            startsAt: Carbon::now()->copy()->addDays(3),
+            includeVenue: false,
+            placeRef: [],
+            linkedAccountProfiles: [
+                [
+                    'id' => (string) $profileLegacyOnly->_id,
+                ],
+            ],
+            artists: [
+                [
+                    'artist_ref_id' => (string) $profileLegacyOnly->_id,
+                ],
+            ],
+            eventSlug: 'event-legacy-only',
+        );
+
+        $this->createEdge((string) $profilePlaceRefObjectId->_id, Carbon::parse('2026-03-19T12:00:00Z'));
+        $this->createEdge((string) $profileEventParty->_id, Carbon::parse('2026-03-18T12:00:00Z'));
+        $this->createEdge((string) $profileLegacyOnly->_id, Carbon::parse('2026-03-17T12:00:00Z'));
+
+        $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $response->assertStatus(200);
+        $itemsByTargetId = collect($response->json('items'))->keyBy('target_id');
+
+        $this->assertSame(
+            '/agenda/evento/event-place-ref-objectid?occurrence='.(string) $placeRefOccurrence->_id,
+            data_get($itemsByTargetId, (string) $profilePlaceRefObjectId->_id.'.navigation.event_target_path'),
+        );
+        $this->assertSame(
+            '/agenda/evento/event-party-ref-id?occurrence='.(string) $eventPartyOccurrence->_id,
+            data_get($itemsByTargetId, (string) $profileEventParty->_id.'.navigation.event_target_path'),
+        );
+        $this->assertNull(
+            data_get($itemsByTargetId, (string) $profileLegacyOnly->_id.'.navigation.event_target_path'),
+        );
+        $this->assertNull(
+            data_get($itemsByTargetId, (string) $profileLegacyOnly->_id.'.occurrence_state.next_event_occurrence_at'),
+        );
     }
 
     public function test_favorites_filters_out_inactive_profiles_without_snapshot_fallback(): void

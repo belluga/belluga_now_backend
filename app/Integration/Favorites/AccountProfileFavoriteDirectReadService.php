@@ -280,7 +280,18 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         $occurrences = EventOccurrence::query()
             ->where('deleted_at', null)
             ->where('is_event_published', true)
-            ->where('starts_at', '<', $now)
+            ->where(static function ($query) use ($now): void {
+                $query->where('effective_ends_at', '<=', $now)
+                    ->orWhere(static function ($query) use ($now): void {
+                        $query->whereNull('effective_ends_at')
+                            ->where('ends_at', '<=', $now);
+                    })
+                    ->orWhere(static function ($query) use ($now): void {
+                        $query->whereNull('effective_ends_at')
+                            ->whereNull('ends_at')
+                            ->where('starts_at', '<', $now);
+                    });
+            })
             ->where(static function ($query) use ($profileIdCandidates): void {
                 $query->where(static function ($query) use ($profileIdCandidates): void {
                     $query->where('place_ref.type', 'account_profile')
