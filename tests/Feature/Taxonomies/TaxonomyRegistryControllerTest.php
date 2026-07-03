@@ -132,6 +132,57 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
+    public function test_taxonomy_index_supports_slug_and_applies_to_filters(): void
+    {
+        foreach ([
+            [
+                'slug' => 'genre',
+                'name' => 'Genre',
+                'applies_to' => ['event'],
+            ],
+            [
+                'slug' => 'cuisine',
+                'name' => 'Cuisine',
+                'applies_to' => ['account_profile'],
+            ],
+            [
+                'slug' => 'audience',
+                'name' => 'Audience',
+                'applies_to' => ['event'],
+            ],
+        ] as $payload) {
+            $this->postJson(
+                "{$this->base_tenant_api_admin}taxonomies",
+                $payload,
+                $this->getHeaders()
+            )->assertStatus(201);
+        }
+
+        $query = http_build_query(
+            [
+                'slugs' => ['genre', 'cuisine', 'audience'],
+                'applies_to' => 'event',
+            ],
+            '',
+            '&',
+            PHP_QUERY_RFC3986
+        );
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}taxonomies?{$query}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(2, 'data');
+        $this->assertSame(
+            ['audience', 'genre'],
+            collect($response->json('data'))
+                ->pluck('slug')
+                ->all()
+        );
+    }
+
     public function test_batch_terms_returns_multiple_taxonomies_in_single_request(): void
     {
         $music = $this->postJson(

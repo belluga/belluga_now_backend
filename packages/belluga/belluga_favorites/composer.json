@@ -1,6 +1,6 @@
 {
   "name": "belluga/favorites",
-  "description": "Belluga favorites package with registry-backed snapshot query contract.",
+  "description": "Belluga favorites package with registry-backed direct-read query contract.",
   "type": "library",
   "license": "MIT",
   "autoload": {
