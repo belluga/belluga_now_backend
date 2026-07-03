@@ -9,12 +9,24 @@ use App\Models\Tenants\Taxonomy;
 class TaxonomyQueryService
 {
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    public function list(): array
+    public function list(array $filters = []): array
     {
-        return Taxonomy::query()
-            ->orderBy('slug')
+        $query = Taxonomy::query()->orderBy('slug');
+
+        $slugs = $this->normalizeStringList($filters['slugs'] ?? []);
+        if ($slugs !== []) {
+            $query->whereIn('slug', $slugs);
+        }
+
+        $appliesTo = trim((string) ($filters['applies_to'] ?? ''));
+        if ($appliesTo !== '') {
+            $query->where('applies_to', $appliesTo);
+        }
+
+        return $query
             ->get()
             ->map(fn (Taxonomy $taxonomy): array => $this->toPayload($taxonomy))
             ->all();
@@ -49,5 +61,18 @@ class TaxonomyQueryService
             'icon' => $taxonomy->icon ?? null,
             'color' => $taxonomy->color ?? null,
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        $rawValues = is_array($value) ? $value : [$value];
+
+        return array_values(array_unique(array_values(array_filter(
+            array_map(static fn (mixed $entry): string => trim((string) $entry), $rawValues),
+            static fn (string $entry): bool => $entry !== ''
+        ))));
     }
 }

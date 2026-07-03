@@ -80,14 +80,25 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('mongodb', $config['connections']['mongodb']['connection']);
     }
 
-    public function test_falls_back_to_primary_database_connection_when_mongodb_queue_connection_is_not_explicitly_set(): void
+    public function test_defaults_to_shared_mongodb_queue_connection_when_not_explicitly_set(): void
     {
-        $this->setEnv('DB_CONNECTION', 'mongodb');
+        $this->setEnv('DB_CONNECTION', 'tenant');
 
         $config = $this->loadQueueConfig();
 
         $this->assertSame('mongodb', $config['default']);
         $this->assertSame('mongodb', $config['connections']['mongodb']['connection']);
+    }
+
+    public function test_fails_closed_when_mongodb_queue_connection_targets_tenant_storage(): void
+    {
+        $this->setEnv('QUEUE_CONNECTION', 'mongodb');
+        $this->setEnv('MONGODB_QUEUE_CONNECTION', 'tenant');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('MONGODB_QUEUE_CONNECTION must point to shared queue storage');
+
+        $this->loadQueueConfig();
     }
 
     public function test_fails_closed_when_database_queue_connection_is_not_explicitly_set(): void

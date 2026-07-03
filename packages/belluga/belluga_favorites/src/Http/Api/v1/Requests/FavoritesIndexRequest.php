@@ -20,7 +20,7 @@ class FavoritesIndexRequest extends FormRequest
     {
         return [
             'page' => ['sometimes', 'integer', 'min:1'],
-            'page_size' => ['sometimes', 'integer', 'min:1'],
+            'page_size' => ['sometimes', 'integer', 'min:1', 'max:10'],
             'registry_key' => ['sometimes', 'string', 'regex:/^[a-z][a-z0-9_]*$/'],
             'target_type' => ['sometimes', 'string', 'max:100'],
         ];
