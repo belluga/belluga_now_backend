@@ -17,8 +17,11 @@ if ($queueConnection === '') {
 $databaseQueueConnection = env('DB_QUEUE_CONNECTION');
 $databaseQueueConnection = is_string($databaseQueueConnection) ? trim($databaseQueueConnection) : '';
 
-$mongodbQueueConnection = env('MONGODB_QUEUE_CONNECTION', $databaseConnection);
+$mongodbQueueConnection = env('MONGODB_QUEUE_CONNECTION', 'mongodb');
 $mongodbQueueConnection = is_string($mongodbQueueConnection) ? trim($mongodbQueueConnection) : '';
+if ($mongodbQueueConnection === '') {
+    $mongodbQueueConnection = 'mongodb';
+}
 
 if ($queueConnection === 'database' && $databaseQueueConnection === '') {
     throw new \RuntimeException(
@@ -35,6 +38,12 @@ if (
         'Unsafe queue configuration detected: DB_CONNECTION is MongoDB but QUEUE_CONNECTION=database '.
         'without a dedicated SQL DB_QUEUE_CONNECTION. Use QUEUE_CONNECTION=mongodb or set DB_QUEUE_CONNECTION '.
         'to a SQL connection.'
+    );
+}
+
+if ($queueConnection === 'mongodb' && $mongodbQueueConnection === 'tenant') {
+    throw new \RuntimeException(
+        'Unsafe queue configuration detected: MONGODB_QUEUE_CONNECTION must point to shared queue storage, never tenant.'
     );
 }
 
