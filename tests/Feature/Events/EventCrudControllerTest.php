@@ -4062,7 +4062,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->post("{$this->accountEventsBase}/{$eventId}", [
             '_method' => 'PATCH',
             'title' => 'Atualizado com multipart',
-            'occurrences' => $occurrences,
+            'occurrences' => $this->withPersistedOccurrenceIdentity($eventId, $occurrences),
             'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
         ]);
 
@@ -4404,9 +4404,9 @@ class EventCrudControllerTest extends TestCaseTenant
             Carbon::setTestNow($baseline->copy()->addHours(8));
 
             $updateResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
-                'occurrences' => [[
+                'occurrences' => $this->withPersistedOccurrenceIdentity($eventId, [[
                     'date_time_start' => $baseline->copy()->subHours(5)->toISOString(),
-                ]],
+                ]]),
             ]);
             $updateResponse->assertStatus(200);
             $updated = Event::query()->find($eventId);
@@ -5885,7 +5885,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $programmingResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
-            'occurrences' => $occurrences,
+            'occurrences' => $this->withPersistedOccurrenceIdentity($eventId, $occurrences),
         ]);
 
         $programmingResponse->assertStatus(422);
@@ -6632,9 +6632,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $occurrences = $this->withPersistedOccurrenceIdentity($eventId, $this->makeOccurrences(2));
+        $this->assertArrayHasKey('occurrence_id', $occurrences[0]);
+        $this->assertArrayHasKey('occurrence_id', $occurrences[1]);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
-            'occurrences' => $this->makeOccurrences(2),
+            'occurrences' => $occurrences,
         ]);
 
         $response->assertStatus(200);
@@ -7698,6 +7701,36 @@ class EventCrudControllerTest extends TestCaseTenant
                 'date_time_end' => $start->copy()->addHours(2)->toISOString(),
             ];
         }
+
+        return $occurrences;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function withPersistedOccurrenceIdentity(string $eventId, array $occurrences): array
+    {
+        $storedOccurrences = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        foreach ($occurrences as $index => &$occurrence) {
+            $storedOccurrence = $storedOccurrences->get($index);
+            if (! $storedOccurrence instanceof EventOccurrence) {
+                continue;
+            }
+
+            $occurrence['occurrence_id'] = (string) $storedOccurrence->_id;
+            $storedSlug = trim((string) ($storedOccurrence->occurrence_slug ?? ''));
+            if ($storedSlug !== '') {
+                $occurrence['occurrence_slug'] = $storedSlug;
+            }
+        }
+        unset($occurrence);
 
         return $occurrences;
     }

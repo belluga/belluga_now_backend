@@ -566,7 +566,7 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
         $event = $this->createEvent();
         $now = Carbon::now();
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+        $this->syncEventWithPersistedOccurrenceIdentity($event, [
             [
                 'date_time_start' => $now->copy()->addDay(),
                 'date_time_end' => $now->copy()->addDay()->addHours(2),
@@ -640,12 +640,41 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
             'is_active' => true,
         ], $overrides));
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
+        $this->syncEventWithPersistedOccurrenceIdentity($event, [[
             'date_time_start' => Carbon::instance($event->date_time_start),
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
         ]]);
 
         return $event->fresh();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     */
+    private function syncEventWithPersistedOccurrenceIdentity(Event $event, array $occurrences): void
+    {
+        $storedOccurrences = EventOccurrence::withTrashed()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        foreach ($occurrences as $index => &$occurrence) {
+            $storedOccurrence = $storedOccurrences->get($index);
+            if (! $storedOccurrence instanceof EventOccurrence) {
+                continue;
+            }
+
+            $occurrence['occurrence_id'] = (string) $storedOccurrence->_id;
+            $storedSlug = trim((string) ($storedOccurrence->occurrence_slug ?? ''));
+            if ($storedSlug !== '') {
+                $occurrence['occurrence_slug'] = $storedSlug;
+            }
+        }
+        unset($occurrence);
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
     }
 
     private function initializeSystem(): void
