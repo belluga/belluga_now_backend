@@ -31,34 +31,34 @@ class EventOccurrenceOrphanInventoryService
      */
     public function inventoryCurrentTenant(): array
     {
-        $occurrences = EventOccurrence::withTrashed()
-            ->orderBy('event_id')
-            ->orderBy('_id')
-            ->get()
-            ->values();
-
-        $eventIds = $occurrences
-            ->map(static fn (EventOccurrence $occurrence): string => trim((string) ($occurrence->event_id ?? '')))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        $eventsById = Event::withTrashed()
-            ->whereIn('_id', $this->buildDocumentIdCandidates($eventIds))
-            ->get()
-            ->keyBy(static fn (Event $event): string => (string) $event->_id);
-
         $rows = [];
-        foreach ($occurrences as $occurrence) {
+        $scannedOccurrences = 0;
+        $activeBypass = 0;
+        $legacyResidue = 0;
+        $currentEventId = null;
+        $currentEventExists = false;
+
+        foreach (EventOccurrence::withTrashed()->orderBy('event_id')->orderBy('_id')->cursor() as $occurrence) {
+            $scannedOccurrences++;
             $eventId = trim((string) ($occurrence->event_id ?? ''));
-            if ($eventId !== '' && $eventsById->has($eventId)) {
+            if ($eventId !== $currentEventId) {
+                $currentEventId = $eventId;
+                $currentEventExists = $eventId !== '' && $this->eventExists($eventId);
+            }
+
+            if ($currentEventExists) {
                 continue;
             }
 
             $classification = $occurrence->deleted_at !== null
                 ? 'legacy_residue'
                 : 'active_bypass';
+
+            if ($classification === 'legacy_residue') {
+                $legacyResidue++;
+            } else {
+                $activeBypass++;
+            }
 
             $rows[] = [
                 'occurrence_id' => (string) ($occurrence->_id ?? ''),
@@ -75,19 +75,20 @@ class EventOccurrenceOrphanInventoryService
 
         return [
             'totals' => [
-                'scanned_occurrences' => $occurrences->count(),
+                'scanned_occurrences' => $scannedOccurrences,
                 'orphan_occurrences' => count($rows),
-                'active_bypass' => count(array_filter(
-                    $rows,
-                    static fn (array $row): bool => $row['classification'] === 'active_bypass'
-                )),
-                'legacy_residue' => count(array_filter(
-                    $rows,
-                    static fn (array $row): bool => $row['classification'] === 'legacy_residue'
-                )),
+                'active_bypass' => $activeBypass,
+                'legacy_residue' => $legacyResidue,
             ],
             'rows' => $rows,
         ];
+    }
+
+    private function eventExists(string $eventId): bool
+    {
+        return Event::withTrashed()
+            ->whereIn('_id', $this->buildDocumentIdCandidates([$eventId]))
+            ->exists();
     }
 
     /**
