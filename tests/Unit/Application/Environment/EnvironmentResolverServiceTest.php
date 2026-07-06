@@ -7,10 +7,12 @@ namespace Tests\Unit\Application\Environment;
 use App\Application\Environment\EnvironmentResolverService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
+use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -259,6 +261,33 @@ class EnvironmentResolverServiceTest extends TestCase
         $this->assertSame('http://landlord.test', $result['landlord_domain']);
         $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
         $this->assertArrayHasKey('tenant_public_auth', $result['settings'] ?? []);
+    }
+
+    public function test_resolve_prefers_pre_resolved_app_domain_tenant_before_fallback_lookup(): void
+    {
+        Tenant::forgetCurrent();
+        $tenant = Tenant::query()->firstOrFail();
+
+        $this->app->instance(
+            TenantAppDomainResolverService::class,
+            $this->mock(TenantAppDomainResolverService::class, function (MockInterface $mock): void {
+                $mock->shouldReceive('findTenantByIdentifier')->never();
+            })
+        );
+        $this->app->forgetInstance(EnvironmentResolverService::class);
+
+        /** @var EnvironmentResolverService $service */
+        $service = $this->app->make(EnvironmentResolverService::class);
+
+        $result = $service->resolve([
+            'app_domain' => 'tenant-beta.test',
+            'resolved_app_domain_tenant' => $tenant,
+            'request_root' => 'https://tenant-beta.test',
+            'request_host' => 'tenant-beta.test',
+        ]);
+
+        $this->assertSame('tenant', $result['type']);
+        $this->assertSame($tenant->name, $result['name']);
     }
 
     private function initializeSystem(): void
