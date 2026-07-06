@@ -2580,6 +2580,59 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences.1.occurrence_slug']);
     }
 
+    public function test_event_update_rejects_identity_free_occurrence_payload_when_schedule_already_exists(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => [
+                [
+                    'date_time_start' => $occurrences[0]['date_time_start'],
+                    'date_time_end' => $occurrences[0]['date_time_end'],
+                ],
+                [
+                    'date_time_start' => $occurrences[1]['date_time_start'],
+                    'date_time_end' => $occurrences[1]['date_time_end'],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function test_event_occurrence_sync_service_rejects_identity_free_payload_when_occurrences_already_exist(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = $this->eventDocument($eventId);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('occurrence_id or occurrence_slug is required when syncing an event that already has persisted occurrences.');
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+            [
+                'date_time_start' => $occurrences[0]['date_time_start'],
+                'date_time_end' => $occurrences[0]['date_time_end'],
+            ],
+            [
+                'date_time_start' => $occurrences[1]['date_time_start'],
+                'date_time_end' => $occurrences[1]['date_time_end'],
+            ],
+        ]);
+    }
+
     public function test_event_update_rejects_mismatched_occurrence_identity_pair(): void
     {
         $occurrences = $this->makeOccurrences(2);
