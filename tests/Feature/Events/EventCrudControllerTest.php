@@ -2580,6 +2580,59 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences.1.occurrence_slug']);
     }
 
+    public function test_event_update_rejects_identity_free_occurrence_payload_when_schedule_already_exists(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+
+        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => [
+                [
+                    'date_time_start' => $occurrences[0]['date_time_start'],
+                    'date_time_end' => $occurrences[0]['date_time_end'],
+                ],
+                [
+                    'date_time_start' => $occurrences[1]['date_time_start'],
+                    'date_time_end' => $occurrences[1]['date_time_end'],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['occurrences']);
+    }
+
+    public function test_event_occurrence_sync_service_rejects_identity_free_payload_when_occurrences_already_exist(): void
+    {
+        $occurrences = $this->makeOccurrences(2);
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = $this->eventDocument($eventId);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('occurrence_id or occurrence_slug is required when syncing an event that already has persisted occurrences.');
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+            [
+                'date_time_start' => $occurrences[0]['date_time_start'],
+                'date_time_end' => $occurrences[0]['date_time_end'],
+            ],
+            [
+                'date_time_start' => $occurrences[1]['date_time_start'],
+                'date_time_end' => $occurrences[1]['date_time_end'],
+            ],
+        ]);
+    }
+
     public function test_event_update_rejects_mismatched_occurrence_identity_pair(): void
     {
         $occurrences = $this->makeOccurrences(2);
@@ -4009,7 +4062,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->post("{$this->accountEventsBase}/{$eventId}", [
             '_method' => 'PATCH',
             'title' => 'Atualizado com multipart',
-            'occurrences' => $occurrences,
+            'occurrences' => $this->withPersistedOccurrenceIdentity($eventId, $occurrences),
             'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
         ]);
 
@@ -4351,9 +4404,9 @@ class EventCrudControllerTest extends TestCaseTenant
             Carbon::setTestNow($baseline->copy()->addHours(8));
 
             $updateResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
-                'occurrences' => [[
+                'occurrences' => $this->withPersistedOccurrenceIdentity($eventId, [[
                     'date_time_start' => $baseline->copy()->subHours(5)->toISOString(),
-                ]],
+                ]]),
             ]);
             $updateResponse->assertStatus(200);
             $updated = Event::query()->find($eventId);
@@ -5832,7 +5885,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $programmingResponse = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
-            'occurrences' => $occurrences,
+            'occurrences' => $this->withPersistedOccurrenceIdentity($eventId, $occurrences),
         ]);
 
         $programmingResponse->assertStatus(422);
@@ -6579,9 +6632,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $occurrences = $this->withPersistedOccurrenceIdentity($eventId, $this->makeOccurrences(2));
+        $this->assertArrayHasKey('occurrence_id', $occurrences[0]);
+        $this->assertArrayHasKey('occurrence_id', $occurrences[1]);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
-            'occurrences' => $this->makeOccurrences(2),
+            'occurrences' => $occurrences,
         ]);
 
         $response->assertStatus(200);
@@ -7645,6 +7701,36 @@ class EventCrudControllerTest extends TestCaseTenant
                 'date_time_end' => $start->copy()->addHours(2)->toISOString(),
             ];
         }
+
+        return $occurrences;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function withPersistedOccurrenceIdentity(string $eventId, array $occurrences): array
+    {
+        $storedOccurrences = EventOccurrence::withTrashed()
+            ->where('event_id', $eventId)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        foreach ($occurrences as $index => &$occurrence) {
+            $storedOccurrence = $storedOccurrences->get($index);
+            if (! $storedOccurrence instanceof EventOccurrence) {
+                continue;
+            }
+
+            $occurrence['occurrence_id'] = (string) $storedOccurrence->_id;
+            $storedSlug = trim((string) ($storedOccurrence->occurrence_slug ?? ''));
+            if ($storedSlug !== '') {
+                $occurrence['occurrence_slug'] = $storedSlug;
+            }
+        }
+        unset($occurrence);
 
         return $occurrences;
     }

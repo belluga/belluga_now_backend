@@ -17,6 +17,7 @@ class EnvironmentController extends Controller
     {
         $resolved = $this->environmentService->resolve([
             ...$request->validated(),
+            'resolved_app_domain_tenant' => $request->resolvedAppDomainTenant(),
             'request_root' => $request->root(),
             'request_host' => $request->getHost(),
         ]);

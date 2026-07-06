@@ -11,6 +11,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
+use RuntimeException;
 
 class EventOccurrenceSyncService
 {
@@ -32,6 +33,7 @@ class EventOccurrenceSyncService
         $publication = $this->normalizePublication($event->publication ?? [], $event->created_at);
         $eventGeoLocation = $this->resolveEventGeoLocation($event);
         $existingDocuments = $this->loadOrderedExistingDocuments($event);
+        $this->assertIdentitySafeForExistingDocuments($occurrences, $existingDocuments);
         $documentsById = $this->keyDocumentsById($existingDocuments);
         $documentsBySlug = $this->keyDocumentsBySlug($existingDocuments);
         $resolvedDocuments = [];
@@ -150,6 +152,17 @@ class EventOccurrenceSyncService
             $document->updated_at = $now;
             $document->save();
         }
+    }
+
+    private function assertIdentitySafeForExistingDocuments(array $occurrences, array $existingDocuments): void
+    {
+        if ($existingDocuments === [] || $this->occurrencesContainIdentity($occurrences)) {
+            return;
+        }
+
+        throw new RuntimeException(
+            'occurrence_id or occurrence_slug is required when syncing an event that already has persisted occurrences.'
+        );
     }
 
     /**

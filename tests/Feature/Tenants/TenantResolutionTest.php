@@ -6,7 +6,9 @@ namespace Tests\Feature\Tenants;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Models\Landlord\Tenant;
+use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -104,6 +106,54 @@ class TenantResolutionTest extends TestCase
             ->assertJsonPath('type', 'tenant')
             ->assertJsonPath('subdomain', 'tenant-alpha')
             ->assertJsonPath('main_domain', $tenant->getMainDomain());
+    }
+
+    public function test_main_domain_environment_request_reuses_validated_app_domain_tenant(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', 'tenant-alpha')->firstOrFail();
+
+        $this->instance(
+            TenantAppDomainResolverService::class,
+            $this->mock(TenantAppDomainResolverService::class, function (MockInterface $mock) use ($tenant): void {
+                $mock->shouldReceive('findTenantByIdentifier')
+                    ->once()
+                    ->with('tenant-alpha.test')
+                    ->andReturn($tenant);
+            })
+        );
+
+        $response = $this->withHeaders([
+            'X-App-Domain' => 'tenant-alpha.test',
+        ])->getJson(
+            sprintf('http://%s/api/v1/environment', $this->host)
+        );
+
+        $response->assertStatus(200)
+            ->assertJsonPath('type', 'tenant')
+            ->assertJsonPath('subdomain', 'tenant-alpha');
+    }
+
+    public function test_main_domain_environment_request_preserves_unknown_app_domain_validation_error(): void
+    {
+        $this->instance(
+            TenantAppDomainResolverService::class,
+            $this->mock(TenantAppDomainResolverService::class, function (MockInterface $mock): void {
+                $mock->shouldReceive('findTenantByIdentifier')
+                    ->once()
+                    ->with('unknown-app-domain.test')
+                    ->andReturn(null);
+            })
+        );
+
+        $response = $this->withHeaders([
+            'X-App-Domain' => 'unknown-app-domain.test',
+        ])->getJson(
+            sprintf('http://%s/api/v1/environment', $this->host)
+        );
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['app_domain'])
+            ->assertJsonPath('errors.app_domain.0', 'Unknown app_domain.');
     }
 
     private function initializeSystem(): void

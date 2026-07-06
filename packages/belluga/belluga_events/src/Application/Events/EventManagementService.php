@@ -600,6 +600,14 @@ class EventManagementService
         $existingById = [];
         $existingBySlug = [];
 
+        if ($existingOccurrences !== [] && ! $this->occurrencesContainIdentity($occurrences)) {
+            throw ValidationException::withMessages([
+                'occurrences' => [
+                    'occurrence_id or occurrence_slug is required for schedule updates once occurrences already exist.',
+                ],
+            ]);
+        }
+
         foreach ($existingOccurrences as $existingOccurrence) {
             $existingId = $this->normalizeOptionalString($existingOccurrence['occurrence_id'] ?? null);
             if ($existingId !== null) {
