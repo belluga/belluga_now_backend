@@ -37,8 +37,7 @@ class EnvironmentResolverService
         $currentTenant = Tenant::current();
         $tenant = $currentTenant?->fresh();
         if ($tenant === null) {
-            $appDomain = $input['app_domain'] ?? null;
-            $tenant = $this->locateTenant(is_string($appDomain) ? $appDomain : null);
+            $tenant = $this->resolveRequestedTenant($input);
         }
         $requestHost = $input['request_host'] ?? null;
 
@@ -53,6 +52,21 @@ class EnvironmentResolverService
         }
 
         return $this->landlordEnvironment($input['request_root'] ?? null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     */
+    private function resolveRequestedTenant(array $input): ?Tenant
+    {
+        $resolvedTenant = $input['resolved_app_domain_tenant'] ?? null;
+        if ($resolvedTenant instanceof Tenant) {
+            return $resolvedTenant;
+        }
+
+        $appDomain = $input['app_domain'] ?? null;
+
+        return $this->locateTenant(is_string($appDomain) ? $appDomain : null);
     }
 
     private function locateTenant(?string $appDomain): ?Tenant

@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Application\Tenants\TenantAppDomainResolverService;
+use App\Models\Landlord\Tenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
 class EnvironmentRequest extends FormRequest
 {
+    private ?Tenant $resolvedAppDomainTenant = null;
+
     public function validationData(): array
     {
         $headerAppDomain = $this->header('X-App-Domain');
@@ -32,6 +35,11 @@ class EnvironmentRequest extends FormRequest
         ];
     }
 
+    public function resolvedAppDomainTenant(): ?Tenant
+    {
+        return $this->resolvedAppDomainTenant;
+    }
+
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
@@ -41,7 +49,9 @@ class EnvironmentRequest extends FormRequest
             }
 
             $resolver = app(TenantAppDomainResolverService::class);
-            if ($resolver->findTenantByIdentifier($appDomain) !== null) {
+            $tenant = $resolver->findTenantByIdentifier($appDomain);
+            if ($tenant !== null) {
+                $this->resolvedAppDomainTenant = $tenant;
                 return;
             }
 
