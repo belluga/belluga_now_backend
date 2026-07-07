@@ -10,6 +10,7 @@ use Belluga\Events\Application\Operations\QueueEventAsyncMetricsProvider;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Capabilities\InMemoryEventCapabilityRegistry;
 use Belluga\Events\Capabilities\MapPoiCapabilityHandler;
+use Belluga\Events\Console\AuditEventOccurrenceOrphansCommand;
 use Belluga\Events\Contracts\AccountProfileHeroImageResolverContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
@@ -66,6 +67,9 @@ class EventsServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        $this->commands([
+            AuditEventOccurrenceOrphansCommand::class,
+        ]);
 
         Queue::failing(function (JobFailed $event): void {
             $this->app->make(EventDlqAlertService::class)->handle($event);

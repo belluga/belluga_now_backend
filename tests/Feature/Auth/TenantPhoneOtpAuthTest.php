@@ -19,6 +19,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
+use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\SeedsTenantAccounts;
@@ -699,6 +700,109 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $validAfterLock->assertJsonPath('errors.code.0', 'The OTP challenge is no longer active.');
     }
 
+    public function test_phone_otp_challenge_serializes_concurrent_requests_per_phone(): void
+    {
+        $this->configureReviewAccess('+5527999990021', '123456');
+
+        $results = $this->runConcurrentProcesses([
+            $this->challengeProcess('+5527999990021', 'otp-concurrency-challenge-1'),
+            $this->challengeProcess('+5527999990021', 'otp-concurrency-challenge-2'),
+            $this->challengeProcess('+5527999990021', 'otp-concurrency-challenge-3'),
+            $this->challengeProcess('+5527999990021', 'otp-concurrency-challenge-4'),
+            $this->challengeProcess('+5527999990021', 'otp-concurrency-challenge-5'),
+        ]);
+
+        $successes = array_values(array_filter($results, fn (array $result): bool => ($result['ok'] ?? false) === true));
+        $cooldowns = array_values(array_filter($results, function (array $result): bool {
+            return ($result['ok'] ?? false) === false
+                && ($result['exception'] ?? null) === 'App\\Application\\Auth\\PhoneOtpCooldownException';
+        }));
+
+        $this->assertCount(1, $successes, json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertCount(4, $cooldowns, json_encode($results, JSON_PRETTY_PRINT));
+
+        $pendingChallenges = PhoneOtpChallenge::query()
+            ->where('phone', '+5527999990021')
+            ->where('status', PhoneOtpChallenge::STATUS_PENDING)
+            ->get();
+
+        $this->assertCount(1, $pendingChallenges);
+    }
+
+    public function test_phone_otp_verify_allows_only_one_concurrent_successful_consume(): void
+    {
+        Queue::fake();
+        $this->configureReviewAccess('+5527999990022', '123456');
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0022',
+            'device_name' => 'otp-concurrency-verify-seed',
+        ]);
+        $challenge->assertStatus(202);
+
+        $challengeId = (string) $challenge->json('data.challenge_id');
+        $results = $this->runConcurrentProcesses([
+            $this->verifyProcess($challengeId, '+5527999990022', '123456', 'otp-concurrency-verify-1'),
+            $this->verifyProcess($challengeId, '+5527999990022', '123456', 'otp-concurrency-verify-2'),
+            $this->verifyProcess($challengeId, '+5527999990022', '123456', 'otp-concurrency-verify-3'),
+            $this->verifyProcess($challengeId, '+5527999990022', '123456', 'otp-concurrency-verify-4'),
+            $this->verifyProcess($challengeId, '+5527999990022', '123456', 'otp-concurrency-verify-5'),
+        ]);
+
+        $successes = array_values(array_filter($results, fn (array $result): bool => ($result['ok'] ?? false) === true));
+        $inactiveFailures = array_values(array_filter($results, function (array $result): bool {
+            return ($result['ok'] ?? false) === false
+                && (($result['errors']['code'][0] ?? null) === 'The OTP challenge is no longer active.');
+        }));
+
+        $this->assertCount(1, $successes, json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertCount(4, $inactiveFailures, json_encode($results, JSON_PRETTY_PRINT));
+
+        $record = PhoneOtpChallenge::query()->findOrFail($challengeId);
+        $this->assertSame(PhoneOtpChallenge::STATUS_VERIFIED, $record->status);
+        $this->assertNotNull($record->verified_at);
+        $this->assertSame(
+            1,
+            AccountUser::query()
+                ->where('phones', 'all', ['+5527999990022'])
+                ->count()
+        );
+    }
+
+    public function test_phone_otp_verify_keeps_invalid_attempt_lockout_atomic_under_concurrency(): void
+    {
+        Queue::fake();
+        $this->configureReviewAccess('+5527999990023', '123456');
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0023',
+            'device_name' => 'otp-concurrency-invalid-seed',
+        ]);
+        $challenge->assertStatus(202);
+
+        $challengeId = (string) $challenge->json('data.challenge_id');
+        $results = $this->runConcurrentProcesses([
+            $this->verifyProcess($challengeId, '+5527999990023', '000000', 'otp-concurrency-invalid-1'),
+            $this->verifyProcess($challengeId, '+5527999990023', '000000', 'otp-concurrency-invalid-2'),
+            $this->verifyProcess($challengeId, '+5527999990023', '000000', 'otp-concurrency-invalid-3'),
+            $this->verifyProcess($challengeId, '+5527999990023', '000000', 'otp-concurrency-invalid-4'),
+            $this->verifyProcess($challengeId, '+5527999990023', '000000', 'otp-concurrency-invalid-5'),
+        ]);
+
+        $successes = array_values(array_filter($results, fn (array $result): bool => ($result['ok'] ?? false) === true));
+        $errorMessages = array_map(
+            fn (array $result): ?string => $result['errors']['code'][0] ?? null,
+            array_values(array_filter($results, fn (array $result): bool => ($result['ok'] ?? false) === false))
+        );
+
+        $this->assertCount(0, $successes, json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertContains('The OTP code is invalid.', $errorMessages, json_encode($results, JSON_PRETTY_PRINT));
+
+        $record = PhoneOtpChallenge::query()->findOrFail($challengeId);
+        $this->assertSame(5, (int) $record->attempts);
+        $this->assertSame(PhoneOtpChallenge::STATUS_LOCKED, $record->status);
+    }
+
     public function test_phone_otp_review_access_verifies_allowlisted_phone_without_webhook_delivery(): void
     {
         Queue::fake();
@@ -888,5 +992,94 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
                 'code_hash' => app(PhoneOtpReviewAccessCodeHasher::class)->make($code),
             ],
         ]);
+    }
+
+    /**
+     * @param  list<Process>  $processes
+     * @return list<array<string, mixed>>
+     */
+    private function runConcurrentProcesses(array $processes): array
+    {
+        foreach ($processes as $process) {
+            $process->start();
+        }
+
+        $results = [];
+        foreach ($processes as $process) {
+            $process->wait();
+            $this->assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
+            $outputLines = array_values(array_filter(array_map('trim', preg_split('/\R+/', $process->getOutput()) ?: [])));
+            $jsonLine = end($outputLines);
+            $this->assertIsString($jsonLine, $process->getOutput());
+            $results[] = json_decode($jsonLine, true, flags: JSON_THROW_ON_ERROR);
+        }
+
+        return $results;
+    }
+
+    private function challengeProcess(string $phone, string $deviceName): Process
+    {
+        $payload = var_export([
+            'phone' => $phone,
+            'device_name' => $deviceName,
+        ], true);
+        $tenantSlug = var_export($this->tenantModel->slug, true);
+
+        $code = <<<PHP
+try {
+    \$tenantModel = 'App\\\\Models\\\\Landlord\\\\Tenant';
+    \$tenant = \$tenantModel::query()->where('slug', {$tenantSlug})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$result = app('App\\\\Application\\\\Auth\\\\TenantPhoneOtpAuthService')->challenge({$payload});
+    echo json_encode([
+        'ok' => true,
+        'challenge_id' => \$result->challengeId,
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    \$errors = method_exists(\$exception, 'errors') ? \$exception->errors() : null;
+    echo json_encode([
+        'ok' => false,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => \$errors,
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), null, null, 30);
+    }
+
+    private function verifyProcess(string $challengeId, string $phone, string $codeValue, string $deviceName): Process
+    {
+        $payload = var_export([
+            'challenge_id' => $challengeId,
+            'phone' => $phone,
+            'code' => $codeValue,
+            'device_name' => $deviceName,
+        ], true);
+        $tenantSlug = var_export($this->tenantModel->slug, true);
+
+        $code = <<<PHP
+try {
+    \$tenantModel = 'App\\\\Models\\\\Landlord\\\\Tenant';
+    \$tenant = \$tenantModel::query()->where('slug', {$tenantSlug})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$result = app('App\\\\Application\\\\Auth\\\\TenantPhoneOtpAuthService')->verify(\$tenant, {$payload});
+    echo json_encode([
+        'ok' => true,
+        'user_id' => (string) (\$result->user->_id ?? ''),
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    \$errors = method_exists(\$exception, 'errors') ? \$exception->errors() : null;
+    echo json_encode([
+        'ok' => false,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => \$errors,
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), null, null, 30);
     }
 }
