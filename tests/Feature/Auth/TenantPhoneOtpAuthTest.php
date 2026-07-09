@@ -15,7 +15,12 @@ use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Invites\Application\Contacts\ContactImportService;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
+use Belluga\PushHandler\Models\Tenants\PushCredential;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
+use Belluga\PushHandler\Models\Tenants\PushMessage;
+use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -48,6 +53,10 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
 
         PhoneOtpChallenge::query()->delete();
         TenantSettings::query()->delete();
+        PushMessage::query()->delete();
+        PushCredential::query()->delete();
+        PushDevice::query()->delete();
+        TenantPushSettings::query()->delete();
     }
 
     public function test_phone_otp_challenge_defaults_to_whatsapp_primary_webhook(): void
@@ -230,7 +239,7 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $viewer = AccountUser::create([
             'identity_state' => 'registered',
             'name' => 'Prior Import Viewer',
-            'phones' => ['+5527999997777'],
+            'phones' => ['+5527999997788'],
         ]);
         $targetPhone = '+55 27 99999-0420';
         $targetPhoneHash = hash('sha256', '5527999990420');
@@ -283,6 +292,90 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $inviteables->assertOk();
         $inviteables->assertJsonPath('items.0.user_id', $targetUserId);
         $inviteables->assertJsonPath('items.0.inviteable_reasons.0', 'contact_match');
+    }
+
+    public function test_phone_otp_verification_authors_contact_entered_app_push_once_for_newly_matched_prior_importers(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+        $this->seedPushRuntimeReady();
+        ContactHashDirectory::query()->delete();
+
+        $viewer = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Prior Import Viewer',
+            'phones' => ['+5527999997777'],
+        ]);
+        $this->registerActivePushToken($viewer, 'prior-import-viewer-token');
+
+        $targetPhone = '+55 27 99999-0421';
+        $targetPhoneHash = hash('sha256', '5527999990421');
+
+        app(ContactImportService::class)->import($viewer, [
+            'contacts' => [
+                [
+                    'type' => 'phone',
+                    'hash' => $targetPhoneHash,
+                ],
+            ],
+        ]);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $targetPhone,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990421',
+            'code' => $otpCode,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $verify->assertStatus(200);
+
+        $matchedUserId = (string) $verify->json('data.user_id');
+        $this->assertNotSame('', $matchedUserId);
+
+        $message = PushMessage::query()->first();
+        $this->assertNotNull($message);
+        $this->assertSame('contact_entered_app', (string) $message->type);
+        $this->assertSame([(string) $viewer->_id], data_get($message->audience, 'user_ids'));
+        $this->assertSame('contact_entered_app', data_get($message->fcm_options, 'data.event'));
+        $this->assertSame($matchedUserId, data_get($message->fcm_options, 'data.matched_user_id'));
+        $this->assertSame('Contato entrou no app', data_get($message->fcm_options, 'notification.title'));
+
+        $repeatChallenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $targetPhone,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $repeatChallenge->assertStatus(202);
+
+        $repeatOtpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$repeatOtpCode): bool {
+            $repeatOtpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($repeatOtpCode);
+
+        $repeatVerify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $repeatChallenge->json('data.challenge_id'),
+            'phone' => '+5527999990421',
+            'code' => $repeatOtpCode,
+            'device_name' => 'android-release-smoke',
+        ]);
+        $repeatVerify->assertStatus(200);
+
+        $this->assertSame(1, PushMessage::query()->count());
     }
 
     public function test_phone_otp_verification_migrates_anonymous_contact_imports_to_registered_viewer(): void
@@ -978,6 +1071,43 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
                     'max_attempts' => 5,
                 ],
             ],
+        ]);
+    }
+
+    private function seedPushRuntimeReady(): void
+    {
+        PushCredential::create([
+            'project_id' => 'project-id',
+            'client_email' => 'client@example.org',
+            'private_key' => 'secret',
+        ]);
+
+        $settings = TenantSettings::query()->first() ?? new TenantSettings();
+        $settings->firebase = [
+            'apiKey' => 'key',
+            'appId' => 'app',
+            'projectId' => 'project',
+            'messagingSenderId' => 'sender',
+            'storageBucket' => 'bucket',
+        ];
+        $settings->push = [
+            'enabled' => true,
+            'max_ttl_days' => 30,
+        ];
+        $settings->save();
+    }
+
+    private function registerActivePushToken(AccountUser $user, string $pushToken): void
+    {
+        PushDevice::query()->create([
+            'tenant_id' => (string) (Tenant::current()?->_id ?? Tenant::current()?->id ?? ''),
+            'account_user_id' => (string) $user->_id,
+            'account_ids' => $user->getAccessToIds(),
+            'device_id' => 'device-'.Str::random(6),
+            'platform' => 'android',
+            'push_token' => $pushToken,
+            'is_active' => true,
+            'last_registered_at' => now(),
         ]);
     }
 

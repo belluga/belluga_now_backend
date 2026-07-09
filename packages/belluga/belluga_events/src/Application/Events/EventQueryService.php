@@ -3588,14 +3588,17 @@ class EventQueryService
         }
 
         $normalized = [];
-        foreach ($rows as $row) {
+        foreach ($rows as $index => $row) {
             $item = $this->normalizeArray($row);
             if ($item === []) {
                 continue;
             }
 
             $normalized[] = [
-                'time' => $this->scalarString($item['time'] ?? null) ?? '',
+                'sequence' => isset($item['sequence']) && is_numeric($item['sequence'])
+                    ? (int) $item['sequence']
+                    : (int) $index,
+                'time' => $this->scalarString($item['time'] ?? null),
                 'end_time' => $this->scalarString($item['end_time'] ?? null),
                 'title' => $this->scalarString($item['title'] ?? null),
                 'account_profile_ids' => array_values(array_map('strval', $this->normalizeArray($item['account_profile_ids'] ?? []))),
@@ -3605,9 +3608,17 @@ class EventQueryService
             ];
         }
 
-        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
+        usort(
+            $normalized,
+            static fn (array $left, array $right): int => [$left['sequence'], $left['time'] ?? '', $left['title'] ?? '']
+                <=> [$right['sequence'], $right['time'] ?? '', $right['title'] ?? '']
+        );
 
-        return $normalized;
+        return array_values(array_map(static function (array $item): array {
+            unset($item['sequence']);
+
+            return $item;
+        }, $normalized));
     }
 
     /**

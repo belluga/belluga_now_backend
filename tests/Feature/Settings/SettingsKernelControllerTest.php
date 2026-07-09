@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature\Settings;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\TenantEnvironmentSnapshot;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
@@ -778,6 +780,57 @@ class SettingsKernelControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['filters']);
+    }
+
+    public function test_patch_map_ui_repairs_environment_snapshot_synchronously(): void
+    {
+        $tenant = Tenant::query()->where('subdomain', $this->tenant->subdomain)->firstOrFail();
+        $tenant->makeCurrent();
+
+        app(TenantEnvironmentSnapshotService::class)->repair(
+            $tenant,
+            'test_seed_environment_snapshot',
+            ['trigger' => 'settings_kernel_controller_test'],
+        );
+
+        $seededSnapshot = TenantEnvironmentSnapshot::current();
+        $this->assertNotNull($seededSnapshot);
+        $this->assertSame(
+            -20.671339,
+            data_get($seededSnapshot?->snapshot, 'settings.map_ui.default_origin.lat'),
+        );
+
+        $patch = $this->patchJson("{$this->base_tenant_api_admin}settings/values/map_ui", [
+            'default_origin.lat' => -20.611121,
+            'default_origin.lng' => -40.498617,
+            'default_origin.label' => 'Praia do Morro Atualizada',
+        ]);
+
+        $patch->assertStatus(200);
+        $patch->assertJsonPath('data.default_origin.lat', -20.611121);
+        $patch->assertJsonPath('data.default_origin.lng', -40.498617);
+        $patch->assertJsonPath('data.default_origin.label', 'Praia do Morro Atualizada');
+
+        $environment = $this->getJson("{$this->base_api_tenant}environment");
+        $environment->assertStatus(200);
+        $environment->assertJsonPath('settings.map_ui.default_origin.lat', -20.611121);
+        $environment->assertJsonPath('settings.map_ui.default_origin.lng', -40.498617);
+        $environment->assertJsonPath('settings.map_ui.default_origin.label', 'Praia do Morro Atualizada');
+
+        $updatedSnapshot = TenantEnvironmentSnapshot::current();
+        $this->assertNotNull($updatedSnapshot);
+        $this->assertSame(
+            -20.611121,
+            data_get($updatedSnapshot?->snapshot, 'settings.map_ui.default_origin.lat'),
+        );
+        $this->assertSame(
+            -40.498617,
+            data_get($updatedSnapshot?->snapshot, 'settings.map_ui.default_origin.lng'),
+        );
+        $this->assertSame(
+            'Praia do Morro Atualizada',
+            data_get($updatedSnapshot?->snapshot, 'settings.map_ui.default_origin.label'),
+        );
     }
 
     public function test_schema_nodes_expose_every_registered_field_as_renderable_node(): void

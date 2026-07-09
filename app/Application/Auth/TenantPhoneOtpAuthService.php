@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Auth;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Push\ContactEnteredAppPushDeliveryService;
 use App\Application\Social\InviteablePeopleProjectionService;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
@@ -36,6 +37,7 @@ class TenantPhoneOtpAuthService
         private readonly AccountProfileBootstrapService $profileBootstrapper,
         private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
         private readonly InviteablePeopleProjectionService $inviteablePeopleProjection,
+        private readonly ContactEnteredAppPushDeliveryService $contactEnteredAppPushes,
     ) {}
 
     /**
@@ -163,7 +165,8 @@ class TenantPhoneOtpAuthService
 
         $this->profileBootstrapper->ensurePersonalAccount($user);
         $user->refresh();
-        $this->rematchExistingContactImports($user);
+        $newlyMatchedImporterIds = $this->rematchExistingContactImports($user);
+        $this->contactEnteredAppPushes->sendToImporters($newlyMatchedImporterIds, $user);
         [$abilities, $accountId] = $this->resolveTokenIssuanceContext($user);
 
         $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
@@ -267,11 +270,14 @@ class TenantPhoneOtpAuthService
         return $user->fresh();
     }
 
-    private function rematchExistingContactImports(AccountUser $user): void
+    /**
+     * @return array<int, string>
+     */
+    private function rematchExistingContactImports(AccountUser $user): array
     {
         $userId = (string) ($user->_id ?? $user->getKey() ?? '');
         if ($userId === '') {
-            return;
+            return [];
         }
 
         $phoneHashes = collect((array) ($user->phone_hashes ?? []))
@@ -282,8 +288,22 @@ class TenantPhoneOtpAuthService
             ->all();
 
         if ($phoneHashes === []) {
-            return;
+            return [];
         }
+
+        $newlyMatchedImporterIds = ContactHashDirectory::query()
+            ->where('type', 'phone')
+            ->whereIn('contact_hash', $phoneHashes)
+            ->where(function ($query) use ($userId): void {
+                $query->whereNull('matched_user_id')
+                    ->orWhere('matched_user_id', '!=', $userId);
+            })
+            ->pluck('importing_user_id')
+            ->map(static fn (mixed $value): string => trim((string) $value))
+            ->filter(static fn (string $value): bool => $value !== '')
+            ->unique()
+            ->values()
+            ->all();
 
         ContactHashDirectory::query()
             ->where('type', 'phone')
@@ -299,6 +319,8 @@ class TenantPhoneOtpAuthService
 
         $this->inviteablePeopleProjection->refreshForUser($user);
         $this->inviteablePeopleProjection->refreshOwnersForContactHashes('phone', $phoneHashes);
+
+        return $newlyMatchedImporterIds;
     }
 
     /**

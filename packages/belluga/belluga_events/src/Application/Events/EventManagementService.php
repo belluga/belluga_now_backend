@@ -364,7 +364,7 @@ class EventManagementService
             return $left['date_time_start']->getTimestamp() <=> $right['date_time_start']->getTimestamp();
         });
 
-        return $normalized;
+        return array_values($normalized);
     }
 
     /**
@@ -1073,18 +1073,18 @@ class EventManagementService
                 ]);
             }
 
-            $time = trim((string) ($item['time'] ?? ''));
-            if (! preg_match('/^\d{2}:\d{2}$/', $time)) {
-                throw ValidationException::withMessages([
-                    "{$field}.{$index}.time" => ['time must use HH:MM format.'],
-                ]);
-            }
+            $time = $this->normalizeProgrammingTime($item['time'] ?? null, "{$field}.{$index}.time");
             $endTime = null;
             if (array_key_exists('end_time', $item) && $item['end_time'] !== null && $item['end_time'] !== '') {
                 $endTime = trim((string) $item['end_time']);
                 if (! preg_match('/^\d{2}:\d{2}$/', $endTime)) {
                     throw ValidationException::withMessages([
                         "{$field}.{$index}.end_time" => ['end_time must use HH:MM format.'],
+                    ]);
+                }
+                if ($time === null) {
+                    throw ValidationException::withMessages([
+                        "{$field}.{$index}.end_time" => ['end_time requires time.'],
                     ]);
                 }
                 if ($endTime <= $time) {
@@ -1094,7 +1094,7 @@ class EventManagementService
                 }
             }
 
-            $title = isset($item['title']) ? trim((string) $item['title']) : '';
+            $title = $this->normalizeProgrammingTitle($item['title'] ?? null, "{$field}.{$index}.title");
             $profileIds = $this->normalizeProgrammingProfileIds(
                 $item['account_profile_ids'] ?? [],
                 "{$field}.{$index}.account_profile_ids"
@@ -1104,7 +1104,7 @@ class EventManagementService
                 "{$field}.{$index}.place_ref"
             );
 
-            if (count($profileIds) > 1 && $title === '') {
+            if (count($profileIds) > 1 && ($title === null || trim(strip_tags($title)) === '')) {
                 throw ValidationException::withMessages([
                     "{$field}.{$index}.title" => ['title is required when more than one linked Account Profile is selected.'],
                 ]);
@@ -1120,9 +1120,10 @@ class EventManagementService
             }
 
             $drafts[] = [
+                'sequence' => $index,
                 'time' => $time,
                 'end_time' => $endTime,
-                'title' => $title === '' ? null : $title,
+                'title' => $title,
                 'account_profile_ids' => $profileIds,
                 'place_ref' => $placeRef,
             ];
@@ -1153,9 +1154,39 @@ class EventManagementService
             ];
         }
 
-        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
-
         return $normalized;
+    }
+
+    private function normalizeProgrammingTime(mixed $value, string $field): ?string
+    {
+        $time = trim((string) ($value ?? ''));
+        if ($time === '') {
+            return null;
+        }
+
+        if (! preg_match('/^\d{2}:\d{2}$/', $time)) {
+            throw ValidationException::withMessages([
+                $field => ['time must use HH:MM format.'],
+            ]);
+        }
+
+        return $time;
+    }
+
+    private function normalizeProgrammingTitle(mixed $value, string $field): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $sanitized = $this->contentSanitizer->sanitize((string) $value);
+        if (strlen($sanitized) > InputConstraints::RICH_TEXT_MAX_BYTES) {
+            throw ValidationException::withMessages([
+                $field => ['The title may not be greater than 100 KB after sanitization.'],
+            ]);
+        }
+
+        return $sanitized === '' ? null : $sanitized;
     }
 
     /**
