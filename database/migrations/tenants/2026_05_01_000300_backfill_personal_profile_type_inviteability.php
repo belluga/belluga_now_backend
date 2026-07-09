@@ -21,35 +21,25 @@ return new class extends Migration
             ->selectCollection('account_profile_types');
         $now = new UTCDateTime((int) Carbon::now()->getTimestampMs());
 
-        $existing = $collection->findOne(['type' => 'personal']);
-        if ($existing === null) {
-            $collection->insertOne([
-                'type' => 'personal',
-                'label' => 'Personal',
-                'allowed_taxonomies' => [],
-                'poi_visual' => null,
-                'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_inviteable' => true,
-                    'is_poi_enabled' => false,
-                    'has_content' => false,
-                ],
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-
-            return;
-        }
-
         $collection->updateOne(
             ['type' => 'personal'],
             [
                 '$set' => [
+                    'label' => 'Personal',
+                    'allowed_taxonomies' => [],
+                    'poi_visual' => null,
                     'capabilities.is_favoritable' => true,
                     'capabilities.is_inviteable' => true,
+                    'capabilities.is_poi_enabled' => false,
+                    'capabilities.has_content' => false,
                     'updated_at' => $now,
                 ],
+                '$setOnInsert' => [
+                    'type' => 'personal',
+                    'created_at' => $now,
+                ],
             ],
+            ['upsert' => true],
         );
     }
 

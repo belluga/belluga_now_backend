@@ -740,7 +740,7 @@ class EventOccurrenceSyncService
         }
 
         $normalized = [];
-        foreach ($rows as $row) {
+        foreach ($rows as $index => $row) {
             $item = $this->normalizeArray($row);
             if ($item === []) {
                 continue;
@@ -759,7 +759,12 @@ class EventOccurrenceSyncService
             }
 
             $normalized[] = [
-                'time' => (string) ($item['time'] ?? ''),
+                'sequence' => isset($item['sequence']) && is_numeric($item['sequence'])
+                    ? (int) $item['sequence']
+                    : (int) $index,
+                'time' => isset($item['time']) && $item['time'] !== null
+                    ? trim((string) $item['time'])
+                    : null,
                 'end_time' => isset($item['end_time']) && $item['end_time'] !== null
                     ? (string) $item['end_time']
                     : null,
@@ -771,7 +776,11 @@ class EventOccurrenceSyncService
             ];
         }
 
-        usort($normalized, static fn (array $left, array $right): int => $left['time'] <=> $right['time']);
+        usort(
+            $normalized,
+            static fn (array $left, array $right): int => [$left['sequence'], $left['time'] ?? '', $left['title'] ?? '']
+                <=> [$right['sequence'], $right['time'] ?? '', $right['title'] ?? '']
+        );
 
         return $normalized;
     }
