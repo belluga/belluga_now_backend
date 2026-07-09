@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\Settings\Http\Api\v1\Controllers\Landlord;
 
-use App\Application\Environment\TenantEnvironmentSnapshotService;
-use App\Models\Landlord\Tenant;
 use Belluga\Settings\Application\SettingsKernelService;
+use Belluga\Settings\Contracts\TenantEnvironmentSnapshotRepairContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
 use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +16,7 @@ class TenantSettingsKernelController
     public function __construct(
         private readonly SettingsKernelService $service,
         private readonly TenantScopeContextContract $tenantContext,
-        private readonly TenantEnvironmentSnapshotService $tenantEnvironmentSnapshotService,
+        private readonly TenantEnvironmentSnapshotRepairContract $tenantEnvironmentSnapshotRepair,
     ) {}
 
     public function schema(Request $request, string $tenant_slug): JsonResponse
@@ -54,9 +53,7 @@ class TenantSettingsKernelController
         try {
             $data = $this->tenantContext->runForTenantSlug($tenant_slug, function () use ($request, $namespace, $payload): array {
                 $data = $this->service->patchNamespace('tenant', $request->user(), $namespace, $payload);
-                $tenant = Tenant::resolve();
-                $this->tenantEnvironmentSnapshotService->repair(
-                    $tenant->fresh() ?? $tenant,
+                $this->tenantEnvironmentSnapshotRepair->repairCurrentTenant(
                     'tenant_settings_namespace_updated_sync',
                     [
                         'trigger' => 'landlord_tenant_settings_patch',

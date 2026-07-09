@@ -7,8 +7,10 @@ namespace App\Providers\PackageIntegration;
 use App\Integration\Settings\CompositeSettingsPatchGuard;
 use App\Integration\Settings\OutboundIntegrationsSettingsNamespaceRegistrar;
 use App\Integration\Settings\PhoneOtpReviewAccessSettingsNamespaceRegistrar;
+use App\Integration\Settings\TenantEnvironmentSnapshotRepairAdapter;
 use App\Integration\Settings\TenantPublicAuthMethodSettingsNamespaceRegistrar;
 use App\Integration\Settings\TenantScopeContextAdapter;
+use Belluga\Settings\Contracts\TenantEnvironmentSnapshotRepairContract;
 use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Contracts\TenantScopeContextContract;
@@ -22,6 +24,10 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             TenantScopeContextContract::class,
             TenantScopeContextAdapter::class
+        );
+        $this->app->bind(
+            TenantEnvironmentSnapshotRepairContract::class,
+            TenantEnvironmentSnapshotRepairAdapter::class,
         );
 
         $this->app->singleton(
