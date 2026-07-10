@@ -1,0 +1,23 @@
+{
+  "schema_version": "ci-contract-v1",
+  "contract_id": "laravel-stage-full",
+  "description": "Laravel repo-owned local contract that mirrors the protected CI architecture and full test gates through the canonical local Docker runtime.",
+  "entries": [
+    {
+      "id": "laravel-stage-promotion-architecture-gate",
+      "repo": "laravel-app",
+      "kind": "workflow-parity",
+      "cwd": "../../../..",
+      "command": ["docker", "compose", "exec", "-T", "app", "composer", "run", "architecture:guardrails"],
+      "description": "Run the Laravel architecture guardrails inside the canonical local app container."
+    },
+    {
+      "id": "laravel-stage-full-suite",
+      "repo": "laravel-app",
+      "kind": "workflow-parity",
+      "cwd": "../../../..",
+      "command": ["bash", "laravel-app/scripts/delphi/run_laravel_tests_safe.sh", "--compact"],
+      "description": "Run the Laravel full test suite through the canonical local-safe Docker runner."
+    }
+  ]
+}
