@@ -20,9 +20,9 @@ use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Http\Client\Request;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
@@ -1082,10 +1082,11 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
             'private_key' => 'secret',
         ]);
 
-        $settings = TenantSettings::query()->first() ?? new TenantSettings();
+        $settings = TenantSettings::query()->first() ?? new TenantSettings;
         $settings->firebase = [
             'apiKey' => 'key',
-            'appId' => 'app',
+            'androidAppId' => 'android-app',
+            'iosAppId' => 'ios-app',
             'projectId' => 'project',
             'messagingSenderId' => 'sender',
             'storageBucket' => 'bucket',

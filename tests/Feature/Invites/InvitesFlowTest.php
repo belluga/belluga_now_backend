@@ -2511,7 +2511,8 @@ class InvitesFlowTest extends TestCaseTenant
         TenantPushSettings::create([
             'firebase' => [
                 'apiKey' => 'key',
-                'appId' => 'app',
+                'androidAppId' => 'android-app',
+                'iosAppId' => 'ios-app',
                 'projectId' => 'project',
                 'messagingSenderId' => 'sender',
                 'storageBucket' => 'bucket',

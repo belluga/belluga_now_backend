@@ -73,7 +73,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser('Attendance User');
-        $this->topicTransport = new FakePushTopicTransport();
+        $this->topicTransport = new FakePushTopicTransport;
         $this->app->instance(PushTopicTransportContract::class, $this->topicTransport);
         Sanctum::actingAs($this->user, ['*']);
     }
@@ -265,7 +265,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
     public function test_confirm_returns_404_for_unknown_event(): void
     {
         $response = $this->postJson("{$this->base_api_tenant}events/missing-event/attendance/confirm", [
-            'occurrence_id' => (string) new \MongoDB\BSON\ObjectId(),
+            'occurrence_id' => (string) new \MongoDB\BSON\ObjectId,
         ]);
         $response->assertStatus(404);
     }
@@ -306,8 +306,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         AccountUser $receiver,
         Event $event,
         string $occurrenceId
-    ): InviteEdge
-    {
+    ): InviteEdge {
         $receiverAccountProfileId = $this->personalAccountProfileIdFor($receiver);
 
         return InviteEdge::query()->create([
@@ -546,7 +545,8 @@ class EventAttendanceControllerTest extends TestCaseTenant
         TenantPushSettings::create([
             'firebase' => [
                 'apiKey' => 'key',
-                'appId' => 'app',
+                'androidAppId' => 'android-app',
+                'iosAppId' => 'ios-app',
                 'projectId' => 'project',
                 'messagingSenderId' => 'sender',
                 'storageBucket' => 'bucket',
