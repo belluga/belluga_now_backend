@@ -105,6 +105,24 @@ final class SettingsNamespaceDefinition
     }
 
     /**
+     * @param  array<string, mixed>  $values
+     * @return array<string, mixed>
+     */
+    public function projectValues(array $values): array
+    {
+        $projected = [];
+        foreach (array_keys($this->fields) as $path) {
+            if (! Arr::has($values, $path)) {
+                continue;
+            }
+
+            Arr::set($projected, $path, Arr::get($values, $path));
+        }
+
+        return $this->applyDefaults($projected);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toSchemaArray(): array

@@ -79,7 +79,7 @@ class TenantEnvironmentPayloadFactory
                 'location_freshness_minutes' => $telemetry['location_freshness_minutes'],
                 'trackers' => $telemetry['trackers'],
             ],
-            'firebase' => $firebase,
+            'firebase' => $this->environmentFirebaseConfig($firebase),
             'push' => $push,
             'profile_types' => $profileTypes,
             'settings' => [
@@ -342,7 +342,9 @@ class TenantEnvironmentPayloadFactory
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
             'telemetry' => $this->normalizeTelemetry($snapshot['telemetry'] ?? []),
-            'firebase' => $this->normalizeBrandingData($snapshot['firebase'] ?? []),
+            'firebase' => $this->environmentFirebaseConfig(
+                $this->normalizeBrandingData($snapshot['firebase'] ?? [])
+            ),
             'push' => $this->normalizeBrandingData($snapshot['push'] ?? []),
             'profile_types' => $this->normalizeProfileTypes(
                 $snapshot['profile_types'] ?? [],
@@ -523,6 +525,25 @@ class TenantEnvironmentPayloadFactory
         $normalized = trim($value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $firebase
+     * @return array<string, mixed>
+     */
+    private function environmentFirebaseConfig(array $firebase): array
+    {
+        $firebase = $this->pushSettings->normalizeFirebaseConfig($firebase);
+        $androidAppId = $this->normalizeOptionalString(
+            $firebase['androidAppId'] ?? null
+        );
+        if ($androidAppId !== null) {
+            // TODO(v0.3.1+16-client-cutoff): remove the environment-only
+            // legacy appId mirror after no active clients below 0.3.1+16 remain.
+            $firebase['appId'] = $androidAppId;
+        }
+
+        return $firebase;
     }
 
     /**

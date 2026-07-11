@@ -89,12 +89,19 @@ class PushSettingsNamespaceRegistrar
                     'label_i18n_key' => 'settings.firebase.api_key.label',
                     'order' => 10,
                 ],
-                'appId' => [
+                'androidAppId' => [
                     'type' => 'string',
                     'nullable' => false,
-                    'label' => 'App ID',
-                    'label_i18n_key' => 'settings.firebase.app_id.label',
-                    'order' => 20,
+                    'label' => 'Android App ID',
+                    'label_i18n_key' => 'settings.firebase.android_app_id.label',
+                    'order' => 25,
+                ],
+                'iosAppId' => [
+                    'type' => 'string',
+                    'nullable' => false,
+                    'label' => 'iOS App ID',
+                    'label_i18n_key' => 'settings.firebase.ios_app_id.label',
+                    'order' => 26,
                 ],
                 'projectId' => [
                     'type' => 'string',

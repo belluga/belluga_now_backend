@@ -57,7 +57,7 @@ class PushSettingsKernelBridge
     {
         $value = $this->settingsStore->getNamespaceValue('firebase');
 
-        return is_array($value) ? $value : [];
+        return is_array($value) ? $this->normalizeFirebaseConfig($value) : [];
     }
 
     /**
@@ -66,7 +66,20 @@ class PushSettingsKernelBridge
      */
     public function patchFirebaseConfig(mixed $user, array $payload): array
     {
-        return $this->settingsMutation->patchNamespace($user, 'firebase', $payload);
+        return $this->normalizeFirebaseConfig(
+            $this->settingsMutation->patchNamespace($user, 'firebase', $payload)
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $firebase
+     * @return array<string, mixed>
+     */
+    public function normalizeFirebaseConfig(array $firebase): array
+    {
+        unset($firebase['appId']);
+
+        return $firebase;
     }
 
     /**
@@ -116,7 +129,14 @@ class PushSettingsKernelBridge
      */
     public function hasRequiredFirebaseConfig(array $firebase): bool
     {
-        $required = ['apiKey', 'appId', 'projectId', 'messagingSenderId', 'storageBucket'];
+        $firebase = $this->normalizeFirebaseConfig($firebase);
+        $required = [
+            'apiKey',
+            'androidAppId',
+            'projectId',
+            'messagingSenderId',
+            'storageBucket',
+        ];
         foreach ($required as $key) {
             $value = $firebase[$key] ?? null;
             if (! is_string($value) || $value === '') {

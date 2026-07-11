@@ -76,7 +76,7 @@ class FavoritesControllerTest extends TestCaseTenant
 
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser(['account-users:view']);
-        $this->topicTransport = new FakePushTopicTransport();
+        $this->topicTransport = new FakePushTopicTransport;
         $this->app->instance(PushTopicTransportContract::class, $this->topicTransport);
 
         Sanctum::actingAs($this->user, ['account-users:view']);
@@ -670,7 +670,8 @@ class FavoritesControllerTest extends TestCaseTenant
         TenantPushSettings::create([
             'firebase' => [
                 'apiKey' => 'key',
-                'appId' => 'app',
+                'androidAppId' => 'android-app',
+                'iosAppId' => 'ios-app',
                 'projectId' => 'project',
                 'messagingSenderId' => 'sender',
                 'storageBucket' => 'bucket',

@@ -2707,6 +2707,24 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
     }
 
+    public function test_event_create_rejects_effectively_empty_untimed_programming_item(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'title' => '<script>alert(1)</script>',
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $this->assertSame(
+            ['programming item must include at least one meaningful field.'],
+            $response->json('errors')['occurrences.0.programming_items.0.title'] ?? null
+        );
+    }
+
     public function test_event_create_persists_mixed_timed_and_untimed_programming_items_in_stable_order_for_admin_and_public_readback(): void
     {
         $openingTitle = '<strong>Abertura</strong><script>alert(1)</script>';
