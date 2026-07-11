@@ -7,6 +7,7 @@ namespace Tests\Feature\Auth;
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\PhoneOtpReviewAccessCodeHasher;
+use App\Application\Push\ContactEnteredAppPushDeliveryService;
 use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -24,6 +25,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -376,6 +378,47 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $repeatVerify->assertStatus(200);
 
         $this->assertSame(1, PushMessage::query()->count());
+    }
+
+    public function test_phone_otp_verification_still_returns_token_when_advisory_contact_push_delivery_throws(): void
+    {
+        Queue::fake();
+        $this->configureOtpWebhook('https://integrations.example/otp');
+
+        $mock = Mockery::mock(ContactEnteredAppPushDeliveryService::class);
+        $mock->shouldReceive('sendToImporters')
+            ->once()
+            ->andThrow(new \RuntimeException('forced advisory push failure'));
+        $this->app->instance(ContactEnteredAppPushDeliveryService::class, $mock);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+55 27 99999-0439',
+            'device_name' => 'android-release-smoke',
+        ]);
+        $challenge->assertStatus(202);
+
+        $otpCode = null;
+        Queue::assertPushed(DeliverPhoneOtpWebhookJob::class, function (DeliverPhoneOtpWebhookJob $job) use (&$otpCode): bool {
+            $otpCode = $job->code();
+
+            return true;
+        });
+        $this->assertIsString($otpCode);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990439',
+            'code' => $otpCode,
+            'device_name' => 'android-release-smoke',
+        ]);
+
+        $verify->assertStatus(200);
+        $verify->assertHeader('X-Api-Security-Domain', 'tenant_public_phone_otp_verify');
+        $this->assertNotEmpty($verify->json('data.token'));
+        $this->assertNotEmpty($verify->json('data.user_id'));
+
+        $storedChallenge = PhoneOtpChallenge::query()->findOrFail($challenge->json('data.challenge_id'));
+        $this->assertSame(PhoneOtpChallenge::STATUS_VERIFIED, (string) $storedChallenge->status);
     }
 
     public function test_phone_otp_verification_migrates_anonymous_contact_imports_to_registered_viewer(): void

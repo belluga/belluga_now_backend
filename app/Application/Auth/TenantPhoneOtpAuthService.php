@@ -166,7 +166,6 @@ class TenantPhoneOtpAuthService
         $this->profileBootstrapper->ensurePersonalAccount($user);
         $user->refresh();
         $newlyMatchedImporterIds = $this->rematchExistingContactImports($user);
-        $this->contactEnteredAppPushes->sendToImporters($newlyMatchedImporterIds, $user);
         [$abilities, $accountId] = $this->resolveTokenIssuanceContext($user);
 
         $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
@@ -176,6 +175,18 @@ class TenantPhoneOtpAuthService
             (string) $tenant->_id,
             $accountId,
         );
+
+        try {
+            $this->contactEnteredAppPushes->sendToImporters($newlyMatchedImporterIds, $user);
+        } catch (\Throwable $exception) {
+            Log::warning('Contact-entered-app advisory push delivery failed after OTP verify.', [
+                'tenant_id' => (string) ($tenant->_id ?? ''),
+                'challenge_id' => (string) $challenge->_id,
+                'user_id' => (string) ($user->_id ?? ''),
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+        }
 
         if ($reviewCodeMatched) {
             Log::info('Phone OTP review access authenticated.', [
