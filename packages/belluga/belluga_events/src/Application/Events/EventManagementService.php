@@ -1104,6 +1104,12 @@ class EventManagementService
                 "{$field}.{$index}.place_ref"
             );
 
+            if ($time === null && $title === null && $profileIds === [] && $placeRef === null) {
+                throw ValidationException::withMessages([
+                    "{$field}.{$index}.title" => ['programming item must include at least one meaningful field.'],
+                ]);
+            }
+
             if (count($profileIds) > 1 && ($title === null || trim(strip_tags($title)) === '')) {
                 throw ValidationException::withMessages([
                     "{$field}.{$index}.title" => ['title is required when more than one linked Account Profile is selected.'],

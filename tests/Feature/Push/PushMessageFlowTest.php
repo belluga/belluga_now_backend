@@ -6,19 +6,18 @@ namespace Tests\Feature\Push;
 
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
-use App\Application\Events\AttendanceCommitmentService;
 use App\Application\Auth\TenantScopedAccessTokenService;
+use App\Application\Events\AttendanceCommitmentService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Push\PushAudienceEligibilityService;
-use App\Domain\Events\Events\OccurrenceAttendanceConfirmed;
-use App\Jobs\Push\ReconcilePushTokenTopicsJob;
-use App\Jobs\Push\SyncEventConfirmedTopicMembershipJob;
-use App\Jobs\Push\SyncFavoriteAccountProfileTopicMembershipJob;
 use App\Application\Push\PushChannelNamingService;
 use App\Application\Push\PushTopicMembershipService;
 use App\Application\Push\PushUserTopicProjectionService;
 use App\Integration\Push\PushUserGatewayAdapter;
+use App\Jobs\Push\ReconcilePushTokenTopicsJob;
+use App\Jobs\Push\SyncEventConfirmedTopicMembershipJob;
+use App\Jobs\Push\SyncFavoriteAccountProfileTopicMembershipJob;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -26,8 +25,8 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
 use Belluga\Events\Models\Tenants\Event;
-use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\Favorites\Domain\Events\FavoriteAdded;
+use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\PushHandler\Contracts\FcmClientContract;
 use Belluga\PushHandler\Contracts\FcmTopicSenderContract;
 use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
@@ -36,22 +35,22 @@ use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Belluga\PushHandler\Domain\Events\PushDeviceRegistered;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
-use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
+use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushMessage;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Belluga\PushHandler\Services\FcmHttpV1Client;
+use Belluga\PushHandler\Services\PushCredentialService;
 use Belluga\PushHandler\Services\PushDeliveryService;
 use Belluga\PushHandler\Services\PushDeviceService;
-use Belluga\PushHandler\Services\PushCredentialService;
 use Belluga\PushHandler\Services\PushRecipientResolver;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Carbon\Carbon;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -1717,7 +1716,8 @@ class PushMessageFlowTest extends TestCase
 
         $payload = [
             'apiKey' => 'key',
-            'appId' => 'app',
+            'androidAppId' => 'android-app',
+            'iosAppId' => 'ios-app',
             'projectId' => 'project',
             'messagingSenderId' => 'sender',
             'storageBucket' => 'bucket',
@@ -1756,7 +1756,8 @@ class PushMessageFlowTest extends TestCase
 
         $payload = [
             'apiKey' => 'tenant-key',
-            'appId' => 'tenant-app',
+            'androidAppId' => 'tenant-android-app',
+            'iosAppId' => 'tenant-ios-app',
             'projectId' => 'tenant-project',
             'messagingSenderId' => 'tenant-sender',
             'storageBucket' => 'tenant-bucket',
@@ -1766,11 +1767,52 @@ class PushMessageFlowTest extends TestCase
         $patch = $this->patchJson($baseApiTenant.'settings/firebase', $payload);
         $patch->assertOk();
         $patch->assertJsonPath('data.projectId', 'tenant-project');
+        $patch->assertJsonPath('data.androidAppId', 'tenant-android-app');
+        $patch->assertJsonPath('data.iosAppId', 'tenant-ios-app');
 
         $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
         $kernelValues->assertOk();
         $kernelValues->assertJsonPath('data.firebase.projectId', 'tenant-project');
         $kernelValues->assertJsonPath('data.firebase.apiKey', 'tenant-key');
+        $kernelValues->assertJsonPath('data.firebase.androidAppId', 'tenant-android-app');
+        $kernelValues->assertJsonPath('data.firebase.iosAppId', 'tenant-ios-app');
+    }
+
+    public function test_tenant_firebase_settings_ignores_persisted_legacy_app_id_in_settings_surfaces(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        TenantSettings::query()->updateOrCreate(
+            ['_id' => TenantSettings::ROOT_ID],
+            [
+                'firebase' => [
+                    'apiKey' => 'legacy-key',
+                    'appId' => 'legacy-android-app',
+                    'androidAppId' => 'canonical-android-app',
+                    'iosAppId' => 'canonical-ios-app',
+                    'projectId' => 'legacy-project',
+                    'messagingSenderId' => 'legacy-sender',
+                    'storageBucket' => 'legacy-bucket',
+                ],
+            ],
+        );
+
+        $baseApiTenant = sprintf('http://%s.%s/api/v1/', $tenant->subdomain, $this->host);
+        $show = $this->getJson($baseApiTenant.'settings/firebase');
+        $show->assertOk();
+        $show->assertJsonPath('data.androidAppId', 'canonical-android-app');
+        $show->assertJsonPath('data.iosAppId', 'canonical-ios-app');
+        $this->assertNull(data_get($show->json('data'), 'appId'));
+
+        $kernelValues = $this->getJson(str_replace('/api/v1/', '/admin/api/v1/', $baseApiTenant).'settings/values');
+        $kernelValues->assertOk();
+        $kernelValues->assertJsonPath('data.firebase.androidAppId', 'canonical-android-app');
+        $kernelValues->assertJsonPath('data.firebase.iosAppId', 'canonical-ios-app');
+        $this->assertNull(data_get($kernelValues->json('data.firebase'), 'appId'));
     }
 
     public function test_landlord_tenant_firebase_settings_admin_endpoints_use_kernel_namespace(): void
@@ -1787,7 +1829,8 @@ class PushMessageFlowTest extends TestCase
 
         $payload = [
             'apiKey' => 'admin-key',
-            'appId' => 'admin-app',
+            'androidAppId' => 'admin-android-app',
+            'iosAppId' => 'admin-ios-app',
             'projectId' => 'admin-project',
             'messagingSenderId' => 'admin-sender',
             'storageBucket' => 'admin-bucket',
@@ -1808,6 +1851,8 @@ class PushMessageFlowTest extends TestCase
         $firebase = $settings?->getAttribute('firebase') ?? [];
         $this->assertSame('admin-project', $firebase['projectId'] ?? null);
         $this->assertSame('admin-key', $firebase['apiKey'] ?? null);
+        $this->assertSame('admin-android-app', $firebase['androidAppId'] ?? null);
+        $this->assertSame('admin-ios-app', $firebase['iosAppId'] ?? null);
     }
 
     public function test_tenant_route_types_update_normalizes_routes(): void
@@ -3124,7 +3169,8 @@ class PushMessageFlowTest extends TestCase
 
         $payload = [
             'apiKey' => 'key',
-            'appId' => 'app',
+            'androidAppId' => 'android-app',
+            'iosAppId' => 'ios-app',
             'projectId' => 'project',
             'messagingSenderId' => 'sender',
             'storageBucket' => 'bucket',
@@ -3291,7 +3337,8 @@ class PushMessageFlowTest extends TestCase
         TenantPushSettings::create([
             'firebase' => [
                 'apiKey' => 'key',
-                'appId' => 'app',
+                'androidAppId' => 'android-app',
+                'iosAppId' => 'ios-app',
                 'projectId' => 'project',
                 'messagingSenderId' => 'sender',
                 'storageBucket' => 'bucket',
@@ -4658,7 +4705,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
@@ -5087,7 +5134,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $user = $this->userService->create($this->account, [
@@ -5123,7 +5170,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $user = $this->userService->create($this->account, [
@@ -5163,7 +5210,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
@@ -5220,7 +5267,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
@@ -5301,7 +5348,7 @@ class PushMessageFlowTest extends TestCase
         $settings->method('hasRequiredFirebaseConfig')->willReturn(true);
 
         $credentials = $this->createMock(PushCredentialService::class);
-        $credentials->method('current')->willReturn(new PushCredential());
+        $credentials->method('current')->willReturn(new PushCredential);
 
         $service = new PushTopicMembershipService(
             transport: $transport,
@@ -5352,7 +5399,7 @@ class PushMessageFlowTest extends TestCase
         $settings->method('hasRequiredFirebaseConfig')->willReturn(true);
 
         $credentials = $this->createMock(PushCredentialService::class);
-        $credentials->method('current')->willReturn(new PushCredential());
+        $credentials->method('current')->willReturn(new PushCredential);
 
         $service = new PushTopicMembershipService(
             transport: $transport,
@@ -5382,7 +5429,7 @@ class PushMessageFlowTest extends TestCase
 
         $eligible = $service->isEligible(
             user: $this->operator,
-            message: new PushMessage(),
+            message: new PushMessage,
             audience: [
                 'type' => 'event_confirmed',
                 'event_id' => 'event-id',
@@ -5401,7 +5448,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $tenant = $this->resolvePrimaryPushTenant();
@@ -5433,7 +5480,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $this->resolvePrimaryPushTenant()->makeCurrent();
@@ -5464,7 +5511,7 @@ class PushMessageFlowTest extends TestCase
 
         $tenant = $this->resolvePrimaryPushTenant();
         $tenant->makeCurrent();
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
         $this->seedPushDevice($user, [
@@ -5517,7 +5564,7 @@ class PushMessageFlowTest extends TestCase
 
         $tenant = $this->resolvePrimaryPushTenant();
         $tenant->makeCurrent();
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
         $user = AccountUser::query()->where('_id', $this->operator->_id)->firstOrFail();
         $this->seedPushDevice($user, [
@@ -5557,7 +5604,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ]));
 
-        $transport = new \Tests\Fakes\FakePushTopicTransport();
+        $transport = new \Tests\Fakes\FakePushTopicTransport;
         $this->app->instance(\Belluga\PushHandler\Contracts\PushTopicTransportContract::class, $transport);
 
         $primaryTenant = $this->resolvePrimaryPushTenant();
@@ -5665,9 +5712,9 @@ class PushMessageFlowTest extends TestCase
         $this->assertStringContainsString("options(['batchSize' => \$chunkSize])", $gatewaySource);
         $this->assertStringContainsString("orderBy('_id')", $gatewaySource);
         $this->assertStringContainsString("where('_id', '>', \$lastSeenId)", $gatewaySource);
-        $this->assertStringContainsString("limit(\$chunkSize)", $gatewaySource);
+        $this->assertStringContainsString('limit($chunkSize)', $gatewaySource);
         $this->assertStringContainsString("get(['_id', 'account_user_id', 'push_token'])", $gatewaySource);
-        $this->assertStringNotContainsString("\$upperBoundId", $gatewaySource);
+        $this->assertStringNotContainsString('$upperBoundId', $gatewaySource);
         $this->assertStringNotContainsString("get(['_id', 'devices'])", $gatewaySource);
     }
 
@@ -6240,7 +6287,8 @@ class PushMessageFlowTest extends TestCase
         $payload = [
             'firebase' => [
                 'apiKey' => 'key',
-                'appId' => 'app',
+                'androidAppId' => 'android-app',
+                'iosAppId' => 'ios-app',
                 'projectId' => 'project',
                 'messagingSenderId' => 'sender',
                 'storageBucket' => 'bucket',
@@ -6371,8 +6419,7 @@ class PushMessageFlowTest extends TestCase
                     array &$topics,
                     private readonly int $acceptedCount,
                     private readonly string $status,
-                )
-                {
+                ) {
                     $this->topics = &$topics;
                 }
 
