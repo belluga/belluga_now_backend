@@ -2,8 +2,8 @@
 
 namespace Tests\Api\v1\Tenants\Auth;
 
-use App\Models\Landlord\Tenant;
 use App\Application\Push\PushChannelNamingService;
+use App\Models\Landlord\Tenant;
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
@@ -28,7 +28,7 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         parent::setUp();
         config(['queue.default' => 'sync']);
 
-        $this->topicTransport = new FakePushTopicTransport();
+        $this->topicTransport = new FakePushTopicTransport;
         $this->app->instance(PushTopicTransportContract::class, $this->topicTransport);
     }
 
@@ -173,7 +173,8 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         TenantPushSettings::create([
             'firebase' => [
                 'apiKey' => 'key',
-                'appId' => 'app',
+                'androidAppId' => 'android-app',
+                'iosAppId' => 'ios-app',
                 'projectId' => 'project',
                 'messagingSenderId' => 'sender',
                 'storageBucket' => 'bucket',

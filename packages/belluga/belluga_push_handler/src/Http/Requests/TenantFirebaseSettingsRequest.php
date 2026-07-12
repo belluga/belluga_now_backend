@@ -18,7 +18,8 @@ class TenantFirebaseSettingsRequest extends FormRequest
     {
         return [
             'apiKey' => ['sometimes', 'string'],
-            'appId' => ['sometimes', 'string'],
+            'androidAppId' => ['sometimes', 'string'],
+            'iosAppId' => ['sometimes', 'string'],
             'projectId' => ['sometimes', 'string'],
             'messagingSenderId' => ['sometimes', 'string'],
             'storageBucket' => ['sometimes', 'string'],
@@ -34,7 +35,14 @@ class TenantFirebaseSettingsRequest extends FormRequest
                 return;
             }
 
-            $allowedKeys = ['apiKey', 'appId', 'projectId', 'messagingSenderId', 'storageBucket'];
+            $allowedKeys = [
+                'apiKey',
+                'androidAppId',
+                'iosAppId',
+                'projectId',
+                'messagingSenderId',
+                'storageBucket',
+            ];
             $disallowedMessages = [
                 'firebase' => 'Use direct payload keys for firebase settings instead of a firebase envelope.',
                 'push' => 'Use /settings/push instead.',
@@ -64,7 +72,7 @@ class TenantFirebaseSettingsRequest extends FormRequest
             }
 
             if (! $hasAllowed) {
-                $validator->errors()->add('payload', 'At least one patchable key is required (apiKey, appId, projectId, messagingSenderId, storageBucket).');
+                $validator->errors()->add('payload', 'At least one patchable key is required (apiKey, androidAppId, iosAppId, projectId, messagingSenderId, storageBucket).');
             }
         });
     }

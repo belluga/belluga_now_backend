@@ -2280,13 +2280,13 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->band->_id, data_get($freshSecond, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('bandas', data_get($freshSecond, 'own_profile_groups.0.id'));
         $this->assertSame('clinic', data_get($freshSecond, 'own_taxonomy_terms.0.value'));
-        $this->assertSame('Segunda programacao', data_get($freshSecond, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Segunda programacao'), data_get($freshSecond, 'programming_items.0.title'));
 
         $this->assertOccurrenceIndexAbsent($freshFirst);
         $this->assertSame((string) $this->artist->_id, data_get($freshFirst, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('atracoes', data_get($freshFirst, 'own_profile_groups.0.id'));
         $this->assertSame('showcase', data_get($freshFirst, 'own_taxonomy_terms.0.value'));
-        $this->assertSame('Primeira programacao', data_get($freshFirst, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Primeira programacao'), data_get($freshFirst, 'programming_items.0.title'));
     }
 
     public function test_event_update_inserting_unidentified_occurrence_preserves_existing_identity_rows(): void
@@ -2381,7 +2381,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertNotSame($firstOccurrenceId, (string) $insertedOccurrence->_id);
         $this->assertNotSame($secondOccurrenceId, (string) $insertedOccurrence->_id);
-        $this->assertSame('Nova programacao', data_get($insertedOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Nova programacao'), data_get($insertedOccurrence, 'programming_items.0.title'));
         $occurrenceSlugs = [
             (string) $insertedOccurrence->occurrence_slug,
             (string) $freshFirst->occurrence_slug,
@@ -2394,12 +2394,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->artist->_id, data_get($freshFirst, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('atracoes', data_get($freshFirst, 'own_profile_groups.0.id'));
         $this->assertSame('showcase', data_get($freshFirst, 'own_taxonomy_terms.0.value'));
-        $this->assertSame('Primeira programacao', data_get($freshFirst, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Primeira programacao'), data_get($freshFirst, 'programming_items.0.title'));
 
         $this->assertOccurrenceIndexAbsent($freshSecond);
         $this->assertSame((string) $this->band->_id, data_get($freshSecond, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('bandas', data_get($freshSecond, 'own_profile_groups.0.id'));
-        $this->assertSame('Segunda programacao', data_get($freshSecond, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Segunda programacao'), data_get($freshSecond, 'programming_items.0.title'));
     }
 
     public function test_event_update_readding_occurrence_after_removal_reuses_freed_indexes_without_duplicate_key(): void
@@ -2515,7 +2515,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertOccurrenceIndexAbsent($freshSecond);
         $this->assertOccurrenceIndexAbsent($insertedOccurrence);
         $this->assertNotSame($thirdOccurrenceId, (string) $insertedOccurrence->_id);
-        $this->assertSame('Programacao re-adicionada', data_get($insertedOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Programacao re-adicionada'), data_get($insertedOccurrence, 'programming_items.0.title'));
         $this->assertNotNull($deletedThird->deleted_at);
         $this->assertOccurrenceIndexAbsent($deletedThird);
     }
@@ -2705,6 +2705,291 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors([
             'occurrences.0.programming_items.0.end_time',
         ]);
+    }
+
+    public function test_event_create_rejects_effectively_empty_untimed_programming_item(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'title' => '<script>alert(1)</script>',
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $this->assertSame(
+            ['programming item must include at least one meaningful field.'],
+            $response->json('errors')['occurrences.0.programming_items.0.title'] ?? null
+        );
+    }
+
+    public function test_event_create_persists_mixed_timed_and_untimed_programming_items_in_stable_order_for_admin_and_public_readback(): void
+    {
+        $openingTitle = '<strong>Abertura</strong><script>alert(1)</script>';
+        $sequentialTitle = '<p>Intervalo <em>sequencial</em></p><script>alert(2)</script>';
+        $closingTitle = 'Encerramento';
+
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [
+            [
+                'time' => '17:00',
+                'end_time' => '18:00',
+                'title' => $openingTitle,
+            ],
+            [
+                'title' => $sequentialTitle,
+            ],
+            [
+                'time' => '20:00',
+                'title' => $closingTitle,
+            ],
+        ];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $created->assertStatus(201);
+        $created->assertJsonPath('data.occurrences.0.programming_items.0.time', '17:00');
+        $created->assertJsonPath('data.occurrences.0.programming_items.1.time', null);
+        $created->assertJsonPath('data.occurrences.0.programming_items.2.time', '20:00');
+        $created->assertJsonPath('data.occurrences.0.programming_items.0.end_time', '18:00');
+        $created->assertJsonPath('data.occurrences.0.programming_items.1.end_time', null);
+        $created->assertJsonPath('data.occurrences.0.programming_items.0.title', '<p><strong>Abertura</strong></p>');
+        $created->assertJsonPath('data.occurrences.0.programming_items.1.title', '<p>Intervalo <em>sequencial</em></p>');
+        $created->assertJsonPath('data.occurrences.0.programming_items.2.title', $this->sanitizedProgrammingTitle($closingTitle));
+
+        $eventId = (string) $created->json('data.event_id');
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $storedProgrammingItems = data_get($storedOccurrence, 'programming_items', []);
+        $this->assertCount(3, $storedProgrammingItems);
+        usort($storedProgrammingItems, static fn (array $left, array $right): int => ($left['sequence'] ?? 0) <=> ($right['sequence'] ?? 0));
+        $this->assertSame(
+            [
+                [
+                    'sequence' => 0,
+                    'time' => '17:00',
+                    'title' => '<p><strong>Abertura</strong></p>',
+                ],
+                [
+                    'sequence' => 1,
+                    'time' => null,
+                    'title' => '<p>Intervalo <em>sequencial</em></p>',
+                ],
+                [
+                    'sequence' => 2,
+                    'time' => '20:00',
+                    'title' => $this->sanitizedProgrammingTitle($closingTitle),
+                ],
+            ],
+            array_map(
+                static fn (array $item): array => [
+                    'sequence' => $item['sequence'] ?? null,
+                    'time' => $item['time'] ?? null,
+                    'title' => $item['title'] ?? null,
+                ],
+                $storedProgrammingItems
+            )
+        );
+
+        $publicDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$storedOccurrence->_id}");
+        $publicDetail->assertStatus(200);
+        $publicDetail->assertJsonPath('data.programming_items.0.time', '17:00');
+        $publicDetail->assertJsonPath('data.programming_items.1.time', null);
+        $publicDetail->assertJsonPath('data.programming_items.2.time', '20:00');
+        $publicDetail->assertJsonPath('data.programming_items.0.title', '<p><strong>Abertura</strong></p>');
+        $publicDetail->assertJsonPath('data.programming_items.1.title', '<p>Intervalo <em>sequencial</em></p>');
+        $publicDetail->assertJsonPath('data.programming_items.2.title', $this->sanitizedProgrammingTitle($closingTitle));
+        $publicDetail->assertJsonMissingPath('data.programming_items.0.title.<script>');
+        $this->assertStringNotContainsString('<script>', (string) $publicDetail->json('data.programming_items.0.title'));
+        $this->assertStringNotContainsString('<script>', (string) $publicDetail->json('data.programming_items.1.title'));
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $adminDetail = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
+        $adminDetail->assertStatus(200);
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.0.time', '17:00');
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.1.time', null);
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.2.time', '20:00');
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.0.title', '<p><strong>Abertura</strong></p>');
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.1.title', '<p>Intervalo <em>sequencial</em></p>');
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.2.title', $this->sanitizedProgrammingTitle($closingTitle));
+    }
+
+    public function test_event_create_rejects_programming_item_end_time_without_time(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'end_time' => '18:30',
+            'title' => 'Missing time',
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $this->assertSame(
+            ['end_time requires time.'],
+            $response->json('errors')['occurrences.0.programming_items.0.end_time'] ?? null
+        );
+    }
+
+    public function test_event_occurrence_sync_service_reapplies_sequence_order_when_source_programming_items_are_scrambled(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [
+            [
+                'time' => '17:00',
+                'title' => 'Primeiro bloco',
+            ],
+            [
+                'title' => 'Segundo bloco',
+            ],
+            [
+                'time' => '20:00',
+                'title' => 'Terceiro bloco',
+            ],
+        ];
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+
+        $syncOccurrences = $created->json('data.occurrences') ?? [];
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $storedItems = data_get($storedOccurrence, 'programming_items', []);
+        $this->assertCount(3, $storedItems);
+
+        data_set($syncOccurrences, '0.programming_items', [
+            $storedItems[2],
+            $storedItems[0],
+            $storedItems[1],
+        ]);
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event->fresh(), $syncOccurrences);
+
+        $syncedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $syncedProgrammingItems = data_get($syncedOccurrence, 'programming_items', []);
+
+        $this->assertSame(
+            [
+                $this->sanitizedProgrammingTitle('Primeiro bloco'),
+                $this->sanitizedProgrammingTitle('Segundo bloco'),
+                $this->sanitizedProgrammingTitle('Terceiro bloco'),
+            ],
+            array_map(
+                static fn (array $item): ?string => $item['title'] ?? null,
+                $syncedProgrammingItems
+            )
+        );
+        $this->assertSame(
+            [0, 1, 2],
+            array_map(
+                static fn (array $item): ?int => isset($item['sequence']) ? (int) $item['sequence'] : null,
+                $syncedProgrammingItems
+            )
+        );
+    }
+
+    public function test_event_update_persists_mixed_timed_and_untimed_programming_items_in_stable_order_for_admin_and_public_readback(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(1),
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $occurrenceId = (string) $created->json('data.occurrences.0.occurrence_id');
+        $dateTimeStart = (string) $created->json('data.occurrences.0.date_time_start');
+        $dateTimeEnd = (string) $created->json('data.occurrences.0.date_time_end');
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'occurrences' => [[
+                'occurrence_id' => $occurrenceId,
+                'date_time_start' => $dateTimeStart,
+                'date_time_end' => $dateTimeEnd,
+                'programming_items' => [
+                    [
+                        'time' => '18:00',
+                        'title' => 'Primeiro ato',
+                    ],
+                    [
+                        'title' => 'Intervalo sequencial',
+                    ],
+                    [
+                        'time' => '20:30',
+                        'end_time' => '21:00',
+                        'title' => 'Encerramento final',
+                    ],
+                ],
+            ]],
+        ]);
+
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.occurrences.0.programming_items.0.time', '18:00');
+        $updated->assertJsonPath('data.occurrences.0.programming_items.1.time', null);
+        $updated->assertJsonPath('data.occurrences.0.programming_items.2.time', '20:30');
+        $updated->assertJsonPath('data.occurrences.0.programming_items.2.end_time', '21:00');
+
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $storedProgrammingItems = data_get($storedOccurrence, 'programming_items', []);
+        $this->assertCount(3, $storedProgrammingItems);
+        usort($storedProgrammingItems, static fn (array $left, array $right): int => ($left['sequence'] ?? 0) <=> ($right['sequence'] ?? 0));
+        $this->assertSame(
+            [
+                [
+                    'sequence' => 0,
+                    'time' => '18:00',
+                    'end_time' => null,
+                    'title' => $this->sanitizedProgrammingTitle('Primeiro ato'),
+                ],
+                [
+                    'sequence' => 1,
+                    'time' => null,
+                    'end_time' => null,
+                    'title' => $this->sanitizedProgrammingTitle('Intervalo sequencial'),
+                ],
+                [
+                    'sequence' => 2,
+                    'time' => '20:30',
+                    'end_time' => '21:00',
+                    'title' => $this->sanitizedProgrammingTitle('Encerramento final'),
+                ],
+            ],
+            array_map(
+                static fn (array $item): array => [
+                    'sequence' => $item['sequence'] ?? null,
+                    'time' => $item['time'] ?? null,
+                    'end_time' => $item['end_time'] ?? null,
+                    'title' => $item['title'] ?? null,
+                ],
+                $storedProgrammingItems
+            )
+        );
+
+        $publicDetail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$storedOccurrence->_id}");
+        $publicDetail->assertStatus(200);
+        $publicDetail->assertJsonPath('data.programming_items.0.time', '18:00');
+        $publicDetail->assertJsonPath('data.programming_items.1.time', null);
+        $publicDetail->assertJsonPath('data.programming_items.2.time', '20:30');
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $adminDetail = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
+        $adminDetail->assertStatus(200);
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.0.time', '18:00');
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.1.time', null);
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.2.time', '20:30');
     }
 
     public function test_event_create_rejects_occurrence_taxonomy_not_allowed_by_event_type(): void
@@ -4069,20 +4354,20 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.title', 'Atualizado com multipart');
         $response->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
-        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $response->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
 
         $freshSecondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
         $this->assertSame((string) $this->band->_id, data_get($freshSecondOccurrence, 'own_event_parties.0.party_ref_id'));
         $this->assertSame('17:00', data_get($freshSecondOccurrence, 'programming_items.0.time'));
-        $this->assertSame('Show com a banda', data_get($freshSecondOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Show com a banda'), data_get($freshSecondOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->venue->_id, data_get($freshSecondOccurrence, 'programming_items.0.place_ref.id'));
 
         $reloaded = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $reloaded->assertStatus(200);
         $reloaded->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
-        $reloaded->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+        $reloaded->assertJsonPath('data.occurrences.1.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $reloaded->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
     }
 
@@ -4116,7 +4401,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $reloaded->assertStatus(200);
         $reloaded->assertJsonPath('data.occurrences.0.own_linked_account_profiles.0.id', (string) $this->band->_id);
-        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.title', 'Show com a banda');
+        $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.account_profile_ids.0', (string) $this->band->_id);
         $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.place_ref.id', (string) $this->venue->_id);
     }
@@ -4667,7 +4952,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonPath('data.occurrences.1.has_location_override', false);
         $response->assertJsonPath('data.occurrences.1.own_linked_account_profiles.0.id', (string) $this->band->_id);
-        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.occurrences.1.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $response->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
         $response->assertJsonPath('data.occurrences.1.programming_items.0.location_profile.id', (string) $this->venue->_id);
         $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
@@ -4690,7 +4975,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'linked_account_profiles.0.id'));
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'linked_account_profiles.1.id'));
         $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
-        $this->assertSame('Show com a banda', data_get($secondOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Show com a banda'), data_get($secondOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
         $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.place_ref.id'));
         $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.location_profile.id'));
@@ -5954,7 +6239,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.longitude', -40);
         $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $this->artist->_id);
         $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
-        $response->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $response->assertJsonPath('data.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $response->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
         $response->assertJsonPath('data.programming_items.0.place_ref.id', (string) $this->venue->_id);
         $response->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
@@ -6013,7 +6298,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'data.venue.public_detail_path',
             '/parceiro/'.(string) $this->venue->slug
         );
-        $aliasResponse->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $aliasResponse->assertJsonPath('data.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $aliasResponse->assertJsonPath('data.programming_items.0.location_profile.id', (string) $this->venue->_id);
 
         $staleQueryResponse = $this->getJson("{$this->base_api_tenant}events/{$secondOccurrence->occurrence_slug}?occurrence=000000000000000000000000");
@@ -6224,13 +6509,13 @@ class EventCrudControllerTest extends TestCaseTenant
         $firstRead->assertStatus(200);
         $firstRead->assertJsonPath('data.occurrence_id', (string) $firstSelectedOccurrence->_id);
         $firstRead->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
-        $firstRead->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $firstRead->assertJsonPath('data.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $firstRead->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
 
         $secondRead = $this->getJson("{$this->base_api_tenant}events/{$secondEventId}?occurrence={$secondSelectedOccurrence->_id}");
         $secondRead->assertStatus(200);
         $secondRead->assertJsonPath('data.occurrence_id', (string) $secondSelectedOccurrence->_id);
-        $secondRead->assertJsonPath('data.programming_items.0.title', 'Pocket show');
+        $secondRead->assertJsonPath('data.programming_items.0.title', $this->sanitizedProgrammingTitle('Pocket show'));
         $secondRead->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->artist->_id);
         $this->assertTrue(
             collect($secondRead->json('data.linked_account_profiles') ?? [])
@@ -6241,19 +6526,19 @@ class EventCrudControllerTest extends TestCaseTenant
         $firstReadAgain->assertStatus(200);
         $firstReadAgain->assertJsonPath('data.occurrence_id', (string) $firstSelectedOccurrence->_id);
         $firstReadAgain->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
-        $firstReadAgain->assertJsonPath('data.programming_items.0.title', 'Show com a banda');
+        $firstReadAgain->assertJsonPath('data.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $firstReadAgain->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
 
         $freshFirstSelectedOccurrence = $firstSelectedOccurrence->fresh();
         $freshSecondSelectedOccurrence = $secondSelectedOccurrence->fresh();
 
         $this->assertSame('17:00', data_get($freshFirstSelectedOccurrence, 'programming_items.0.time'));
-        $this->assertSame('Show com a banda', data_get($freshFirstSelectedOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Show com a banda'), data_get($freshFirstSelectedOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->band->_id, data_get($freshFirstSelectedOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
         $this->assertSame((string) $this->band->_id, data_get($freshFirstSelectedOccurrence, 'own_linked_account_profiles.0.id'));
 
         $this->assertSame('19:00', data_get($freshSecondSelectedOccurrence, 'programming_items.0.time'));
-        $this->assertSame('Pocket show', data_get($freshSecondSelectedOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Pocket show'), data_get($freshSecondSelectedOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
         $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'own_linked_account_profiles.0.id'));
     }
@@ -6368,6 +6653,55 @@ class EventCrudControllerTest extends TestCaseTenant
         $occurrences = $this->makeOccurrences(2);
         $occurrences[0]['programming_items'] = [[
             'time' => '17:00',
+            'account_profile_ids' => [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+            ],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'occurrences.0.programming_items.0.title',
+        ]);
+    }
+
+    public function test_event_create_allows_rich_programming_title_when_more_than_one_profile_is_linked(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => '<strong>Dupla principal</strong><script>alert(1)</script>',
+            'account_profile_ids' => [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+            ],
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
+
+        $response->assertStatus(201);
+        $response->assertJsonPath(
+            'data.occurrences.0.programming_items.0.title',
+            '<p><strong>Dupla principal</strong></p>'
+        );
+        $this->assertStringNotContainsString(
+            '<script>',
+            (string) $response->json('data.occurrences.0.programming_items.0.title')
+        );
+    }
+
+    public function test_event_create_rejects_effectively_empty_rich_programming_title_when_more_than_one_profile_is_linked(): void
+    {
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['programming_items'] = [[
+            'time' => '17:00',
+            'title' => '<p> </p>',
             'account_profile_ids' => [
                 (string) $this->artist->_id,
                 (string) $this->band->_id,
@@ -6960,7 +7294,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('bandas', data_get($secondOccurrence, 'own_profile_groups.0.id'));
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_linked_account_profiles.0.id'));
         $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
-        $this->assertSame('Show com a banda', data_get($secondOccurrence, 'programming_items.0.title'));
+        $this->assertSame($this->sanitizedProgrammingTitle('Show com a banda'), data_get($secondOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
         $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'programming_items.0.place_ref.id'));
     }
@@ -7389,6 +7723,11 @@ class EventCrudControllerTest extends TestCaseTenant
         $bodyBytes = max(0, $targetBytes - $wrapperBytes);
 
         return '<p>'.str_repeat('a', $bodyBytes).'</p>';
+    }
+
+    private function sanitizedProgrammingTitle(string $text): string
+    {
+        return "<p>{$text}</p>";
     }
 
     private function createEvent(array $overrides = []): Event

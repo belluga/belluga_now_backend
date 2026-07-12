@@ -77,7 +77,7 @@ class SettingsKernelService
             return $this->resolvedNamespaceValue($scope, $definition);
         }
 
-        return $definition->applyDefaults(
+        return $definition->projectValues(
             $this->store->mergeNamespace($scope, $namespace, $changes, $definition)
         );
     }
@@ -125,7 +125,7 @@ class SettingsKernelService
      */
     private function resolvedNamespaceValue(string $scope, SettingsNamespaceDefinition $definition): array
     {
-        return $definition->applyDefaults(
+        return $definition->projectValues(
             $this->store->getNamespaceValue($scope, $definition->namespace)
         );
     }

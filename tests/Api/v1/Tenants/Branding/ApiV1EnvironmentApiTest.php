@@ -17,10 +17,10 @@ use App\Models\Tenants\TenantSettings as AppTenantSettings;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 
@@ -571,6 +571,42 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('telemetry.trackers.0.type', 'mixpanel');
         $response->assertJsonPath('telemetry.trackers.0.token', 'kernel-token');
         $response->assertJsonPath('telemetry.trackers.0.events.0', 'invite_received');
+    }
+
+    public function test_environment_api_exposes_platform_firebase_app_ids_with_legacy_android_mirror(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        TenantSettings::query()->updateOrCreate(
+            ['_id' => TenantSettings::ROOT_ID],
+            [
+                'firebase' => [
+                    'apiKey' => 'tenant-firebase-key',
+                    'androidAppId' => '1:249193301334:android:f73db77742a1b07f2302f7',
+                    'iosAppId' => '1:249193301334:ios:ce4aca6dbb545ca02302f7',
+                    'projectId' => 'guarappari',
+                    'messagingSenderId' => '249193301334',
+                    'storageBucket' => 'guarappari.firebasestorage.app',
+                ],
+            ],
+        );
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath(
+            'firebase.androidAppId',
+            '1:249193301334:android:f73db77742a1b07f2302f7',
+        );
+        $response->assertJsonPath(
+            'firebase.iosAppId',
+            '1:249193301334:ios:ce4aca6dbb545ca02302f7',
+        );
+        $response->assertJsonPath(
+            'firebase.appId',
+            '1:249193301334:android:f73db77742a1b07f2302f7',
+        );
     }
 
     public function test_environment_api_exposes_tenant_public_auth_from_persisted_settings(): void
