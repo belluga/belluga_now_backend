@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "channels": {
+    "email": {
+      "capabilities": {
+        "public_card": true,
+        "direct_launch": true,
+        "bubble": false,
+        "message_presets": false,
+        "repeatable": true,
+        "max_initial_messages": 0,
+        "max_initial_message_cta_length": 0,
+        "max_initial_message_length": 0
+      },
+      "vectors": [
+        {
+          "raw_value": " Primary@Example.test ",
+          "normalized_value": "primary@example.test",
+          "launch_uri": "mailto:primary%40example.test"
+        },
+        {
+          "raw_value": "not-an-email",
+          "normalized_value": null,
+          "launch_uri": null
+        }
+      ]
+    },
+    "whatsapp": {
+      "capabilities": {
+        "public_card": true,
+        "direct_launch": true,
+        "bubble": true,
+        "message_presets": true,
+        "repeatable": true,
+        "max_initial_messages": 20,
+        "max_initial_message_cta_length": 255,
+        "max_initial_message_length": 1000
+      },
+      "vectors": [
+        {
+          "raw_value": "+55 (27) 99999-1111",
+          "normalized_value": "+55 (27) 99999-1111",
+          "launch_uri": "https://wa.me/5527999991111",
+          "launch_uri_with_message": "https://wa.me/5527999991111?text=Hello%20there"
+        },
+        {
+          "raw_value": "https://wa.me/552799991112",
+          "normalized_value": "https://wa.me/552799991112",
+          "launch_uri": "https://wa.me/552799991112"
+        },
+        {
+          "raw_value": "not-a-whatsapp-target",
+          "normalized_value": null,
+          "launch_uri": null
+        }
+      ]
+    }
+  },
+  "collection_invariants": {
+    "max_channels": 20,
+    "titles_required_when_type_repeats": true,
+    "cta_ids_unique_within_parent_channel": true,
+    "new_channel_requires_draft_key": true,
+    "persisted_channel_ids_are_server_owned_and_immutable": true
+  }
+}

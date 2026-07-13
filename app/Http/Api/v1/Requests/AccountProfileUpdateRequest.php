@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileContactChannels;
 use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileRichText;
 use App\Support\Validation\InputConstraints;
 use Closure;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class AccountProfileUpdateRequest extends FormRequest
 {
+    use ValidatesAccountProfileContactChannels;
     use ValidatesAccountProfileRichText;
 
     private const MIN_VISIBLE_PUBLIC_NAME_LENGTH = 3;
@@ -50,6 +52,7 @@ class AccountProfileUpdateRequest extends FormRequest
             'cover_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'remove_avatar' => 'sometimes|boolean',
             'remove_cover' => 'sometimes|boolean',
+            ...$this->accountProfileContactChannelRules(),
         ];
     }
 

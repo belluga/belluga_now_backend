@@ -25,6 +25,7 @@ class AccountProfileManagementService
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly MapPoiProjectionService $mapPoiProjectionService,
     ) {}
 
@@ -93,6 +94,11 @@ class AccountProfileManagementService
                 $payload['nested_profile_groups']
             );
         }
+
+        $payload = [
+            ...$payload,
+            ...$this->contactChannelsService->normalizeForWrite($profileType, $payload),
+        ];
 
         try {
             if (! array_key_exists('is_active', $payload)) {
@@ -182,6 +188,15 @@ class AccountProfileManagementService
                 (string) $profile->getKey()
             );
         }
+
+        $attributes = [
+            ...$attributes,
+            ...$this->contactChannelsService->normalizeForWrite(
+                $profileType,
+                $attributes,
+                $profile,
+            ),
+        ];
 
         try {
             $profile->fill($attributes);

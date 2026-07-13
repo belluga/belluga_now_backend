@@ -42,6 +42,9 @@
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
+        <testsuite name="Package-ContactChannels">
+            <directory>packages/belluga/belluga_contact_channels/tests</directory>
+        </testsuite>
         <testsuite name="Initialization">
             <file>tests/Api/v1/Initialization/ApiV1InitializeTest.php</file>
         </testsuite>

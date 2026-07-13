@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8f78dc0ad99824f96d4e2fbb8753a2f7",
+    "content-hash": "d840083bd15e958ccae5722d827e19aa",
     "packages": [
         {
             "name": "amphp/amp",
@@ -813,6 +813,31 @@
                 }
             ],
             "time": "2024-08-03T19:31:26+00:00"
+        },
+        {
+            "name": "belluga/contact-channels",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "packages/belluga/belluga_contact_channels",
+                "reference": "cd6f4cb005f3a183e3da2f46edef7a59936a8bf3"
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Belluga\\ContactChannels\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Framework-neutral contact-channel definitions, validation, and collection normalization for Belluga.",
+            "transport-options": {
+                "relative": true
+            }
         },
         {
             "name": "beste/clock",
@@ -11687,7 +11712,9 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "belluga/contact-channels": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

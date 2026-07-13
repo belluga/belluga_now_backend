@@ -1,0 +1,14 @@
+{
+  "name": "belluga/contact-channels",
+  "description": "Framework-neutral contact-channel definitions, validation, and collection normalization for Belluga.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Belluga\\ContactChannels\\": "src/"
+    }
+  },
+  "require": {
+    "php": "^8.4"
+  }
+}
