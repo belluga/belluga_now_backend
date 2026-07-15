@@ -5,6 +5,7 @@ use App\Http\Api\v1\Controllers\AccountProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
 use App\Http\Api\v1\Controllers\BrandingPublicWebMediaController;
+use App\Http\Api\v1\Controllers\CurrentTenantAccountDeletionController;
 use App\Http\Api\v1\Controllers\EnvironmentController;
 use App\Http\Api\v1\Controllers\EventTypeMediaController;
 use App\Http\Api\v1\Controllers\MapFilterImageMediaController;
@@ -82,6 +83,8 @@ Route::middleware('tenant')->group(function () {
                 ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
             Route::patch('/', [ProfileControllerTenant::class, 'updateProfile']);
+
+            Route::delete('/', CurrentTenantAccountDeletionController::class);
 
             Route::patch('/emails', [ProfileControllerTenant::class, 'addEmails']);
 

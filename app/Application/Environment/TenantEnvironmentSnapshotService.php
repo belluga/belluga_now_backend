@@ -237,7 +237,7 @@ class TenantEnvironmentSnapshotService
         Context::add($contextKey, $tenantId);
 
         try {
-            RebuildTenantEnvironmentSnapshotJob::dispatch($reason, $context);
+            RebuildTenantEnvironmentSnapshotJob::dispatch($tenantId, $reason, $context);
         } finally {
             $restoreTenant = null;
             if ($restoreTenantId !== '') {

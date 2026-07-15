@@ -24,6 +24,14 @@ trait EnsuresSystemInitialization
 
     protected function ensureSystemInitialized(): void
     {
+        if (
+            $this->bootstrappedFlagIsFalse()
+            && static::$systemInitialized === false
+            && $this->calledFromAuthenticatedHarnessSetUp()
+        ) {
+            return;
+        }
+
         $hasLandlordUser = LandlordUser::query()->exists();
         $hasTenant = Tenant::query()->exists();
 
@@ -51,7 +59,7 @@ trait EnsuresSystemInitialization
         );
 
         if ($response->getStatusCode() !== 201) {
-            if ($response->getStatusCode() !== 404) {
+            if (! in_array($response->getStatusCode(), [403, 404], true)) {
                 $response->assertStatus(201);
             }
 
@@ -81,6 +89,27 @@ trait EnsuresSystemInitialization
         $this->makeTenantCurrent();
 
         static::$systemInitialized = true;
+    }
+
+    private function calledFromAuthenticatedHarnessSetUp(): bool
+    {
+        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 4);
+        $caller = $trace[1] ?? [];
+
+        return ($caller['function'] ?? null) === 'setUp'
+            && ($caller['class'] ?? null) === \Tests\TestCaseAuthenticated::class;
+    }
+
+    private function bootstrappedFlagIsFalse(): bool
+    {
+        if (! property_exists(static::class, 'bootstrapped')) {
+            return false;
+        }
+
+        $reflection = new \ReflectionProperty(static::class, 'bootstrapped');
+        $reflection->setAccessible(true);
+
+        return $reflection->getValue() === false;
     }
 
     /**

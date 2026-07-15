@@ -85,6 +85,11 @@ class TenantProfileType extends Model
         return $query->whereRaw(self::galleryEnabledCapabilityExpression());
     }
 
+    public function scopeContactChannelsEnabled($query)
+    {
+        return $query->where('capabilities.has_contact_channels', true);
+    }
+
     /**
      * @return array<string, mixed>
      */

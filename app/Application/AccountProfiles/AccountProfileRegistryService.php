@@ -155,6 +155,17 @@ class AccountProfileRegistryService
         );
     }
 
+    public function hasContactChannels(string $profileType): bool
+    {
+        $definition = $this->typeDefinition($profileType);
+        $capabilities = $definition['capabilities'] ?? [];
+
+        return $this->capabilityCatalog->isEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
+            is_array($capabilities) ? $capabilities : [],
+        );
+    }
+
     /**
      * @return array<string, string>|null
      */

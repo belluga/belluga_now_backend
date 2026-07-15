@@ -31,6 +31,10 @@ class AccountProfile extends Model
         'location',
         'nested_profile_groups',
         'gallery_groups',
+        'contact_mode',
+        'contact_source_account_profile_id',
+        'contact_channels',
+        'contact_bubble_channel_id',
         'bio',
         'content',
         'avatar_url',
@@ -82,6 +86,14 @@ class AccountProfile extends Model
      * @return array<int|string, mixed>
      */
     public function getGalleryGroupsAttribute(mixed $value): array
+    {
+        return $this->normalizeNestedArray($value);
+    }
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    public function getContactChannelsAttribute(mixed $value): array
     {
         return $this->normalizeNestedArray($value);
     }

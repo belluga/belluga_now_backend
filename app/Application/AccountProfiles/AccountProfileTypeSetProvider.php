@@ -114,6 +114,21 @@ final class AccountProfileTypeSetProvider
     /**
      * @return array<int, string>
      */
+    public function contactChannelsEnabledTypes(): array
+    {
+        return $this->remember('contact_channels_enabled', static fn (): array => TenantProfileType::query()
+            ->contactChannelsEnabled()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all());
+    }
+
+    /**
+     * @return array<int, string>
+     */
     public function queryablePoiEnabledTypes(): array
     {
         return $this->remember('queryable_poi_enabled', static fn (): array => TenantProfileType::query()

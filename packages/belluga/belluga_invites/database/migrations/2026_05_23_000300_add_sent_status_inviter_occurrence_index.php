@@ -1,13 +1,22 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
 {
+    private const string INDEX_NAME = 'idx_invite_edges_sent_status_inviter_occurrence';
+
     public function up(): void
     {
+        if (! Schema::hasTable('invite_edges')) {
+            return;
+        }
+
+        $this->dropIndexIfExists();
+
         Schema::table('invite_edges', function (Blueprint $collection): void {
             $collection->index(
                 [
@@ -20,7 +29,7 @@ return new class extends Migration
                     '_id' => -1,
                 ],
                 options: [
-                    'name' => 'idx_invite_edges_sent_status_inviter_occurrence',
+                    'name' => self::INDEX_NAME,
                 ],
             );
         });
@@ -29,5 +38,16 @@ return new class extends Migration
     public function down(): void
     {
         // No-op for MongoDB index rollback in this migration slice.
+    }
+
+    private function dropIndexIfExists(): void
+    {
+        try {
+            DB::connection('tenant')
+                ->getCollection('invite_edges')
+                ->dropIndex(self::INDEX_NAME);
+        } catch (Throwable) {
+            // Fresh databases and pre-rebuild tenants may not have this index yet.
+        }
     }
 };
