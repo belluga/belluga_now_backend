@@ -24,4 +24,5 @@ return [
     App\Providers\PackageIntegration\InvitesIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\FavoritesIntegrationServiceProvider::class,
     App\Providers\PackageIntegration\DeepLinksIntegrationServiceProvider::class,
+    App\Providers\PackageIntegration\ContactChannelsIntegrationServiceProvider::class,
 ];

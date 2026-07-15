@@ -11,6 +11,7 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
+use App\Http\Api\v1\Requests\AccountProfileContactSourceCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -35,6 +36,18 @@ class AccountProfilesController extends Controller
             $request->query(),
             $request->boolean('archived'),
             $perPage
+        );
+
+        return response()->json($paginator->toArray());
+    }
+
+    public function contactSourceCandidates(
+        AccountProfileContactSourceCandidatesRequest $request,
+    ): JsonResponse {
+        $validated = $request->validated();
+        $paginator = $this->profileQueryService->paginateContactSourceCandidates(
+            $validated['exclude_account_profile_id'] ?? null,
+            (int) ($validated['per_page'] ?? 50),
         );
 
         return response()->json($paginator->toArray());
@@ -70,7 +83,11 @@ class AccountProfilesController extends Controller
         $profile = $this->profileQueryService->publicFindBySlugOrFail($account_profile_slug);
 
         return response()->json([
-            'data' => $this->formatter->format($profile, includeAgendaOccurrences: true),
+            'data' => $this->formatter->format(
+                $profile,
+                includeAgendaOccurrences: true,
+                publicContactProjection: true,
+            ),
         ]);
     }
 

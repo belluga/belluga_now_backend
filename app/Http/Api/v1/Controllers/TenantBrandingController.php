@@ -57,7 +57,7 @@ class TenantBrandingController
         );
 
         $this->tenantEnvironmentSnapshotService->repair(
-            $tenant->fresh() ?? $tenant,
+            $tenant,
             'tenant_branding_updated_sync',
             [
                 'trigger' => 'tenant_branding_update',

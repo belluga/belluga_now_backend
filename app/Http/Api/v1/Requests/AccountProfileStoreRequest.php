@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileContactChannels;
 use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileRichText;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AccountProfileStoreRequest extends FormRequest
 {
+    use ValidatesAccountProfileContactChannels;
     use ValidatesAccountProfileRichText;
 
     public function authorize(): bool
@@ -45,6 +47,7 @@ class AccountProfileStoreRequest extends FormRequest
             'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             'avatar_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
             'cover_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            ...$this->accountProfileContactChannelRules(),
         ];
     }
 }

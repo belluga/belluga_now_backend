@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
+use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
@@ -136,6 +137,93 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertNotEmpty($response->json('data'));
         $this->assertTrue(collect($response->json('data'))->every(static fn (array $item): bool => array_key_exists('ownership_state', $item)));
+    }
+
+    public function test_contact_source_candidates_are_resolved_by_the_tenant_query_contract(): void
+    {
+        TenantProfileType::create([
+            'type' => 'contact_source',
+            'label' => 'Contact source',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => false,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+                'has_contact_channels' => true,
+            ],
+        ]);
+
+        $eligible = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Eligible Contact Source',
+            'contact_mode' => 'own',
+            'is_active' => true,
+        ]);
+        $excluded = AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Excluded source account',
+                'document' => 'DOC-EXCLUDED-SOURCE',
+            ])->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Excluded Contact Source',
+            'contact_mode' => 'own',
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Mirrored source account',
+                'document' => 'DOC-MIRRORED-SOURCE',
+            ])->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Mirrored Contact Source',
+            'contact_mode' => 'mirrored_account_profile',
+            'contact_source_account_profile_id' => (string) $eligible->_id,
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Ineligible source account',
+                'document' => 'DOC-INELIGIBLE-SOURCE',
+            ])->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Ineligible Contact Source',
+            'contact_mode' => 'own',
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Inactive source account',
+                'document' => 'DOC-INACTIVE-SOURCE',
+            ])->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Inactive Contact Source',
+            'contact_mode' => 'own',
+            'is_active' => false,
+        ]);
+        $deleted = AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Deleted source account',
+                'document' => 'DOC-DELETED-SOURCE',
+            ])->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Deleted Contact Source',
+            'contact_mode' => 'own',
+            'is_active' => true,
+        ]);
+        $deleted->delete();
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/contact_sources?exclude_account_profile_id={$excluded->_id}",
+            $this->getHeaders(),
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.0.id', (string) $eligible->_id);
+        $this->assertSame([(string) $eligible->_id], collect($response->json('data'))->pluck('id')->all());
     }
 
     public function test_public_account_profile_index_forbids_landlord_user_without_tenant_access(): void
@@ -925,6 +1013,351 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.display_name', 'Slug Detail Venue');
         $response->assertJsonPath('data.can_open_public_detail', true);
         $response->assertJsonPath('data.public_detail_path', '/parceiro/slug-detail-venue');
+    }
+
+    public function test_public_account_profile_show_by_slug_projects_effective_mirrored_contact_channels(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $source = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Contact Source Venue',
+            'slug' => 'contact-source-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $sourceResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $source->_id,
+            [
+                'contact_mode' => 'own',
+                'contact_channels' => [
+                    [
+                        'draft_key' => 'email-source',
+                        'type' => 'email',
+                        'value' => 'contato@source.example',
+                        'title' => 'E-mail principal',
+                    ],
+                    [
+                        'draft_key' => 'whatsapp-source',
+                        'type' => 'whatsapp',
+                        'value' => '+55 (27) 99999-1111',
+                        'title' => 'WhatsApp principal',
+                        'metadata' => [
+                            'initial_messages' => [
+                                [
+                                    'id' => 'cta-ola',
+                                    'cta' => 'Olá',
+                                    'mensagem' => 'Olá! Gostaria de saber mais.',
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'contact_bubble_channel_draft_key' => 'whatsapp-source',
+            ],
+            $this->getHeaders()
+        );
+
+        $sourceResponse->assertOk();
+        $sourceBubbleChannelId = $sourceResponse->json('data.contact_bubble_channel_id');
+        $this->assertIsString($sourceBubbleChannelId);
+
+        $mirrorAccount = Account::create([
+            'name' => 'Mirror Account',
+            'document' => 'DOC-MIRROR-'.uniqid('', true),
+        ]);
+        $mirror = AccountProfile::create([
+            'account_id' => (string) $mirrorAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Mirrored Contact Venue',
+            'slug' => 'mirrored-contact-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $mirrorResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+                'contact_bubble_channel_id' => $sourceBubbleChannelId,
+            ],
+            $this->getHeaders()
+        );
+
+        $mirrorResponse->assertOk();
+        $mirrorResponse->assertJsonPath('data.contact_mode', 'mirrored_account_profile');
+        $mirrorResponse->assertJsonPath('data.contact_source_account_profile.id', (string) $source->_id);
+        $mirrorResponse->assertJsonPath('data.effective_contact_source.id', (string) $source->_id);
+        $mirrorResponse->assertJsonPath('data.contact_channels', []);
+        $mirrorResponse->assertJsonPath('data.effective_contact_channels.0.type', 'email');
+        $mirrorResponse->assertJsonPath('data.effective_contact_channels.1.type', 'whatsapp');
+        $mirrorResponse->assertJsonPath('data.effective_contact_bubble_channel.id', $sourceBubbleChannelId);
+
+        $this->createAccountUser([]);
+
+        $publicResponse = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/mirrored-contact-venue"
+        );
+
+        $publicResponse->assertOk();
+        $publicResponse->assertJsonPath('data.contact_mode', 'mirrored_account_profile');
+        $publicResponse->assertJsonPath('data.effective_contact_source.id', (string) $source->_id);
+        $publicResponse->assertJsonPath('data.effective_contact_channels.0.type', 'email');
+        $publicResponse->assertJsonPath('data.effective_contact_channels.1.type', 'whatsapp');
+        $publicResponse->assertJsonPath('data.effective_contact_bubble_channel.id', $sourceBubbleChannelId);
+        $publicResponse->assertJsonMissing([
+            'data.contact_source_account_profile',
+            'data.contact_source_account_profile_id',
+            'data.contact_channels',
+            'data.contact_bubble_channel_id',
+        ]);
+    }
+
+    public function test_contact_mirror_source_deactivation_fails_closed_for_reads_and_new_writes(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $source = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Active Contact Source',
+            'slug' => 'active-contact-source',
+            'contact_mode' => 'own',
+            'is_active' => true,
+        ])->fresh();
+        $sourceWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $source->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'active-source-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 99999-1111',
+                ]],
+                'contact_bubble_channel_draft_key' => 'active-source-whatsapp',
+            ],
+            $this->getHeaders(),
+        );
+        $sourceWrite->assertOk();
+        $sourceBubbleChannelId = $sourceWrite->json('data.contact_bubble_channel_id');
+        $this->assertIsString($sourceBubbleChannelId);
+
+        $mirrorAccount = Account::create([
+            'name' => 'Deactivated Source Mirror Account',
+            'document' => 'DOC-DEACTIVATED-SOURCE-'.uniqid('', true),
+        ]);
+        $mirror = AccountProfile::create([
+            'account_id' => (string) $mirrorAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Deactivated Source Mirror',
+            'slug' => 'deactivated-source-mirror',
+            'is_active' => true,
+        ])->fresh();
+        $mirrorWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+                'contact_bubble_channel_id' => $sourceBubbleChannelId,
+            ],
+            $this->getHeaders(),
+        );
+        $mirrorWrite->assertOk();
+
+        $source->is_active = false;
+        $source->save();
+
+        $readAfterDeactivation = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            $this->getHeaders(),
+        );
+        $readAfterDeactivation->assertOk();
+        $readAfterDeactivation->assertJsonPath('data.effective_contact_source', null);
+        $readAfterDeactivation->assertJsonPath('data.effective_contact_channels', []);
+        $readAfterDeactivation->assertJsonPath('data.effective_contact_bubble_channel', null);
+
+        $writeAfterDeactivation = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+            ],
+            $this->getHeaders(),
+        );
+        $writeAfterDeactivation->assertStatus(422);
+        $writeAfterDeactivation->assertJsonValidationErrors([
+            'contact_source_account_profile_id',
+        ]);
+    }
+
+    public function test_contact_channel_overlapping_stale_snapshots_preserve_valid_bubble_state(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $burstLevel = max(2, (int) (getenv('DELPHI_BCI_BURST_LEVEL') ?: 2));
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Concurrent Contact Profile',
+            'slug' => 'concurrent-contact-profile',
+            'contact_mode' => 'own',
+            'is_active' => true,
+        ])->fresh();
+
+        $initialWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'initial-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 99999-0101',
+                    'title' => 'Inicial',
+                ]],
+                'contact_bubble_channel_draft_key' => 'initial-whatsapp',
+            ],
+            $this->getHeaders(),
+        );
+        $initialWrite->assertOk();
+        $initialChannelId = $initialWrite->json('data.contact_bubble_channel_id');
+        $this->assertIsString($initialChannelId);
+
+        $staleUnrelatedSnapshots = [];
+        for ($index = 0; $index < $burstLevel; $index++) {
+            $staleUnrelatedSnapshots[] = AccountProfile::query()
+                ->findOrFail((string) $profile->_id);
+        }
+
+        $clearWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_channels' => [],
+                'contact_bubble_channel_id' => null,
+            ],
+            $this->getHeaders(),
+        );
+        $clearWrite->assertOk();
+
+        $service = $this->app->make(AccountProfileManagementService::class);
+        foreach ($staleUnrelatedSnapshots as $index => $staleSnapshot) {
+            $service->update(
+                $staleSnapshot,
+                ['display_name' => "Unrelated stale update {$index}"],
+                false,
+            );
+        }
+
+        $afterUnrelatedWrites = AccountProfile::query()
+            ->findOrFail((string) $profile->_id);
+        $afterUnrelatedRead = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            $this->getHeaders(),
+        );
+        $afterUnrelatedRead->assertOk();
+        $afterUnrelatedRead->assertJsonPath('data.contact_channels', []);
+        $afterUnrelatedRead->assertJsonPath('data.contact_bubble_channel_id', null);
+        $this->assertSame(
+            "Unrelated stale update ".($burstLevel - 1),
+            $afterUnrelatedWrites->display_name,
+        );
+
+        $restoredWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'competing-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 99999-0202',
+                    'title' => 'Base concorrente',
+                ]],
+                'contact_bubble_channel_draft_key' => 'competing-whatsapp',
+            ],
+            $this->getHeaders(),
+        );
+        $restoredWrite->assertOk();
+        $competingChannelId = $restoredWrite->json('data.contact_bubble_channel_id');
+        $this->assertIsString($competingChannelId);
+
+        $staleContactSnapshots = [];
+        for ($index = 0; $index < $burstLevel; $index++) {
+            $staleContactSnapshots[] = AccountProfile::query()
+                ->findOrFail((string) $profile->_id);
+        }
+
+        foreach ($staleContactSnapshots as $index => $staleSnapshot) {
+            $service->update(
+                $staleSnapshot,
+                [
+                    'contact_channels' => [[
+                        'id' => $competingChannelId,
+                        'type' => 'whatsapp',
+                        'value' => '+55 (27) 99999-0202',
+                        'title' => "Concorrente {$index}",
+                    ]],
+                    'contact_bubble_channel_id' => $competingChannelId,
+                ],
+                false,
+            );
+        }
+
+        $finalRead = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            $this->getHeaders(),
+        );
+        $finalRead->assertOk();
+        $finalRead->assertJsonPath('data.contact_channels.0.id', $competingChannelId);
+        $finalRead->assertJsonPath(
+            'data.contact_channels.0.title',
+            "Concorrente ".($burstLevel - 1),
+        );
+        $finalRead->assertJsonPath('data.contact_bubble_channel_id', $competingChannelId);
+        $finalRead->assertJsonCount(1, 'data.contact_channels');
+        $this->assertNotSame($initialChannelId, $competingChannelId);
+    }
+
+    public function test_public_contact_projection_omits_raw_contact_state_when_capability_is_revoked(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Revoked Contact Capability',
+            'slug' => 'revoked-contact-capability',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $write = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'revoked-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 99999-1111',
+                ]],
+                'contact_bubble_channel_draft_key' => 'revoked-whatsapp',
+            ],
+            $this->getHeaders(),
+        );
+        $write->assertOk();
+
+        $profileType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $profileType->capabilities = array_merge(
+            is_array($profileType->capabilities ?? null) ? $profileType->capabilities : [],
+            ['has_contact_channels' => false],
+        );
+        $profileType->save();
+
+        $publicRead = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/revoked-contact-capability",
+        );
+        $publicRead->assertOk();
+        $publicRead->assertJsonPath('data.effective_contact_channels', []);
+        $publicRead->assertJsonPath('data.effective_contact_bubble_channel', null);
+        $publicRead->assertJsonMissing([
+            'contact_channels',
+            'contact_bubble_channel_id',
+            'contact_source_account_profile_id',
+            'contact_source_account_profile',
+        ]);
     }
 
     public function test_public_account_profile_index_excludes_non_queryable_type_even_if_discoverable_flag_is_true(): void
@@ -2818,6 +3251,449 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($response->json('errors.profile_type'));
     }
 
+    public function test_account_onboarding_persists_contact_channels_when_type_capability_is_enabled(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Contact Venue',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.3155,
+                    'lng' => -40.3128,
+                ],
+                'contact_mode' => 'own',
+                'contact_channels' => [
+                    [
+                        'draft_key' => 'email-main',
+                        'type' => 'email',
+                        'value' => 'contato@venue.example',
+                        'title' => 'E-mail principal',
+                    ],
+                    [
+                        'draft_key' => 'whatsapp-main',
+                        'type' => 'whatsapp',
+                        'value' => '+55 (27) 99999-1111',
+                        'title' => 'WhatsApp principal',
+                        'metadata' => [
+                            'initial_messages' => [
+                                [
+                                    'id' => 'cta-ola',
+                                    'cta' => 'Olá',
+                                    'mensagem' => 'Olá! Gostaria de saber mais.',
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'contact_bubble_channel_draft_key' => 'whatsapp-main',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.account_profile.contact_mode', 'own');
+        $emailId = $response->json('data.account_profile.contact_channels.0.id');
+        $whatsappId = $response->json('data.account_profile.contact_channels.1.id');
+        $this->assertIsString($emailId);
+        $this->assertIsString($whatsappId);
+        $this->assertNotSame($emailId, $whatsappId);
+        $response->assertJsonPath('data.account_profile.contact_bubble_channel_id', $whatsappId);
+        $response->assertJsonPath('data.account_profile.effective_contact_channels.0.id', $emailId);
+        $response->assertJsonPath('data.account_profile.effective_contact_channels.1.id', $whatsappId);
+        $response->assertJsonPath('data.account_profile.effective_contact_bubble_channel.id', $whatsappId);
+    }
+
+    public function test_account_profile_update_rejects_contact_channels_when_type_capability_is_disabled(): void
+    {
+        TenantProfileType::create([
+            'type' => 'plain',
+            'label' => 'Plain',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+                'has_contact_channels' => false,
+            ],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'plain',
+            'display_name' => 'No Contact Capability',
+            'slug' => 'no-contact-capability',
+            'is_active' => true,
+        ])->fresh();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_mode' => 'own',
+                'contact_channels' => [
+                    [
+                        'id' => 'email-main',
+                        'type' => 'email',
+                        'value' => 'blocked@example.org',
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['contact_channels']);
+    }
+
+    public function test_account_profile_update_requires_source_for_mirrored_contact_mode(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Mirror Source Required',
+            'slug' => 'mirror-source-required',
+            'is_active' => true,
+        ])->fresh();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['contact_source_account_profile_id']);
+    }
+
+    public function test_account_profile_update_rejects_invalid_whatsapp_contact_channel(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Invalid WhatsApp Venue',
+            'slug' => 'invalid-whatsapp-venue',
+            'is_active' => true,
+        ])->fresh();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_mode' => 'own',
+                'contact_channels' => [
+                    [
+                        'draft_key' => 'whatsapp-main',
+                        'type' => 'whatsapp',
+                        'value' => 'not-a-whatsapp-target',
+                    ],
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['contact_channels.0.value']);
+    }
+
+    public function test_account_profile_update_rejects_oversized_whatsapp_initial_message_text(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Oversized WhatsApp Message',
+            'slug' => 'oversized-whatsapp-message',
+            'is_active' => true,
+        ])->fresh();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'oversized-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 99999-1111',
+                    'metadata' => ['initial_messages' => [[
+                        'id' => 'oversized',
+                        'cta' => 'Mensagem longa',
+                        'mensagem' => str_repeat('M', 1001),
+                    ]]],
+                ]],
+            ],
+            $this->getHeaders(),
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors([
+            'contact_channels.0.metadata.initial_messages.0.mensagem',
+        ]);
+    }
+
+    public function test_account_profile_update_rejects_non_whatsapp_bubble_selection(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Bubble Validation Venue',
+            'slug' => 'bubble-validation-venue',
+            'is_active' => true,
+        ])->fresh();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'contact_mode' => 'own',
+                'contact_channels' => [
+                    [
+                        'draft_key' => 'email-main',
+                        'type' => 'email',
+                        'value' => 'contato@bubble.example',
+                    ],
+                    [
+                        'draft_key' => 'whatsapp-main',
+                        'type' => 'whatsapp',
+                        'value' => '+55 (27) 99999-1111',
+                    ],
+                ],
+                'contact_bubble_channel_draft_key' => 'email-main',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['contact_bubble_channel_id']);
+    }
+
+    public function test_contact_channel_draft_ids_are_server_owned_and_bubble_patch_is_tri_state(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Draft Identity Venue',
+            'slug' => 'draft-identity-venue',
+            'is_active' => true,
+        ])->fresh();
+        $profileId = (string) $profile->_id;
+
+        $created = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'contact_channels' => [
+                    [
+                        'draft_key' => 'email-primary',
+                        'type' => 'email',
+                        'value' => 'primary@example.test',
+                    ],
+                    [
+                        'draft_key' => 'whatsapp-primary',
+                        'type' => 'whatsapp',
+                        'value' => '+55 (27) 99999-1111',
+                    ],
+                ],
+                'contact_bubble_channel_draft_key' => 'whatsapp-primary',
+            ],
+            $this->getHeaders(),
+        );
+
+        $created->assertOk();
+        $emailId = $created->json('data.contact_channels.0.id');
+        $whatsappId = $created->json('data.contact_channels.1.id');
+        $this->assertIsString($emailId);
+        $this->assertIsString($whatsappId);
+        $created->assertJsonPath('data.contact_bubble_channel_id', $whatsappId);
+
+        $omitted = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            ['display_name' => 'Draft Identity Venue Renamed'],
+            $this->getHeaders(),
+        );
+        $omitted->assertOk();
+        $omitted->assertJsonPath('data.contact_bubble_channel_id', $whatsappId);
+
+        $cleared = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            ['contact_bubble_channel_id' => null],
+            $this->getHeaders(),
+        );
+        $cleared->assertOk();
+        $cleared->assertJsonPath('data.contact_bubble_channel_id', null);
+
+        $unknownId = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'contact_channels' => [
+                    ['id' => 'contact-unknown', 'type' => 'email', 'value' => 'unknown@example.test'],
+                ],
+            ],
+            $this->getHeaders(),
+        );
+        $unknownId->assertStatus(422);
+        $unknownId->assertJsonValidationErrors(['contact_channels.0.id']);
+
+        $typeMutation = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [
+                'contact_channels' => [
+                    ['id' => $emailId, 'type' => 'whatsapp', 'value' => '+55 (27) 99999-1111'],
+                ],
+            ],
+            $this->getHeaders(),
+        );
+        $typeMutation->assertStatus(422);
+        $typeMutation->assertJsonValidationErrors(['contact_channels.0.type']);
+    }
+
+    public function test_contact_channel_mirrors_are_one_hop_and_stale_pointers_fail_closed_without_reuse(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $source = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Own Contact Source',
+            'slug' => 'own-contact-source',
+            'is_active' => true,
+        ])->fresh();
+
+        $sourceWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $source->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'source-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 99999-1111',
+                ]],
+                'contact_bubble_channel_draft_key' => 'source-whatsapp',
+            ],
+            $this->getHeaders(),
+        );
+        $sourceWrite->assertOk();
+        $removedSourceChannelId = $sourceWrite->json('data.contact_bubble_channel_id');
+        $this->assertIsString($removedSourceChannelId);
+
+        $mirrorAccount = Account::create([
+            'name' => 'One Hop Mirror Account',
+            'document' => 'DOC-ONE-HOP-'.uniqid('', true),
+        ]);
+        $mirror = AccountProfile::create([
+            'account_id' => (string) $mirrorAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'One Hop Mirror',
+            'slug' => 'one-hop-mirror',
+            'is_active' => true,
+        ])->fresh();
+
+        $mirrorWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+                'contact_bubble_channel_id' => $removedSourceChannelId,
+            ],
+            $this->getHeaders(),
+        );
+        $mirrorWrite->assertOk();
+
+        $sourceRemoval = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $source->_id,
+            [
+                'contact_channels' => [],
+                'contact_bubble_channel_id' => null,
+            ],
+            $this->getHeaders(),
+        );
+        $sourceRemoval->assertOk();
+
+        $staleMirror = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            $this->getHeaders(),
+        );
+        $staleMirror->assertOk();
+        $staleMirror->assertJsonPath('data.contact_bubble_channel_id', $removedSourceChannelId);
+        $staleMirror->assertJsonPath('data.effective_contact_channels', []);
+        $staleMirror->assertJsonPath('data.effective_contact_bubble_channel', null);
+
+        $replacementSource = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $source->_id,
+            [
+                'contact_channels' => [[
+                    'draft_key' => 'replacement-whatsapp',
+                    'type' => 'whatsapp',
+                    'value' => '+55 (27) 98888-2222',
+                ]],
+            ],
+            $this->getHeaders(),
+        );
+        $replacementSource->assertOk();
+        $replacementSourceChannelId = $replacementSource->json('data.contact_channels.0.id');
+        $this->assertIsString($replacementSourceChannelId);
+        $this->assertNotSame($removedSourceChannelId, $replacementSourceChannelId);
+
+        $replacementMirror = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            $this->getHeaders(),
+        );
+        $replacementMirror->assertOk();
+        $replacementMirror->assertJsonPath('data.effective_contact_channels.0.id', $replacementSourceChannelId);
+        $replacementMirror->assertJsonPath('data.effective_contact_bubble_channel', null);
+
+        $nestedAccount = Account::create([
+            'name' => 'Nested Mirror Account',
+            'document' => 'DOC-NESTED-'.uniqid('', true),
+        ]);
+        $nested = AccountProfile::create([
+            'account_id' => (string) $nestedAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Mirror Candidate',
+            'slug' => 'nested-mirror-candidate',
+            'is_active' => true,
+        ])->fresh();
+        $nestedWrite = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $nested->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $mirror->_id,
+            ],
+            $this->getHeaders(),
+        );
+        $nestedWrite->assertStatus(422);
+        $nestedWrite->assertJsonValidationErrors(['contact_source_account_profile_id']);
+
+        $legacyNestedAccount = Account::create([
+            'name' => 'Legacy Nested Mirror Account',
+            'document' => 'DOC-LEGACY-NESTED-'.uniqid('', true),
+        ]);
+        $legacyNested = AccountProfile::create([
+            'account_id' => (string) $legacyNestedAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Legacy Nested Mirror',
+            'slug' => 'legacy-nested-mirror',
+            'contact_mode' => 'mirrored_account_profile',
+            'contact_source_account_profile_id' => (string) $mirror->_id,
+            'contact_bubble_channel_id' => $replacementSourceChannelId,
+            'is_active' => true,
+        ])->fresh();
+        $legacyRead = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $legacyNested->_id,
+            $this->getHeaders(),
+        );
+        $legacyRead->assertOk();
+        $legacyRead->assertJsonPath('data.effective_contact_source', null);
+        $legacyRead->assertJsonPath('data.effective_contact_channels', []);
+        $legacyRead->assertJsonPath('data.effective_contact_bubble_channel', null);
+    }
+
     public function test_account_profile_update_accepts_four_character_public_display_name(): void
     {
         $profile = AccountProfile::create([
@@ -3484,6 +4360,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_active' => true,
             'visibility' => 'public',
         ], $overrides))->fresh();
+    }
+
+    private function enableContactChannelsCapability(string $type): void
+    {
+        $profileType = TenantProfileType::query()->where('type', $type)->firstOrFail();
+        $profileType->capabilities = array_merge(
+            is_array($profileType->capabilities ?? null) ? $profileType->capabilities : [],
+            ['has_contact_channels' => true],
+        );
+        $profileType->save();
     }
 
     private function initializeSystem(): void

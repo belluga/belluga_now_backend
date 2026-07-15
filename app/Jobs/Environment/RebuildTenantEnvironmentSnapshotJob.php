@@ -11,9 +11,9 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Spatie\Multitenancy\Jobs\TenantAware;
+use Spatie\Multitenancy\Jobs\NotTenantAware;
 
-class RebuildTenantEnvironmentSnapshotJob implements ShouldQueue, TenantAware
+class RebuildTenantEnvironmentSnapshotJob implements ShouldQueue, NotTenantAware
 {
     use Dispatchable;
     use InteractsWithQueue;
@@ -24,17 +24,49 @@ class RebuildTenantEnvironmentSnapshotJob implements ShouldQueue, TenantAware
      * @param  array<string, mixed>  $context
      */
     public function __construct(
+        private readonly string $tenantId,
         private readonly string $reason,
         private readonly array $context = [],
     ) {}
 
     public function handle(TenantEnvironmentSnapshotService $snapshotService): void
     {
-        $tenant = Tenant::current();
+        $tenantId = trim($this->tenantId);
+        if ($tenantId === '') {
+            return;
+        }
+
+        $tenant = Tenant::query()->find($tenantId);
         if (! $tenant) {
             return;
         }
 
-        $snapshotService->repair($tenant, $this->reason, $this->context);
+        $previousTenant = Tenant::current();
+        $restorePreviousTenant = $previousTenant instanceof Tenant
+            ? (string) $previousTenant->getKey()
+            : '';
+
+        $tenant->makeCurrent();
+
+        try {
+            $snapshotService->repair($tenant, $this->reason, $this->context);
+        } finally {
+            if ($restorePreviousTenant !== '' && $restorePreviousTenant !== $tenantId) {
+                $restoredTenant = Tenant::query()->find($restorePreviousTenant);
+                if ($restoredTenant instanceof Tenant) {
+                    $restoredTenant->makeCurrent();
+
+                    return;
+                }
+            }
+
+            if ($restorePreviousTenant === $tenantId) {
+                $tenant->makeCurrent();
+
+                return;
+            }
+
+            Tenant::forgetCurrent();
+        }
     }
 }

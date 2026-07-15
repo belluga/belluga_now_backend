@@ -7,20 +7,36 @@ namespace App\Application\AccountProfiles;
 final class AccountProfileTypeCapabilityCatalog
 {
     public const IS_QUERYABLE = 'is_queryable';
+
     public const IS_PUBLICLY_NAVIGABLE = 'is_publicly_navigable';
+
     public const IS_PUBLICLY_DISCOVERABLE = 'is_publicly_discoverable';
+
     public const IS_FAVORITABLE = 'is_favoritable';
+
     public const IS_INVITEABLE = 'is_inviteable';
+
     public const IS_POI_ENABLED = 'is_poi_enabled';
+
     public const IS_REFERENCE_LOCATION_ENABLED = 'is_reference_location_enabled';
+
     public const HAS_BIO = 'has_bio';
+
     public const HAS_CONTENT = 'has_content';
+
     public const HAS_TAXONOMIES = 'has_taxonomies';
+
     public const HAS_AVATAR = 'has_avatar';
+
     public const HAS_COVER = 'has_cover';
+
     public const HAS_EVENTS = 'has_events';
+
     public const HAS_GALLERY = 'has_gallery';
+
     public const HAS_NESTED_PROFILE_GROUPS = 'has_nested_profile_groups';
+
+    public const HAS_CONTACT_CHANNELS = 'has_contact_channels';
 
     /**
      * @return array<int, array{key:string, default:bool, requires:array<int, string>}>
@@ -43,6 +59,7 @@ final class AccountProfileTypeCapabilityCatalog
             $this->definition(self::HAS_EVENTS),
             $this->definition(self::HAS_GALLERY),
             $this->definition(self::HAS_NESTED_PROFILE_GROUPS),
+            $this->definition(self::HAS_CONTACT_CHANNELS),
         ];
     }
 

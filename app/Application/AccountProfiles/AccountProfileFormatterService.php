@@ -19,12 +19,17 @@ class AccountProfileFormatterService
         private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfileContactChannelsService $contactChannelsService,
     ) {}
 
     /**
      * @return array<string, mixed>
      */
-    public function format(AccountProfile $profile, bool $includeAgendaOccurrences = false): array
+    public function format(
+        AccountProfile $profile,
+        bool $includeAgendaOccurrences = false,
+        bool $publicContactProjection = false,
+    ): array
     {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
@@ -70,6 +75,13 @@ class AccountProfileFormatterService
             'created_at' => $profile->created_at?->toJSON(),
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
+        ];
+
+        $payload = [
+            ...$payload,
+            ...($publicContactProjection
+                ? $this->contactChannelsService->formatForPublicRead($profile)
+                : $this->contactChannelsService->formatForRead($profile)),
         ];
 
         if ($includeAgendaOccurrences) {
