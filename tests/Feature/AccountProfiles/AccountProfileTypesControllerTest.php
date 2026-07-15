@@ -886,6 +886,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_publicly_discoverable' => true,
                     'is_publicly_navigable' => true,
+                    'has_contact_channels' => true,
                 ],
             ],
             $this->getHeaders()
@@ -897,6 +898,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertSame('Venue Sync Updated', $environmentType['label'] ?? null);
         $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable', false));
         $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_navigable', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.has_contact_channels', false));
     }
 
     public function test_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void

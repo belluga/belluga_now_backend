@@ -27,7 +27,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_profile_type_capabilities_enable_independently_when_declared_requirements_are_met(): void
     {
-        $catalog = new AccountProfileTypeCapabilityCatalog();
+        $catalog = new AccountProfileTypeCapabilityCatalog;
         $keys = array_keys($this->expectedDefinitions());
 
         foreach ($this->expectedDefinitions() as $targetKey => $expectation) {
@@ -52,7 +52,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_profile_type_capability_dependencies_fail_closed_only_for_declared_requirements(): void
     {
-        $catalog = new AccountProfileTypeCapabilityCatalog();
+        $catalog = new AccountProfileTypeCapabilityCatalog;
         $keys = array_keys($this->expectedDefinitions());
 
         foreach ($this->expectedDefinitions() as $targetKey => $expectation) {
@@ -80,7 +80,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_non_required_capabilities_do_not_change_target_capability_resolution(): void
     {
-        $catalog = new AccountProfileTypeCapabilityCatalog();
+        $catalog = new AccountProfileTypeCapabilityCatalog;
         $definitions = $this->expectedDefinitions();
         $keys = array_keys($definitions);
 
@@ -118,7 +118,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_capability_normalization_returns_only_catalog_keys(): void
     {
-        $normalized = (new AccountProfileTypeCapabilityCatalog())->normalize([
+        $normalized = (new AccountProfileTypeCapabilityCatalog)->normalize([
             'unknown_future_transport_key' => true,
         ]);
 
@@ -127,7 +127,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_effective_capability_accessors_use_catalog_dependency_resolution(): void
     {
-        $catalog = new AccountProfileTypeCapabilityCatalog();
+        $catalog = new AccountProfileTypeCapabilityCatalog;
 
         $this->assertTrue($catalog->isEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
@@ -176,7 +176,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_queryability_and_public_navigability_defaults_and_independence_are_explicit(): void
     {
-        $catalog = new AccountProfileTypeCapabilityCatalog();
+        $catalog = new AccountProfileTypeCapabilityCatalog;
 
         $normalizedDefaults = $catalog->normalize([]);
         $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_QUERYABLE]);
@@ -290,7 +290,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     private function definitionsByKey(): array
     {
         $definitions = [];
-        foreach ((new AccountProfileTypeCapabilityCatalog())->definitions() as $definition) {
+        foreach ((new AccountProfileTypeCapabilityCatalog)->definitions() as $definition) {
             $key = $definition['key'];
             $this->assertArrayNotHasKey($key, $definitions, "Duplicate capability key [{$key}].");
             $definitions[$key] = $definition;
@@ -365,6 +365,10 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 'default' => false,
                 'requires' => [],
             ],
+            AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS => [
+                'default' => false,
+                'requires' => [],
+            ],
         ];
     }
 
@@ -376,6 +380,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         return [
             'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
             'app/Application/AccountProfiles/AccountProfileGalleryService.php',
+            'app/Application/AccountProfiles/AccountProfileContactChannelsService.php',
             'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php',
             'app/Application/AccountProfiles/AccountProfileRegistryService.php',
             'app/Application/ProximityPreferences/ProximityPreferenceService.php',

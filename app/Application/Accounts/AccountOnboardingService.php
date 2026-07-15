@@ -50,21 +50,35 @@ class AccountOnboardingService
 
                 $this->assertLocationKeysForPoiProfile($payload);
 
+                $profilePayload = [
+                    'account_id' => (string) $account->_id,
+                    'profile_type' => $payload['profile_type'],
+                    'display_name' => $payload['name'],
+                    'location' => $payload['location'] ?? null,
+                    'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
+                    'bio' => $payload['bio'] ?? null,
+                    'content' => $payload['content'] ?? null,
+                    'nested_profile_groups' => $payload['nested_profile_groups'] ?? [],
+                    'created_by' => $payload['created_by'] ?? null,
+                    'created_by_type' => $payload['created_by_type'] ?? null,
+                    'updated_by' => $payload['updated_by'] ?? null,
+                    'updated_by_type' => $payload['updated_by_type'] ?? null,
+                ];
+
+                foreach ([
+                    'contact_mode',
+                    'contact_source_account_profile_id',
+                    'contact_channels',
+                    'contact_bubble_channel_id',
+                    'contact_bubble_channel_draft_key',
+                ] as $contactKey) {
+                    if (array_key_exists($contactKey, $payload)) {
+                        $profilePayload[$contactKey] = $payload[$contactKey];
+                    }
+                }
+
                 $profile = $this->profileService->createWithinCurrentTransaction(
-                    [
-                        'account_id' => (string) $account->_id,
-                        'profile_type' => $payload['profile_type'],
-                        'display_name' => $payload['name'],
-                        'location' => $payload['location'] ?? null,
-                        'taxonomy_terms' => $payload['taxonomy_terms'] ?? [],
-                        'bio' => $payload['bio'] ?? null,
-                        'content' => $payload['content'] ?? null,
-                        'nested_profile_groups' => $payload['nested_profile_groups'] ?? [],
-                        'created_by' => $payload['created_by'] ?? null,
-                        'created_by_type' => $payload['created_by_type'] ?? null,
-                        'updated_by' => $payload['updated_by'] ?? null,
-                        'updated_by_type' => $payload['updated_by_type'] ?? null,
-                    ],
+                    $profilePayload,
                     queueMapPoiSyncAfterCommit: false,
                 );
 

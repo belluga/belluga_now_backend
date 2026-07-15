@@ -125,6 +125,34 @@ class AccountProfileMediaService
         );
     }
 
+    /**
+     * Erases all profile-owned media before an irreversible account deletion.
+     */
+    public function removeAllUploads(AccountProfile $profile, ?string $baseUrl = null): void
+    {
+        foreach (['avatar', 'cover'] as $kind) {
+            $this->modelMediaService->removeUpload(
+                model: $profile,
+                kind: $kind,
+                definition: $this->definition(),
+                baseUrl: $baseUrl,
+            );
+        }
+
+        foreach ($profile->gallery_groups ?? [] as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            foreach ($group['items'] ?? [] as $item) {
+                $itemId = trim((string) (is_array($item) ? ($item['item_id'] ?? '') : ''));
+                if ($itemId !== '') {
+                    $this->removeGalleryUpload($profile, $itemId, $baseUrl);
+                }
+            }
+        }
+    }
+
     public function galleryItemExists(AccountProfile $profile, string $itemId): bool
     {
         foreach ($profile->gallery_groups ?? [] as $group) {

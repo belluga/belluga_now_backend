@@ -53,6 +53,39 @@ class AccountProfileQueryService extends AbstractQueryService
         return $this->hydrateOwnershipState($paginator);
     }
 
+    public function paginateContactSourceCandidates(
+        ?string $excludedProfileId,
+        int $perPage = InputConstraints::PUBLIC_PAGE_SIZE_MAX,
+    ): LengthAwarePaginator {
+        $eligibleTypes = $this->typeSetProvider->contactChannelsEnabledTypes();
+        if ($eligibleTypes === []) {
+            return new LengthAwarePaginator(
+                collect(),
+                0,
+                $perPage,
+                max(1, (int) request()->query('page', 1)),
+            );
+        }
+
+        $query = AccountProfile::query()
+            ->where('contact_mode', 'own')
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->whereIn('profile_type', $eligibleTypes);
+
+        $normalizedExcludedProfileId = trim((string) $excludedProfileId);
+        if ($normalizedExcludedProfileId !== '') {
+            $query->where('_id', '!=', $normalizedExcludedProfileId);
+        }
+
+        $paginator = $query
+            ->orderBy('display_name')
+            ->orderBy('_id')
+            ->paginate($perPage);
+
+        return $this->hydrateOwnershipState($paginator);
+    }
+
     /**
      * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>

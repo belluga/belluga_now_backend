@@ -2042,6 +2042,9 @@ class InvitesFlowTest extends TestCaseTenant
         $rebuildMigration = require base_path(
             'packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php'
         );
+        $legacyMigration = require base_path(
+            'packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php'
+        );
 
         try {
             $rebuildMigration->down();
@@ -2052,6 +2055,19 @@ class InvitesFlowTest extends TestCaseTenant
                 $expectedPreviousIndexKeys,
                 $normalizeIndexKeys($rolledBackSentStatusIndex),
                 'Rollback must restore the exact previous sent-status index key order.'
+            );
+
+            $legacyMigration->up();
+            $reappliedLegacySentStatusIndex = $findSentStatusIndex();
+
+            $this->assertNotNull(
+                $reappliedLegacySentStatusIndex,
+                'Reapplying the legacy migration must keep the sent-status index present.'
+            );
+            $this->assertSame(
+                $expectedPreviousIndexKeys,
+                $normalizeIndexKeys($reappliedLegacySentStatusIndex),
+                'The legacy migration must tolerate an already rebuilt index name and restore the previous key order.'
             );
         } finally {
             $rebuildMigration->up();

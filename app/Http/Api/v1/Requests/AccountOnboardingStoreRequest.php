@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileContactChannels;
 use App\Http\Api\v1\Requests\Concerns\ValidatesAccountProfileRichText;
 use App\Support\Validation\InputConstraints;
 use Closure;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class AccountOnboardingStoreRequest extends FormRequest
 {
+    use ValidatesAccountProfileContactChannels;
     use ValidatesAccountProfileRichText;
 
     private const MIN_VISIBLE_PUBLIC_NAME_LENGTH = 3;
@@ -46,6 +48,7 @@ class AccountOnboardingStoreRequest extends FormRequest
             'content' => $this->optionalAccountProfileRichTextRule(),
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
+            ...$this->accountProfileContactChannelRules(),
         ];
     }
 
