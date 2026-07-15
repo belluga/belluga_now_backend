@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\PhoneOtpReviewAccessCodeHasher;
 use App\Application\Push\ContactEnteredAppPushDeliveryService;
+use App\Application\Social\InviteablePeopleProjectionService;
 use App\Jobs\Auth\DeliverPhoneOtpWebhookJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -294,6 +295,56 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         $inviteables->assertOk();
         $inviteables->assertJsonPath('items.0.user_id', $targetUserId);
         $inviteables->assertJsonPath('items.0.inviteable_reasons.0', 'contact_match');
+    }
+
+    public function test_phone_otp_verification_updates_all_directory_matches_but_bounds_advisory_projection_fanout(): void
+    {
+        Queue::fake();
+        $this->configureReviewAccess('+5527999990422', '123456');
+        ContactHashDirectory::query()->delete();
+
+        $phoneHash = hash('sha256', '5527999990422');
+        for ($index = 0; $index < 101; $index++) {
+            $importer = AccountUser::create([
+                'identity_state' => 'registered',
+                'name' => "High fanout importer {$index}",
+                'phones' => [sprintf('+552799%07d', 8000000 + $index)],
+            ]);
+            ContactHashDirectory::create([
+                'importing_user_id' => (string) $importer->_id,
+                'contact_hash' => $phoneHash,
+                'type' => 'phone',
+            ]);
+        }
+
+        $projection = Mockery::mock(app(InviteablePeopleProjectionService::class))->makePartial();
+        $projection->shouldReceive('refreshForUser')
+            ->once()
+            ->with(Mockery::on(static fn (mixed $user): bool => $user instanceof AccountUser
+                && in_array('+5527999990422', (array) $user->phones, true)));
+        $projection->shouldReceive('refreshForUserIds')
+            ->once()
+            ->with(Mockery::on(static fn (mixed $ids): bool => is_array($ids)
+                && count($ids) === 100
+                && count(array_unique($ids)) === 100));
+        app()->instance(InviteablePeopleProjectionService::class, $projection);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => '+5527999990422',
+            'device_name' => 'otp-high-fanout',
+        ])->assertStatus(202);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => '+5527999990422',
+            'code' => '123456',
+            'device_name' => 'otp-high-fanout',
+        ])->assertOk();
+
+        $this->assertSame(101, ContactHashDirectory::query()
+            ->where('contact_hash', $phoneHash)
+            ->where('matched_user_id', (string) $verify->json('data.user_id'))
+            ->count());
     }
 
     public function test_phone_otp_verification_authors_contact_entered_app_push_once_for_newly_matched_prior_importers(): void

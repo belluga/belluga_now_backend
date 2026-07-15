@@ -27,6 +27,14 @@ use MongoDB\BSON\ObjectId;
 
 class TenantPhoneOtpAuthService
 {
+    /**
+     * Advisory contact notifications must not turn OTP verification into an
+     * unbounded importer fanout. Contact matching itself remains one atomic
+     * indexed update; recipients beyond this bounded immediate batch can read
+     * the canonical directory match on their next normal refresh.
+     */
+    private const int MAX_ADVISORY_CONTACT_IMPORTERS = 100;
+
     public function __construct(
         private readonly PhoneNumberNormalizer $phoneNormalizer,
         private readonly PhoneOtpDeliverySettingsResolver $deliverySettings,
@@ -149,7 +157,6 @@ class TenantPhoneOtpAuthService
         }
 
         $this->assertPhoneUserCanAuthenticate($phone, $reviewCodeMatched);
-
         if (! $this->challengeStore->consumePending((string) $challenge->_id, $phone, $now)) {
             throw ValidationException::withMessages([
                 'code' => ['The OTP challenge is no longer active.'],
@@ -175,6 +182,12 @@ class TenantPhoneOtpAuthService
             (string) $tenant->_id,
             $accountId,
         );
+
+        // The verified identity still needs its own projection refresh. The
+        // importer list is capped at indexed hydration, so this advisory work
+        // cannot fan out without bound.
+        $this->inviteablePeopleProjection->refreshForUser($user);
+        $this->inviteablePeopleProjection->refreshForUserIds($newlyMatchedImporterIds);
 
         try {
             $this->contactEnteredAppPushes->sendToImporters($newlyMatchedImporterIds, $user);
@@ -309,6 +322,8 @@ class TenantPhoneOtpAuthService
                 $query->whereNull('matched_user_id')
                     ->orWhere('matched_user_id', '!=', $userId);
             })
+            ->orderBy('importing_user_id')
+            ->limit(self::MAX_ADVISORY_CONTACT_IMPORTERS)
             ->pluck('importing_user_id')
             ->map(static fn (mixed $value): string => trim((string) $value))
             ->filter(static fn (string $value): bool => $value !== '')
@@ -327,9 +342,6 @@ class TenantPhoneOtpAuthService
                 ],
                 'updated_at' => Carbon::now(),
             ]);
-
-        $this->inviteablePeopleProjection->refreshForUser($user);
-        $this->inviteablePeopleProjection->refreshOwnersForContactHashes('phone', $phoneHashes);
 
         return $newlyMatchedImporterIds;
     }

@@ -72,6 +72,13 @@ $riskMatrix = [
         'fail_closed_on_backend_error' => true,
     ],
     [
+        'domain' => 'tenant_public_profile_delete',
+        'pattern' => '#^api/v1/profile$#',
+        'methods' => ['DELETE'],
+        'level' => 'L2',
+        'require_idempotency' => false,
+    ],
+    [
         'domain' => 'tenant_public_phone_otp_challenge',
         'pattern' => '#^api/v1/auth/otp/challenge$#',
         'methods' => ['POST'],
