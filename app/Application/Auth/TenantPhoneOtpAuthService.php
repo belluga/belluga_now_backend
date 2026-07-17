@@ -40,6 +40,7 @@ class TenantPhoneOtpAuthService
         private readonly PhoneOtpDeliverySettingsResolver $deliverySettings,
         private readonly TenantPublicAuthMethodResolver $authMethodResolver,
         private readonly PhoneOtpChallengeStore $challengeStore,
+        private readonly PhoneIdentityCoordinationStore $phoneIdentityCoordination,
         private readonly PhoneOtpReviewAccessCodeHasher $reviewAccessCodeHasher,
         private readonly AnonymousIdentityMerger $identityMerger,
         private readonly AccountProfileBootstrapService $profileBootstrapper,
@@ -115,106 +116,120 @@ class TenantPhoneOtpAuthService
         $this->assertPhoneOtpEnabled();
 
         $phone = $this->phoneNormalizer->normalize($payload['phone']);
-        $challenge = $this->findChallenge((string) $payload['challenge_id']);
-        $now = Carbon::now();
-
-        if ($challenge === null || $challenge->phone !== $phone) {
-            throw ValidationException::withMessages([
-                'code' => ['The OTP challenge could not be verified.'],
-            ]);
-        }
-
-        if ($challenge->status !== PhoneOtpChallenge::STATUS_PENDING) {
-            throw ValidationException::withMessages([
-                'code' => ['The OTP challenge is no longer active.'],
-            ]);
-        }
-
-        $expiresAt = $this->toCarbon($challenge->expires_at);
-        if ($expiresAt === null || $expiresAt->lessThanOrEqualTo($now)) {
-            $this->challengeStore->markExpiredIfPending((string) $challenge->_id, $now);
-
-            throw ValidationException::withMessages([
-                'code' => ['The OTP challenge has expired.'],
-            ]);
-        }
-
-        $reviewAccess = $this->reviewAccessForPhone($phone);
-        $reviewCodeMatched = $reviewAccess !== null
-            && $this->reviewAccessCodeHasher->check((string) $payload['code'], $reviewAccess['code_hash'] ?? null);
-
-        if (! $reviewCodeMatched && ! Hash::check((string) $payload['code'], (string) $challenge->code_hash)) {
-            $this->challengeStore->recordInvalidAttempt(
-                challengeId: (string) $challenge->_id,
-                phone: $phone,
-                maxAttempts: (int) ($challenge->max_attempts ?? 5),
-                now: $now,
-            );
-
-            throw ValidationException::withMessages([
-                'code' => ['The OTP code is invalid.'],
-            ]);
-        }
-
-        $this->assertPhoneUserCanAuthenticate($phone, $reviewCodeMatched);
-        if (! $this->challengeStore->consumePending((string) $challenge->_id, $phone, $now)) {
-            throw ValidationException::withMessages([
-                'code' => ['The OTP challenge is no longer active.'],
-            ]);
-        }
-
-        $user = $this->findOrCreateVerifiedPhoneUser($phone, $now);
-        $mergedAnonymousUserIds = $this->mergeAnonymousUsers(
-            $tenant,
-            $user,
-            $payload['anonymous_user_ids'] ?? []
+        $lease = $this->phoneIdentityCoordination->acquire(
+            [$this->phoneNormalizer->hash($phone)],
+            'phone_otp_verify',
         );
-
-        $this->profileBootstrapper->ensurePersonalAccount($user);
-        $user->refresh();
-        $newlyMatchedImporterIds = $this->rematchExistingContactImports($user);
-        [$abilities, $accountId] = $this->resolveTokenIssuanceContext($user);
-
-        $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
-            $user,
-            $this->tokenName($payload['device_name'] ?? null),
-            $this->sanitizeAbilities($abilities),
-            (string) $tenant->_id,
-            $accountId,
-        );
-
-        // The verified identity still needs its own projection refresh. The
-        // importer list is capped at indexed hydration, so this advisory work
-        // cannot fan out without bound.
-        $this->inviteablePeopleProjection->refreshForUser($user);
-        $this->inviteablePeopleProjection->refreshForUserIds($newlyMatchedImporterIds);
 
         try {
-            $this->contactEnteredAppPushes->sendToImporters($newlyMatchedImporterIds, $user);
-        } catch (\Throwable $exception) {
-            Log::warning('Contact-entered-app advisory push delivery failed after OTP verify.', [
-                'tenant_id' => (string) ($tenant->_id ?? ''),
-                'challenge_id' => (string) $challenge->_id,
-                'user_id' => (string) ($user->_id ?? ''),
-                'exception' => $exception::class,
-                'message' => $exception->getMessage(),
-            ]);
-        }
+            $this->sleepBeforeCriticalMutationHook();
+            $this->phoneIdentityCoordination->assertStillOwned($lease);
 
-        if ($reviewCodeMatched) {
-            Log::info('Phone OTP review access authenticated.', [
-                'tenant_id' => (string) ($tenant->_id ?? ''),
-                'challenge_id' => (string) $challenge->_id,
-                'phone_hash' => $this->phoneNormalizer->hash($phone),
-                'user_id' => (string) ($user->_id ?? ''),
-            ]);
-        }
+            $challenge = $this->findChallenge((string) $payload['challenge_id']);
+            $now = Carbon::now();
 
-        return new PhoneOtpVerificationResult(
-            user: $user->fresh(),
-            plainTextToken: $token->plainTextToken,
-            mergedAnonymousUserIds: $mergedAnonymousUserIds,
-        );
+            if ($challenge === null || $challenge->phone !== $phone) {
+                throw ValidationException::withMessages([
+                    'code' => ['The OTP challenge could not be verified.'],
+                ]);
+            }
+
+            if ($challenge->status !== PhoneOtpChallenge::STATUS_PENDING) {
+                throw ValidationException::withMessages([
+                    'code' => ['The OTP challenge is no longer active.'],
+                ]);
+            }
+
+            $expiresAt = $this->toCarbon($challenge->expires_at);
+            if ($expiresAt === null || $expiresAt->lessThanOrEqualTo($now)) {
+                $this->challengeStore->markExpiredIfPending((string) $challenge->_id, $now);
+
+                throw ValidationException::withMessages([
+                    'code' => ['The OTP challenge has expired.'],
+                ]);
+            }
+
+            $reviewAccess = $this->reviewAccessForPhone($phone);
+            $reviewCodeMatched = $reviewAccess !== null
+                && $this->reviewAccessCodeHasher->check((string) $payload['code'], $reviewAccess['code_hash'] ?? null);
+
+            if (! $reviewCodeMatched && ! Hash::check((string) $payload['code'], (string) $challenge->code_hash)) {
+                $this->challengeStore->recordInvalidAttempt(
+                    challengeId: (string) $challenge->_id,
+                    phone: $phone,
+                    maxAttempts: (int) ($challenge->max_attempts ?? 5),
+                    now: $now,
+                );
+
+                throw ValidationException::withMessages([
+                    'code' => ['The OTP code is invalid.'],
+                ]);
+            }
+
+            $this->assertPhoneUserCanAuthenticate($phone, $reviewCodeMatched);
+            $this->phoneIdentityCoordination->assertStillOwned($lease);
+            if (! $this->challengeStore->consumePending((string) $challenge->_id, $phone, $now)) {
+                throw ValidationException::withMessages([
+                    'code' => ['The OTP challenge is no longer active.'],
+                ]);
+            }
+
+            $this->phoneIdentityCoordination->assertStillOwned($lease);
+            $user = $this->findOrCreateVerifiedPhoneUser($phone, $now);
+            $mergedAnonymousUserIds = $this->mergeAnonymousUsers(
+                $tenant,
+                $user,
+                $payload['anonymous_user_ids'] ?? []
+            );
+
+            $this->profileBootstrapper->ensurePersonalAccount($user);
+            $user->refresh();
+            $newlyMatchedImporterIds = $this->rematchExistingContactImports($user);
+            [$abilities, $accountId] = $this->resolveTokenIssuanceContext($user);
+
+            $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
+                $user,
+                $this->tokenName($payload['device_name'] ?? null),
+                $this->sanitizeAbilities($abilities),
+                (string) $tenant->_id,
+                $accountId,
+            );
+
+            // The verified identity still needs its own projection refresh. The
+            // importer list is capped at indexed hydration, so this advisory work
+            // cannot fan out without bound.
+            $this->inviteablePeopleProjection->refreshForUser($user);
+            $this->inviteablePeopleProjection->refreshForUserIds($newlyMatchedImporterIds);
+
+            try {
+                $this->contactEnteredAppPushes->sendToImporters($newlyMatchedImporterIds, $user);
+            } catch (\Throwable $exception) {
+                Log::warning('Contact-entered-app advisory push delivery failed after OTP verify.', [
+                    'tenant_id' => (string) ($tenant->_id ?? ''),
+                    'challenge_id' => (string) $challenge->_id,
+                    'user_id' => (string) ($user->_id ?? ''),
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                ]);
+            }
+
+            if ($reviewCodeMatched) {
+                Log::info('Phone OTP review access authenticated.', [
+                    'tenant_id' => (string) ($tenant->_id ?? ''),
+                    'challenge_id' => (string) $challenge->_id,
+                    'phone_hash' => $this->phoneNormalizer->hash($phone),
+                    'user_id' => (string) ($user->_id ?? ''),
+                ]);
+            }
+
+            return new PhoneOtpVerificationResult(
+                user: $user->fresh(),
+                plainTextToken: $token->plainTextToken,
+                mergedAnonymousUserIds: $mergedAnonymousUserIds,
+            );
+        } finally {
+            $this->phoneIdentityCoordination->release($lease);
+        }
     }
 
     private function assertPhoneOtpEnabled(): void
@@ -579,5 +594,15 @@ class TenantPhoneOtpAuthService
         }
 
         return null;
+    }
+
+    private function sleepBeforeCriticalMutationHook(): void
+    {
+        $delayMilliseconds = (int) (getenv('BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS') ?: 0);
+        if ($delayMilliseconds <= 0) {
+            return;
+        }
+
+        usleep($delayMilliseconds * 1000);
     }
 }

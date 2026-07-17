@@ -177,6 +177,15 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $this->assertTrue($reflection->hasMethod('formatAgendaEvents'));
     }
 
+    public function test_public_agenda_geo_index_exists_for_published_occurrences(): void
+    {
+        $this->assertContains(
+            'idx_event_occurrences_public_agenda_geo_v1',
+            $this->indexNames('event_occurrences'),
+            'Nearby Home agenda must narrow published, non-deleted occurrences with its dedicated geo index.'
+        );
+    }
+
     public function test_account_scoped_management_occurrence_query_filters_profile_snapshots_before_grouping(): void
     {
         $account = Account::query()->create([

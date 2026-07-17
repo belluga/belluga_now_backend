@@ -68,7 +68,11 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         $query = AccountProfile::query()
-            ->where('contact_mode', 'own')
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('contact_mode', 'own')
+                    ->orWhereNull('contact_mode');
+            })
             ->where('is_active', true)
             ->whereNull('deleted_at')
             ->whereIn('profile_type', $eligibleTypes);

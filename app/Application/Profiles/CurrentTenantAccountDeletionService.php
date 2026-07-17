@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Profiles;
 
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\Auth\PhoneIdentityCoordinationStore;
 use App\Application\Push\PushTopicMembershipService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -39,6 +40,7 @@ final class CurrentTenantAccountDeletionService
         private readonly AccountProfileMediaService $profileMedia,
         private readonly PushTopicMembershipService $pushTopicMemberships,
         private readonly CurrentTenantAccountDeletionAccountGuard $accountGuard,
+        private readonly PhoneIdentityCoordinationStore $phoneIdentityCoordination,
     ) {}
 
     public function delete(Tenant $tenant, AccountUser $user): void
@@ -50,25 +52,35 @@ final class CurrentTenantAccountDeletionService
         }
 
         $phoneHashes = $this->normalizedStrings((array) ($user->phone_hashes ?? []));
-        $personalProfiles = $this->personalProfiles($userId);
-        $personalProfileIds = $this->profileIds($personalProfiles);
-        $deletableAccountIds = $this->deletablePersonalAccountIds($userId, $personalProfiles);
+        $lease = $this->phoneIdentityCoordination->acquire($phoneHashes, 'current_account_delete');
 
-        $this->eraseProfileMedia($personalProfiles);
-        $this->eraseExternalProfileReferences($personalProfileIds);
-        $this->eraseUserOwnedTenantData($userId, $phoneHashes, $personalProfileIds);
-        $this->eraseAuthenticationState($user, $userId);
-        $this->accountGuard->eraseRevalidatedPersonalGraph(
-            $userId,
-            $personalProfileIds,
-            $deletableAccountIds,
-        );
+        try {
+            $this->sleepBeforeCriticalMutationHook();
 
-        AccountUser::withoutEvents(static function () use ($userId): void {
-            AccountUser::query()
-                ->where('_id', $userId)
-                ->forceDelete();
-        });
+            $personalProfiles = $this->personalProfiles($userId);
+            $personalProfileIds = $this->profileIds($personalProfiles);
+            $deletableAccountIds = $this->deletablePersonalAccountIds($userId, $personalProfiles);
+
+            $this->phoneIdentityCoordination->assertStillOwned($lease);
+            $this->eraseProfileMedia($personalProfiles);
+            $this->eraseExternalProfileReferences($personalProfileIds);
+            $this->eraseUserOwnedTenantData($userId, $phoneHashes, $personalProfileIds);
+            $this->eraseAuthenticationState($user, $userId);
+            $this->accountGuard->eraseRevalidatedPersonalGraph(
+                $userId,
+                $personalProfileIds,
+                $deletableAccountIds,
+            );
+
+            $this->phoneIdentityCoordination->assertStillOwned($lease);
+            AccountUser::withoutEvents(static function () use ($userId): void {
+                AccountUser::query()
+                    ->where('_id', $userId)
+                    ->forceDelete();
+            });
+        } finally {
+            $this->phoneIdentityCoordination->release($lease);
+        }
     }
 
     /**
@@ -385,5 +397,15 @@ final class CurrentTenantAccountDeletionService
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function sleepBeforeCriticalMutationHook(): void
+    {
+        $delayMilliseconds = (int) (getenv('BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS') ?: 0);
+        if ($delayMilliseconds <= 0) {
+            return;
+        }
+
+        usleep($delayMilliseconds * 1000);
     }
 }

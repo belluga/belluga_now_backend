@@ -244,6 +244,69 @@ class EventQueryService
         ]);
     }
 
+
+    /**
+     * @param  array<string, mixed>  $venue
+     * @return array<string, mixed>|null
+     */
+    private function formatVenuePreviewPayload(array $venue): ?array
+    {
+        if ($venue === []) {
+            return null;
+        }
+
+        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
+            ?? $this->scalarString($venue['name'] ?? null);
+        $venueSlug = $this->scalarString($venue['slug'] ?? null);
+        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
+        $supportsPublicNavigation = $venueProfileType !== null
+            && $venueProfileType !== ''
+            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
+        $venueCanOpenPublicDetail = $venueSlug !== null
+            && $venueSlug !== ''
+            && $supportsPublicNavigation;
+        $avatarUrl = $this->absoluteUrlString($venue['avatar_url'] ?? null)
+            ?? $this->absoluteUrlString($venue['logo_url'] ?? null);
+        $coverUrl = $this->absoluteUrlString($venue['cover_url'] ?? null)
+            ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null);
+
+        return [
+            'id' => $this->resolveLegacyDocumentId($venue),
+            'display_name' => $venueDisplay ?? '',
+            'slug' => $venueSlug,
+            'can_open_public_detail' => $venueCanOpenPublicDetail,
+            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
+            'profile_type' => $venueProfileType,
+            'supports_public_navigation' => $supportsPublicNavigation,
+            'tagline' => $this->scalarString($venue['tagline'] ?? null),
+            'hero_image_url' => $coverUrl,
+            'logo_url' => $avatarUrl,
+            'avatar_url' => $avatarUrl,
+            'cover_url' => $coverUrl,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $venue
+     * @return array<string, mixed>|null
+     */
+    private function formatVenueDetailPayload(array $venue): ?array
+    {
+        $payload = $this->formatVenuePreviewPayload($venue);
+        if ($payload === null) {
+            return null;
+        }
+
+        return [
+            ...$payload,
+            'bio' => $this->scalarString($venue['bio'] ?? null),
+            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
+            'gallery_groups' => is_array($venue['gallery_groups'] ?? null)
+                ? array_values($venue['gallery_groups'])
+                : [],
+        ];
+    }
+
     /**
      * @param  array<string, mixed>  $queryParams
      */
@@ -476,31 +539,7 @@ class EventQueryService
         $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
         $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
 
-        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
-            ?? $this->scalarString($venue['name'] ?? null);
-        $venueSlug = $this->scalarString($venue['slug'] ?? null);
-        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
-        $venueCanOpenPublicDetail = $venueSlug !== null
-            && $venueSlug !== ''
-            && $venueProfileType !== null
-            && $venueProfileType !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
-        $venuePayload = $venue === [] ? null : [
-            'id' => $this->resolveLegacyDocumentId($venue),
-            'display_name' => $venueDisplay ?? '',
-            'slug' => $venueSlug,
-            'can_open_public_detail' => $venueCanOpenPublicDetail,
-            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
-            'profile_type' => $venueProfileType,
-            'tagline' => $this->scalarString($venue['tagline'] ?? null),
-            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
-        ];
+        $venuePayload = $this->formatVenuePreviewPayload($venue);
 
         return $this->withCanonicalHeroImage([
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
@@ -556,31 +595,7 @@ class EventQueryService
         );
         $publication = $event->publication ?? null;
         $publication = is_array($publication) ? $publication : (array) $publication;
-        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
-            ?? $this->scalarString($venue['name'] ?? null);
-        $venueSlug = $this->scalarString($venue['slug'] ?? null);
-        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
-        $venueCanOpenPublicDetail = $venueSlug !== null
-            && $venueSlug !== ''
-            && $venueProfileType !== null
-            && $venueProfileType !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
-        $venuePayload = $venue === [] ? null : [
-            'id' => $this->resolveLegacyDocumentId($venue),
-            'display_name' => $venueDisplay ?? '',
-            'slug' => $venueSlug,
-            'can_open_public_detail' => $venueCanOpenPublicDetail,
-            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
-            'profile_type' => $venueProfileType,
-            'tagline' => $this->scalarString($venue['tagline'] ?? null),
-            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
-        ];
+        $venuePayload = $this->formatVenuePreviewPayload($venue);
         $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
         $coordinates = $geo['coordinates'] ?? null;
         $lat = null;
@@ -717,31 +732,7 @@ class EventQueryService
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
-        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
-            ?? $this->scalarString($venue['name'] ?? null);
-        $venueSlug = $this->scalarString($venue['slug'] ?? null);
-        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
-        $venueCanOpenPublicDetail = $venueSlug !== null
-            && $venueSlug !== ''
-            && $venueProfileType !== null
-            && $venueProfileType !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
-        $venuePayload = $venue === [] ? null : [
-            'id' => $this->resolveLegacyDocumentId($venue),
-            'display_name' => $venueDisplay ?? '',
-            'slug' => $venueSlug,
-            'can_open_public_detail' => $venueCanOpenPublicDetail,
-            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
-            'profile_type' => $venueProfileType,
-            'tagline' => $this->scalarString($venue['tagline'] ?? null),
-            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
-        ];
+        $venuePayload = $this->formatVenuePreviewPayload($venue);
         $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
         $coordinates = $geo['coordinates'] ?? null;
         $lat = null;
@@ -846,31 +837,7 @@ class EventQueryService
         );
         $publication = $event->publication ?? null;
         $publication = is_array($publication) ? $publication : (array) $publication;
-        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
-            ?? $this->scalarString($venue['name'] ?? null);
-        $venueSlug = $this->scalarString($venue['slug'] ?? null);
-        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
-        $venueCanOpenPublicDetail = $venueSlug !== null
-            && $venueSlug !== ''
-            && $venueProfileType !== null
-            && $venueProfileType !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
-        $venuePayload = $venue === [] ? null : [
-            'id' => $this->resolveLegacyDocumentId($venue),
-            'display_name' => $venueDisplay ?? '',
-            'slug' => $venueSlug,
-            'can_open_public_detail' => $venueCanOpenPublicDetail,
-            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
-            'profile_type' => $venueProfileType,
-            'tagline' => $this->scalarString($venue['tagline'] ?? null),
-            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
-        ];
+        $venuePayload = $this->formatVenuePreviewPayload($venue);
         $occurrences = $this->resolveManagementListOccurrences($event, $preloadedOccurrences);
         $dateTimeStart = $this->formatDate($this->extractRawAttribute($event, 'date_time_start'))
             ?? ($occurrences[0]['date_time_start'] ?? null);
@@ -1173,12 +1140,10 @@ class EventQueryService
                     'type' => 'Point',
                     'coordinates' => [(float) $filters['origin_lng'], (float) $filters['origin_lat']],
                 ],
+                'key' => 'geo_location',
                 'distanceField' => 'distance_meters',
                 'spherical' => true,
-                'query' => $this->combineMatchExpressions(
-                    $baseMatch,
-                    ['geo_location' => ['$ne' => null]]
-                ),
+                'query' => $baseMatch,
             ];
 
             if ($filters['max_distance_meters'] !== null) {
@@ -1387,12 +1352,10 @@ class EventQueryService
                     'type' => 'Point',
                     'coordinates' => [(float) $filters['origin_lng'], (float) $filters['origin_lat']],
                 ],
+                'key' => 'geo_location',
                 'distanceField' => 'distance_meters',
                 'spherical' => true,
-                'query' => $this->combineMatchExpressions(
-                    $baseMatch,
-                    ['geo_location' => ['$ne' => null]]
-                ),
+                'query' => $baseMatch,
             ];
 
             if ($filters['max_distance_meters'] !== null) {
@@ -1947,31 +1910,7 @@ class EventQueryService
             : [];
         $taxonomyTerms = $this->resolvePublicEventTaxonomyTerms($event);
 
-        $venueDisplay = $this->scalarString($venue['display_name'] ?? null)
-            ?? $this->scalarString($venue['name'] ?? null);
-        $venueSlug = $this->scalarString($venue['slug'] ?? null);
-        $venueProfileType = $this->scalarString($venue['profile_type'] ?? null);
-        $venueCanOpenPublicDetail = $venueSlug !== null
-            && $venueSlug !== ''
-            && $venueProfileType !== null
-            && $venueProfileType !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($venueProfileType);
-        $venuePayload = $venue === [] ? null : [
-            'id' => $this->resolveLegacyDocumentId($venue),
-            'display_name' => $venueDisplay ?? '',
-            'slug' => $venueSlug,
-            'can_open_public_detail' => $venueCanOpenPublicDetail,
-            'public_detail_path' => $venueCanOpenPublicDetail ? '/parceiro/'.$venueSlug : null,
-            'profile_type' => $venueProfileType,
-            'tagline' => $this->scalarString($venue['tagline'] ?? null),
-            'hero_image_url' => $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'logo_url' => $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'avatar_url' => $this->absoluteUrlString($venue['avatar_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['logo_url'] ?? null),
-            'cover_url' => $this->absoluteUrlString($venue['cover_url'] ?? null)
-                ?? $this->absoluteUrlString($venue['hero_image_url'] ?? null),
-            'taxonomy_terms' => $this->ensureTaxonomySnapshots($venue['taxonomy_terms'] ?? []),
-        ];
+        $venuePayload = $this->formatVenueDetailPayload($venue);
 
         $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
         $coordinates = $geo['coordinates'] ?? null;

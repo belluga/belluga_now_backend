@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Profile;
 
 use App\Application\Profiles\CurrentTenantAccountDeletionAccountGuard;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -12,6 +13,8 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -78,6 +81,177 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
         $this->assertSame(PhoneOtpChallenge::STATUS_VERIFIED, (string) PhoneOtpChallenge::query()
             ->findOrFail($challenge->json('data.challenge_id'))
             ->status);
+    }
+
+    public function test_delete_first_blocks_phone_otp_verify_until_direct_delete_finishes(): void
+    {
+        $phone = '+5527999990314';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Delete First Target',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'delete-first-seed',
+        ])->assertStatus(202);
+
+        $results = $this->runLeaderWithFollowers(
+            $this->deleteProcess((string) $target->_id, [
+                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '1200',
+            ]),
+            [
+                $this->verifyProcess(
+                    (string) $challenge->json('data.challenge_id'),
+                    $phone,
+                    '123456',
+                    'delete-first-verify',
+                ),
+            ],
+            200,
+        );
+
+        $deleteResult = $results[0];
+        $verifyResult = $results[1];
+
+        $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertFalse($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertGreaterThanOrEqual(900, (int) ($verifyResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertSame('The OTP challenge could not be verified.', $verifyResult['errors']['code'][0] ?? null);
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    public function test_verify_first_blocks_direct_delete_until_phone_otp_verify_finishes(): void
+    {
+        $phone = '+5527999990315';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Verify First Target',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'verify-first-seed',
+        ])->assertStatus(202);
+
+        $results = $this->runLeaderWithFollowers(
+            $this->verifyProcess(
+                (string) $challenge->json('data.challenge_id'),
+                $phone,
+                '123456',
+                'verify-first-verify',
+                ['BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS' => '1200'],
+            ),
+            [
+                $this->deleteProcess((string) $target->_id),
+            ],
+            200,
+        );
+
+        $verifyResult = $results[0];
+        $deleteResult = $results[1];
+
+        $this->assertTrue($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertGreaterThanOrEqual(900, (int) ($deleteResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    public function test_lease_loss_aborts_stale_phone_otp_verify_before_it_can_mutate_the_identity_slice(): void
+    {
+        $phone = '+5527999990316';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Lease Loss Target',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'lease-loss-seed',
+        ])->assertStatus(202);
+
+        $results = $this->runLeaderWithFollowers(
+            $this->verifyProcess(
+                (string) $challenge->json('data.challenge_id'),
+                $phone,
+                '123456',
+                'lease-loss-verify',
+                [
+                    'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '1',
+                    'BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS' => '1500',
+                ],
+            ),
+            [
+                $this->deleteProcess((string) $target->_id, [
+                    'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '1',
+                ]),
+            ],
+            200,
+        );
+
+        $verifyResult = $results[0];
+        $deleteResult = $results[1];
+
+        $this->assertFalse($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertSame(ConcurrencyConflictException::class, $verifyResult['exception'] ?? null);
+        $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    #[DataProvider('overlapProfileProvider')]
+    public function test_mixed_overlap_profiles_of_five_ten_and_twenty_never_mutate_same_phone_slice_concurrently(int $followers): void
+    {
+        $phone = sprintf('+55279999904%02d', $followers);
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => "Overlap {$followers} Target",
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => "overlap-{$followers}-seed",
+        ])->assertStatus(202);
+
+        $processes = [];
+        foreach (range(1, $followers) as $index) {
+            $processes[] = $this->verifyProcess(
+                (string) $challenge->json('data.challenge_id'),
+                $phone,
+                '123456',
+                "overlap-{$followers}-verify-{$index}",
+            );
+        }
+
+        $results = $this->runLeaderWithFollowers(
+            $this->deleteProcess((string) $target->_id, [
+                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2000',
+            ]),
+            $processes,
+            800,
+        );
+
+        $leadDelete = array_shift($results);
+        $this->assertIsArray($leadDelete);
+        $this->assertTrue($leadDelete['ok'], json_encode([$leadDelete, ...$results], JSON_PRETTY_PRINT));
+
+        foreach ($results as $result) {
+            $this->assertFalse($result['ok'], json_encode($results, JSON_PRETTY_PRINT));
+            $this->assertSame('The OTP challenge could not be verified.', $result['errors']['code'][0] ?? null, json_encode($results, JSON_PRETTY_PRINT));
+        }
+
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
 
     public function test_stale_personal_account_snapshot_cannot_hard_delete_an_account_that_gained_a_member(): void
@@ -185,5 +359,135 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             ],
         ];
         $settings->save();
+    }
+
+    /**
+     * @param  list<Process>  $followers
+     * @return list<array<string, mixed>>
+     */
+    private function runLeaderWithFollowers(Process $leader, array $followers, int $followerDelayMilliseconds): array
+    {
+        $leader->start();
+        if ($followerDelayMilliseconds > 0) {
+            usleep($followerDelayMilliseconds * 1000);
+        }
+
+        foreach ($followers as $follower) {
+            $follower->start();
+        }
+
+        return $this->collectProcessResults([$leader, ...$followers]);
+    }
+
+    /**
+     * @param  list<Process>  $processes
+     * @return list<array<string, mixed>>
+     */
+    private function collectProcessResults(array $processes): array
+    {
+        $results = [];
+
+        foreach ($processes as $process) {
+            $process->wait();
+            $this->assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
+            $outputLines = array_values(array_filter(array_map('trim', preg_split('/\R+/', $process->getOutput()) ?: [])));
+            $jsonLine = end($outputLines);
+            $this->assertIsString($jsonLine, $process->getOutput());
+            $results[] = json_decode($jsonLine, true, flags: JSON_THROW_ON_ERROR);
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param  array<string, string>  $env
+     */
+    private function deleteProcess(string $userId, array $env = []): Process
+    {
+        $tenantSlug = var_export($this->tenantModel->slug, true);
+        $userIdValue = var_export($userId, true);
+
+        $code = <<<PHP
+\$started = microtime(true);
+try {
+    \$tenantModel = 'App\\\\Models\\\\Landlord\\\\Tenant';
+    \$tenant = \$tenantModel::query()->where('slug', {$tenantSlug})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$user = app('App\\\\Models\\\\Tenants\\\\AccountUser')::query()->findOrFail({$userIdValue});
+    app('App\\\\Application\\\\Profiles\\\\CurrentTenantAccountDeletionService')->delete(\$tenant, \$user);
+    echo json_encode([
+        'ok' => true,
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    \$errors = method_exists(\$exception, 'errors') ? \$exception->errors() : null;
+    echo json_encode([
+        'ok' => false,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => \$errors,
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), $env, null, 30);
+    }
+
+    /**
+     * @param  array<string, string>  $env
+     */
+    private function verifyProcess(
+        string $challengeId,
+        string $phone,
+        string $codeValue,
+        string $deviceName,
+        array $env = [],
+    ): Process {
+        $payload = var_export([
+            'challenge_id' => $challengeId,
+            'phone' => $phone,
+            'code' => $codeValue,
+            'device_name' => $deviceName,
+        ], true);
+        $tenantSlug = var_export($this->tenantModel->slug, true);
+
+        $code = <<<PHP
+\$started = microtime(true);
+try {
+    \$tenantModel = 'App\\\\Models\\\\Landlord\\\\Tenant';
+    \$tenant = \$tenantModel::query()->where('slug', {$tenantSlug})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$result = app('App\\\\Application\\\\Auth\\\\TenantPhoneOtpAuthService')->verify(\$tenant, {$payload});
+    echo json_encode([
+        'ok' => true,
+        'user_id' => (string) (\$result->user->_id ?? ''),
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    \$errors = method_exists(\$exception, 'errors') ? \$exception->errors() : null;
+    echo json_encode([
+        'ok' => false,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => \$errors,
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), $env, null, 30);
+    }
+
+    /**
+     * @return array<string, array{0: int}>
+     */
+    public static function overlapProfileProvider(): array
+    {
+        return [
+            'five-followers' => [5],
+            'ten-followers' => [10],
+            'twenty-followers' => [20],
+        ];
     }
 }
