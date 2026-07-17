@@ -142,6 +142,23 @@ final class AccountProfileTypeSetProvider
             ->all());
     }
 
+    /**
+     * @return array<int, string>
+     */
+    public function queryablePubliclyNavigablePoiEnabledTypes(): array
+    {
+        return $this->remember('queryable_publicly_navigable_poi_enabled', static fn (): array => TenantProfileType::query()
+            ->queryable()
+            ->publiclyNavigable()
+            ->where('capabilities.is_poi_enabled', true)
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all());
+    }
+
     public function isQueryable(string $profileType): bool
     {
         $normalized = trim($profileType);

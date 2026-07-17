@@ -238,6 +238,10 @@ class InviteShareService
             ];
         }
 
+        if ($this->isSelfIssuerPreview($userId, $share)) {
+            return $this->selfIssuerPreviewResponse($share);
+        }
+
         /** @var InviteEdge|null $existing */
         $existing = $this->findExistingInviteEdge($userId, $share);
         if ($existing === null) {
@@ -262,6 +266,15 @@ class InviteShareService
             ->first();
         if (! $share || $this->isExpired($share)) {
             throw new InviteDomainException('invite_share_not_found', 404);
+        }
+
+        if ($this->isSelfIssuerPreview($userId, $share)) {
+            throw new InviteDomainException(
+                'invite_share_self_issuer_preview_only',
+                409,
+                'Invite issuers can only preview and re-share their own public invite URL.',
+                $this->selfIssuerPreviewResponse($share),
+            );
         }
 
         /** @var InviteEdge|null $edge */
@@ -480,6 +493,47 @@ class InviteShareService
         }
 
         return (string) $id;
+    }
+
+    private function isSelfIssuerPreview(string $userId, InviteShareCode $share): bool
+    {
+        if ((string) $share->issued_by_user_id === $userId) {
+            return true;
+        }
+
+        $principal = $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []);
+        if (($principal['kind'] ?? '') === 'user' && ($principal['id'] ?? '') === $userId) {
+            return true;
+        }
+
+        $recipient = $this->identityGateway->resolveUserRecipientOwnership($userId);
+        if ($recipient === null) {
+            return false;
+        }
+
+        return ($principal['kind'] ?? '') === 'account_profile'
+            && ($principal['id'] ?? '') !== ''
+            && ($principal['id'] ?? '') === (string) ($recipient['receiver_account_profile_id'] ?? '');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function selfIssuerPreviewResponse(InviteShareCode $share): array
+    {
+        return [
+            'tenant_id' => $this->runtimeSettings->settingsPayload()['tenant_id'],
+            'invite_id' => null,
+            'target_ref' => [
+                'event_id' => (string) $share->event_id,
+                'occurrence_id' => (string) $share->occurrence_id,
+            ],
+            'inviter_principal' => $this->fromStoredPrincipal(is_array($share->inviter_principal) ? $share->inviter_principal : []),
+            'status' => 'self_issuer_preview',
+            'attendance_policy' => 'free_confirmation_only',
+            'credited_acceptance' => false,
+            'accepted_at' => null,
+        ];
     }
 
     private function findExistingInviteEdge(string $userId, InviteShareCode $share): ?InviteEdge

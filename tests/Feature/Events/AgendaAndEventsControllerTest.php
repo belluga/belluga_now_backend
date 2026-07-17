@@ -127,6 +127,61 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertContains('Happening Now', $titles);
     }
 
+    public function test_agenda_venue_payload_omits_editorial_detail_fields(): void
+    {
+        $event = $this->createEvent([
+            'title' => 'Lean Agenda Venue',
+            'venue' => [
+                'id' => 'venue-lean-agenda',
+                'display_name' => 'Lean Agenda Venue',
+                'slug' => 'lean-agenda-venue',
+                'profile_type' => 'venue',
+                'tagline' => 'Agenda summary',
+                'avatar_url' => 'https://example.org/venue-avatar.jpg',
+                'cover_url' => 'https://example.org/venue-cover.jpg',
+                'bio' => 'This editorial copy belongs exclusively to event detail.',
+                'taxonomy_terms' => [
+                    ['type' => 'cuisine', 'value' => 'italian'],
+                ],
+                'gallery_groups' => [
+                    [
+                        'id' => 'venue-gallery',
+                        'items' => [
+                            ['url' => 'https://example.org/venue-gallery.jpg'],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}agenda?page=1&page_size=10");
+        $response->assertStatus(200);
+
+        $agendaItem = collect($response->json('items'))
+            ->firstWhere('event_id', (string) $event->_id);
+        $this->assertIsArray($agendaItem);
+        $agendaVenue = $agendaItem['venue'] ?? null;
+        $this->assertIsArray($agendaVenue);
+        $this->assertSame('Lean Agenda Venue', $agendaVenue['display_name'] ?? null);
+        $this->assertArrayNotHasKey('bio', $agendaVenue);
+        $this->assertArrayNotHasKey('taxonomy_terms', $agendaVenue);
+        $this->assertArrayNotHasKey('gallery_groups', $agendaVenue);
+
+        $detailPayload = app(EventQueryService::class)->formatEventDetail(
+            $event->fresh(),
+        );
+        $detailVenue = $detailPayload['venue'] ?? null;
+        $this->assertIsArray($detailVenue);
+        $this->assertSame(
+            'This editorial copy belongs exclusively to event detail.',
+            $detailVenue['bio'] ?? null,
+        );
+        $this->assertSame('https://example.org/venue-cover.jpg', $detailVenue['hero_image_url'] ?? null);
+        $this->assertSame('https://example.org/venue-avatar.jpg', $detailVenue['logo_url'] ?? null);
+        $this->assertNotEmpty($detailVenue['taxonomy_terms'] ?? []);
+        $this->assertNotEmpty($detailVenue['gallery_groups'] ?? []);
+    }
+
     public function test_agenda_default_includes_live_now_and_excludes_past_events(): void
     {
         $now = Carbon::now();
@@ -1223,6 +1278,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         ];
 
         $geoAgendaPipeline = $this->buildAgendaPipelineForTest($baseFilters, true);
+        $this->assertSame(
+            'geo_location',
+            $geoAgendaPipeline[0]['$geoNear']['key'] ?? null,
+            'Agenda geo queries must explicitly select geo_location when the collection has multiple 2dsphere indexes.'
+        );
         $this->assertTrue(
             $this->matchExpressionContainsDocumentId(
                 $geoAgendaPipeline[0]['$geoNear']['query'] ?? [],
@@ -1250,6 +1310,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         );
 
         $geoStreamPipeline = $this->buildStreamPipelineForTest($baseFilters, true);
+        $this->assertSame(
+            'geo_location',
+            $geoStreamPipeline[0]['$geoNear']['key'] ?? null,
+            'Stream geo queries must explicitly select geo_location when the collection has multiple 2dsphere indexes.'
+        );
         $this->assertTrue(
             $this->matchExpressionContainsDocumentId(
                 $geoStreamPipeline[0]['$geoNear']['query'] ?? [],

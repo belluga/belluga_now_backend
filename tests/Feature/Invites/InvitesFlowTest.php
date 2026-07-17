@@ -1130,6 +1130,123 @@ class InvitesFlowTest extends TestCaseTenant
         );
     }
 
+    public function test_share_materialize_returns_self_issuer_preview_without_persisting_user_principal_edge(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => $this->targetRef($this->event),
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+        $this->assertNotSame('', $code);
+
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+
+        $materializeResponse->assertOk();
+        $materializeResponse->assertJsonPath('status', 'self_issuer_preview');
+        $materializeResponse->assertJsonPath('invite_id', null);
+        $materializeResponse->assertJsonPath('credited_acceptance', false);
+        $materializeResponse->assertJsonPath('target_ref.event_id', (string) $this->event->_id);
+        $materializeResponse->assertJsonPath('target_ref.occurrence_id', $this->firstOccurrenceId($this->event));
+        $materializeResponse->assertJsonPath('inviter_principal.kind', 'user');
+        $materializeResponse->assertJsonPath('inviter_principal.id', (string) $this->sender->_id);
+
+        $edge = InviteEdge::query()
+            ->where('receiver_user_id', (string) $this->sender->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
+            ->where('source', 'share_url')
+            ->first();
+        $this->assertNull($edge);
+
+        $projection = InviteFeedProjection::query()
+            ->where('receiver_user_id', (string) $this->sender->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
+            ->first();
+        $this->assertNull($projection);
+    }
+
+    public function test_share_materialize_returns_self_issuer_preview_without_persisting_account_profile_principal_edge(): void
+    {
+        $senderProfile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Sender Profile Principal',
+            'created_by' => (string) $this->sender->_id,
+            'created_by_type' => 'tenant',
+            'updated_by' => (string) $this->sender->_id,
+            'updated_by_type' => 'tenant',
+            'is_active' => true,
+        ]);
+        $senderProfileId = (string) $senderProfile->_id;
+
+        Sanctum::actingAs($this->sender, ['*']);
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'account_profile_id' => $senderProfileId,
+            'target_ref' => $this->targetRef($this->event),
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+        $this->assertNotSame('', $code);
+
+        $materializeResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/materialize", []);
+
+        $materializeResponse->assertOk();
+        $materializeResponse->assertJsonPath('status', 'self_issuer_preview');
+        $materializeResponse->assertJsonPath('invite_id', null);
+        $materializeResponse->assertJsonPath('credited_acceptance', false);
+        $materializeResponse->assertJsonPath('inviter_principal.kind', 'account_profile');
+        $materializeResponse->assertJsonPath('inviter_principal.id', $senderProfileId);
+
+        $edge = InviteEdge::query()
+            ->where('receiver_user_id', (string) $this->sender->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
+            ->where('source', 'share_url')
+            ->first();
+        $this->assertNull($edge);
+    }
+
+    public function test_share_accept_by_code_rejects_self_issuer_preview_without_persisting_edge_or_credit(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+
+        $shareResponse = $this->postJson("{$this->base_api_tenant}invites/share", [
+            'target_ref' => $this->targetRef($this->event),
+        ]);
+        $shareResponse->assertOk();
+        $code = (string) $shareResponse->json('code');
+        $this->assertNotSame('', $code);
+
+        $acceptResponse = $this->postJson("{$this->base_api_tenant}invites/share/{$code}/accept", []);
+
+        $acceptResponse->assertStatus(409);
+        $acceptResponse->assertJsonPath('status', 'rejected');
+        $acceptResponse->assertJsonPath('code', 'invite_share_self_issuer_preview_only');
+        $acceptResponse->assertJsonPath('payload.status', 'self_issuer_preview');
+        $acceptResponse->assertJsonPath('payload.target_ref.event_id', (string) $this->event->_id);
+        $acceptResponse->assertJsonPath('payload.target_ref.occurrence_id', $this->firstOccurrenceId($this->event));
+
+        $edge = InviteEdge::query()
+            ->where('receiver_user_id', (string) $this->sender->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
+            ->where('source', 'share_url')
+            ->first();
+        $this->assertNull($edge);
+
+        $metric = PrincipalSocialMetric::query()
+            ->where('principal_kind', 'user')
+            ->where('principal_id', (string) $this->sender->_id)
+            ->first();
+        $this->assertTrue(
+            $metric === null || (int) $metric->credited_invite_acceptances === 0,
+            'Self-issuer share accept rejection must not credit inviter metrics.',
+        );
+    }
+
     public function test_share_accept_replays_by_idempotency_key_without_creating_duplicate_edges(): void
     {
         Sanctum::actingAs($this->sender, ['*']);

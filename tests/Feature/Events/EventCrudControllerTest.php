@@ -1359,6 +1359,50 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotContains((string) $hiddenHost->_id, $hostIds);
     }
 
+    public function test_event_account_profile_candidates_endpoint_excludes_non_navigable_physical_hosts_even_when_queryable_and_poi_enabled(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'editorial_restaurant'],
+            [
+                'label' => 'Editorial Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_publicly_navigable' => false,
+                    'is_poi_enabled' => true,
+                ],
+            ]
+        );
+
+        $hostAccount = Account::create([
+            'name' => 'Editorial Bistro Account',
+            'document' => (string) Str::uuid(),
+        ]);
+
+        $hiddenHost = AccountProfile::query()->create([
+            'account_id' => (string) $hostAccount->_id,
+            'profile_type' => 'editorial_restaurant',
+            'display_name' => 'Editorial Bistro',
+            'taxonomy_terms' => [],
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.25, -20.25],
+            ],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=editorial%20bistro");
+
+        $response->assertStatus(200);
+        $hostIds = collect($response->json('data') ?? [])->pluck('id')->all();
+        $this->assertNotContains((string) $hiddenHost->_id, $hostIds);
+    }
+
     public function test_event_account_profile_candidates_endpoint_rejects_without_candidate_abilities(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
