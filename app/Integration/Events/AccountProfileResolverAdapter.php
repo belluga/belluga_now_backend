@@ -6,6 +6,7 @@ namespace App\Integration\Events;
 
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
@@ -23,6 +24,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
         private readonly AccountProfileMediaService $accountProfileMediaService,
+        private readonly AccountProfileGalleryService $galleryService,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -104,8 +106,21 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         }
 
         $slug = $this->normalizeSlug($profile->slug ?? null);
-        $canOpenPublicDetail = $slug !== null
-            && $this->typeSetProvider->isPubliclyNavigable($profileType);
+        $supportsPublicNavigation = $this->typeSetProvider->isPubliclyNavigable($profileType);
+        $canOpenPublicDetail = $slug !== null && $supportsPublicNavigation;
+        $baseUrl = request()->getSchemeAndHttpHost();
+        $avatarUrl = $this->accountProfileMediaService->normalizePublicUrl(
+            $baseUrl,
+            $profile,
+            'avatar',
+            $this->normalizeCandidateMediaInput($profile->avatar_url ?? null),
+        );
+        $coverUrl = $this->accountProfileMediaService->normalizePublicUrl(
+            $baseUrl,
+            $profile,
+            'cover',
+            $this->normalizeCandidateMediaInput($profile->cover_url ?? null),
+        );
 
         return [
             'venue' => [
@@ -117,14 +132,17 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                     ? '/parceiro/'.$slug
                     : null,
                 'profile_type' => (string) ($profile->profile_type ?? ''),
+                'supports_public_navigation' => $supportsPublicNavigation,
                 'tagline' => null,
-                'hero_image_url' => $profile->cover_url ?? null,
-                'logo_url' => $profile->avatar_url ?? null,
-                'avatar_url' => $profile->avatar_url ?? null,
-                'cover_url' => $profile->cover_url ?? null,
+                'hero_image_url' => $coverUrl,
+                'logo_url' => $avatarUrl,
+                'avatar_url' => $avatarUrl,
+                'cover_url' => $coverUrl,
+                'bio' => $profile->bio,
                 'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                     is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
                 ),
+                'gallery_groups' => $this->galleryService->formatForRead($profile, $baseUrl),
             ],
             'location' => $location,
         ];
@@ -265,11 +283,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
         $query = match ($candidateType) {
             'related_account_profile' => $this->queryRelatedAccountProfileCandidates($likePattern, $accountId),
-            'physical_host' => $this->queryPhysicalHostCandidates(
-                $this->resolvePoiEnabledProfileTypes(),
-                $likePattern,
-                $accountId
-            ),
+            'physical_host' => $this->queryPhysicalHostCandidates($likePattern, $accountId),
             default => throw ValidationException::withMessages([
                 'type' => ['Unsupported account profile candidate type.'],
             ]),
@@ -290,22 +304,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         return $paginator;
     }
 
-    /**
-     * @return array<int, string>
-     */
-    private function resolvePoiEnabledProfileTypes(): array
-    {
-        return $this->typeSetProvider->queryablePoiEnabledTypes();
-    }
-
-    /**
-     * @param  array<int, string>  $profileTypes
-     */
     private function queryPhysicalHostCandidates(
-        array $profileTypes,
         ?string $likePattern,
         ?string $accountId
     ): Builder {
+        $profileTypes = $this->typeSetProvider->queryablePubliclyNavigablePoiEnabledTypes();
         if ($profileTypes === []) {
             return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
         }
@@ -388,6 +391,14 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     }
 
     /**
+     * @return array<int, string>
+     */
+    private function resolvePubliclyNavigableProfileTypes(): array
+    {
+        return $this->typeSetProvider->publiclyNavigableTypes();
+    }
+
+    /**
      * @param  array<int, string>  $profileIds
      * @return array<int, string>
      */
@@ -397,14 +408,6 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             static fn (mixed $profileId): string => trim((string) $profileId),
             $profileIds
         ), static fn (string $profileId): bool => $profileId !== '')));
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function resolvePubliclyNavigableProfileTypes(): array
-    {
-        return $this->typeSetProvider->publiclyNavigableTypes();
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Profiles\CurrentTenantAccountDeletionService;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Http\Api\v1\Requests\DeleteCurrentTenantAccountRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
@@ -25,7 +26,13 @@ final class CurrentTenantAccountDeletionController extends Controller
             abort(403);
         }
 
-        $deletion->delete(Tenant::resolve(), $principal);
+        try {
+            $deletion->delete(Tenant::resolve(), $principal);
+        } catch (ConcurrencyConflictException) {
+            return response()->json([
+                'message' => 'A concurrency conflict occurred. Please try again.',
+            ], 409);
+        }
 
         return response()->noContent();
     }

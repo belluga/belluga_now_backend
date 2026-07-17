@@ -163,6 +163,25 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'contact_mode' => 'own',
             'is_active' => true,
         ]);
+        $legacyMissingMode = AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Legacy missing mode account',
+                'document' => 'DOC-LEGACY-MISSING-MODE',
+            ])->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Legacy Missing Mode Source',
+            'is_active' => true,
+        ]);
+        $legacyNullMode = AccountProfile::create([
+            'account_id' => (string) Account::create([
+                'name' => 'Legacy null mode account',
+                'document' => 'DOC-LEGACY-NULL-MODE',
+            ])->_id,
+            'profile_type' => 'contact_source',
+            'display_name' => 'Legacy Null Mode Source',
+            'contact_mode' => null,
+            'is_active' => true,
+        ]);
         $excluded = AccountProfile::create([
             'account_id' => (string) Account::create([
                 'name' => 'Excluded source account',
@@ -222,8 +241,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
-        $response->assertJsonPath('data.0.id', (string) $eligible->_id);
-        $this->assertSame([(string) $eligible->_id], collect($response->json('data'))->pluck('id')->all());
+        $this->assertEqualsCanonicalizing(
+            [
+                (string) $eligible->_id,
+                (string) $legacyMissingMode->_id,
+                (string) $legacyNullMode->_id,
+            ],
+            collect($response->json('data'))->pluck('id')->all(),
+        );
     }
 
     public function test_public_account_profile_index_forbids_landlord_user_without_tenant_access(): void
