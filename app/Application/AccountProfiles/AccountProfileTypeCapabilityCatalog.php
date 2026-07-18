@@ -68,27 +68,21 @@ final class AccountProfileTypeCapabilityCatalog
      * @param  array<string, mixed>  $currentCapabilities
      * @return array<string, bool>
      */
-    public function normalize(array $capabilities, array $currentCapabilities = []): array
-    {
+    public function completeForPersistence(
+        string $type,
+        array $capabilities = [],
+        array $currentCapabilities = [],
+    ): array {
         $normalized = [];
+        $typeDefaults = $this->typeDefaults($type);
 
         foreach ($this->definitions() as $definition) {
             $key = $definition['key'];
             $normalized[$key] = array_key_exists($key, $capabilities)
                 ? (bool) $capabilities[$key]
-                : (array_key_exists($key, $currentCapabilities)
-                    ? (bool) $currentCapabilities[$key]
-                    : $definition['default']);
-        }
-
-        foreach ($this->definitions() as $definition) {
-            $key = $definition['key'];
-            foreach ($definition['requires'] as $requiredKey) {
-                if (($normalized[$key] ?? false) && ! ($normalized[$requiredKey] ?? false)) {
-                    $normalized[$key] = false;
-                    break;
-                }
-            }
+                : (is_bool($currentCapabilities[$key] ?? null)
+                    ? $currentCapabilities[$key]
+                    : ($typeDefaults[$key] ?? $definition['default']));
         }
 
         return $normalized;
@@ -96,29 +90,56 @@ final class AccountProfileTypeCapabilityCatalog
 
     /**
      * @param  array<string, mixed>  $capabilities
-     * @param  array<string, mixed>  $currentCapabilities
+     * @return array<string, bool>
      */
-    public function isEnabled(string $key, array $capabilities, array $currentCapabilities = []): bool
+    public function runtimeCapabilities(array $capabilities): array
     {
-        $normalized = $this->normalize($capabilities, $currentCapabilities);
+        $resolved = [];
 
-        return (bool) ($normalized[$key] ?? false);
+        foreach ($this->definitions() as $definition) {
+            $key = $definition['key'];
+            $resolved[$key] = is_bool($capabilities[$key] ?? null)
+                ? $capabilities[$key]
+                : false;
+        }
+
+        foreach ($this->definitions() as $definition) {
+            $key = $definition['key'];
+            foreach ($definition['requires'] as $requiredKey) {
+                if (($resolved[$key] ?? false) && ! ($resolved[$requiredKey] ?? false)) {
+                    $resolved[$key] = false;
+                    break;
+                }
+            }
+        }
+
+        return $resolved;
     }
 
     /**
      * @param  array<string, mixed>  $capabilities
      * @param  array<string, mixed>  $currentCapabilities
      */
-    public function firstDisabledRequirement(string $key, array $capabilities, array $currentCapabilities = []): ?string
+    public function isExplicitlyEnabled(string $key, array $capabilities): bool
+    {
+        $resolved = $this->runtimeCapabilities($capabilities);
+
+        return $resolved[$key] ?? false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $capabilities
+     */
+    public function firstDisabledRequirement(string $key, array $capabilities): ?string
     {
         $definition = $this->definitionFor($key);
         if ($definition === null) {
             return null;
         }
 
-        $normalized = $this->normalize($capabilities, $currentCapabilities);
+        $resolved = $this->runtimeCapabilities($capabilities);
         foreach ($definition['requires'] as $requiredKey) {
-            if (! ($normalized[$requiredKey] ?? false)) {
+            if (! ($resolved[$requiredKey] ?? false)) {
                 return $requiredKey;
             }
         }
@@ -153,6 +174,35 @@ final class AccountProfileTypeCapabilityCatalog
             'default' => $default,
             'requires' => $requires,
         ];
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function typeDefaults(string $type): array
+    {
+        return match (trim($type)) {
+            'personal' => [
+                self::IS_QUERYABLE => false,
+                self::IS_PUBLICLY_NAVIGABLE => false,
+                self::IS_FAVORITABLE => true,
+                self::IS_INVITEABLE => true,
+                self::IS_PUBLICLY_DISCOVERABLE => false,
+                self::IS_POI_ENABLED => false,
+                self::HAS_CONTENT => false,
+                self::HAS_GALLERY => false,
+            ],
+            'artist' => [
+                self::IS_FAVORITABLE => true,
+                self::HAS_GALLERY => true,
+            ],
+            'venue' => [
+                self::IS_FAVORITABLE => true,
+                self::IS_POI_ENABLED => true,
+                self::HAS_GALLERY => true,
+            ],
+            default => [],
+        };
     }
 
     /**

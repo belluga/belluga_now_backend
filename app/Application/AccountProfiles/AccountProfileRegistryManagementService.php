@@ -84,17 +84,15 @@ class AccountProfileRegistryManagementService
 
         $entry = $this->mergeEntry($model, $payload, $nextType);
         $currentCapabilities = $this->arrayFrom($model->capabilities ?? []);
-        $currentPoiEnabled = $this->capabilityCatalog->isEnabled(
+        $currentPoiEnabled = $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-            $currentCapabilities,
             $currentCapabilities,
         );
         $nextCapabilities = is_array($entry['capabilities'] ?? null)
             ? $entry['capabilities']
             : [];
-        $nextPoiEnabled = $this->capabilityCatalog->isEnabled(
+        $nextPoiEnabled = $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-            $nextCapabilities,
             $nextCapabilities,
         );
         $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->visual ?? $model->poi_visual ?? null);
@@ -222,7 +220,7 @@ class AccountProfileRegistryManagementService
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities),
+            'capabilities' => $this->completeCapabilities($type, $capabilities),
         ];
     }
 
@@ -246,7 +244,7 @@ class AccountProfileRegistryManagementService
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities, $currentCapabilities),
+            'capabilities' => $this->completeCapabilities($resolvedType, $capabilities, $currentCapabilities),
         ];
     }
 
@@ -255,9 +253,16 @@ class AccountProfileRegistryManagementService
      * @param  array<string, mixed>  $currentCapabilities
      * @return array<string, bool>
      */
-    private function normalizeCapabilities(array $capabilities, array $currentCapabilities = []): array
-    {
-        return $this->capabilityCatalog->normalize($capabilities, $currentCapabilities);
+    private function completeCapabilities(
+        string $type,
+        array $capabilities,
+        array $currentCapabilities = [],
+    ): array {
+        return $this->capabilityCatalog->completeForPersistence(
+            $type,
+            $capabilities,
+            $currentCapabilities,
+        );
     }
 
     /**
@@ -316,7 +321,7 @@ class AccountProfileRegistryManagementService
             )),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities, $capabilities),
+            'capabilities' => $this->capabilityCatalog->runtimeCapabilities($capabilities),
         ];
     }
 

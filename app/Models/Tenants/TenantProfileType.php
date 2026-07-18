@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use MongoDB\Laravel\Eloquent\Model;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
@@ -77,7 +78,14 @@ class TenantProfileType extends Model
     {
         return $query
             ->publicCatalog()
-            ->where('capabilities.is_poi_enabled', true);
+            ->poiEnabled();
+    }
+
+    public function scopePoiEnabled($query)
+    {
+        return $query->whereRaw(self::enabledCapabilityExpression(
+            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
+        ));
     }
 
     public function scopeGalleryEnabled($query)
@@ -87,7 +95,9 @@ class TenantProfileType extends Model
 
     public function scopeContactChannelsEnabled($query)
     {
-        return $query->where('capabilities.has_contact_channels', true);
+        return $query->whereRaw(self::enabledCapabilityExpression(
+            AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
+        ));
     }
 
     /**
@@ -98,7 +108,7 @@ class TenantProfileType extends Model
         return [
             '$and' => [
                 ['type' => ['$ne' => self::PERSONAL_TYPE]],
-                ['capabilities.is_queryable' => true],
+                self::enabledCapabilityExpression(AccountProfileTypeCapabilityCatalog::IS_QUERYABLE),
             ],
         ];
     }
@@ -108,7 +118,9 @@ class TenantProfileType extends Model
      */
     public static function publicDiscoveryCapabilityExpression(): array
     {
-        return ['capabilities.is_publicly_discoverable' => true];
+        return self::enabledCapabilityExpression(
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE,
+        );
     }
 
     /**
@@ -116,7 +128,9 @@ class TenantProfileType extends Model
      */
     public static function publicNavigabilityCapabilityExpression(): array
     {
-        return ['capabilities.is_publicly_navigable' => true];
+        return self::enabledCapabilityExpression(
+            AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE,
+        );
     }
 
     /**
@@ -124,7 +138,7 @@ class TenantProfileType extends Model
      */
     public static function favoritableCapabilityExpression(): array
     {
-        return ['capabilities.is_favoritable' => true];
+        return self::enabledCapabilityExpression(AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE);
     }
 
     /**
@@ -132,6 +146,14 @@ class TenantProfileType extends Model
      */
     public static function galleryEnabledCapabilityExpression(): array
     {
-        return ['capabilities.has_gallery' => true];
+        return self::enabledCapabilityExpression(AccountProfileTypeCapabilityCatalog::HAS_GALLERY);
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private static function enabledCapabilityExpression(string $capability): array
+    {
+        return ["capabilities.{$capability}" => true];
     }
 }

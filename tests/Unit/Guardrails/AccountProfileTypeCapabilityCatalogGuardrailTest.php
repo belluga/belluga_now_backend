@@ -38,7 +38,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 $payload[$requiredKey] = true;
             }
 
-            $normalized = $catalog->normalize($payload);
+            $normalized = $catalog->completeForPersistence('custom', $payload);
 
             $this->assertTrue(
                 $normalized[$targetKey],
@@ -64,10 +64,8 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                     $payload[$requiredKey] = $requiredKey !== $missingRequiredKey;
                 }
 
-                $normalized = $catalog->normalize($payload);
-
                 $this->assertFalse(
-                    $normalized[$targetKey],
+                    $catalog->isExplicitlyEnabled($targetKey, $payload),
                     sprintf(
                         'Capability [%s] must fail closed when declared requirement [%s] is disabled.',
                         $targetKey,
@@ -92,7 +90,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 $basePayload[$requiredKey] = true;
             }
 
-            $baseline = $catalog->normalize($basePayload);
+            $baseline = $catalog->completeForPersistence('custom', $basePayload);
 
             foreach ($keys as $probeKey) {
                 if ($probeKey === $targetKey || in_array($probeKey, $expectation['requires'], true)) {
@@ -101,7 +99,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
                 $variantPayload = $basePayload;
                 $variantPayload[$probeKey] = true;
-                $variant = $catalog->normalize($variantPayload);
+                $variant = $catalog->completeForPersistence('custom', $variantPayload);
 
                 $this->assertSame(
                     $baseline[$targetKey],
@@ -118,7 +116,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
 
     public function test_capability_normalization_returns_only_catalog_keys(): void
     {
-        $normalized = (new AccountProfileTypeCapabilityCatalog)->normalize([
+        $normalized = (new AccountProfileTypeCapabilityCatalog)->completeForPersistence('custom', [
             'unknown_future_transport_key' => true,
         ]);
 
@@ -129,7 +127,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     {
         $catalog = new AccountProfileTypeCapabilityCatalog;
 
-        $this->assertTrue($catalog->isEnabled(
+        $this->assertTrue($catalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
             [
                 AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS => true,
@@ -138,7 +136,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             ],
         ));
 
-        $this->assertTrue($catalog->isEnabled(
+        $this->assertTrue($catalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_GALLERY,
             [
                 AccountProfileTypeCapabilityCatalog::HAS_GALLERY => true,
@@ -147,7 +145,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             ],
         ));
 
-        $this->assertFalse($catalog->isEnabled(
+        $this->assertFalse($catalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
             [
                 AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED => true,
@@ -178,12 +176,12 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     {
         $catalog = new AccountProfileTypeCapabilityCatalog;
 
-        $normalizedDefaults = $catalog->normalize([]);
+        $normalizedDefaults = $catalog->completeForPersistence('custom');
         $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_QUERYABLE]);
         $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE]);
         $this->assertTrue($normalizedDefaults[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE]);
 
-        $nonQueryableNavigable = $catalog->normalize([
+        $nonQueryableNavigable = $catalog->completeForPersistence('custom', [
             AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
             AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE => true,
             AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => false,
@@ -191,7 +189,7 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         $this->assertFalse($nonQueryableNavigable[AccountProfileTypeCapabilityCatalog::IS_QUERYABLE]);
         $this->assertTrue($nonQueryableNavigable[AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE]);
 
-        $nonQueryableDiscoverable = $catalog->normalize([
+        $nonQueryableDiscoverable = $catalog->completeForPersistence('custom', [
             AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => false,
             AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
         ]);
@@ -203,6 +201,31 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => true,
             ],
         ));
+    }
+
+    public function test_persistence_completion_owns_type_defaults_and_preserves_valid_current_values(): void
+    {
+        $catalog = new AccountProfileTypeCapabilityCatalog;
+
+        $personal = $catalog->completeForPersistence('personal', [], [
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 'invalid',
+            AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => false,
+            AccountProfileTypeCapabilityCatalog::HAS_GALLERY => true,
+        ]);
+
+        $this->assertFalse($personal[AccountProfileTypeCapabilityCatalog::IS_QUERYABLE]);
+        $this->assertFalse($personal[AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE]);
+        $this->assertTrue($personal[AccountProfileTypeCapabilityCatalog::HAS_GALLERY]);
+
+        $patched = $catalog->completeForPersistence('artist', [
+            AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => false,
+        ], [
+            AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => true,
+            AccountProfileTypeCapabilityCatalog::HAS_GALLERY => true,
+        ]);
+
+        $this->assertFalse($patched[AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE]);
+        $this->assertTrue($patched[AccountProfileTypeCapabilityCatalog::HAS_GALLERY]);
     }
 
     public function test_runtime_resolution_is_explicit_and_never_applies_persistence_defaults(): void
@@ -240,6 +263,22 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
             "->where('capabilities.",
             $providerSource,
             'AccountProfileTypeSetProvider must compose model facade scopes instead of raw capability predicates.',
+        );
+    }
+
+    public function test_catalog_exposes_no_ambiguous_default_or_runtime_capability_api(): void
+    {
+        $source = $this->readSource('app/Application/AccountProfiles/AccountProfileTypeCapabilityCatalog.php');
+
+        $this->assertStringNotContainsString(
+            'function normalize(',
+            $source,
+            'The catalog must expose separate write completion and runtime resolution APIs.',
+        );
+        $this->assertStringNotContainsString(
+            'function isEnabled(',
+            $source,
+            'Runtime consumers must use the explicit fail-closed capability API.',
         );
     }
 

@@ -133,7 +133,7 @@ final class AccountProfileTypeSetProvider
     {
         return $this->remember('queryable_poi_enabled', static fn (): array => TenantProfileType::query()
             ->queryable()
-            ->where('capabilities.is_poi_enabled', true)
+            ->poiEnabled()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
@@ -150,7 +150,7 @@ final class AccountProfileTypeSetProvider
         return $this->remember('queryable_publicly_navigable_poi_enabled', static fn (): array => TenantProfileType::query()
             ->queryable()
             ->publiclyNavigable()
-            ->where('capabilities.is_poi_enabled', true)
+            ->poiEnabled()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')

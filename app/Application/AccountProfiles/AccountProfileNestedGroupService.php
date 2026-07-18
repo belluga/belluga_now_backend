@@ -225,9 +225,8 @@ class AccountProfileNestedGroupService
             ->first();
         $capabilities = $this->arrayFrom($type?->capabilities ?? []);
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
-            $capabilities,
             $capabilities,
         );
     }

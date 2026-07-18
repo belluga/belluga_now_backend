@@ -30,7 +30,7 @@ final class AccountProfileContactChannelsService
      * The host owns profile persistence, tenant-local source lookup, mirror topology,
      * and the atomically persisted bubble pointer. The package owns channel data rules.
      *
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function normalizeForWrite(
@@ -334,8 +334,8 @@ final class AccountProfileContactChannelsService
      * request-local channel and is translated before persistence. Omitting both
      * preserves the pointer for unrelated PATCH requests.
      *
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $draftKeyToChannelId
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $draftKeyToChannelId
      */
     private function resolveBubbleSelectionForWrite(
         array $payload,
@@ -424,7 +424,7 @@ final class AccountProfileContactChannelsService
             ? $definition['capabilities']
             : [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
             $capabilities,
         );
