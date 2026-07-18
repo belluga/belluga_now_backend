@@ -39,6 +39,31 @@ final class AccountProfileTypeCapabilityCatalog
     public const HAS_CONTACT_CHANNELS = 'has_contact_channels';
 
     /**
+     * @var array<string, array<string, bool>>
+     */
+    private const TYPE_DEFAULT_OVERRIDES = [
+        'personal' => [
+            self::IS_QUERYABLE => false,
+            self::IS_PUBLICLY_NAVIGABLE => false,
+            self::IS_FAVORITABLE => true,
+            self::IS_INVITEABLE => true,
+            self::IS_PUBLICLY_DISCOVERABLE => false,
+            self::IS_POI_ENABLED => false,
+            self::HAS_CONTENT => false,
+            self::HAS_GALLERY => false,
+        ],
+        'artist' => [
+            self::IS_FAVORITABLE => true,
+            self::HAS_GALLERY => true,
+        ],
+        'venue' => [
+            self::IS_FAVORITABLE => true,
+            self::IS_POI_ENABLED => true,
+            self::HAS_GALLERY => true,
+        ],
+    ];
+
+    /**
      * @return array<int, array{key:string, default:bool, requires:array<int, string>}>
      */
     public function definitions(): array
@@ -86,6 +111,39 @@ final class AccountProfileTypeCapabilityCatalog
         }
 
         return $normalized;
+    }
+
+    /**
+     * @return array<string, array<string, bool>>
+     */
+    public function typeSpecificPersistenceDefaults(): array
+    {
+        $defaults = [];
+
+        foreach (array_keys(self::TYPE_DEFAULT_OVERRIDES) as $type) {
+            $defaults[$type] = $this->completeForPersistence($type);
+        }
+
+        return $defaults;
+    }
+
+    /**
+     * @return array<int, array{key:string, name:string, keys:array<string, int>}>
+     */
+    public function capabilityIndexDefinitions(): array
+    {
+        $indexes = [];
+
+        foreach ($this->definitions() as $definition) {
+            $key = $definition['key'];
+            $indexes[] = [
+                'key' => $key,
+                'name' => "idx_account_profile_types_capability_{$key}_v1",
+                'keys' => ["capabilities.{$key}" => 1],
+            ];
+        }
+
+        return $indexes;
     }
 
     /**
@@ -181,28 +239,7 @@ final class AccountProfileTypeCapabilityCatalog
      */
     private function typeDefaults(string $type): array
     {
-        return match (trim($type)) {
-            'personal' => [
-                self::IS_QUERYABLE => false,
-                self::IS_PUBLICLY_NAVIGABLE => false,
-                self::IS_FAVORITABLE => true,
-                self::IS_INVITEABLE => true,
-                self::IS_PUBLICLY_DISCOVERABLE => false,
-                self::IS_POI_ENABLED => false,
-                self::HAS_CONTENT => false,
-                self::HAS_GALLERY => false,
-            ],
-            'artist' => [
-                self::IS_FAVORITABLE => true,
-                self::HAS_GALLERY => true,
-            ],
-            'venue' => [
-                self::IS_FAVORITABLE => true,
-                self::IS_POI_ENABLED => true,
-                self::HAS_GALLERY => true,
-            ],
-            default => [],
-        };
+        return self::TYPE_DEFAULT_OVERRIDES[trim($type)] ?? [];
     }
 
     /**

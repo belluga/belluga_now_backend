@@ -6,6 +6,7 @@ namespace Tests\Unit\Application\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
@@ -33,6 +34,7 @@ class AccountProfileRegistryServiceTest extends TestCase
         }
 
         Tenant::query()->firstOrFail()->makeCurrent();
+        $this->app->forgetInstance(AccountProfileRegistryService::class);
         $this->service = $this->app->make(AccountProfileRegistryService::class);
     }
 
@@ -112,6 +114,36 @@ class AccountProfileRegistryServiceTest extends TestCase
 
         $this->assertTrue((bool) data_get($artist->capabilities, 'has_gallery', false));
         $this->assertTrue((bool) data_get($venue->capabilities, 'has_gallery', false));
+    }
+
+    public function test_ensure_defaults_completes_missing_capabilities_without_rewriting_explicit_booleans(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'personal',
+            'label' => 'Personal',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => false,
+                'has_bio' => 'invalid',
+            ],
+        ]);
+
+        $this->app->make(AccountProfileRegistrySeeder::class)->ensureDefaults();
+
+        $personal = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
+        $capabilities = (array) $personal->capabilities;
+
+        foreach ((new AccountProfileTypeCapabilityCatalog)->definitions() as $definition) {
+            $key = $definition['key'];
+            $this->assertArrayHasKey($key, $capabilities);
+            $this->assertIsBool($capabilities[$key]);
+        }
+
+        $this->assertFalse($capabilities['is_favoritable']);
+        $this->assertFalse($capabilities['has_bio']);
+        $this->assertFalse($capabilities['is_queryable']);
+        $this->assertTrue($capabilities['is_inviteable']);
     }
 
     public function test_type_definition_is_memoized_across_capability_helpers_within_one_request(): void

@@ -178,7 +178,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable', false));
     }
 
-    public function test_profile_type_create_disables_reference_location_when_poi_is_disabled(): void
+    public function test_profile_type_create_resolves_reference_location_fail_closed_when_poi_is_disabled(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profile_types",
@@ -203,7 +203,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
 
         $model = TenantProfileType::query()->where('type', 'hotel')->firstOrFail();
-        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
     }
 
     public function test_profile_type_create_keeps_nested_groups_capability_independent(): void
@@ -295,7 +295,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertNotContains('closed-detail', $publiclyNavigableTypes);
     }
 
-    public function test_public_catalog_and_public_poi_scopes_respect_public_discoverability_independently_from_favoritable(): void
+    public function test_public_catalog_and_public_poi_scopes_require_explicit_favoritability(): void
     {
         TenantProfileType::query()->delete();
 
@@ -358,10 +358,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ->all();
 
         $this->assertEqualsCanonicalizing(
-            ['non-favoritable-poi', 'public-non-poi', 'public-poi'],
+            ['public-non-poi', 'public-poi'],
             $publicCatalogTypes
         );
-        $this->assertEqualsCanonicalizing(['non-favoritable-poi', 'public-poi'], $publicPoiCatalogTypes);
+        $this->assertEqualsCanonicalizing(['public-poi'], $publicPoiCatalogTypes);
     }
 
     public function test_queryability_and_public_navigation_backfill_repairs_missing_flags_without_overwriting_explicit_values(): void
@@ -1470,7 +1470,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type']);
     }
 
-    public function test_profile_type_update_disables_reference_location_when_poi_is_turned_off(): void
+    public function test_profile_type_update_resolves_reference_location_fail_closed_when_poi_is_turned_off(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -1499,7 +1499,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
 
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
-        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
     }
 
     public function test_profile_type_index_exposes_effective_reference_location_capability(): void

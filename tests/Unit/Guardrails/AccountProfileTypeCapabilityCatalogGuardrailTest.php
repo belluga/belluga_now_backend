@@ -361,6 +361,41 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         }
     }
 
+    public function test_raw_profile_type_capability_evaluation_and_query_predicates_are_allowlisted(): void
+    {
+        $allowedOwners = [
+            'app/Application/AccountProfiles/AccountProfileTypeCapabilityCatalog.php',
+            'app/Application/AccountProfiles/AccountProfileTypeCapabilityRepairer.php',
+            'app/Models/Tenants/TenantProfileType.php',
+        ];
+
+        foreach ($this->applicationPhpPaths() as $relativePath) {
+            if (in_array($relativePath, $allowedOwners, true)) {
+                continue;
+            }
+
+            $source = $this->readSource($relativePath);
+            if (! str_contains($source, 'TenantProfileType')
+                && ! str_contains($source, 'AccountProfileTypeCapabilityCatalog')) {
+                continue;
+            }
+
+            foreach (array_keys($this->expectedDefinitions()) as $capabilityKey) {
+                $escapedKey = preg_quote($capabilityKey, '/');
+                $this->assertDoesNotMatchRegularExpression(
+                    "/\\b(?:capabilities|currentCapabilities|nextCapabilities)\\s*\\[\\s*['\"]{$escapedKey}['\"]\\s*\\]/",
+                    $source,
+                    "{$relativePath} must not evaluate Account Profile Type capability [{$capabilityKey}] directly.",
+                );
+                $this->assertDoesNotMatchRegularExpression(
+                    "/['\"]capabilities\\.{$escapedKey}['\"]/",
+                    $source,
+                    "{$relativePath} must not construct an Account Profile Type capability predicate for [{$capabilityKey}].",
+                );
+            }
+        }
+    }
+
     /**
      * @return array<string, array{key:string, default:bool, requires:array<int, string>}>
      */
@@ -485,5 +520,29 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         $this->assertIsString($source, "Failed to read [{$relativePath}].");
 
         return $source;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function applicationPhpPaths(): array
+    {
+        $applicationPath = dirname(__DIR__, 3).DIRECTORY_SEPARATOR.'app';
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($applicationPath),
+        );
+        $paths = [];
+
+        foreach ($iterator as $file) {
+            if (! $file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $paths[] = 'app/'.substr($file->getPathname(), strlen($applicationPath) + 1);
+        }
+
+        sort($paths);
+
+        return $paths;
     }
 }

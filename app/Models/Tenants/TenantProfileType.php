@@ -60,7 +60,9 @@ class TenantProfileType extends Model
 
     public function scopePublicCatalog($query)
     {
-        return $query->publiclyDiscoverable();
+        return $query
+            ->publiclyDiscoverable()
+            ->favoritable();
     }
 
     public function scopeFavoritable($query)
@@ -147,6 +149,80 @@ class TenantProfileType extends Model
     public static function galleryEnabledCapabilityExpression(): array
     {
         return self::enabledCapabilityExpression(AccountProfileTypeCapabilityCatalog::HAS_GALLERY);
+    }
+
+    /**
+     * @return array<int, array{name:string, keys:array<string, int>}>
+     */
+    public static function capabilityQueryIndexDefinitions(): array
+    {
+        return [
+            [
+                'name' => 'idx_account_profile_types_queryable_candidates_v1',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_public_navigation_v1',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_public_discovery_v1',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_public_catalog_v2',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_public_poi_catalog_v2',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_DISCOVERABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_FAVORITABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_queryable_poi_enabled_v1',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_queryable_public_navigation_poi_enabled_v1',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_PUBLICLY_NAVIGABLE => 1,
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => 1,
+                    'type' => 1,
+                ],
+            ],
+            [
+                'name' => 'idx_account_profile_types_contact_channels_v1',
+                'keys' => [
+                    'capabilities.'.AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS => 1,
+                    'type' => 1,
+                ],
+            ],
+        ];
     }
 
     /**

@@ -5,48 +5,42 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\TenantProfileType;
-use MongoDB\Model\BSONArray;
-use MongoDB\Model\BSONDocument;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use MongoDB\BSON\UTCDateTime;
 
 class AccountProfileRegistrySeeder
 {
+    private AccountProfileTypeCapabilityCatalog $capabilityCatalog;
+
+    private AccountProfileTypeCapabilityRepairer $capabilityRepairer;
+
+    public function __construct(
+        ?AccountProfileTypeCapabilityCatalog $capabilityCatalog = null,
+        ?AccountProfileTypeCapabilityRepairer $capabilityRepairer = null,
+    ) {
+        $this->capabilityCatalog = $capabilityCatalog ?? new AccountProfileTypeCapabilityCatalog;
+        $this->capabilityRepairer = $capabilityRepairer
+            ?? new AccountProfileTypeCapabilityRepairer($this->capabilityCatalog);
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
     public function defaults(): array
     {
-        return [
+        $defaults = [
             [
                 'type' => 'personal',
                 'label' => 'Personal',
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
-                'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_navigable' => false,
-                    'is_favoritable' => true,
-                    'is_inviteable' => true,
-                    'is_publicly_discoverable' => false,
-                    'is_poi_enabled' => false,
-                    'has_content' => false,
-                    'has_gallery' => false,
-                ],
             ],
             [
                 'type' => 'artist',
                 'label' => 'Artist',
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
-                'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
-                    'has_content' => false,
-                    'has_gallery' => true,
-                ],
             ],
             [
                 'type' => 'venue',
@@ -57,18 +51,16 @@ class AccountProfileRegistrySeeder
                     'icon' => 'place',
                     'color' => '#E53935',
                 ],
-                'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => true,
-                    'has_content' => false,
-                    'has_gallery' => true,
-                ],
             ],
         ];
+
+        return array_map(function (array $entry): array {
+            $entry['capabilities'] = $this->capabilityCatalog->completeForPersistence(
+                (string) $entry['type'],
+            );
+
+            return $entry;
+        }, $defaults);
     }
 
     public function ensureDefaults(): void
@@ -89,46 +81,25 @@ class AccountProfileRegistrySeeder
                 continue;
             }
 
-            $this->repairDefaultCapabilities($existing, $entry);
+            $this->repairDefaultCapabilities($existing);
         }
     }
 
-    /**
-     * @param  array<string, mixed>  $entry
-     */
-    private function repairDefaultCapabilities(
-        TenantProfileType $type,
-        array $entry,
-    ): void {
-        $current = $this->arrayFrom($type->capabilities ?? []);
-        $defaults = $this->arrayFrom($entry['capabilities'] ?? []);
-        $next = $current + $defaults;
+    private function repairDefaultCapabilities(TenantProfileType $type): void
+    {
+        $modifiedCount = $this->capabilityRepairer->repairDocument(
+            DB::connection('tenant')
+                ->getMongoDB()
+                ->selectCollection('account_profile_types'),
+            (string) $type->type,
+            new UTCDateTime((int) Carbon::now()->getTimestampMs()),
+        );
 
-        if ((string) $type->type === 'personal') {
-            $next['is_queryable'] = false;
-            $next['is_publicly_navigable'] = false;
-            $next['is_favoritable'] = true;
-            $next['is_inviteable'] = true;
-            $next['is_publicly_discoverable'] = false;
-        }
-
-        if ($next === $current) {
+        if ($modifiedCount === 0) {
             return;
         }
 
-        $type->capabilities = $next;
-        $type->save();
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function arrayFrom(mixed $value): array
-    {
-        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
-            return $value->getArrayCopy();
-        }
-
-        return is_array($value) ? $value : [];
+        // Raw field repair bypasses model events; refresh before touching so projections receive the repaired map.
+        $type->refresh()->touch();
     }
 }
