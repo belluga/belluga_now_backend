@@ -7,6 +7,7 @@ namespace Tests\Feature\AccountProfiles;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
@@ -971,6 +972,90 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $deleteResponse->assertStatus(200);
         $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-delete-type')->exists());
+    }
+
+    public function test_profile_type_mutations_reject_a_token_without_the_required_ability(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'ability-protected',
+            'label' => 'Ability Protected',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $user = LandlordUser::query()->where('emails', 'all', ['root@example.org'])->firstOrFail();
+        $token = $user->createToken('account-profile-type-read-only', ['account-users:view'])->plainTextToken;
+        $headers = [
+            'Authorization' => "Bearer {$token}",
+            'Content-Type' => 'application/json',
+        ];
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/ability-protected",
+            ['label' => 'Unauthorized Update'],
+            $headers
+        )->assertForbidden();
+
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profile_types/ability-protected",
+            [],
+            $headers
+        )->assertForbidden();
+
+        $this->assertSame(
+            'Ability Protected',
+            TenantProfileType::query()->where('type', 'ability-protected')->value('label')
+        );
+    }
+
+    public function test_profile_type_mutations_reject_a_user_without_access_to_the_current_tenant(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'tenant-protected',
+            'label' => 'Tenant Protected',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $otherTenantId = new ObjectId;
+        $otherTenantUser = LandlordUser::create([
+            'name' => 'Other Tenant Admin',
+            'emails' => ['other-tenant-admin@example.org'],
+            'identity_state' => 'registered',
+            'tenant_roles' => [[
+                'name' => 'Other Tenant Admin',
+                'slug' => 'other-tenant-admin',
+                'permissions' => ['account-users:update', 'account-users:delete'],
+                'tenant_id' => (string) $otherTenantId,
+            ]],
+        ]);
+        $token = $otherTenantUser->createToken(
+            'other-tenant-account-profile-type-manager',
+            ['account-users:update', 'account-users:delete']
+        )->plainTextToken;
+        $headers = [
+            'Authorization' => "Bearer {$token}",
+            'Content-Type' => 'application/json',
+        ];
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/tenant-protected",
+            ['label' => 'Cross Tenant Update'],
+            $headers
+        )->assertForbidden();
+
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profile_types/tenant-protected",
+            [],
+            $headers
+        )->assertForbidden();
+
+        $this->assertSame(
+            'Tenant Protected',
+            TenantProfileType::query()->where('type', 'tenant-protected')->value('label')
+        );
     }
 
     public function test_profile_type_update_disables_poi_and_hard_deletes_related_projections(): void
