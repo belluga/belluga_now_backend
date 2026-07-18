@@ -73,6 +73,8 @@ class AccountProfileRegistryManagementService
         $currentType = (string) ($model->type ?? '');
 
         if ($nextType !== $currentType) {
+            $this->ensureTypeIsNotReferenced($currentType);
+
             if (TenantProfileType::query()->where('type', $nextType)->exists()) {
                 throw ValidationException::withMessages([
                     'type' => ['Profile type already exists.'],
@@ -140,12 +142,6 @@ class AccountProfileRegistryManagementService
                 ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
                 ->all();
 
-            if ($nextType !== $currentType && $profileIds !== []) {
-                AccountProfile::query()
-                    ->where('profile_type', $currentType)
-                    ->update(['profile_type' => $nextType]);
-            }
-
             if ($profileIds !== []) {
                 if (! $nextPoiEnabled) {
                     $this->mapPoiProjectionRefs->dispatchForEachRefId(
@@ -193,7 +189,20 @@ class AccountProfileRegistryManagementService
             abort(404, 'Profile type not found.');
         }
 
+        $this->ensureTypeIsNotReferenced((string) ($model->type ?? ''));
+
         $model->delete();
+    }
+
+    private function ensureTypeIsNotReferenced(string $type): void
+    {
+        if (! AccountProfile::withTrashed()->where('profile_type', $type)->exists()) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'type' => ['Profile type is referenced by an account profile.'],
+        ]);
     }
 
     /**
