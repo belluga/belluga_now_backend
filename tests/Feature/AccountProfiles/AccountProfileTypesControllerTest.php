@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -145,6 +146,30 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
         $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
+
+        $model = TenantProfileType::query()->where('type', 'venue-create')->firstOrFail();
+        foreach ((new AccountProfileTypeCapabilityCatalog)->definitions() as $definition) {
+            $this->assertIsBool($model->capabilities[$definition['key']] ?? null);
+        }
+    }
+
+    public function test_profile_type_create_rejects_non_boolean_capability_input(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'invalid-capability',
+                'label' => 'Invalid Capability',
+                'capabilities' => [
+                    'is_favoritable' => 'definitely-not-a-boolean',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['capabilities.is_favoritable']);
+        $this->assertFalse(TenantProfileType::query()->where('type', 'invalid-capability')->exists());
     }
 
     public function test_profile_type_create_repairs_public_environment_snapshot_synchronously(): void

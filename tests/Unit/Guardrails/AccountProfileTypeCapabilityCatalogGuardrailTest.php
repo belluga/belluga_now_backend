@@ -380,20 +380,18 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 continue;
             }
 
-            foreach (array_keys($this->expectedDefinitions()) as $capabilityKey) {
-                $escapedKey = preg_quote($capabilityKey, '/');
-                $this->assertDoesNotMatchRegularExpression(
-                    "/\\b(?:capabilities|currentCapabilities|nextCapabilities)\\s*\\[\\s*['\"]{$escapedKey}['\"]\\s*\\]/",
-                    $source,
-                    "{$relativePath} must not evaluate Account Profile Type capability [{$capabilityKey}] directly.",
-                );
-                $this->assertDoesNotMatchRegularExpression(
-                    "/['\"]capabilities\\.{$escapedKey}['\"]/",
-                    $source,
-                    "{$relativePath} must not construct an Account Profile Type capability predicate for [{$capabilityKey}].",
-                );
-            }
+            $this->assertNoRawCapabilityPolicy($relativePath, $source);
         }
+    }
+
+    public function test_raw_capability_guard_rejects_a_non_allowlisted_consumer_fixture(): void
+    {
+        $this->expectException(\PHPUnit\Framework\AssertionFailedError::class);
+
+        $this->assertNoRawCapabilityPolicy(
+            'app/Application/AccountProfiles/UnsafeCapabilityConsumer.php',
+            "<?php\n\$capabilities['is_queryable'];",
+        );
     }
 
     /**
@@ -520,6 +518,23 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         $this->assertIsString($source, "Failed to read [{$relativePath}].");
 
         return $source;
+    }
+
+    private function assertNoRawCapabilityPolicy(string $relativePath, string $source): void
+    {
+        foreach (array_keys($this->expectedDefinitions()) as $capabilityKey) {
+            $escapedKey = preg_quote($capabilityKey, '/');
+            $this->assertDoesNotMatchRegularExpression(
+                "/\\b(?:capabilities|currentCapabilities|nextCapabilities)\\s*\\[\\s*['\"]{$escapedKey}['\"]\\s*\\]/",
+                $source,
+                "{$relativePath} must not evaluate Account Profile Type capability [{$capabilityKey}] directly.",
+            );
+            $this->assertDoesNotMatchRegularExpression(
+                "/['\"]capabilities\\.{$escapedKey}['\"]/",
+                $source,
+                "{$relativePath} must not construct an Account Profile Type capability predicate for [{$capabilityKey}].",
+            );
+        }
     }
 
     /**

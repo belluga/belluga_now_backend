@@ -134,6 +134,43 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
         }
     }
 
+    public function test_migration_repairs_only_the_current_tenant_collection(): void
+    {
+        $primary = Tenant::query()->firstOrFail();
+        $primary->makeCurrent();
+        $this->profileTypesCollection()->insertOne([
+            'type' => 'primary-isolation-type',
+            'capabilities' => [
+                'is_favoritable' => null,
+            ],
+        ]);
+
+        $secondary = Tenant::create([
+            'name' => 'Capability Isolation Secondary',
+            'subdomain' => 'capability-isolation-secondary',
+        ]);
+
+        try {
+            $secondary->makeCurrent();
+            $this->profileTypesCollection()->insertOne([
+                'type' => 'secondary-isolation-type',
+                'capabilities' => [
+                    'is_favoritable' => null,
+                ],
+            ]);
+
+            $primary->makeCurrent();
+            $this->runCapabilityCanonicalizationMigration();
+
+            $this->assertFalse($this->capabilitiesFor('primary-isolation-type')['is_favoritable']);
+
+            $secondary->makeCurrent();
+            $this->assertNull($this->capabilitiesFor('secondary-isolation-type')['is_favoritable']);
+        } finally {
+            $primary->makeCurrent();
+        }
+    }
+
     private function runCapabilityCanonicalizationMigration(): void
     {
         $migration = require base_path(
