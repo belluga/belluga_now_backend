@@ -859,6 +859,43 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertTrue(AccountProfile::query()->whereKey($profile->getKey())->exists());
     }
 
+    public function test_profile_type_delete_rejects_when_a_soft_deleted_profile_references_current_type(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::withTrashed()->forceDelete();
+
+        TenantProfileType::create([
+            'type' => 'soft-delete-reference',
+            'label' => 'Soft Delete Reference',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-soft-delete-reference',
+            'profile_type' => 'soft-delete-reference',
+            'display_name' => 'Soft Delete Reference Profile',
+            'is_active' => true,
+        ]);
+        $profile->delete();
+
+        $response = $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profile_types/soft-delete-reference",
+            [],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type']);
+        $this->assertTrue(TenantProfileType::query()->where('type', 'soft-delete-reference')->exists());
+        $this->assertTrue(
+            AccountProfile::withTrashed()
+                ->whereKey($profile->getKey())
+                ->where('profile_type', 'soft-delete-reference')
+                ->exists()
+        );
+    }
+
     public function test_profile_type_update_allows_metadata_when_profiles_reference_current_type(): void
     {
         TenantProfileType::query()->delete();
@@ -890,10 +927,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertTrue(AccountProfile::query()->whereKey($profile->getKey())->where('profile_type', 'metadata-reference')->exists());
     }
 
-    public function test_profile_type_update_and_delete_allow_an_unreferenced_type(): void
+    public function test_profile_type_update_allows_an_unreferenced_type_rename(): void
     {
         TenantProfileType::query()->delete();
-        AccountProfile::query()->delete();
+        AccountProfile::withTrashed()->forceDelete();
 
         TenantProfileType::create([
             'type' => 'unreferenced-type',
@@ -912,15 +949,28 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $renameResponse->assertJsonPath('data.type', 'unreferenced-type-renamed');
         $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-type')->exists());
         $this->assertTrue(TenantProfileType::query()->where('type', 'unreferenced-type-renamed')->exists());
+    }
+
+    public function test_profile_type_delete_allows_an_unreferenced_type(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::withTrashed()->forceDelete();
+
+        TenantProfileType::create([
+            'type' => 'unreferenced-delete-type',
+            'label' => 'Unreferenced Delete Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
 
         $deleteResponse = $this->deleteJson(
-            "{$this->base_tenant_api_admin}account_profile_types/unreferenced-type-renamed",
+            "{$this->base_tenant_api_admin}account_profile_types/unreferenced-delete-type",
             [],
             $this->getHeaders()
         );
 
         $deleteResponse->assertStatus(200);
-        $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-type-renamed')->exists());
+        $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-delete-type')->exists());
     }
 
     public function test_profile_type_update_disables_poi_and_hard_deletes_related_projections(): void
