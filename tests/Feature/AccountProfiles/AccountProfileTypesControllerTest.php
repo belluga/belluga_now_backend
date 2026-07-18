@@ -708,7 +708,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.projection_count', 2);
     }
 
-    public function test_profile_type_update_allows_type_rename_and_propagates_dependents(): void
+    public function test_profile_type_update_rejects_type_rename_when_profiles_reference_current_type(): void
     {
         TenantProfileType::query()->delete();
         AccountProfile::query()->delete();
@@ -759,18 +759,17 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(200);
-        $response->assertJsonPath('data.type', 'creator');
-        $response->assertJsonPath('data.label', 'Creator');
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type']);
 
-        $this->assertTrue(TenantProfileType::query()->where('type', 'creator')->exists());
-        $this->assertFalse(TenantProfileType::query()->where('type', 'personal')->exists());
+        $this->assertTrue(TenantProfileType::query()->where('type', 'personal')->exists());
+        $this->assertFalse(TenantProfileType::query()->where('type', 'creator')->exists());
         $this->assertSame(
-            'creator',
+            'personal',
             (string) (AccountProfile::query()->findOrFail($profile->_id)->profile_type ?? '')
         );
         $this->assertSame(
-            'creator',
+            'personal',
             (string) (
                 MapPoi::query()
                     ->where('ref_type', 'account_profile')
