@@ -829,6 +829,62 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_profile_type_update_rejects_referenced_rename_before_type_asset_upload_side_effects(): void
+    {
+        Storage::fake('public');
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+
+        $type = TenantProfileType::create([
+            'type' => 'media-reference',
+            'label' => 'Media Reference',
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'place',
+                'color' => '#AA3300',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-media-reference',
+            'profile_type' => 'media-reference',
+            'display_name' => 'Media Reference Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_profile_types/media-reference",
+            [
+                '_method' => 'PATCH',
+                'type' => 'media-reference-renamed',
+                'label' => 'Media Reference Renamed',
+                'visual' => [
+                    'mode' => 'image',
+                    'image_source' => 'type_asset',
+                ],
+                'type_asset' => UploadedFile::fake()->image('blocked-type-asset.png', 256, 256),
+            ],
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type']);
+
+        $type = TenantProfileType::query()->whereKey($type->getKey())->firstOrFail();
+        $this->assertSame('media-reference', (string) $type->type);
+        $this->assertSame('Media Reference', (string) $type->label);
+        $this->assertNull($type->type_asset_url);
+        $this->assertSame([], Storage::disk('public')->allFiles());
+        $this->assertTrue(
+            AccountProfile::query()
+                ->whereKey($profile->getKey())
+                ->where('profile_type', 'media-reference')
+                ->exists()
+        );
+    }
+
     public function test_profile_type_delete_rejects_when_profiles_reference_current_type(): void
     {
         TenantProfileType::query()->delete();
@@ -918,13 +974,43 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profile_types/metadata-reference",
-            ['label' => 'Updated Metadata Reference'],
+            [
+                'label' => 'Updated Metadata Reference',
+                'allowed_taxonomies' => ['music_genre', 'venue_kind'],
+                'capabilities' => [
+                    'has_events' => true,
+                    'has_contact_channels' => true,
+                ],
+                'visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                    'color' => '#123456',
+                    'icon_color' => '#ABCDEF',
+                ],
+            ],
             $this->getHeaders()
         );
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.type', 'metadata-reference');
         $response->assertJsonPath('data.label', 'Updated Metadata Reference');
+        $response->assertJsonPath('data.allowed_taxonomies.0', 'music_genre');
+        $response->assertJsonPath('data.allowed_taxonomies.1', 'venue_kind');
+        $response->assertJsonPath('data.capabilities.has_events', true);
+        $response->assertJsonPath('data.capabilities.has_contact_channels', true);
+        $response->assertJsonPath('data.visual.mode', 'icon');
+        $response->assertJsonPath('data.visual.icon', 'place');
+        $response->assertJsonPath('data.visual.color', '#123456');
+        $response->assertJsonPath('data.visual.icon_color', '#ABCDEF');
+        $response->assertJsonPath('data.poi_visual.mode', 'icon');
+        $type = TenantProfileType::query()->where('type', 'metadata-reference')->firstOrFail();
+        $this->assertSame(['music_genre', 'venue_kind'], $type->allowed_taxonomies);
+        $this->assertTrue((bool) ($type->capabilities['has_events'] ?? false));
+        $this->assertTrue((bool) ($type->capabilities['has_contact_channels'] ?? false));
+        $this->assertSame('icon', data_get($type->visual, 'mode'));
+        $this->assertSame('place', data_get($type->visual, 'icon'));
+        $this->assertSame('#123456', data_get($type->visual, 'color'));
+        $this->assertSame('#ABCDEF', data_get($type->visual, 'icon_color'));
         $this->assertTrue(AccountProfile::query()->whereKey($profile->getKey())->where('profile_type', 'metadata-reference')->exists());
     }
 
@@ -1558,6 +1644,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         return [
             ...$this->getHeaders(),
             'Content-Type' => 'multipart/form-data',
+            'Accept' => 'application/json',
         ];
     }
 
