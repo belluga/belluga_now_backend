@@ -205,6 +205,44 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         ));
     }
 
+    public function test_runtime_resolution_is_explicit_and_never_applies_persistence_defaults(): void
+    {
+        $catalog = new AccountProfileTypeCapabilityCatalog;
+
+        $this->assertFalse($catalog->isExplicitlyEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE,
+            [],
+        ));
+        $this->assertTrue($catalog->isExplicitlyEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_QUERYABLE,
+            [AccountProfileTypeCapabilityCatalog::IS_QUERYABLE => true],
+        ));
+        $this->assertFalse($catalog->isExplicitlyEnabled(
+            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
+            [
+                AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED => true,
+                AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED => false,
+            ],
+        ));
+    }
+
+    public function test_capability_predicates_are_owned_by_the_profile_type_model_facade(): void
+    {
+        $modelSource = $this->readSource('app/Models/Tenants/TenantProfileType.php');
+        $providerSource = $this->readSource('app/Application/AccountProfiles/AccountProfileTypeSetProvider.php');
+
+        $this->assertStringContainsString(
+            'function scopePoiEnabled',
+            $modelSource,
+            'TenantProfileType must expose the semantic POI capability predicate.',
+        );
+        $this->assertStringNotContainsString(
+            "->where('capabilities.",
+            $providerSource,
+            'AccountProfileTypeSetProvider must compose model facade scopes instead of raw capability predicates.',
+        );
+    }
+
     public function test_runtime_consumers_resolve_account_profile_type_capabilities_through_catalog(): void
     {
         foreach ($this->runtimeConsumerPaths() as $relativePath) {
