@@ -176,7 +176,6 @@ final class AccountProfileTypeCapabilityCatalog
 
     /**
      * @param  array<string, mixed>  $capabilities
-     * @param  array<string, mixed>  $currentCapabilities
      */
     public function isExplicitlyEnabled(string $key, array $capabilities): bool
     {

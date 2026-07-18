@@ -20,7 +20,7 @@ return new class extends Migration
         }
 
         $collection = DB::connection('tenant')
-            ->getMongoDB()
+            ->getDatabase()
             ->selectCollection('account_profile_types');
 
         $catalog = new AccountProfileTypeCapabilityCatalog;

@@ -89,7 +89,7 @@ class AccountProfileRegistrySeeder
     {
         $modifiedCount = $this->capabilityRepairer->repairDocument(
             DB::connection('tenant')
-                ->getMongoDB()
+                ->getDatabase()
                 ->selectCollection('account_profile_types'),
             (string) $type->type,
             new UTCDateTime((int) Carbon::now()->getTimestampMs()),

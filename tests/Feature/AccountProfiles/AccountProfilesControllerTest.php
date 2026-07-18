@@ -339,7 +339,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('venue', $items->first()['profile_type'] ?? null);
     }
 
-    public function test_public_account_profile_index_includes_publicly_discoverable_non_favoritable_types(): void
+    public function test_public_account_profile_index_excludes_publicly_discoverable_non_favoritable_types(): void
     {
         $this->createAccountUser([]);
 
@@ -382,11 +382,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $items = collect($response->json('data'));
-        $this->assertSame(
-            ['internal_partner', 'venue'],
-            $items->pluck('profile_type')->unique()->sort()->values()->all()
-        );
-        $this->assertTrue(
+        $this->assertSame(['venue'], $items->pluck('profile_type')->unique()->values()->all());
+        $this->assertFalse(
             $items->contains(fn (array $item): bool => ($item['profile_type'] ?? null) === 'internal_partner')
         );
     }
@@ -460,7 +457,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $detailResponse->assertStatus(404);
     }
 
-    public function test_public_account_profile_index_returns_requested_items_when_filter_requests_publicly_discoverable_non_favoritable_type(): void
+    public function test_public_account_profile_index_rejects_filter_bypass_for_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
 
@@ -494,10 +491,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(200);
-        $this->assertSame(
-            ['Internal Filter Profile'],
-            collect($response->json('data'))->pluck('display_name')->values()->all()
-        );
+        $this->assertSame([], $response->json('data'));
     }
 
     public function test_public_account_profile_index_excludes_unbackfilled_types_missing_required_public_capabilities(): void
@@ -694,7 +688,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'capabilities' => [
                 'is_queryable' => true,
                 'is_publicly_navigable' => true,
-                'is_favoritable' => false,
+                'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
                 'has_events' => false,
@@ -707,7 +701,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'capabilities' => [
                 'is_queryable' => true,
                 'is_publicly_navigable' => true,
-                'is_favoritable' => false,
+                'is_favoritable' => true,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
                 'has_events' => false,
@@ -720,7 +714,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'capabilities' => [
                 'is_queryable' => true,
                 'is_publicly_navigable' => true,
-                'is_favoritable' => false,
+                'is_favoritable' => true,
                 'is_publicly_discoverable' => false,
                 'is_poi_enabled' => false,
                 'has_events' => false,
@@ -1281,7 +1275,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $afterUnrelatedRead->assertJsonPath('data.contact_channels', []);
         $afterUnrelatedRead->assertJsonPath('data.contact_bubble_channel_id', null);
         $this->assertSame(
-            "Unrelated stale update ".($burstLevel - 1),
+            'Unrelated stale update '.($burstLevel - 1),
             $afterUnrelatedWrites->display_name,
         );
 
@@ -1332,7 +1326,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $finalRead->assertJsonPath('data.contact_channels.0.id', $competingChannelId);
         $finalRead->assertJsonPath(
             'data.contact_channels.0.title',
-            "Concorrente ".($burstLevel - 1),
+            'Concorrente '.($burstLevel - 1),
         );
         $finalRead->assertJsonPath('data.contact_bubble_channel_id', $competingChannelId);
         $finalRead->assertJsonCount(1, 'data.contact_channels');

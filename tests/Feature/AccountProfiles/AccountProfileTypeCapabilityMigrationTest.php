@@ -169,7 +169,7 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
     private function profileTypesCollection(): \MongoDB\Collection
     {
         return DB::connection('tenant')
-            ->getMongoDB()
+            ->getDatabase()
             ->selectCollection('account_profile_types');
     }
 
