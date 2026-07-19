@@ -4024,6 +4024,104 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
     }
 
+    public function test_account_profile_admin_readback_keeps_linked_selection_summaries_in_one_contract(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        TenantProfileType::create([
+            'type' => 'queryable_only',
+            'label' => 'Queryable only',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => false,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => false,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+                'has_contact_channels' => false,
+            ],
+        ]);
+
+        $parent = $this->createNestedProfileFixture('Linked Summary Parent', 'linked-summary-parent');
+        $queryable = $this->createNestedProfileFixture(
+            'Queryable Linked Profile',
+            'queryable-linked-profile',
+            ['profile_type' => 'queryable_only'],
+        );
+        $inactive = $this->createNestedProfileFixture(
+            'Inactive Linked Profile',
+            'inactive-linked-profile',
+            ['profile_type' => 'queryable_only', 'is_active' => false],
+        );
+        $deleted = $this->createNestedProfileFixture(
+            'Deleted Linked Profile',
+            'deleted-linked-profile',
+            ['profile_type' => 'queryable_only'],
+        );
+        $deleted->delete();
+        $contactSource = $this->createNestedProfileFixture(
+            'Contact Linked Profile',
+            'contact-linked-profile',
+            ['contact_mode' => 'own'],
+        );
+        $missingId = (string) new ObjectId;
+
+        $parent->forceFill([
+            'nested_profile_groups' => [[
+                'id' => 'linked',
+                'label' => 'Linked profiles',
+                'order' => 0,
+                'account_profile_ids' => [
+                    (string) $queryable->_id,
+                    (string) $inactive->_id,
+                    (string) $deleted->_id,
+                    $missingId,
+                ],
+            ]],
+            'contact_mode' => 'mirrored_account_profile',
+            'contact_source_account_profile_id' => (string) $contactSource->_id,
+            'contact_channels' => [],
+            'contact_bubble_channel_id' => null,
+        ])->save();
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            $this->getHeaders(),
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.0', [
+            'id' => (string) $queryable->_id,
+            'display_name' => 'Queryable Linked Profile',
+            'is_queryable_candidate' => true,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.1', [
+            'id' => (string) $inactive->_id,
+            'display_name' => 'Inactive Linked Profile',
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.2', [
+            'id' => (string) $deleted->_id,
+            'display_name' => 'Deleted Linked Profile',
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.3', [
+            'id' => $missingId,
+            'display_name' => null,
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $response->assertJsonPath('data.contact_source_account_profile', [
+            'id' => (string) $contactSource->_id,
+            'display_name' => 'Contact Linked Profile',
+            'is_queryable_candidate' => true,
+            'is_contact_capable_candidate' => true,
+        ]);
+    }
+
     public function test_account_profile_update_rejects_invalid_nested_profile_group_members(): void
     {
         $parent = AccountProfile::create([

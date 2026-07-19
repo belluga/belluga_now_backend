@@ -161,6 +161,30 @@ class AccountProfileNestedGroupService
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>  $summariesByProfileId
+     * @return array<int, array<string, mixed>>
+     */
+    public function withSelectedSummaries(array $groups, array $summariesByProfileId): array
+    {
+        return array_values(array_map(
+            static fn (array $group): array => [
+                ...$group,
+                'account_profile_summaries' => array_values(array_map(
+                    static fn (string $profileId): array => $summariesByProfileId[$profileId] ?? [
+                        'id' => $profileId,
+                        'display_name' => null,
+                        'is_queryable_candidate' => false,
+                        'is_contact_capable_candidate' => false,
+                    ],
+                    $group['account_profile_ids'],
+                )),
+            ],
+            $groups,
+        ));
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function formatForPublicDetail(AccountProfile $parentProfile, string $baseUrl): array

@@ -131,6 +131,61 @@ final class AccountProfileCandidateDiscoveryService
     }
 
     /**
+     * Returns only summaries for already-persisted links. This deliberately does
+     * not reuse a candidate page: a readback must expose stale and soft-deleted
+     * selections so the next write can require an explicit repair.
+     *
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>
+     */
+    public function selectedSummariesByIds(array $profileIds): array
+    {
+        $profileIds = collect($profileIds)
+            ->map(static fn (mixed $profileId): string => trim((string) $profileId))
+            ->filter(static fn (string $profileId): bool => $profileId !== '')
+            ->unique()
+            ->values()
+            ->all();
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $queryableTypes = array_flip($this->eligibleTypes(self::SCOPE_QUERYABLE));
+        $contactCapableTypes = array_flip($this->eligibleTypes(self::SCOPE_CONTACT_CAPABLE));
+
+        /** @var Collection<int, AccountProfile> $profiles */
+        $profiles = AccountProfile::withTrashed()
+            ->whereIn('_id', $profileIds)
+            ->get(['_id', 'display_name', 'profile_type', 'is_active', 'contact_mode', 'deleted_at']);
+        $profilesById = $profiles->keyBy(static fn (AccountProfile $profile): string => (string) $profile->getKey());
+
+        $summaries = [];
+        foreach ($profileIds as $profileId) {
+            /** @var AccountProfile|null $profile */
+            $profile = $profilesById->get($profileId);
+            if (! $profile instanceof AccountProfile) {
+                $summaries[$profileId] = $this->unavailableSelectedSummary($profileId);
+
+                continue;
+            }
+
+            $isActive = (bool) $profile->is_active && $profile->deleted_at === null;
+            $profileType = trim((string) $profile->profile_type);
+            $displayName = trim((string) $profile->display_name);
+            $summaries[$profileId] = [
+                'id' => $profileId,
+                'display_name' => $displayName === '' ? null : $displayName,
+                'is_queryable_candidate' => $isActive && isset($queryableTypes[$profileType]),
+                'is_contact_capable_candidate' => $isActive
+                    && isset($contactCapableTypes[$profileType])
+                    && trim((string) $profile->contact_mode) === AccountProfileContactChannelsService::CONTACT_MODE_OWN,
+            ];
+        }
+
+        return $summaries;
+    }
+
+    /**
      * @return array<int, string>
      */
     private function eligibleTypes(string $scope): array
@@ -162,6 +217,19 @@ final class AccountProfileCandidateDiscoveryService
             'per_page' => $perPage,
             'has_more' => false,
             'browse_limit_reached' => false,
+        ];
+    }
+
+    /**
+     * @return array{id: string, display_name: null, is_queryable_candidate: false, is_contact_capable_candidate: false}
+     */
+    private function unavailableSelectedSummary(string $profileId): array
+    {
+        return [
+            'id' => $profileId,
+            'display_name' => null,
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
         ];
     }
 }

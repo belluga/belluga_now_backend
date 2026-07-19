@@ -135,7 +135,7 @@ final class AccountProfileContactChannelsService
     }
 
     /** @return array<string, mixed> */
-    public function formatForRead(AccountProfile $profile): array
+    public function formatForRead(AccountProfile $profile, array $selectedSummariesByProfileId = []): array
     {
         $stored = $this->readStoredContactState($profile);
         $mode = $this->normalizeMode($stored['contact_mode']);
@@ -148,7 +148,10 @@ final class AccountProfileContactChannelsService
         return [
             'contact_mode' => $mode,
             'contact_source_account_profile_id' => $stored['contact_source_account_profile_id'],
-            'contact_source_account_profile' => $this->profileSummary($directSource),
+            'contact_source_account_profile' => $this->selectedSummary(
+                $stored['contact_source_account_profile_id'],
+                $selectedSummariesByProfileId,
+            ),
             'contact_channels' => $stored['contact_channels'],
             'contact_bubble_channel_id' => $stored['contact_bubble_channel_id'],
             'effective_contact_source' => $this->profileSummary($effectiveSource),
@@ -442,6 +445,24 @@ final class AccountProfileContactChannelsService
             'display_name' => trim((string) $profile->display_name),
             'slug' => $this->normalizeNullableString($profile->slug ?? null),
             'profile_type' => trim((string) $profile->profile_type),
+        ];
+    }
+
+    /**
+     * @param  array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>  $selectedSummariesByProfileId
+     * @return array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}|null
+     */
+    private function selectedSummary(?string $profileId, array $selectedSummariesByProfileId): ?array
+    {
+        if ($profileId === null) {
+            return null;
+        }
+
+        return $selectedSummariesByProfileId[$profileId] ?? [
+            'id' => $profileId,
+            'display_name' => null,
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
         ];
     }
 

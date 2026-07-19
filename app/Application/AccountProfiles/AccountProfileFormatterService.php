@@ -20,6 +20,7 @@ class AccountProfileFormatterService
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
     ) {}
 
     /**
@@ -35,6 +36,15 @@ class AccountProfileFormatterService
         $slug = trim((string) ($profile->slug ?? ''));
         $canOpenPublicDetail = $slug !== ''
             && $this->typeSetProvider->isPublicCatalog((string) $profile->profile_type);
+
+        $nestedProfileGroups = $includeAgendaOccurrences
+            ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl)
+            : $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
+        $selectedSummariesByProfileId = $includeAgendaOccurrences
+            ? []
+            : $this->candidateDiscoveryService->selectedSummariesByIds(
+                $this->linkedSelectionIds($nestedProfileGroups, $profile),
+            );
 
         $payload = [
             'id' => (string) $profile->_id,
@@ -65,8 +75,11 @@ class AccountProfileFormatterService
                 ? $this->galleryService->formatForPublicDetail($profile, $baseUrl)
                 : $this->galleryService->formatForRead($profile, $baseUrl),
             'nested_profile_groups' => $includeAgendaOccurrences
-                ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl)
-                : $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []),
+                ? $nestedProfileGroups
+                : $this->nestedGroupService->withSelectedSummaries(
+                    $nestedProfileGroups,
+                    $selectedSummariesByProfileId,
+                ),
             'location' => $this->formatLocation($profile->location),
             'ownership_state' => $account
                 ? $this->ownershipStateService->deriveOwnershipState($account)
@@ -80,7 +93,7 @@ class AccountProfileFormatterService
             ...$payload,
             ...($publicContactProjection
                 ? $this->contactChannelsService->formatForPublicRead($profile)
-                : $this->contactChannelsService->formatForRead($profile)),
+                : $this->contactChannelsService->formatForRead($profile, $selectedSummariesByProfileId)),
         ];
 
         if ($includeAgendaOccurrences) {
@@ -108,5 +121,29 @@ class AccountProfileFormatterService
             'lat' => (float) $coordinates[1],
             'lng' => (float) $coordinates[0],
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $nestedProfileGroups
+     * @return array<int, string>
+     */
+    private function linkedSelectionIds(array $nestedProfileGroups, AccountProfile $profile): array
+    {
+        $ids = [];
+        foreach ($nestedProfileGroups as $group) {
+            foreach ($group['account_profile_ids'] ?? [] as $profileId) {
+                $profileId = trim((string) $profileId);
+                if ($profileId !== '') {
+                    $ids[$profileId] = true;
+                }
+            }
+        }
+
+        $contactSourceId = trim((string) ($profile->contact_source_account_profile_id ?? ''));
+        if ($contactSourceId !== '') {
+            $ids[$contactSourceId] = true;
+        }
+
+        return array_keys($ids);
     }
 }
