@@ -321,7 +321,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
                     'is_publicly_discoverable' => true,
                     'is_poi_enabled' => false,
                     'has_events' => false,
@@ -375,7 +375,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
                     'is_publicly_discoverable' => true,
                     'is_poi_enabled' => false,
                     'has_events' => false,
@@ -417,7 +417,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
                     'is_publicly_discoverable' => true,
                     'is_poi_enabled' => false,
                     'has_events' => false,
@@ -435,7 +435,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $this->get($mediaRoute, $this->getHeaders())->assertOk();
     }
 
-    public function test_public_gallery_media_requires_active_public_navigable_profile(): void
+    public function test_public_gallery_media_requires_an_active_public_catalog_profile(): void
     {
         Storage::fake('public');
 
@@ -494,7 +494,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 ],
             ],
         );
-        $this->get($mediaRoute, $this->getHeaders())->assertNotFound();
+        $this->get($mediaRoute, $this->getHeaders())->assertOk();
 
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'venue'],

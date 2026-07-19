@@ -134,6 +134,27 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
         }
     }
 
+    public function test_base_migration_can_reapply_when_canonical_capability_indexes_already_exist(): void
+    {
+        $this->profileTypesCollection()->drop();
+
+        $baseMigration = require base_path(
+            'database/migrations/tenants/2026_01_29_000300_create_profile_types_collection.php',
+        );
+        $baseMigration->up();
+        $this->runCapabilityCanonicalizationMigration();
+
+        $baseMigration->up();
+
+        $indexNames = array_map(
+            static fn ($index): string => $index->getName(),
+            iterator_to_array($this->profileTypesCollection()->listIndexes()),
+        );
+
+        $this->assertContains('idx_account_profile_types_capability_is_favoritable_v1', $indexNames);
+        $this->assertContains('idx_account_profile_types_capability_is_poi_enabled_v1', $indexNames);
+    }
+
     public function test_migration_repairs_only_the_current_tenant_collection(): void
     {
         $primary = Tenant::query()->firstOrFail();

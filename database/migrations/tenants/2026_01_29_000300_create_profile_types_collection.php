@@ -13,8 +13,14 @@ return new class extends Migration
     {
         Schema::create('account_profile_types', function (Blueprint $collection) {
             $collection->unique('type');
-            $collection->index(['capabilities.is_favoritable' => 1]);
-            $collection->index(['capabilities.is_poi_enabled' => 1]);
+            $collection->index(
+                ['capabilities.is_favoritable' => 1],
+                'idx_account_profile_types_capability_is_favoritable_v1',
+            );
+            $collection->index(
+                ['capabilities.is_poi_enabled' => 1],
+                'idx_account_profile_types_capability_is_poi_enabled_v1',
+            );
             $collection->index(['created_at' => -1, 'updated_at' => -1]);
         });
     }
