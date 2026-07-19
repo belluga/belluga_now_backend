@@ -404,15 +404,6 @@ function defaultAccountProfileQueryabilityAllowlist(): array
             'rationale' => 'Canonical tenant-admin AccountProfile index gateway, including queryable_only selector filtering.',
         ],
         [
-            'key' => 'app/Application/AccountProfiles/AccountProfileQueryService.php::paginateContactSourceCandidates::query',
-            'path' => 'app/Application/AccountProfiles/AccountProfileQueryService.php',
-            'method' => 'paginateContactSourceCandidates',
-            'source_kind' => 'query',
-            'category' => 'canonical_gateway',
-            'owner' => 'TODO-v0.3.2-account-profile-whatsapp-capability',
-            'rationale' => 'Canonical tenant-admin contact-source candidate gateway: tenant-scoped, own-mode, active, non-deleted, contact-capable profiles are filtered in MongoDB before ordered pagination.',
-        ],
-        [
             'key' => 'app/Application/AccountProfiles/AccountProfileQueryService.php::publicPaginate::query',
             'path' => 'app/Application/AccountProfiles/AccountProfileQueryService.php',
             'method' => 'publicPaginate',
@@ -526,11 +517,13 @@ function resolveAccountProfileQueryabilityGuardOptions(array $argv): array
     foreach (array_slice($argv, 1) as $argument) {
         if (str_starts_with($argument, '--root=')) {
             $root = substr($argument, strlen('--root='));
+
             continue;
         }
 
         if (str_starts_with($argument, '--allowlist=')) {
             $allowlistPath = substr($argument, strlen('--allowlist='));
+
             continue;
         }
 

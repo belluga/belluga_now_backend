@@ -6,11 +6,13 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Support\Facades\DB;
+use Laravel\Sanctum\Sanctum;
 use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -133,6 +135,17 @@ class AccountProfileCandidateDiscoveryTest extends TestCaseTenant
 
         $missingScope->assertStatus(422)->assertJsonValidationErrors('scope');
         $shortSearch->assertStatus(422)->assertJsonValidationErrors('search');
+    }
+
+    public function test_candidate_discovery_requires_authentication_and_view_ability(): void
+    {
+        $url = "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable&search=xa";
+
+        $this->getJson($url)->assertUnauthorized();
+
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create']);
+
+        $this->getJson($url)->assertForbidden();
     }
 
     public function test_candidate_discovery_normalizes_name_prefixes_and_escapes_regex_input(): void

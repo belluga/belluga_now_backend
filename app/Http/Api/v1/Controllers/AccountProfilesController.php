@@ -4,16 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
+use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
+use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
-use App\Http\Api\v1\Requests\AccountProfileContactSourceCandidatesRequest;
-use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -39,18 +38,6 @@ class AccountProfilesController extends Controller
             $request->query(),
             $request->boolean('archived'),
             $perPage
-        );
-
-        return response()->json($paginator->toArray());
-    }
-
-    public function contactSourceCandidates(
-        AccountProfileContactSourceCandidatesRequest $request,
-    ): JsonResponse {
-        $validated = $request->validated();
-        $paginator = $this->profileQueryService->paginateContactSourceCandidates(
-            $validated['exclude_account_profile_id'] ?? null,
-            (int) ($validated['per_page'] ?? 50),
         );
 
         return response()->json($paginator->toArray());
