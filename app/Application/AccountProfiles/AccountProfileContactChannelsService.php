@@ -22,6 +22,7 @@ final class AccountProfileContactChannelsService
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly ContactChannelDefinitionRegistry $definitionRegistry,
         private readonly ContactChannelCollectionNormalizer $collectionNormalizer,
     ) {}
@@ -406,15 +407,14 @@ final class AccountProfileContactChannelsService
             return null;
         }
 
-        $profile = AccountProfile::query()->find($sourceId);
-        if (! $profile instanceof AccountProfile
-            || ! $profile->is_active
-            || ! $this->hasContactChannelsCapability((string) $profile->profile_type)
-            || $this->normalizeMode($profile->contact_mode ?? null) !== self::CONTACT_MODE_OWN) {
-            return null;
-        }
+        $profile = $this->candidateDiscoveryService
+            ->eligibleProfilesByIds(
+                AccountProfileCandidateDiscoveryService::SCOPE_CONTACT_CAPABLE,
+                [$sourceId],
+            )
+            ->first();
 
-        return $profile;
+        return $profile instanceof AccountProfile ? $profile : null;
     }
 
     private function hasContactChannelsCapability(string $profileType): bool

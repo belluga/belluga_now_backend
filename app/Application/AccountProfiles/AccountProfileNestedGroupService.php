@@ -21,6 +21,7 @@ class AccountProfileNestedGroupService
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
     ) {}
 
     /**
@@ -327,11 +328,10 @@ class AccountProfileNestedGroupService
             return;
         }
 
-        $queryableTypes = $this->queryableProfileTypes();
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', $memberIds)
-            ->where('is_active', true)
-            ->get();
+        $profiles = $this->candidateDiscoveryService->eligibleProfilesByIds(
+            AccountProfileCandidateDiscoveryService::SCOPE_QUERYABLE,
+            $memberIds,
+        );
         $profilesById = [];
         foreach ($profiles as $profile) {
             $profilesById[(string) $profile->getKey()] = $profile;
@@ -342,7 +342,7 @@ class AccountProfileNestedGroupService
             $profile = $profilesById[$memberId] ?? null;
             if (
                 ! $profile
-                || ! in_array((string) $profile->profile_type, $queryableTypes, true)
+                || ! $profile->is_active
             ) {
                 $invalid[] = $memberId;
             }

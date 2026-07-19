@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileFormatterService;
+use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -12,6 +13,7 @@ use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfileContactSourceCandidatesRequest;
+use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -22,6 +24,7 @@ class AccountProfilesController extends Controller
 {
     public function __construct(
         private readonly AccountProfileManagementService $profileService,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
@@ -51,6 +54,19 @@ class AccountProfilesController extends Controller
         );
 
         return response()->json($paginator->toArray());
+    }
+
+    public function candidates(AccountProfileCandidatesRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        return response()->json($this->candidateDiscoveryService->page(
+            $validated['scope'],
+            $request->normalizedSearch(),
+            (int) ($validated['page'] ?? 1),
+            (int) ($validated['per_page'] ?? 20),
+            $validated['exclude_account_profile_id'] ?? null,
+        ));
     }
 
     public function publicIndex(AccountProfilePublicIndexRequest $request): JsonResponse

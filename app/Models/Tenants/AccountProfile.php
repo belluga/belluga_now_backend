@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\AccountProfiles\AccountProfileNameSearchKey;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
 use MongoDB\Laravel\Relations\BelongsTo;
@@ -23,6 +24,7 @@ class AccountProfile extends Model
         'account_id',
         'profile_type',
         'display_name',
+        'name_search_key',
         'slug',
         'visibility',
         'discoverable_by_contacts',
@@ -60,6 +62,18 @@ class AccountProfile extends Model
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(static function (self $profile): void {
+            if ($profile->isDirty('display_name') || trim((string) $profile->getAttribute('name_search_key')) === '') {
+                $profile->setAttribute(
+                    'name_search_key',
+                    AccountProfileNameSearchKey::fromDisplayName((string) $profile->getAttribute('display_name')),
+                );
+            }
+        });
+    }
 
     public function account(): BelongsTo
     {
