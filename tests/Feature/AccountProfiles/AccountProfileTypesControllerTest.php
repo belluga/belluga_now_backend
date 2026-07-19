@@ -600,6 +600,37 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_favoritable', true);
     }
 
+    public function test_profile_type_update_rejects_non_boolean_capability_without_rewriting_existing_values(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'protected-update',
+            'label' => 'Protected Update',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/protected-update",
+            [
+                'capabilities' => [
+                    'is_favoritable' => 'definitely-not-a-boolean',
+                ],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['capabilities.is_favoritable']);
+
+        $type = TenantProfileType::query()->where('type', 'protected-update')->firstOrFail();
+        $this->assertTrue((bool) ($type->capabilities['is_favoritable'] ?? false));
+        $this->assertTrue((bool) ($type->capabilities['is_poi_enabled'] ?? false));
+    }
+
     public function test_profile_type_update_uses_route_param(): void
     {
         TenantProfileType::query()->delete();

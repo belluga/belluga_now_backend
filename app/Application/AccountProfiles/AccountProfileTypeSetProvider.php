@@ -54,10 +54,10 @@ final class AccountProfileTypeSetProvider
     /**
      * @return array<int, string>
      */
-    public function publicDiscoverySurfaceTypes(): array
+    public function publicCatalogTypes(): array
     {
-        return $this->remember('public_discovery_surface', static fn (): array => TenantProfileType::query()
-            ->publicDiscoverySurface()
+        return $this->remember('public_catalog', static fn (): array => TenantProfileType::query()
+            ->publicCatalog()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
@@ -177,6 +177,16 @@ final class AccountProfileTypeSetProvider
         }
 
         return in_array($normalized, $this->publiclyNavigableTypes(), true);
+    }
+
+    public function isPublicCatalog(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->publicCatalogTypes(), true);
     }
 
     public function hasGalleryEnabled(string $profileType): bool

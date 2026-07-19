@@ -457,6 +457,35 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $detailResponse->assertStatus(404);
     }
 
+    public function test_public_account_profile_detail_rejects_a_navigable_non_favoritable_type(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'navigable_non_favoritable',
+            'label' => 'Navigable Non Favoritable',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => false,
+            ],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'navigable_non_favoritable',
+            'display_name' => 'Navigable But Not Public',
+            'slug' => 'navigable-but-not-public',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/{$profile->slug}")
+            ->assertStatus(404);
+    }
+
     public function test_public_account_profile_index_rejects_filter_bypass_for_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
@@ -1410,7 +1439,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('data'));
     }
 
-    public function test_public_account_profile_show_by_slug_requires_public_navigation_capability(): void
+    public function test_public_account_profile_show_by_slug_uses_canonical_public_catalog_eligibility(): void
     {
         $this->createAccountUser([]);
 
@@ -1438,14 +1467,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $index = $this->getJson("{$this->base_api_tenant}account_profiles");
         $index->assertStatus(200);
         $index->assertJsonPath('data.0.slug', 'route-disabled-venue');
-        $index->assertJsonPath('data.0.can_open_public_detail', false);
-        $index->assertJsonPath('data.0.public_detail_path', null);
+        $index->assertJsonPath('data.0.can_open_public_detail', true);
+        $index->assertJsonPath('data.0.public_detail_path', '/parceiro/route-disabled-venue');
 
         $detail = $this->getJson(
             "{$this->base_api_tenant}account_profiles/route-disabled-venue"
         );
 
-        $detail->assertStatus(404);
+        $detail->assertStatus(200);
     }
 
     public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_venue_occurrences(): void
@@ -1677,6 +1706,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_queryable' => true,
                 'is_publicly_navigable' => true,
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => true,
             ],
@@ -1730,6 +1760,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_queryable' => true,
                 'is_publicly_navigable' => true,
                 'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
                 'has_events' => false,
             ],
@@ -1962,6 +1993,18 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_poi_enabled' => false,
             ],
         ]);
+        TenantProfileType::create([
+            'type' => 'blocked-poi',
+            'label' => 'Blocked Poi',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => false,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
 
         $secondary = Account::create([
             'name' => 'Geo Secondary',
@@ -1971,6 +2014,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $tertiary = Account::create([
             'name' => 'Geo Tertiary',
             'document' => 'DOC-GEO-TERTIARY',
+        ]);
+        $blocked = Account::create([
+            'name' => 'Geo Blocked',
+            'document' => 'DOC-GEO-BLOCKED',
         ]);
 
         AccountProfile::create([
@@ -2003,6 +2050,17 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ],
             'is_active' => true,
         ]);
+        AccountProfile::create([
+            'account_id' => (string) $blocked->_id,
+            'profile_type' => 'blocked-poi',
+            'display_name' => 'Blocked Poi',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0003, -20.0003],
+            ],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
 
         $response = $this->getJson(
             "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
@@ -2021,6 +2079,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame(
             ['Near Venue', 'Far Venue'],
             $items->pluck('display_name')->values()->all()
+        );
+        $this->assertFalse(
+            $items->contains(static fn (array $item): bool => ($item['display_name'] ?? null) === 'Blocked Poi')
         );
         $this->assertNotNull($items->first()['distance_meters'] ?? null);
         $this->assertIsNumeric($items->first()['distance_meters'] ?? null);
@@ -4270,6 +4331,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_queryable' => true,
             'is_publicly_navigable' => true,
             'is_favoritable' => true,
+            'is_publicly_discoverable' => true,
             'is_poi_enabled' => true,
             'has_events' => true,
             'has_nested_profile_groups' => false,

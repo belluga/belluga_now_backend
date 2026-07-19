@@ -380,7 +380,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         $profileId = (string) $profile->getAttribute('_id');
         $profileSlug = trim((string) ($profile->slug ?? ''));
         $canOpenPublicDetail = $profileSlug !== ''
-            && $this->typeSetProvider->isPubliclyNavigable((string) ($profile->profile_type ?? ''));
+            && $this->typeSetProvider->isPublicCatalog((string) ($profile->profile_type ?? ''));
         $publicDetailPath = $canOpenPublicDetail ? '/parceiro/'.$profileSlug : null;
 
         $liveNowOccurrenceId = $liveNowOccurrence ? (string) $liveNowOccurrence->getAttribute('_id') : null;

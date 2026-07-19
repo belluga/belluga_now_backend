@@ -125,7 +125,7 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $allowedTypes = $this->publiclyDiscoverableProfileTypes();
+        $allowedTypes = $this->publicCatalogProfileTypes();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
 
         $query = $this->withoutPublicProfileTypeFilters($queryParams);
@@ -165,7 +165,7 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $allowedTypes = $this->publiclyDiscoverableProfileTypes();
+        $allowedTypes = $this->publicCatalogProfileTypes();
         $selectedTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $hasExplicitTypeFilter = $this->hasExplicitPublicTypeFilter($queryParams);
         $selectedTypesForItems = $hasExplicitTypeFilter && $selectedTypes === []
@@ -806,7 +806,7 @@ class AccountProfileQueryService extends AbstractQueryService
     public function publicFindBySlugOrFail(string $slug): AccountProfile
     {
         $normalizedSlug = trim($slug);
-        $allowedTypes = $this->publiclyNavigableProfileTypes();
+        $allowedTypes = $this->publicCatalogProfileTypes();
 
         if ($normalizedSlug === '' || $allowedTypes === []) {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$slug]);
@@ -836,7 +836,7 @@ class AccountProfileQueryService extends AbstractQueryService
             return false;
         }
 
-        return $this->typeSetProvider->isPubliclyNavigable(
+        return $this->typeSetProvider->isPublicCatalog(
             trim((string) ($profile->profile_type ?? ''))
         );
     }
@@ -886,7 +886,7 @@ class AccountProfileQueryService extends AbstractQueryService
             ?? Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
         $canOpenPublicDetail = $slug !== ''
-            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
+            && $this->typeSetProvider->isPublicCatalog((string) $profile->profile_type);
 
         return [
             'id' => (string) $profile->_id,
@@ -1073,17 +1073,9 @@ class AccountProfileQueryService extends AbstractQueryService
     /**
      * @return array<int, string>
      */
-    private function publiclyDiscoverableProfileTypes(): array
+    private function publicCatalogProfileTypes(): array
     {
-        return $this->typeSetProvider->publicDiscoverySurfaceTypes();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function publiclyNavigableProfileTypes(): array
-    {
-        return $this->typeSetProvider->publiclyNavigableTypes();
+        return $this->typeSetProvider->publicCatalogTypes();
     }
 
     /**

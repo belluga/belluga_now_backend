@@ -185,7 +185,7 @@ class AccountProfileNestedGroupService
             return [];
         }
 
-        $publiclyNavigableTypes = $this->publiclyNavigableProfileTypes();
+        $publicCatalogTypes = $this->publicCatalogTypes();
         $profilesById = $this->publicProfilesById(array_keys($orderedMemberIds), $queryableTypes);
         $publicGroups = [];
         foreach ($groups as $group) {
@@ -195,7 +195,7 @@ class AccountProfileNestedGroupService
                 if (! $profile) {
                     continue;
                 }
-                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publiclyNavigableTypes);
+                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publicCatalogTypes);
             }
 
             if ($profiles === []) {
@@ -401,10 +401,10 @@ class AccountProfileNestedGroupService
     /**
      * @return array<string, mixed>
      */
-    private function formatLinkedProfile(AccountProfile $profile, string $baseUrl, array $publiclyNavigableTypes): array
+    private function formatLinkedProfile(AccountProfile $profile, string $baseUrl, array $publicCatalogTypes): array
     {
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $slug !== '' && in_array((string) $profile->profile_type, $publiclyNavigableTypes, true);
+        $canOpenPublicDetail = $slug !== '' && in_array((string) $profile->profile_type, $publicCatalogTypes, true);
 
         return [
             'id' => (string) $profile->_id,
@@ -443,8 +443,8 @@ class AccountProfileNestedGroupService
     /**
      * @return array<int, string>
      */
-    private function publiclyNavigableProfileTypes(): array
+    private function publicCatalogTypes(): array
     {
-        return $this->typeSetProvider->publiclyNavigableTypes();
+        return $this->typeSetProvider->publicCatalogTypes();
     }
 }

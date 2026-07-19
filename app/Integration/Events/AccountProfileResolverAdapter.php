@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
+use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
-use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
@@ -106,7 +106,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         }
 
         $slug = $this->normalizeSlug($profile->slug ?? null);
-        $supportsPublicNavigation = $this->typeSetProvider->isPubliclyNavigable($profileType);
+        $supportsPublicNavigation = $this->typeSetProvider->isPublicCatalog($profileType);
         $canOpenPublicDetail = $slug !== null && $supportsPublicNavigation;
         $baseUrl = request()->getSchemeAndHttpHost();
         $avatarUrl = $this->accountProfileMediaService->normalizePublicUrl(

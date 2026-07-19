@@ -29,13 +29,12 @@ class AccountProfileFormatterService
         AccountProfile $profile,
         bool $includeAgendaOccurrences = false,
         bool $publicContactProjection = false,
-    ): array
-    {
+    ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
         $canOpenPublicDetail = $slug !== ''
-            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
+            && $this->typeSetProvider->isPublicCatalog((string) $profile->profile_type);
 
         $payload = [
             'id' => (string) $profile->_id,
