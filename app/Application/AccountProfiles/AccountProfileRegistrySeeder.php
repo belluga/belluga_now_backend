@@ -15,13 +15,17 @@ class AccountProfileRegistrySeeder
 
     private AccountProfileTypeCapabilityRepairer $capabilityRepairer;
 
+    private AccountProfileRegistryDefaultUpserter $defaultUpserter;
+
     public function __construct(
         ?AccountProfileTypeCapabilityCatalog $capabilityCatalog = null,
         ?AccountProfileTypeCapabilityRepairer $capabilityRepairer = null,
+        ?AccountProfileRegistryDefaultUpserter $defaultUpserter = null,
     ) {
         $this->capabilityCatalog = $capabilityCatalog ?? new AccountProfileTypeCapabilityCatalog;
         $this->capabilityRepairer = $capabilityRepairer
             ?? new AccountProfileTypeCapabilityRepairer($this->capabilityCatalog);
+        $this->defaultUpserter = $defaultUpserter ?? new AccountProfileRegistryDefaultUpserter;
     }
 
     /**
@@ -66,22 +70,26 @@ class AccountProfileRegistrySeeder
     public function ensureDefaults(): void
     {
         foreach ($this->defaults() as $entry) {
-            $type = trim((string) ($entry['type'] ?? ''));
-            if ($type === '') {
+            $outcome = $this->defaultUpserter->ensureDefault(
+                $entry,
+                new UTCDateTime((int) Carbon::now()->getTimestampMs()),
+            );
+
+            if (! $outcome->requiresExistingDefaultRepair()) {
+                AccountProfileTypeSetProvider::bumpRevision();
+
                 continue;
             }
 
+            $type = trim((string) ($entry['type'] ?? ''));
             $existing = TenantProfileType::query()
                 ->where('type', $type)
-                ->first();
-
-            if (! $existing instanceof TenantProfileType) {
-                TenantProfileType::create($entry);
-
-                continue;
-            }
-
+                ->firstOrFail();
             $this->repairDefaultCapabilities($existing);
+
+            if ($outcome->requiresTypeSetInvalidation()) {
+                AccountProfileTypeSetProvider::bumpRevision();
+            }
         }
     }
 

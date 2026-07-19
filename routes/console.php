@@ -1,6 +1,7 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
 use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -14,7 +15,6 @@ use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
@@ -44,17 +44,20 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
 
     $tenant->makeCurrent();
 
-    $registry = (new AccountProfileRegistrySeeder)->defaults();
+    try {
+        app(AccountProfileRegistrySyncIndexPrecondition::class)->assertCompatibleTypeIndex();
+        app(AccountProfileRegistrySeeder::class)->ensureDefaults();
+        $this->info("Profile type registry repaired for tenant [{$tenantSlug}].");
 
-    TenantProfileType::query()->delete();
-    foreach ($registry as $entry) {
-        TenantProfileType::create($entry);
+        return 0;
+    } catch (\Throwable $exception) {
+        $this->error($exception->getMessage());
+
+        return 1;
+    } finally {
+        Tenant::forgetCurrent();
     }
-
-    $this->info("Profile type registry updated for tenant [{$tenantSlug}].");
-
-    return 0;
-})->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+})->purpose('Additively ensure default profile types and repair established default capabilities.');
 
 Artisan::command('accounts:missing-profiles:repair {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
     if (! app()->environment(['local', 'testing'])) {
