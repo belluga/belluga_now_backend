@@ -4,14 +4,20 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfileNestedGroupService;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
+use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
-use App\Http\Api\v1\Requests\AccountProfileContactSourceCandidatesRequest;
+use App\Http\Api\v1\Requests\AccountProfilePublicNestedGroupMembersRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -22,9 +28,12 @@ class AccountProfilesController extends Controller
 {
     public function __construct(
         private readonly AccountProfileManagementService $profileService,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
+        private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
     ) {}
 
@@ -41,21 +50,23 @@ class AccountProfilesController extends Controller
         return response()->json($paginator->toArray());
     }
 
-    public function contactSourceCandidates(
-        AccountProfileContactSourceCandidatesRequest $request,
-    ): JsonResponse {
+    public function candidates(AccountProfileCandidatesRequest $request): JsonResponse
+    {
         $validated = $request->validated();
-        $paginator = $this->profileQueryService->paginateContactSourceCandidates(
-            $validated['exclude_account_profile_id'] ?? null,
-            (int) ($validated['per_page'] ?? 50),
-        );
 
-        return response()->json($paginator->toArray());
+        return response()->json($this->candidateDiscoveryService->page(
+            $validated['scope'],
+            $request->normalizedSearch(),
+            (int) ($validated['page'] ?? 1),
+            (int) ($validated['per_page'] ?? 20),
+            $validated['exclude_account_profile_id'] ?? null,
+        ));
     }
 
     public function publicIndex(AccountProfilePublicIndexRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        $validated['search'] = $request->normalizedSearch();
 
         $perPage = (int) ($validated['per_page'] ?? $validated['page_size'] ?? 15);
         $payload = $this->profileQueryService->publicPageEnvelope($validated, $perPage);
@@ -91,6 +102,21 @@ class AccountProfilesController extends Controller
         ]);
     }
 
+    public function publicNestedGroupMembers(
+        AccountProfilePublicNestedGroupMembersRequest $request,
+        string $tenant_domain,
+        string $account_profile_slug,
+        string $group_id,
+    ): JsonResponse {
+        return response()->json($this->nestedPublicMembersProjectionService->publicMemberPage(
+            $account_profile_slug,
+            $group_id,
+            $request->perPage(),
+            $request->suppliedPerPage(),
+            $request->cursor(),
+        ));
+    }
+
     public function store(AccountProfileStoreRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -104,8 +130,27 @@ class AccountProfilesController extends Controller
             $validated['updated_by_type'] = $validated['created_by_type'];
         }
 
-        $profile = $this->profileService->create($validated);
-        $this->mediaService->applyUploads($request, $profile);
+        $mediaFingerprint = $this->mediaService->mutationFingerprint($request);
+        $mediaBackup = null;
+        $profile = $this->profileService->create(
+            $validated,
+            $request->header('X-Request-Id'),
+            $mediaFingerprint === []
+                ? null
+                : function (\App\Models\Tenants\AccountProfile $persistedProfile) use ($request, &$mediaBackup): array {
+                    $mediaBackup ??= $this->mediaService->captureMutationBackup($request, $persistedProfile);
+
+                    return $this->mediaService->applyUploads($request, $persistedProfile);
+                },
+            ['media' => $mediaFingerprint],
+            static function () use (&$mediaBackup): mixed {
+                if ($mediaBackup !== null) {
+                    return $mediaBackup->restore();
+                }
+
+                return null;
+            },
+        );
 
         return response()->json([
             'data' => $this->formatter->format($profile),
@@ -121,6 +166,44 @@ class AccountProfilesController extends Controller
         ]);
     }
 
+    public function nestedGroupMembers(
+        AccountProfileNestedGroupMembersRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $group_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json($this->nestedGroupService->adminMemberPage(
+            $profile,
+            $group_id,
+            $request->perPage(),
+            $request->suppliedPerPage(),
+            $request->cursor(),
+            $this->candidateDiscoveryService,
+        ));
+    }
+
+    public function patchNestedGroupMembers(
+        AccountProfileNestedGroupMembersPatchRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $group_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json([
+            'data' => $this->profileService->patchNestedGroupMembers(
+                $profile,
+                $group_id,
+                $request->aggregateRevision(),
+                $request->addIds(),
+                $request->removeIds(),
+                $request->header('X-Request-Id'),
+            ),
+        ]);
+    }
+
     public function update(AccountProfileUpdateRequest $request, string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
@@ -133,20 +216,21 @@ class AccountProfilesController extends Controller
             $validated['updated_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
         }
 
-        $hasMediaMutation = $request->hasFile('avatar')
-            || $request->hasFile('cover')
-            || $request->boolean('remove_avatar')
-            || $request->boolean('remove_cover');
+        $mediaFingerprint = $this->mediaService->mutationFingerprint($request);
+        $mediaBackup = $this->mediaService->captureMutationBackup($request, $profile);
 
         $updated = $this->profileService->update(
             $profile,
             $validated,
-            syncMapPoiProjection: ! $hasMediaMutation
+            commandId: $request->header('X-Request-Id'),
+            mutateWithinTransaction: $mediaFingerprint === []
+                ? null
+                : fn (\App\Models\Tenants\AccountProfile $persistedProfile): array => $this->mediaService->applyUploads($request, $persistedProfile),
+            fingerprintSupplement: ['media' => $mediaFingerprint],
+            compensateKnownRollback: $mediaBackup === null
+                ? null
+                : static fn (): mixed => $mediaBackup->restore(),
         );
-        $this->mediaService->applyUploads($request, $updated);
-        if ($hasMediaMutation) {
-            $this->profileService->syncMapPoiProjection($updated);
-        }
 
         return response()->json([
             'data' => $this->formatter->format($updated),
@@ -156,7 +240,7 @@ class AccountProfilesController extends Controller
     public function destroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
-        $this->profileService->delete($profile);
+        $this->profileService->delete($profile, request()->header('X-Request-Id'));
 
         return response()->json();
     }
@@ -164,7 +248,7 @@ class AccountProfilesController extends Controller
     public function restore(string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id, true);
-        $restored = $this->profileService->restore($profile);
+        $restored = $this->profileService->restore($profile, request()->header('X-Request-Id'));
 
         return response()->json([
             'data' => $this->formatter->format($restored),
@@ -174,7 +258,7 @@ class AccountProfilesController extends Controller
     public function forceDestroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id, true);
-        $this->profileService->forceDelete($profile);
+        $this->profileService->forceDelete($profile, request()->header('X-Request-Id'));
 
         return response()->json();
     }

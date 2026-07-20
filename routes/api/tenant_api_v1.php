@@ -209,6 +209,11 @@ Route::prefix('account_profiles')
 
         Route::prefix('{account_profile_id}')
             ->group(function () {
+                Route::get('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'nestedGroupMembers'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+                Route::patch('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'patchNestedGroupMembers'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
                 Route::get('/', [AccountProfilesController::class, 'show'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 

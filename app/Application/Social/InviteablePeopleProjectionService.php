@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Social;
 
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
@@ -52,8 +53,11 @@ class InviteablePeopleProjectionService
         $stale->delete();
     }
 
-    public function refreshProfileForUser(AccountUser|string|null $viewer, string $profileId): void
-    {
+    public function refreshProfileForUser(
+        AccountUser|string|null $viewer,
+        string $profileId,
+        ?AccountProfileTransactionContext $context = null,
+    ): void {
         $viewer = $viewer instanceof AccountUser
             ? $viewer
             : $this->accountUser((string) $viewer);
@@ -77,7 +81,7 @@ class InviteablePeopleProjectionService
             return;
         }
 
-        $this->upsertProjectionPayload($ownerUserId, $item);
+        $this->upsertProjectionPayload($ownerUserId, $item, $context);
     }
 
     /**
@@ -218,6 +222,53 @@ class InviteablePeopleProjectionService
         $this->refreshProfileForOwners($ownerIds, $profileId);
     }
 
+    /** @param array<string, mixed> $event */
+    public function refreshImpactedByAccountProfileOutboxEvent(
+        AccountProfileTransactionContext $context,
+        array $event,
+    ): void {
+        $profileId = $this->nullableString($event['profile_id'] ?? null);
+        if ($profileId === null) {
+            return;
+        }
+
+        $snapshot = (string) ($event['operation'] ?? '') === 'tombstone'
+            ? ($event['tombstone'] ?? null)
+            : ($event['projection'] ?? null);
+        if (! is_array($snapshot)) {
+            return;
+        }
+
+        $ownerIds = [];
+        $profileOwnerId = (string) ($snapshot['created_by_type'] ?? '') === 'tenant'
+            ? $this->nullableString($snapshot['created_by'] ?? null)
+            : null;
+        if ($profileOwnerId !== null) {
+            $ownerIds[] = $profileOwnerId;
+            $ownerIds = array_merge(
+                $ownerIds,
+                ContactHashDirectory::query()
+                    ->where('matched_user_id', $profileOwnerId)
+                    ->get()
+                    ->pluck('importing_user_id')
+                    ->all(),
+            );
+        }
+
+        $ownerIds = array_merge(
+            $ownerIds,
+            FavoriteEdge::query()
+                ->where('registry_key', 'account_profile')
+                ->where('target_type', 'account_profile')
+                ->where('target_id', $profileId)
+                ->get()
+                ->pluck('owner_user_id')
+                ->all(),
+        );
+
+        $this->refreshProfileForOwners($ownerIds, $profileId, $context);
+    }
+
     public function refreshImpactedByUser(AccountUser $user): void
     {
         $userId = $this->userId($user);
@@ -331,8 +382,11 @@ class InviteablePeopleProjectionService
     /**
      * @param  array<string, mixed>  $item
      */
-    private function upsertProjectionPayload(string $ownerUserId, array $item): void
-    {
+    private function upsertProjectionPayload(
+        string $ownerUserId,
+        array $item,
+        ?AccountProfileTransactionContext $context = null,
+    ): void {
         $profileId = $this->nullableString($item['receiver_account_profile_id'] ?? null);
         if ($ownerUserId === '' || $profileId === null) {
             return;
@@ -369,7 +423,9 @@ class InviteablePeopleProjectionService
                         'created_at' => $timestamp,
                     ],
                 ],
-                ['upsert' => true],
+                $context === null
+                    ? ['upsert' => true]
+                    : [...$context->rawOptions(), 'upsert' => true],
             )
         );
     }
@@ -398,10 +454,13 @@ class InviteablePeopleProjectionService
     /**
      * @param  array<int, mixed>  $ownerUserIds
      */
-    private function refreshProfileForOwners(array $ownerUserIds, string $profileId): void
-    {
+    private function refreshProfileForOwners(
+        array $ownerUserIds,
+        string $profileId,
+        ?AccountProfileTransactionContext $context = null,
+    ): void {
         foreach ($this->normalizedIds($ownerUserIds) as $ownerUserId) {
-            $this->refreshProfileForUser($ownerUserId, $profileId);
+            $this->refreshProfileForUser($ownerUserId, $profileId, $context);
         }
     }
 

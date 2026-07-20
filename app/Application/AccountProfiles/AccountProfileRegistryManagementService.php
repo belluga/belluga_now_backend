@@ -237,18 +237,23 @@ class AccountProfileRegistryManagementService
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities, $currentCapabilities),
+            'capabilities' => $this->normalizeCapabilities($resolvedType, $capabilities, $currentCapabilities),
         ];
     }
 
     /**
+     * @param  string  $type
      * @param  array<string, mixed>  $capabilities
      * @param  array<string, mixed>  $currentCapabilities
      * @return array<string, bool>
      */
-    private function normalizeCapabilities(array $capabilities, array $currentCapabilities = []): array
+    private function normalizeCapabilities(string $type, array $capabilities, array $currentCapabilities = []): array
     {
-        return $this->capabilityCatalog->normalize($capabilities, $currentCapabilities);
+        return $this->capabilityCatalog->completeForPersistence(
+            trim($type),
+            $capabilities,
+            $currentCapabilities,
+        );
     }
 
     /**

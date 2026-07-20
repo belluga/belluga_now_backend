@@ -54,10 +54,10 @@ final class AccountProfileTypeSetProvider
     /**
      * @return array<int, string>
      */
-    public function publicDiscoverySurfaceTypes(): array
+    public function publicCatalogTypes(): array
     {
-        return $this->remember('public_discovery_surface', static fn (): array => TenantProfileType::query()
-            ->publicDiscoverySurface()
+        return $this->remember('public_catalog', static fn (): array => TenantProfileType::query()
+            ->publicCatalog()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
@@ -133,7 +133,7 @@ final class AccountProfileTypeSetProvider
     {
         return $this->remember('queryable_poi_enabled', static fn (): array => TenantProfileType::query()
             ->queryable()
-            ->where('capabilities.is_poi_enabled', true)
+            ->poiEnabled()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
@@ -150,7 +150,7 @@ final class AccountProfileTypeSetProvider
         return $this->remember('queryable_publicly_navigable_poi_enabled', static fn (): array => TenantProfileType::query()
             ->queryable()
             ->publiclyNavigable()
-            ->where('capabilities.is_poi_enabled', true)
+            ->poiEnabled()
             ->pluck('type')
             ->map(static fn ($type): string => trim((string) $type))
             ->filter(static fn (string $type): bool => $type !== '')
@@ -179,6 +179,16 @@ final class AccountProfileTypeSetProvider
         return in_array($normalized, $this->publiclyNavigableTypes(), true);
     }
 
+    public function isPublicCatalog(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->publicCatalogTypes(), true);
+    }
+
     public function hasGalleryEnabled(string $profileType): bool
     {
         $normalized = trim($profileType);
@@ -187,6 +197,16 @@ final class AccountProfileTypeSetProvider
         }
 
         return in_array($normalized, $this->galleryEnabledTypes(), true);
+    }
+
+    public function hasContactChannelsEnabled(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->contactChannelsEnabledTypes(), true);
     }
 
     /**

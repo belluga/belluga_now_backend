@@ -1,6 +1,9 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -258,6 +261,70 @@ Artisan::command('invites:inviteable-people-projection:backfill {tenant_slug?} {
 
     return 0;
 })->purpose('Backfill inviteable_people_projection for one tenant or every tenant before projection-only reads.');
+
+Artisan::command('account-profiles:nested-public-members-projection:backfill {tenant_slug?} {--all}', function () {
+    $runCurrentTenant = function (?string $tenantSlug = null): array {
+        $summary = app(AccountProfileNestedPublicMembersProjectionBackfillService::class)
+            ->rebuildCurrentTenant();
+        if ($tenantSlug !== null) {
+            $summary['tenant_slug'] = $tenantSlug;
+        }
+
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return $summary;
+    };
+
+    if ($this->option('all')) {
+        $count = 0;
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $tenant->makeCurrent();
+            try {
+                $runCurrentTenant((string) $tenant->slug);
+                $count++;
+            } finally {
+                $tenant->forgetCurrent();
+            }
+        }
+
+        $this->info(sprintf('Processed nested public members projection rebuild for tenants: %d', $count));
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug !== '') {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+
+        $tenant->makeCurrent();
+        try {
+            $runCurrentTenant($tenantSlug);
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        return 0;
+    }
+
+    if (! Tenant::current()) {
+        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $runCurrentTenant((string) Tenant::current()?->slug);
+
+    return 0;
+})->purpose('Rebuild nested public member projection rows for one tenant or all tenants.');
 
 Artisan::command('api-security:abuse-signals:prune', function () {
     $result = app(ApiAbuseSignalRecorder::class)->pruneExpired();

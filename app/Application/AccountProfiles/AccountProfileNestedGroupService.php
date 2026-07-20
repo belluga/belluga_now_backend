@@ -6,20 +6,22 @@ namespace App\Application\AccountProfiles;
 
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
 use App\Support\Validation\InputConstraints;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
-use MongoDB\Model\BSONArray;
-use MongoDB\Model\BSONDocument;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class AccountProfileNestedGroupService
 {
+    private const ADMIN_CURSOR_VERSION = 1;
+
+    private const ADMIN_CURSOR_SCOPE = 'admin_nested_group_members';
+
     public function __construct(
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
@@ -79,10 +81,11 @@ class AccountProfileNestedGroupService
                 'label' => $label,
                 'order' => isset($rawGroup['order']) ? (int) $rawGroup['order'] : $index,
                 'account_profile_ids' => $memberIds,
+                'member_count' => isset($rawGroup['member_count'])
+                    ? max(0, (int) $rawGroup['member_count'])
+                    : count($memberIds),
             ];
         }
-
-        $this->assertMemberProfilesExist(array_keys($allMemberIds));
 
         usort(
             $groups,
@@ -96,6 +99,7 @@ class AccountProfileNestedGroupService
                 'label' => $group['label'],
                 'order' => $group['order'],
                 'account_profile_ids' => $group['account_profile_ids'],
+                'member_count' => max(0, (int) ($group['member_count'] ?? count($group['account_profile_ids']))),
             ],
             $groups
         ));
@@ -154,17 +158,125 @@ class AccountProfileNestedGroupService
                 'label' => $group['label'],
                 'order' => $group['order'],
                 'account_profile_ids' => $group['account_profile_ids'],
+                'member_count' => max(0, (int) ($group['member_count'] ?? count($group['account_profile_ids']))),
             ],
             $groups
         ));
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>  $summariesByProfileId
      * @return array<int, array<string, mixed>>
      */
-    public function formatForPublicDetail(AccountProfile $parentProfile, string $baseUrl): array
+    public function withSelectedSummaries(array $groups, array $summariesByProfileId): array
     {
-        if (! $this->parentProfileTypeAllowsNestedGroups($parentProfile)) {
+        return array_values(array_map(
+            static fn (array $group): array => [
+                ...$group,
+                'account_profile_summaries' => array_values(array_map(
+                    static fn (string $profileId): array => $summariesByProfileId[$profileId] ?? [
+                        'id' => $profileId,
+                        'display_name' => null,
+                        'is_queryable_candidate' => false,
+                        'is_contact_capable_candidate' => false,
+                    ],
+                    $group['account_profile_ids'],
+                )),
+            ],
+            $groups,
+        ));
+    }
+
+    /**
+     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     */
+    public function adminMemberPage(
+        AccountProfile $parentProfile,
+        string $groupId,
+        int $defaultPerPage,
+        ?int $suppliedPerPage,
+        ?string $cursor,
+        AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
+    ): array {
+        $groups = $this->formatForRead($parentProfile->nested_profile_groups ?? []);
+        $group = $this->findGroupOrFail($groups, $groupId);
+
+        $perPage = $defaultPerPage;
+        $offset = 0;
+        $aggregateRevision = max(0, (int) ($parentProfile->aggregate_revision ?? 0));
+        $parentProfileId = (string) $parentProfile->getKey();
+
+        if ($cursor !== null) {
+            $payload = $this->decodeAdminCursor($cursor);
+            if (($payload['scope'] ?? null) !== self::ADMIN_CURSOR_SCOPE
+                || ($payload['parent_profile_id'] ?? null) !== $parentProfileId
+                || ($payload['group_id'] ?? null) !== $group['id']) {
+                throw ValidationException::withMessages([
+                    'cursor' => ['Nested profile member cursor is invalid for this parent or group.'],
+                ]);
+            }
+
+            $cursorPerPage = (int) ($payload['per_page'] ?? 0);
+            if ($suppliedPerPage !== null && $suppliedPerPage !== $cursorPerPage) {
+                throw ValidationException::withMessages([
+                    'per_page' => ['Nested profile member cursor fixes the page size for continuation requests.'],
+                ]);
+            }
+
+            if ((int) ($payload['aggregate_revision'] ?? -1) !== $aggregateRevision) {
+                throw ValidationException::withMessages([
+                    'cursor' => ['Nested profile member cursor is stale for the current aggregate revision.'],
+                ]);
+            }
+
+            $perPage = $cursorPerPage;
+            $offset = max(0, (int) ($payload['offset'] ?? 0));
+        }
+
+        $memberIds = array_values($group['account_profile_ids'] ?? []);
+        $pageIds = array_slice($memberIds, $offset, $perPage);
+        $selectedSummaries = $candidateDiscoveryService->selectedSummariesByIds($pageIds);
+        $data = array_values(array_map(
+            static fn (string $profileId): array => $selectedSummaries[$profileId] ?? [
+                'id' => $profileId,
+                'display_name' => null,
+                'is_queryable_candidate' => false,
+                'is_contact_capable_candidate' => false,
+            ],
+            $pageIds,
+        ));
+
+        $nextCursor = null;
+        if (($offset + $perPage) < count($memberIds)) {
+            $nextCursor = Crypt::encryptString(json_encode([
+                'version' => self::ADMIN_CURSOR_VERSION,
+                'scope' => self::ADMIN_CURSOR_SCOPE,
+                'parent_profile_id' => $parentProfileId,
+                'group_id' => $group['id'],
+                'aggregate_revision' => $aggregateRevision,
+                'per_page' => $perPage,
+                'offset' => $offset + $perPage,
+                'expires_at' => now()->addMinutes(15)->toIso8601String(),
+            ], JSON_THROW_ON_ERROR));
+        }
+
+        return [
+            'aggregate_revision' => $aggregateRevision,
+            'data' => $data,
+            'next_cursor' => $nextCursor,
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function formatForPublicDetail(
+        AccountProfile $parentProfile,
+        string $baseUrl,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+    ): array {
+        if (! $publicCatalogPolicy->isPublicNestedParent($parentProfile)) {
             return [];
         }
 
@@ -180,13 +292,10 @@ class AccountProfileNestedGroupService
             }
         }
 
-        $queryableTypes = $this->queryableProfileTypes();
-        if ($queryableTypes === []) {
-            return [];
-        }
-
-        $publiclyNavigableTypes = $this->publiclyNavigableProfileTypes();
-        $profilesById = $this->publicProfilesById(array_keys($orderedMemberIds), $queryableTypes);
+        $profilesById = $this->publicProfilesById(
+            array_keys($orderedMemberIds),
+            $publicCatalogPolicy,
+        );
         $publicGroups = [];
         foreach ($groups as $group) {
             $profiles = [];
@@ -195,7 +304,7 @@ class AccountProfileNestedGroupService
                 if (! $profile) {
                     continue;
                 }
-                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publiclyNavigableTypes);
+                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publicCatalogPolicy);
             }
 
             if ($profiles === []) {
@@ -211,45 +320,6 @@ class AccountProfileNestedGroupService
         }
 
         return $publicGroups;
-    }
-
-    private function parentProfileTypeAllowsNestedGroups(AccountProfile $parentProfile): bool
-    {
-        $profileType = trim((string) ($parentProfile->profile_type ?? ''));
-        if ($profileType === '') {
-            return false;
-        }
-
-        $type = TenantProfileType::query()
-            ->where('type', $profileType)
-            ->first();
-        $capabilities = $this->arrayFrom($type?->capabilities ?? []);
-
-        return $this->capabilityCatalog->isEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
-            $capabilities,
-            $capabilities,
-        );
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function arrayFrom(mixed $value): array
-    {
-        if (is_array($value)) {
-            return $value;
-        }
-
-        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
-            return $value->getArrayCopy();
-        }
-
-        if ($value instanceof \Traversable) {
-            return iterator_to_array($value);
-        }
-
-        return [];
     }
 
     private function normalizeGroupId(mixed $rawId, string $label, int $index): string
@@ -321,58 +391,19 @@ class AccountProfileNestedGroupService
 
     /**
      * @param  array<int, string>  $memberIds
-     */
-    private function assertMemberProfilesExist(array $memberIds): void
-    {
-        if ($memberIds === []) {
-            return;
-        }
-
-        $queryableTypes = $this->queryableProfileTypes();
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', $memberIds)
-            ->where('is_active', true)
-            ->get();
-        $profilesById = [];
-        foreach ($profiles as $profile) {
-            $profilesById[(string) $profile->getKey()] = $profile;
-        }
-
-        $invalid = [];
-        foreach ($memberIds as $memberId) {
-            $profile = $profilesById[$memberId] ?? null;
-            if (
-                ! $profile
-                || ! in_array((string) $profile->profile_type, $queryableTypes, true)
-            ) {
-                $invalid[] = $memberId;
-            }
-        }
-
-        if ($invalid !== []) {
-            throw ValidationException::withMessages([
-                'nested_profile_groups' => ['Nested profile group includes unavailable or non-queryable profiles.'],
-            ]);
-        }
-    }
-
-    /**
-     * @param  array<int, string>  $memberIds
-     * @param  array<int, string>  $queryableTypes
      * @return array<string, AccountProfile>
      */
-    private function publicProfilesById(array $memberIds, array $queryableTypes): array
-    {
-        if ($memberIds === [] || $queryableTypes === []) {
+    private function publicProfilesById(
+        array $memberIds,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+    ): array {
+        if ($memberIds === []) {
             return [];
         }
 
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', $memberIds)
-            ->where('is_active', true)
-            ->where('visibility', 'public')
-            ->whereIn('profile_type', $queryableTypes)
-            ->get();
+        $profiles = $publicCatalogPolicy->applyCatalogConstraint(
+            AccountProfile::query()->whereIn('_id', $memberIds),
+        )->get();
         $byId = [];
         foreach ($profiles as $profile) {
             $byId[(string) $profile->getKey()] = $profile;
@@ -400,12 +431,53 @@ class AccountProfileNestedGroupService
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $groups
      * @return array<string, mixed>
      */
-    private function formatLinkedProfile(AccountProfile $profile, string $baseUrl, array $publiclyNavigableTypes): array
+    public function findGroupOrFail(array $groups, string $groupId): array
     {
+        $normalizedGroupId = Str::lower(trim($groupId));
+        foreach ($groups as $group) {
+            if (trim((string) ($group['id'] ?? '')) === $normalizedGroupId) {
+                return $group;
+            }
+        }
+
+        throw new NotFoundHttpException;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeAdminCursor(string $cursor): array
+    {
+        try {
+            $decoded = json_decode(Crypt::decryptString($cursor), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            throw ValidationException::withMessages([
+                'cursor' => ['Nested profile member cursor is invalid.'],
+            ]);
+        }
+
+        if (! is_array($decoded)) {
+            throw ValidationException::withMessages([
+                'cursor' => ['Nested profile member cursor is invalid.'],
+            ]);
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatLinkedProfile(
+        AccountProfile $profile,
+        string $baseUrl,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+    ): array {
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $slug !== '' && in_array((string) $profile->profile_type, $publiclyNavigableTypes, true);
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
 
         return [
             'id' => (string) $profile->_id,
@@ -431,21 +503,5 @@ class AccountProfileNestedGroupService
             'can_open_public_detail' => $canOpenPublicDetail,
             'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
         ];
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function queryableProfileTypes(): array
-    {
-        return $this->typeSetProvider->queryableTypes();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function publiclyNavigableProfileTypes(): array
-    {
-        return $this->typeSetProvider->publiclyNavigableTypes();
     }
 }
