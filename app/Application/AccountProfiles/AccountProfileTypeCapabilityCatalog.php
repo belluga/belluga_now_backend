@@ -128,25 +128,6 @@ final class AccountProfileTypeCapabilityCatalog
     }
 
     /**
-     * @return array<int, array{key:string, name:string, keys:array<string, int>}>
-     */
-    public function capabilityIndexDefinitions(): array
-    {
-        $indexes = [];
-
-        foreach ($this->definitions() as $definition) {
-            $key = $definition['key'];
-            $indexes[] = [
-                'key' => $key,
-                'name' => "idx_account_profile_types_capability_{$key}_v1",
-                'keys' => ["capabilities.{$key}" => 1],
-            ];
-        }
-
-        return $indexes;
-    }
-
-    /**
      * @param  array<string, mixed>  $capabilities
      * @return array<string, bool>
      */

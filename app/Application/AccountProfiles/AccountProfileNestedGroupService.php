@@ -6,22 +6,17 @@ namespace App\Application\AccountProfiles;
 
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
-use MongoDB\Model\BSONArray;
-use MongoDB\Model\BSONDocument;
 
 class AccountProfileNestedGroupService
 {
     public function __construct(
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
-        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
     ) {}
 
     /**
@@ -82,8 +77,6 @@ class AccountProfileNestedGroupService
                 'account_profile_ids' => $memberIds,
             ];
         }
-
-        $this->assertMemberProfilesExist(array_keys($allMemberIds));
 
         usort(
             $groups,
@@ -187,9 +180,12 @@ class AccountProfileNestedGroupService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function formatForPublicDetail(AccountProfile $parentProfile, string $baseUrl): array
-    {
-        if (! $this->parentProfileTypeAllowsNestedGroups($parentProfile)) {
+    public function formatForPublicDetail(
+        AccountProfile $parentProfile,
+        string $baseUrl,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+    ): array {
+        if (! $publicCatalogPolicy->isPublicNestedParent($parentProfile)) {
             return [];
         }
 
@@ -205,13 +201,10 @@ class AccountProfileNestedGroupService
             }
         }
 
-        $queryableTypes = $this->queryableProfileTypes();
-        if ($queryableTypes === []) {
-            return [];
-        }
-
-        $publicCatalogTypes = $this->publicCatalogTypes();
-        $profilesById = $this->publicProfilesById(array_keys($orderedMemberIds), $queryableTypes);
+        $profilesById = $this->publicProfilesById(
+            array_keys($orderedMemberIds),
+            $publicCatalogPolicy,
+        );
         $publicGroups = [];
         foreach ($groups as $group) {
             $profiles = [];
@@ -220,7 +213,7 @@ class AccountProfileNestedGroupService
                 if (! $profile) {
                     continue;
                 }
-                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publicCatalogTypes);
+                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publicCatalogPolicy);
             }
 
             if ($profiles === []) {
@@ -236,44 +229,6 @@ class AccountProfileNestedGroupService
         }
 
         return $publicGroups;
-    }
-
-    private function parentProfileTypeAllowsNestedGroups(AccountProfile $parentProfile): bool
-    {
-        $profileType = trim((string) ($parentProfile->profile_type ?? ''));
-        if ($profileType === '') {
-            return false;
-        }
-
-        $type = TenantProfileType::query()
-            ->where('type', $profileType)
-            ->first();
-        $capabilities = $this->arrayFrom($type?->capabilities ?? []);
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
-            $capabilities,
-        );
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function arrayFrom(mixed $value): array
-    {
-        if (is_array($value)) {
-            return $value;
-        }
-
-        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
-            return $value->getArrayCopy();
-        }
-
-        if ($value instanceof \Traversable) {
-            return iterator_to_array($value);
-        }
-
-        return [];
     }
 
     private function normalizeGroupId(mixed $rawId, string $label, int $index): string
@@ -345,57 +300,19 @@ class AccountProfileNestedGroupService
 
     /**
      * @param  array<int, string>  $memberIds
-     */
-    private function assertMemberProfilesExist(array $memberIds): void
-    {
-        if ($memberIds === []) {
-            return;
-        }
-
-        $profiles = $this->candidateDiscoveryService->eligibleProfilesByIds(
-            AccountProfileCandidateDiscoveryService::SCOPE_QUERYABLE,
-            $memberIds,
-        );
-        $profilesById = [];
-        foreach ($profiles as $profile) {
-            $profilesById[(string) $profile->getKey()] = $profile;
-        }
-
-        $invalid = [];
-        foreach ($memberIds as $memberId) {
-            $profile = $profilesById[$memberId] ?? null;
-            if (
-                ! $profile
-                || ! $profile->is_active
-            ) {
-                $invalid[] = $memberId;
-            }
-        }
-
-        if ($invalid !== []) {
-            throw ValidationException::withMessages([
-                'nested_profile_groups' => ['Nested profile group includes unavailable or non-queryable profiles.'],
-            ]);
-        }
-    }
-
-    /**
-     * @param  array<int, string>  $memberIds
-     * @param  array<int, string>  $queryableTypes
      * @return array<string, AccountProfile>
      */
-    private function publicProfilesById(array $memberIds, array $queryableTypes): array
-    {
-        if ($memberIds === [] || $queryableTypes === []) {
+    private function publicProfilesById(
+        array $memberIds,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+    ): array {
+        if ($memberIds === []) {
             return [];
         }
 
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', $memberIds)
-            ->where('is_active', true)
-            ->where('visibility', 'public')
-            ->whereIn('profile_type', $queryableTypes)
-            ->get();
+        $profiles = $publicCatalogPolicy->applyCatalogConstraint(
+            AccountProfile::query()->whereIn('_id', $memberIds),
+        )->get();
         $byId = [];
         foreach ($profiles as $profile) {
             $byId[(string) $profile->getKey()] = $profile;
@@ -425,10 +342,13 @@ class AccountProfileNestedGroupService
     /**
      * @return array<string, mixed>
      */
-    private function formatLinkedProfile(AccountProfile $profile, string $baseUrl, array $publicCatalogTypes): array
-    {
+    private function formatLinkedProfile(
+        AccountProfile $profile,
+        string $baseUrl,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+    ): array {
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $slug !== '' && in_array((string) $profile->profile_type, $publicCatalogTypes, true);
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
 
         return [
             'id' => (string) $profile->_id,
@@ -454,21 +374,5 @@ class AccountProfileNestedGroupService
             'can_open_public_detail' => $canOpenPublicDetail,
             'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
         ];
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function queryableProfileTypes(): array
-    {
-        return $this->typeSetProvider->queryableTypes();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function publicCatalogTypes(): array
-    {
-        return $this->typeSetProvider->publicCatalogTypes();
     }
 }

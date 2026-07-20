@@ -5,11 +5,21 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
+use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMapPoiOutboxConsumer;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
+use App\Application\AccountProfiles\AccountProfileOutboxPublisher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
+use App\Application\AccountProfiles\AccountProfileTransactionRetryPolicy;
+use App\Application\AccountProfiles\AccountProfileTransactionRunner;
+use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -24,6 +34,7 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +42,10 @@ use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use MongoDB\BSON\ObjectId;
+use MongoDB\Laravel\Connection;
+use RuntimeException;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -137,6 +151,962 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertNotEmpty($response->json('data'));
         $this->assertTrue(collect($response->json('data'))->every(static fn (array $item): bool => array_key_exists('ownership_state', $item)));
+    }
+
+    public function test_profile_update_persists_a_command_receipt_and_outbox_event_for_the_same_request_id(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Source Venue',
+            'is_active' => true,
+        ])->fresh();
+        $commandId = 'u07a-profile-update-'.uniqid('', true);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}",
+            ['display_name' => 'Outbox Updated Venue'],
+            [...$this->getHeaders(), 'X-Request-Id' => $commandId],
+        );
+
+        $response->assertOk();
+
+        $database = DB::connection('tenant')->getDatabase();
+        $receipt = $database
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+
+        $this->assertNotNull($receipt);
+        $this->assertNotNull($outbox);
+        $this->assertSame((string) $profile->_id, (string) ($outbox['profile_id'] ?? ''));
+        $this->assertSame('upsert', (string) ($outbox['operation'] ?? ''));
+        $this->assertSame($commandId, (string) ($receipt['command_id'] ?? ''));
+    }
+
+    public function test_profile_update_replays_the_same_request_id_without_a_second_outbox_event(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Idempotent Outbox Venue',
+            'is_active' => true,
+        ])->fresh();
+        $commandId = 'u07a-profile-replay-'.uniqid('', true);
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}";
+        $payload = ['display_name' => 'Idempotent Outbox Venue Updated'];
+        $headers = [...$this->getHeaders(), 'X-Request-Id' => $commandId];
+
+        $first = $this->patchJson($url, $payload, $headers);
+        $second = $this->patchJson($url, $payload, $headers);
+
+        $first->assertOk();
+        $second->assertOk();
+        $this->assertSame($first->json('data.id'), $second->json('data.id'));
+        $this->assertSame($first->json('data.display_name'), $second->json('data.display_name'));
+        $this->assertSame(
+            1,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_outbox')
+                ->countDocuments(['command_id' => $commandId]),
+        );
+    }
+
+    public function test_unknown_commit_reconciles_from_a_durable_command_receipt_without_replaying_the_body(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Unknown Commit Receipt Source',
+            'is_active' => true,
+            'aggregate_revision' => 1,
+        ])->fresh();
+        $commandId = 'u07a-unknown-commit-'.uniqid('', true);
+        $publisher = app(AccountProfileOutboxPublisher::class);
+        $fingerprint = $publisher->fingerprintForUpdate(
+            (string) $profile->_id,
+            ['display_name' => 'Unknown Commit Receipt Source'],
+        );
+        $realConnection = DB::connection('tenant');
+        $connection = Mockery::mock(Connection::class);
+        $unknownCommit = new class extends RuntimeException
+        {
+            public function __construct()
+            {
+                parent::__construct('Unknown transaction commit result.');
+            }
+
+            public function hasErrorLabel(string $label): bool
+            {
+                return $label === 'UnknownTransactionCommitResult';
+            }
+        };
+        $commitCalls = 0;
+        $bodyCalls = 0;
+        $reconciliationCalls = 0;
+
+        DB::shouldReceive('connection')
+            ->twice()
+            ->with('tenant')
+            ->andReturn($connection, $realConnection);
+        $connection->shouldReceive('beginTransaction')
+            ->once()
+            ->andReturnUsing(static function () use ($realConnection): void {
+                $realConnection->beginTransaction();
+            });
+        $connection->shouldReceive('getSession')
+            ->once()
+            ->andReturnUsing(static fn () => $realConnection->getSession());
+        $connection->shouldReceive('getDatabase')
+            ->once()
+            ->andReturnUsing(static fn () => $realConnection->getDatabase());
+        $connection->shouldReceive('commit')
+            ->times(3)
+            ->andReturnUsing(function () use ($realConnection, $unknownCommit, &$commitCalls): never {
+                $commitCalls++;
+                if ($commitCalls === 1) {
+                    // The transaction committed, but its acknowledgement is indeterminate.
+                    $realConnection->commit();
+                }
+
+                throw $unknownCommit;
+            });
+
+        $result = (new AccountProfileTransactionRunner(new AccountProfileTransactionRetryPolicy))->run(
+            function (AccountProfileTransactionContext $context) use ($publisher, $profile, $commandId, $fingerprint, &$bodyCalls): array {
+                $bodyCalls++;
+
+                return [
+                    'event_id' => $publisher->recordUpsert($context, $profile, $commandId, $fingerprint),
+                ];
+            },
+            function () use ($publisher, $commandId, $fingerprint, &$reconciliationCalls): ?array {
+                $reconciliationCalls++;
+                $receipt = $publisher->committedReceipt($commandId);
+                if ($receipt === null) {
+                    return null;
+                }
+
+                $publisher->assertReceiptMatches($receipt, $fingerprint);
+
+                return ['event_id' => (string) $receipt['outbox_event_id']];
+            },
+        );
+
+        $database = $realConnection->getDatabase();
+        $receipt = $database
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+
+        $this->assertSame(1, $bodyCalls);
+        $this->assertSame(3, $commitCalls);
+        $this->assertSame(1, $reconciliationCalls);
+        $this->assertNotNull($receipt);
+        $this->assertSame((string) ($receipt['outbox_event_id'] ?? ''), $result['event_id']);
+        $this->assertSame(
+            1,
+            $database->selectCollection('account_profile_command_receipts')->countDocuments(['_id' => $commandId]),
+        );
+        $this->assertSame(
+            1,
+            $database->selectCollection('account_profile_outbox')->countDocuments(['command_id' => $commandId]),
+        );
+    }
+
+    public function test_profile_update_conflicts_while_its_account_is_deletion_gated(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Deletion Gated Venue',
+            'is_active' => true,
+        ]);
+        $this->account->setAttribute('account_profile_deletion_gate', [
+            'attempt_id' => 'u07a-test-deletion-attempt',
+            'attempt_generation' => 1,
+        ]);
+        $this->account->save();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}",
+            ['display_name' => 'Must Not Persist'],
+            [...$this->getHeaders(), 'X-Request-Id' => 'u07a-gated-update-'.uniqid('', true)],
+        )->assertConflict();
+
+        $this->assertSame('Deletion Gated Venue', (string) $profile->fresh()->display_name);
+    }
+
+    public function test_gallery_update_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
+    {
+        Storage::fake('public');
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Gallery Venue',
+            'is_active' => true,
+        ]);
+        $commandId = 'u07a-gallery-update-'.uniqid('', true);
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}/gallery";
+        $payload = [
+            '_method' => 'PATCH',
+            'gallery_groups' => json_encode([
+                [
+                    'group_id' => 'main',
+                    'subtitle' => 'Main',
+                    'items' => [
+                        [
+                            'item_id' => 'entry',
+                            'upload' => 'gallery_entry',
+                        ],
+                    ],
+                ],
+            ], JSON_THROW_ON_ERROR),
+            'gallery_entry' => UploadedFile::fake()->image('entry.jpg', 1200, 800),
+        ];
+
+        $this->withHeaders([
+            ...$this->getMultipartHeaders(),
+            'X-Request-Id' => $commandId,
+        ])->post($url, $payload)->assertOk();
+
+        $outbox = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertNotNull($outbox);
+        $this->assertSame('upsert', $outbox['operation'] ?? null);
+
+        $this->account->setAttribute('account_profile_deletion_gate', [
+            'attempt_id' => 'u07a-gallery-gate',
+            'attempt_generation' => 1,
+        ]);
+        $this->account->save();
+
+        $this->withHeaders([
+            ...$this->getMultipartHeaders(),
+            'X-Request-Id' => 'u07a-gallery-gated-'.uniqid('', true),
+        ])->post($url, [
+            '_method' => 'PATCH',
+            'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
+        ])->assertConflict();
+
+        $this->assertSame('entry', (string) $profile->fresh()->gallery_groups[0]['items'][0]['item_id']);
+    }
+
+    public function test_profile_lifecycle_gateway_rejects_all_ordinary_mutations_while_account_is_deletion_gated(): void
+    {
+        $activeProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Gated Active Profile',
+            'is_active' => false,
+        ]);
+        $this->account->setAttribute('account_profile_deletion_gate', [
+            'attempt_id' => 'u07a-lifecycle-gate',
+            'attempt_generation' => 1,
+        ]);
+        $this->account->save();
+
+        $service = app(AccountProfileManagementService::class);
+        $operations = [
+            fn (): mixed => $service->create([
+                'account_id' => (string) $this->account->getKey(),
+                'profile_type' => 'personal',
+                'display_name' => 'Must Not Create',
+            ], 'u07a-gated-create-'.uniqid('', true)),
+            fn (): mixed => $service->delete(
+                $activeProfile,
+                'u07a-gated-delete-'.uniqid('', true),
+            ),
+            fn (): mixed => $service->forceDelete(
+                $activeProfile,
+                'u07a-gated-force-delete-'.uniqid('', true),
+            ),
+        ];
+
+        foreach ($operations as $operation) {
+            try {
+                $operation();
+                $this->fail('A gated Account Profile mutation must conflict.');
+            } catch (ConcurrencyConflictException) {
+                // The Account gate owns this Profile until its deletion attempt completes.
+            }
+        }
+
+        $activeProfile->delete();
+        try {
+            $service->restore(
+                $activeProfile,
+                'u07a-gated-restore-'.uniqid('', true),
+            );
+            $this->fail('A gated Account Profile mutation must conflict.');
+        } catch (ConcurrencyConflictException) {
+            // The Account gate also blocks restoration of a captured target.
+        }
+
+        $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $activeProfile->getKey()));
+    }
+
+    public function test_profile_delete_persists_and_dispatches_a_tombstone_outbox_event(): void
+    {
+        $commandId = 'u07a-profile-delete-'.uniqid('', true);
+        $createResponse = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Outbox Delete Venue',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+            ],
+            $this->getHeaders(),
+        );
+
+        $createResponse->assertCreated();
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $profile->is_active = false;
+        $profile->save();
+        $this->assertNotNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->first(),
+        );
+
+        $response = $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [],
+            [...$this->getHeaders(), 'X-Request-Id' => $commandId],
+        );
+
+        $response->assertOk();
+        $outbox = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+
+        $this->assertNotNull($outbox);
+        $this->assertSame('tombstone', $outbox['operation'] ?? null);
+        $this->assertSame('completed', $outbox['delivery_state'] ?? null);
+        $deletedProfile = AccountProfile::onlyTrashed()->find($profileId);
+        $this->assertNotNull($deletedProfile);
+        $this->assertSame(
+            (int) ($outbox['aggregate_revision'] ?? -1),
+            (int) $deletedProfile->aggregate_revision,
+        );
+        $this->assertNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->first(),
+        );
+    }
+
+    public function test_profile_restore_persists_and_dispatches_an_upsert_outbox_event(): void
+    {
+        $deleteCommandId = 'u07a-profile-delete-before-restore-'.uniqid('', true);
+        $restoreCommandId = 'u07a-profile-restore-'.uniqid('', true);
+        $createResponse = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Outbox Restore Venue',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+            ],
+            $this->getHeaders(),
+        );
+
+        $createResponse->assertCreated();
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $profile->is_active = false;
+        $profile->save();
+
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [],
+            [...$this->getHeaders(), 'X-Request-Id' => $deleteCommandId],
+        )->assertOk();
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/restore",
+            [],
+            [...$this->getHeaders(), 'X-Request-Id' => $restoreCommandId],
+        );
+
+        $response->assertOk();
+        $outbox = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $restoreCommandId]);
+
+        $this->assertNotNull($outbox);
+        $this->assertSame('upsert', $outbox['operation'] ?? null);
+        $this->assertSame('completed', $outbox['delivery_state'] ?? null);
+        $this->assertNotNull(AccountProfile::query()->find($profileId));
+        $poi = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+        $this->assertNotNull($poi);
+        $this->assertFalse((bool) $poi->is_active);
+    }
+
+    public function test_profile_force_delete_persists_and_dispatches_a_tombstone_outbox_event(): void
+    {
+        $deleteCommandId = 'u07a-profile-delete-before-force-'.uniqid('', true);
+        $commandId = 'u07a-profile-force-delete-'.uniqid('', true);
+        $createResponse = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Outbox Force Delete Venue',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+            ],
+            $this->getHeaders(),
+        );
+
+        $createResponse->assertCreated();
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $profile->is_active = false;
+        $profile->save();
+        $this->assertNotNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->first(),
+        );
+
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            [],
+            [...$this->getHeaders(), 'X-Request-Id' => $deleteCommandId],
+        )->assertOk();
+        $deleteReceipt = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $deleteCommandId]);
+        $this->assertNotNull($deleteReceipt);
+
+        Account::query()->findOrFail((string) $profile->account_id)->delete();
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/force_delete",
+            [],
+            [...$this->getHeaders(), 'X-Request-Id' => $commandId],
+        );
+
+        $response->assertOk();
+        $receipt = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+        $this->assertNotNull($receipt);
+        $this->assertSame($deleteReceipt['outbox_event_id'] ?? null, $receipt['outbox_event_id'] ?? null);
+
+        $outbox = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $receipt['outbox_event_id']]);
+        $this->assertNotNull($outbox);
+        $this->assertSame('tombstone', $outbox['operation'] ?? null);
+        $this->assertSame('completed', $outbox['delivery_state'] ?? null);
+        $this->assertNull(AccountProfile::withTrashed()->find($profileId));
+        $this->assertNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->first(),
+        );
+    }
+
+    public function test_profile_outbox_dispatcher_applies_map_poi_snapshot_once_with_a_checkpoint(): void
+    {
+        MapPoi::query()->delete();
+
+        $profiles = app(AccountProfileManagementService::class);
+        $profile = $profiles->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Map Poi Source',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ]);
+        MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->delete();
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->deleteOne(['_id' => 'map_poi:'.(string) $profile->_id]);
+
+        $commandId = 'u07a-map-poi-dispatch-'.uniqid('', true);
+        $updated = $profiles->update(
+            $profile,
+            ['display_name' => 'Outbox Map Poi Applied'],
+            commandId: $commandId,
+            dispatchOutboxImmediately: false,
+        );
+
+        $database = DB::connection('tenant')->getDatabase();
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertNotNull($outbox);
+        $this->assertSame(
+            0,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => 'map_poi:'.(string) $profile->_id]),
+        );
+
+        app(AccountProfileOutboxDispatcher::class)->dispatchEvent((string) $outbox['_id']);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->first();
+        $checkpoint = $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->findOne(['_id' => 'map_poi:'.(string) $profile->_id]);
+
+        $this->assertNotNull($projection);
+        $this->assertSame($updated->display_name, $projection?->name);
+        $this->assertNotNull($checkpoint);
+        $this->assertSame((int) ($outbox['aggregate_revision'] ?? 0), (int) ($checkpoint['aggregate_revision'] ?? -1));
+
+        app(AccountProfileOutboxDispatcher::class)->dispatchEvent((string) $outbox['_id']);
+
+        $this->assertSame(
+            1,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => 'map_poi:'.(string) $profile->_id]),
+        );
+    }
+
+    public function test_map_poi_outbox_effect_and_checkpoint_roll_back_together(): void
+    {
+        MapPoi::query()->delete();
+
+        $profiles = app(AccountProfileManagementService::class);
+        $profile = $profiles->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Atomic Map Poi Source',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ]);
+        MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->delete();
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->deleteOne(['_id' => 'map_poi:'.(string) $profile->_id]);
+
+        $commandId = 'u07a-map-poi-rollback-'.uniqid('', true);
+        $profiles->update(
+            $profile,
+            ['display_name' => 'Outbox Atomic Map Poi Applied'],
+            commandId: $commandId,
+            dispatchOutboxImmediately: false,
+        );
+        $database = DB::connection('tenant')->getDatabase();
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertNotNull($outbox);
+
+        try {
+            app(AccountProfileTransactionRunner::class)->run(
+                function (AccountProfileTransactionContext $context) use ($outbox): void {
+                    app(AccountProfileMapPoiOutboxConsumer::class)->consume(
+                        $context,
+                        [
+                            ...$outbox->getArrayCopy(),
+                            'projection' => $outbox['projection']->getArrayCopy(),
+                        ],
+                    );
+
+                    throw new RuntimeException('forced outbox effect rollback');
+                },
+            );
+            $this->fail('The test transaction should have been rolled back.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('forced outbox effect rollback', $exception->getMessage());
+        }
+
+        $this->assertNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', (string) $profile->_id)
+                ->first(),
+        );
+        $this->assertSame(
+            0,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => 'map_poi:'.(string) $profile->_id]),
+        );
+    }
+
+    public function test_profile_outbox_dispatcher_does_not_regress_map_poi_for_out_of_order_events(): void
+    {
+        MapPoi::query()->delete();
+
+        $profiles = app(AccountProfileManagementService::class);
+        $profile = $profiles->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Ordering Source',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ]);
+        $profileId = (string) $profile->_id;
+        $database = DB::connection('tenant')->getDatabase();
+        MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->delete();
+        $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->deleteOne(['_id' => 'map_poi:'.$profileId]);
+
+        $firstCommandId = 'u07a-map-poi-order-first-'.uniqid('', true);
+        $first = $profiles->update(
+            $profile,
+            ['display_name' => 'Outbox Ordering First'],
+            commandId: $firstCommandId,
+            dispatchOutboxImmediately: false,
+        );
+        $secondCommandId = 'u07a-map-poi-order-second-'.uniqid('', true);
+        $second = $profiles->update(
+            $first,
+            ['display_name' => 'Outbox Ordering Second'],
+            commandId: $secondCommandId,
+            dispatchOutboxImmediately: false,
+        );
+
+        $firstEvent = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $firstCommandId]);
+        $secondEvent = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $secondCommandId]);
+        $this->assertNotNull($firstEvent);
+        $this->assertNotNull($secondEvent);
+        $this->assertGreaterThan(
+            (int) ($firstEvent['aggregate_revision'] ?? 0),
+            (int) ($secondEvent['aggregate_revision'] ?? 0),
+        );
+
+        $dispatcher = app(AccountProfileOutboxDispatcher::class);
+        $dispatcher->dispatchEvent((string) $secondEvent['_id']);
+        $dispatcher->dispatchEvent((string) $firstEvent['_id']);
+
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+        $checkpoint = $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->findOne(['_id' => 'map_poi:'.$profileId]);
+
+        $this->assertNotNull($projection);
+        $this->assertSame($second->display_name, $projection?->name);
+        $this->assertNotNull($checkpoint);
+        $this->assertSame(
+            (int) ($secondEvent['aggregate_revision'] ?? 0),
+            (int) ($checkpoint['aggregate_revision'] ?? -1),
+        );
+        $this->assertSame(
+            'completed',
+            (string) ($database
+                ->selectCollection('account_profile_outbox')
+                ->findOne(['_id' => $firstEvent['_id']])['delivery_state'] ?? ''),
+        );
+    }
+
+    public function test_profile_outbox_dispatcher_releases_a_failed_event_for_retry(): void
+    {
+        MapPoi::query()->delete();
+
+        $profiles = app(AccountProfileManagementService::class);
+        $profile = $profiles->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Retry Source',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ]);
+        $profileId = (string) $profile->_id;
+        $database = DB::connection('tenant')->getDatabase();
+        MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->delete();
+        $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->deleteOne(['_id' => 'map_poi:'.$profileId]);
+
+        $commandId = 'u07a-map-poi-retry-'.uniqid('', true);
+        $profiles->update(
+            $profile,
+            ['display_name' => 'Outbox Retry Applied'],
+            commandId: $commandId,
+            dispatchOutboxImmediately: false,
+        );
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertNotNull($outbox);
+        $originalProjection = $outbox['projection'];
+        $database
+            ->selectCollection('account_profile_outbox')
+            ->updateOne(['_id' => $outbox['_id']], ['$set' => ['projection' => null]]);
+
+        try {
+            app(AccountProfileOutboxDispatcher::class)->dispatchEvent((string) $outbox['_id']);
+            $this->fail('The malformed event must be released for retry.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame(
+                'Account Profile Map POI upsert event requires an immutable projection.',
+                $exception->getMessage(),
+            );
+        }
+
+        $released = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $outbox['_id']]);
+        $this->assertNotNull($released);
+        $this->assertSame('pending', (string) ($released['delivery_state'] ?? ''));
+        $this->assertSame(1, (int) ($released['delivery_attempts'] ?? 0));
+        $this->assertStringContainsString(
+            'Account Profile Map POI upsert event requires an immutable projection.',
+            (string) ($released['last_delivery_error'] ?? ''),
+        );
+        $this->assertSame(
+            0,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => 'map_poi:'.$profileId]),
+        );
+
+        $database
+            ->selectCollection('account_profile_outbox')
+            ->updateOne(['_id' => $outbox['_id']], ['$set' => ['projection' => $originalProjection]]);
+        app(AccountProfileOutboxDispatcher::class)->dispatchEvent((string) $outbox['_id']);
+
+        $completed = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $outbox['_id']]);
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', $profileId)
+            ->first();
+        $this->assertNotNull($completed);
+        $this->assertSame('completed', (string) ($completed['delivery_state'] ?? ''));
+        $this->assertSame(2, (int) ($completed['delivery_attempts'] ?? 0));
+        $this->assertNotNull($projection);
+        $this->assertSame('Outbox Retry Applied', $projection?->name);
+    }
+
+    public function test_profile_update_dispatches_its_map_poi_outbox_event_after_commit(): void
+    {
+        MapPoi::query()->delete();
+
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Dispatch HTTP Source',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ]);
+        MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->delete();
+
+        $commandId = 'u07a-map-poi-http-'.uniqid('', true);
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}",
+            ['display_name' => 'Outbox Dispatch HTTP Applied'],
+            [...$this->getHeaders(), 'X-Request-Id' => $commandId],
+        );
+
+        $response->assertOk();
+        $database = DB::connection('tenant')->getDatabase();
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->first();
+
+        $this->assertNotNull($outbox);
+        $this->assertSame('completed', (string) ($outbox['delivery_state'] ?? ''));
+        $this->assertNotNull($projection);
+        $this->assertSame('Outbox Dispatch HTTP Applied', $projection?->name);
+        $this->assertSame(
+            1,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => 'map_poi:'.(string) $profile->_id]),
+        );
+    }
+
+    public function test_profile_outbox_dispatcher_replays_pending_events(): void
+    {
+        MapPoi::query()->delete();
+
+        $profiles = app(AccountProfileManagementService::class);
+        $profile = $profiles->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Pending Source',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ]);
+        MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->delete();
+
+        $commandId = 'u07a-outbox-pending-'.uniqid('', true);
+        $profiles->update(
+            $profile,
+            ['display_name' => 'Outbox Pending Applied'],
+            commandId: $commandId,
+            dispatchOutboxImmediately: false,
+        );
+
+        $database = DB::connection('tenant')->getDatabase();
+        $pending = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertSame('pending', (string) ($pending['delivery_state'] ?? ''));
+        $this->assertSame(0, (int) ($pending['delivery_attempts'] ?? -1));
+
+        $this->assertGreaterThanOrEqual(
+            1,
+            app(AccountProfileOutboxDispatcher::class)->dispatchAvailable(),
+        );
+
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $projection = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->first();
+
+        $this->assertSame('completed', (string) ($outbox['delivery_state'] ?? ''));
+        $this->assertSame('Outbox Pending Applied', $projection?->name);
+    }
+
+    public function test_account_onboarding_persists_and_dispatches_its_profile_outbox_event(): void
+    {
+        MapPoi::query()->delete();
+
+        $commandId = 'u07a-profile-create-'.uniqid('', true);
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Outbox Direct Create',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'venue',
+                'location' => [
+                    'lat' => -20.0,
+                    'lng' => -40.0,
+                ],
+            ],
+            [...$this->getHeaders(), 'X-Request-Id' => $commandId],
+        );
+
+        $response->assertCreated();
+        $profileId = (string) $response->json('data.account_profile.id');
+        $database = DB::connection('tenant')->getDatabase();
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+
+        $this->assertNotNull($outbox);
+        $this->assertSame(1, (int) ($outbox['aggregate_revision'] ?? 0));
+        $this->assertSame('completed', (string) ($outbox['delivery_state'] ?? ''));
+        $this->assertNotNull(
+            MapPoi::query()
+                ->where('ref_type', 'account_profile')
+                ->where('ref_id', $profileId)
+                ->first(),
+        );
+        $this->assertSame(
+            1,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => 'map_poi:'.$profileId]),
+        );
+    }
+
+    public function test_account_onboarding_replays_the_same_request_id_without_a_second_account_or_outbox_event(): void
+    {
+        $commandId = 'u07a-profile-onboarding-replay-'.uniqid('', true);
+        $payload = [
+            'name' => 'Outbox Onboarding Replay',
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
+            ],
+        ];
+        $headers = [...$this->getHeaders(), 'X-Request-Id' => $commandId];
+
+        $first = $this->postJson("{$this->base_tenant_api_admin}account_onboardings", $payload, $headers);
+        $second = $this->postJson("{$this->base_tenant_api_admin}account_onboardings", $payload, $headers);
+
+        $first->assertCreated();
+        $second->assertCreated();
+        $this->assertSame($first->json('data.account.id'), $second->json('data.account.id'));
+        $this->assertSame($first->json('data.account_profile.id'), $second->json('data.account_profile.id'));
+        $this->assertSame(
+            1,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_outbox')
+                ->countDocuments(['command_id' => $commandId]),
+        );
     }
 
     public function test_public_account_profile_index_forbids_landlord_user_without_tenant_access(): void
@@ -951,6 +1921,27 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.public_detail_path', '/parceiro/slug-detail-venue');
     }
 
+    public function test_admin_account_profile_show_does_not_advertise_public_detail_for_private_profile(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Formatter Venue',
+            'slug' => 'private-formatter-venue',
+            'is_active' => true,
+            'visibility' => 'private',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            $this->getHeaders(),
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.can_open_public_detail', false);
+        $response->assertJsonPath('data.public_detail_path', null);
+    }
+
     public function test_public_account_profile_show_by_slug_projects_effective_mirrored_contact_channels(): void
     {
         $this->enableContactChannelsCapability('venue');
@@ -1178,7 +2169,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $service->update(
                 $staleSnapshot,
                 ['display_name' => "Unrelated stale update {$index}"],
-                false,
+                dispatchOutboxImmediately: false,
             );
         }
 
@@ -1231,7 +2222,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     ]],
                     'contact_bubble_channel_id' => $competingChannelId,
                 ],
-                false,
+                dispatchOutboxImmediately: false,
             );
         }
 
@@ -2683,13 +3674,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($coverUrl);
 
         $profileId = (string) $response->json('data.account_profile.id');
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $profile->profile_type = 'venue';
+        $profile->visibility = 'public';
+        $profile->is_active = true;
+        $profile->save();
+
         $this->assertMediaUrlHealthy($avatarUrl);
         $this->assertMediaUrlHealthy($coverUrl);
         $this->assertMediaStored($profileId, 'avatar');
         $this->assertMediaStored($profileId, 'cover');
     }
 
-    public function test_avatar_and_cover_media_remain_available_for_admin_readback_even_when_profile_is_not_publicly_exposed(): void
+    public function test_avatar_and_cover_media_are_not_publicly_served_when_profile_is_not_publicly_exposed(): void
     {
         Storage::fake('public');
 
@@ -2712,19 +3709,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($coverUrl);
 
         $profile = AccountProfile::query()->findOrFail($profileId);
-        $this->assertMediaUrlAccess($avatarUrl, 200);
-        $this->assertMediaUrlAccess($coverUrl, 200);
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
 
         $profile->visibility = 'friends_only';
         $profile->save();
-        $this->assertMediaUrlAccess($avatarUrl, 200);
-        $this->assertMediaUrlAccess($coverUrl, 200);
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
 
         $profile->visibility = 'public';
         $profile->is_active = false;
         $profile->save();
-        $this->assertMediaUrlAccess($avatarUrl, 200);
-        $this->assertMediaUrlAccess($coverUrl, 200);
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
 
         $profile->is_active = true;
         $profile->save();
@@ -2742,8 +3739,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ],
             ],
         );
-        $this->assertMediaUrlAccess($avatarUrl, 200);
-        $this->assertMediaUrlAccess($coverUrl, 200);
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
 
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'personal'],
@@ -2759,8 +3756,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ],
             ],
         );
-        $this->assertMediaUrlAccess($avatarUrl, 200);
-        $this->assertMediaUrlAccess($coverUrl, 200);
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
     }
 
     public function test_account_profile_create_rejects_unknown_taxonomy(): void
@@ -2862,7 +3859,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $newAvatarUrl = $updateResponse->json('data.avatar_url');
         $this->assertNotEmpty($newAvatarUrl);
 
-        $this->assertMediaUrlHealthy($newAvatarUrl);
+        $this->assertMediaUrlAccess($newAvatarUrl, 404);
         $this->assertMediaStored($profileId, 'avatar');
         if ($originalPath) {
             Storage::disk('public')->assertMissing($originalPath);
@@ -2901,7 +3898,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $newCoverUrl = $updateResponse->json('data.cover_url');
         $this->assertNotEmpty($newCoverUrl);
 
-        $this->assertMediaUrlHealthy($newCoverUrl);
+        $this->assertMediaUrlAccess($newCoverUrl, 404);
         $this->assertMediaStored($profileId, 'cover');
         if ($originalPath) {
             Storage::disk('public')->assertMissing($originalPath);
@@ -2937,7 +3934,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNull($projection?->avatar_url);
         $this->assertNull($projection?->cover_url);
 
-        $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+        $commandId = 'profile-media-update-outbox';
+        $updateResponse = $this->withHeaders([
+            ...$this->getMultipartHeaders(),
+            'X-Request-Id' => $commandId,
+        ])->post(
             "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
             [
                 '_method' => 'PATCH',
@@ -2953,6 +3954,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($coverUrl);
         $profile = AccountProfile::query()->findOrFail($profileId);
 
+        $outboxEvent = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertNotNull($outboxEvent);
+        $outboxPayload = $outboxEvent->getArrayCopy();
+        $this->assertSame('completed', $outboxPayload['delivery_state'] ?? null);
+        $this->assertSame($profile->avatar_url, $outboxPayload['projection']['avatar_url'] ?? null);
+        $this->assertSame($profile->cover_url, $outboxPayload['projection']['cover_url'] ?? null);
+
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
             ->where('ref_id', $profileId)
@@ -2963,6 +3974,109 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame($profile->cover_url, $projection?->cover_url);
         $this->assertStringEndsWith((string) $projection?->avatar_url, (string) $avatarUrl);
         $this->assertStringEndsWith((string) $projection?->cover_url, (string) $coverUrl);
+    }
+
+    public function test_account_profile_media_update_rejects_reused_request_id_with_different_upload(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Media Request Id Guard',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $commandId = 'profile-media-request-id-'.uniqid('', true);
+        $headers = [
+            ...$this->getMultipartHeaders(),
+            'X-Request-Id' => $commandId,
+        ];
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profileId}";
+
+        $first = $this->withHeaders($headers)->post($url, [
+            '_method' => 'PATCH',
+            'avatar' => UploadedFile::fake()->image('first.png', 220, 220),
+        ]);
+        $second = $this->withHeaders($headers)->post($url, [
+            '_method' => 'PATCH',
+            'avatar' => UploadedFile::fake()->image('second.png', 320, 320),
+        ]);
+
+        $first->assertOk();
+        $second->assertStatus(422)->assertJsonValidationErrors('X-Request-Id');
+        $this->assertSame(
+            1,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_outbox')
+                ->countDocuments(['command_id' => $commandId]),
+        );
+    }
+
+    public function test_account_profile_media_update_restores_files_after_a_known_transaction_abort(): void
+    {
+        Storage::fake('public');
+
+        $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Media Abort Compensation',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'avatar' => UploadedFile::fake()->image('original.png', 220, 220),
+            ],
+        );
+
+        $createResponse->assertStatus(201);
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $originalAvatarUrl = (string) $profile->avatar_url;
+        $originalAvatarPath = $this->assertMediaStored($profileId, 'avatar');
+        $originalAvatarContents = Storage::disk('public')->get($originalAvatarPath);
+        $request = Request::create(
+            "{$this->base_tenant_url}admin/api/v1/account_profiles/{$profileId}",
+            'PATCH',
+            [],
+            [],
+            ['avatar' => UploadedFile::fake()->image('replacement.png', 320, 320)],
+        );
+        $media = app(\App\Application\AccountProfiles\AccountProfileMediaService::class);
+        $backup = $media->captureMutationBackup($request, $profile);
+        $this->assertNotNull($backup);
+        $commandId = 'profile-media-known-abort-'.uniqid('', true);
+
+        try {
+            app(AccountProfileManagementService::class)->update(
+                $profile,
+                [],
+                commandId: $commandId,
+                mutateWithinTransaction: function (AccountProfile $persistedProfile) use ($media, $request): void {
+                    $media->applyUploads($request, $persistedProfile);
+
+                    throw new RuntimeException('Injected known transaction abort.');
+                },
+                compensateKnownRollback: static fn (): mixed => $backup->restore(),
+            );
+            $this->fail('The injected transaction abort must be rethrown.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Injected known transaction abort.', $exception->getMessage());
+        }
+
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        $this->assertSame($originalAvatarUrl, $profile->avatar_url);
+        $this->assertSame($originalAvatarContents, Storage::disk('public')->get($originalAvatarPath));
+        $this->assertSame(
+            0,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_outbox')
+                ->countDocuments(['command_id' => $commandId]),
+        );
     }
 
     public function test_account_profile_update_media_removals_refresh_map_poi_projection_urls(): void
@@ -3912,6 +5026,285 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
     }
 
+    public function test_relation_admission_touches_contact_and_nested_targets_before_the_parent_commit(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Relation Admission Parent',
+            'slug' => 'relation-admission-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $contactSource = $this->createNestedProfileFixture(
+            'Relation Admission Contact Source',
+            'relation-admission-contact-source',
+            ['contact_mode' => 'own'],
+        );
+        $nestedMember = $this->createNestedProfileFixture(
+            'Relation Admission Nested Member',
+            'relation-admission-nested-member',
+        );
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}",
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $contactSource->_id,
+                'nested_profile_groups' => [[
+                    'id' => 'admitted-members',
+                    'label' => 'Admitted members',
+                    'account_profile_ids' => [(string) $nestedMember->_id],
+                ]],
+            ],
+            $this->getHeaders(),
+        );
+
+        $response->assertOk();
+        $this->assertSame(1, (int) $parent->fresh()->aggregate_revision);
+        $this->assertSame(1, (int) $contactSource->fresh()->lifecycle_fence_revision);
+        $this->assertSame(1, (int) $nestedMember->fresh()->lifecycle_fence_revision);
+    }
+
+    public function test_relation_admission_rejects_a_tenant_b_profile_id_on_a_tenant_a_admin_patch(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $tenantA = Tenant::current();
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Cross Tenant Admission Parent',
+            'slug' => 'cross-tenant-admission-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $parentBefore = $parent->only([
+            'display_name',
+            'contact_mode',
+            'contact_source_account_profile_id',
+            'nested_profile_groups',
+            'aggregate_revision',
+        ]);
+
+        Queue::fake([RebuildTenantEnvironmentSnapshotJob::class]);
+        $tenantB = $this->ensureCanonicalTenantExists($this->landlord->tenant_secondary);
+        $tenantB->makeCurrent();
+        $accountB = Account::create([
+            'name' => 'Cross Tenant Admission Account',
+            'document' => strtoupper('B'.bin2hex(random_bytes(7))),
+        ]);
+        $tenantBProfile = AccountProfile::create([
+            'account_id' => (string) $accountB->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Tenant B Only Profile',
+            'slug' => 'tenant-b-only-profile-'.bin2hex(random_bytes(4)),
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $tenantBProfileId = (string) $tenantBProfile->_id;
+        $tenantBProfileBefore = $tenantBProfile->only([
+            'display_name',
+            'slug',
+            'lifecycle_fence_revision',
+        ]);
+
+        $tenantA->makeCurrent();
+        $tenantAUrl = "http://{$tenantA->subdomain}.{$this->host}/admin/api/v1/account_profiles/{$parent->_id}";
+        $contactCommandId = 'u07a-cross-tenant-contact-'.uniqid('', true);
+        $contactResponse = $this->patchJson(
+            $tenantAUrl,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => $tenantBProfileId,
+            ],
+            [...$this->getHeaders(), 'X-Request-Id' => $contactCommandId],
+        );
+
+        $contactResponse->assertStatus(422);
+        $this->assertSame($parentBefore, $parent->fresh()->only(array_keys($parentBefore)));
+
+        $database = DB::connection('tenant')->getDatabase();
+        $this->assertNull(
+            $database->selectCollection('account_profile_command_receipts')->findOne(['_id' => $contactCommandId]),
+        );
+        $this->assertNull(
+            $database->selectCollection('account_profile_outbox')->findOne(['command_id' => $contactCommandId]),
+        );
+
+        $tenantB->makeCurrent();
+        $this->assertSame(
+            $tenantBProfileBefore,
+            AccountProfile::query()->findOrFail($tenantBProfileId)->only(array_keys($tenantBProfileBefore)),
+        );
+
+        $tenantA->makeCurrent();
+        $nestedCommandId = 'u07a-cross-tenant-nested-'.uniqid('', true);
+        $nestedResponse = $this->patchJson(
+            $tenantAUrl,
+            [
+                'nested_profile_groups' => [[
+                    'id' => 'cross-tenant-members',
+                    'label' => 'Cross tenant members',
+                    'account_profile_ids' => [$tenantBProfileId],
+                ]],
+            ],
+            [...$this->getHeaders(), 'X-Request-Id' => $nestedCommandId],
+        );
+
+        $nestedResponse->assertStatus(422);
+        $this->assertSame($parentBefore, $parent->fresh()->only(array_keys($parentBefore)));
+
+        $database = DB::connection('tenant')->getDatabase();
+        $this->assertNull(
+            $database->selectCollection('account_profile_command_receipts')->findOne(['_id' => $nestedCommandId]),
+        );
+        $this->assertNull(
+            $database->selectCollection('account_profile_outbox')->findOne(['command_id' => $nestedCommandId]),
+        );
+
+        $tenantB->makeCurrent();
+        $this->assertSame(
+            $tenantBProfileBefore,
+            AccountProfile::query()->findOrFail($tenantBProfileId)->only(array_keys($tenantBProfileBefore)),
+        );
+    }
+
+    public function test_account_cascade_delete_cleans_previously_admitted_nested_profile_references(): void
+    {
+        $targetAccount = Account::create([
+            'name' => 'Nested Cascade Target Account',
+            'document' => 'DOC-NESTED-CASCADE-TARGET-'.uniqid('', true),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $target = AccountProfile::create([
+            'account_id' => (string) $targetAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Cascade Target',
+            'slug' => 'nested-cascade-target-'.uniqid('', true),
+            'is_active' => true,
+        ]);
+        $survivingAccount = Account::create([
+            'name' => 'Nested Cascade Surviving Account',
+            'document' => 'DOC-NESTED-CASCADE-SURVIVING-'.uniqid('', true),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $surviving = AccountProfile::create([
+            'account_id' => (string) $survivingAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Cascade Surviving',
+            'slug' => 'nested-cascade-surviving-'.uniqid('', true),
+            'is_active' => true,
+        ]);
+        $parentAccount = Account::create([
+            'name' => 'Nested Cascade Parent Account',
+            'document' => 'DOC-NESTED-CASCADE-PARENT-'.uniqid('', true),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $parent = AccountProfile::create([
+            'account_id' => (string) $parentAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Cascade Parent',
+            'slug' => 'nested-cascade-parent-'.uniqid('', true),
+            'is_active' => true,
+        ]);
+
+        app(AccountProfileManagementService::class)->update(
+            $parent,
+            [
+                'nested_profile_groups' => [[
+                    'id' => 'cascade-members',
+                    'label' => 'Cascade Members',
+                    'account_profile_ids' => [(string) $target->_id, (string) $surviving->_id],
+                ]],
+            ],
+            commandId: 'u07a-nested-cascade-relation-'.uniqid('', true),
+        );
+
+        $cascadeCommandId = 'u07a-nested-cascade-delete-'.uniqid('', true);
+        app(AccountManagementService::class)->delete(
+            $targetAccount,
+            commandId: $cascadeCommandId,
+        );
+
+        $parent->refresh();
+        $this->assertSame(
+            [(string) $surviving->_id],
+            $parent->nested_profile_groups[0]['account_profile_ids'] ?? [],
+        );
+        $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $target->_id));
+        $cleanupReceipt = DB::connection('tenant')->getDatabase()
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => "{$cascadeCommandId}:reference-cleanup:".(string) $parent->_id]);
+        $this->assertNotNull($cleanupReceipt);
+        $cleanupOutbox = DB::connection('tenant')->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $cleanupReceipt['outbox_event_id'] ?? '']);
+        $this->assertSame('completed', $cleanupOutbox['delivery_state'] ?? null);
+    }
+
+    public function test_profile_delete_cleans_previously_admitted_nested_profile_references(): void
+    {
+        $targetAccount = Account::create([
+            'name' => 'Nested Direct Target Account',
+            'document' => 'DOC-NESTED-DIRECT-TARGET-'.uniqid('', true),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $target = AccountProfile::create([
+            'account_id' => (string) $targetAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Direct Target',
+            'slug' => 'nested-direct-target-'.uniqid('', true),
+            'is_active' => true,
+        ]);
+        $parentAccount = Account::create([
+            'name' => 'Nested Direct Parent Account',
+            'document' => 'DOC-NESTED-DIRECT-PARENT-'.uniqid('', true),
+            'ownership_state' => 'unmanaged',
+        ]);
+        $parent = AccountProfile::create([
+            'account_id' => (string) $parentAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Direct Parent',
+            'slug' => 'nested-direct-parent-'.uniqid('', true),
+            'is_active' => true,
+        ]);
+
+        app(AccountProfileManagementService::class)->update(
+            $parent,
+            [
+                'nested_profile_groups' => [[
+                    'id' => 'direct-members',
+                    'label' => 'Direct Members',
+                    'account_profile_ids' => [(string) $target->_id],
+                ]],
+            ],
+            commandId: 'u07a-nested-direct-relation-'.uniqid('', true),
+        );
+        app(AccountProfileManagementService::class)->update(
+            $target,
+            ['is_active' => false],
+            commandId: 'u07a-nested-direct-deactivate-'.uniqid('', true),
+        );
+
+        $deleteCommandId = 'u07a-nested-direct-delete-'.uniqid('', true);
+        app(AccountProfileLifecycleService::class)->delete($target, $deleteCommandId);
+
+        $parent->refresh();
+        $this->assertSame([], $parent->nested_profile_groups[0]['account_profile_ids'] ?? []);
+        $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $target->_id));
+        $cleanupReceipt = DB::connection('tenant')->getDatabase()
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => "{$deleteCommandId}:reference-cleanup:".(string) $parent->_id]);
+        $this->assertNotNull($cleanupReceipt);
+        $cleanupOutbox = DB::connection('tenant')->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $cleanupReceipt['outbox_event_id'] ?? '']);
+        $this->assertSame('completed', $cleanupOutbox['delivery_state'] ?? null);
+    }
+
     public function test_account_profile_admin_readback_keeps_linked_selection_summaries_in_one_contract(): void
     {
         $this->enableContactChannelsCapability('venue');
@@ -4231,7 +5624,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_public_account_profile_detail_nested_groups_use_queryability_and_public_navigation_contract(): void
+    public function test_public_account_profile_detail_nested_groups_use_public_catalog_eligibility(): void
     {
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'guest_public'],
@@ -4294,13 +5687,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.nested_profile_groups');
-        $response->assertJsonCount(2, 'data.nested_profile_groups.0.profiles');
+        $response->assertJsonCount(1, 'data.nested_profile_groups.0.profiles');
         $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.slug', 'navigable-member');
         $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.can_open_public_detail', true);
         $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.public_detail_path', '/parceiro/navigable-member');
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.slug', 'non-navigable-member');
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.can_open_public_detail', false);
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.public_detail_path', null);
+        $this->assertFalse(
+            collect($response->json('data.nested_profile_groups.0.profiles'))
+                ->pluck('slug')
+                ->contains('non-navigable-member')
+        );
         $this->assertFalse(
             collect($response->json('data.nested_profile_groups.0.profiles'))
                 ->pluck('slug')

@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileCommandIndeterminateException;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfileOutboxPublisher;
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
+use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -24,6 +29,8 @@ class AccountOnboardingService
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileRegistrySeeder $registrySeeder,
         private readonly AccountProfileRegistryService $registryService,
+        private readonly AccountProfileTransactionRunner $transactionRunner,
+        private readonly AccountProfileOutboxPublisher $outboxPublisher,
     ) {}
 
     /**
@@ -33,9 +40,32 @@ class AccountOnboardingService
     public function create(array $payload, Request $request): array
     {
         $this->registrySeeder->ensureDefaults();
+        $commandId = trim((string) $request->header('X-Request-Id'));
+        if ($commandId === '') {
+            $commandId = (string) Str::uuid();
+        }
+        $fingerprint = $this->outboxPublisher->fingerprintForCreate(
+            $this->fingerprintPayload($payload),
+        );
+        $mediaBackup = null;
 
         try {
-            return DB::connection('tenant')->transaction(function () use ($payload, $request): array {
+            /** @var array{account:Account,account_profile:AccountProfile,role:AccountRoleTemplate,outbox_event_id:?string} $result */
+            $result = $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use (
+                $payload,
+                $request,
+                $commandId,
+                $fingerprint,
+                &$mediaBackup,
+            ): array {
+                $existing = $this->profileService->resultForCommand($context, $commandId, $fingerprint);
+                if ($existing !== null) {
+                    return $this->resultForRecordedProfile(
+                        $existing['profile'],
+                        $existing['outbox_event_id'],
+                    );
+                }
+
                 $accountResult = $this->accountService->createWithinCurrentTransaction([
                     'name' => $payload['name'],
                     'ownership_state' => $payload['ownership_state'],
@@ -78,25 +108,102 @@ class AccountOnboardingService
                 }
 
                 $profile = $this->profileService->createWithinCurrentTransaction(
-                    $profilePayload,
-                    queueMapPoiSyncAfterCommit: false,
+                    [...$profilePayload, 'aggregate_revision' => 1],
+                    $context,
                 );
 
+                $mediaBackup ??= $this->mediaService->captureMutationBackup($request, $profile);
                 $this->mediaService->applyUploads($request, $profile);
-                $this->profileService->queueMapPoiSyncAfterCommit($profile);
+                $profile = $profile->fresh();
+                $outboxEventId = $this->profileService->recordCreatedProfile(
+                    $context,
+                    $profile,
+                    $commandId,
+                    $fingerprint,
+                );
 
                 return [
                     'account' => $account->fresh(),
                     'account_profile' => $profile->fresh(),
                     'role' => $role->fresh(),
+                    'outbox_event_id' => $outboxEventId,
                 ];
+            }, function () use ($commandId, $fingerprint): ?array {
+                $existing = $this->profileService->resultForCommittedCommand($commandId, $fingerprint);
+
+                return $existing === null
+                    ? null
+                    : $this->resultForRecordedProfile($existing['profile'], $existing['outbox_event_id']);
             });
+            $this->profileService->dispatchOutboxEvent($result['outbox_event_id']);
+
+            return [
+                'account' => $result['account'],
+                'account_profile' => $result['account_profile'],
+                'role' => $result['role'],
+            ];
+        } catch (AccountProfileCommandIndeterminateException $exception) {
+            throw $exception;
         } catch (ValidationException $exception) {
+            $this->restoreKnownRollbackMedia($mediaBackup);
+
             throw $this->normalizeValidationException($exception);
         } catch (Throwable $exception) {
+            $this->restoreKnownRollbackMedia($mediaBackup);
+            report($exception);
+
             throw ValidationException::withMessages([
                 'account' => ['Account onboarding could not be completed.'],
             ]);
+        }
+    }
+
+    /**
+     * @return array{account:Account,account_profile:AccountProfile,role:AccountRoleTemplate,outbox_event_id:?string}
+     */
+    private function resultForRecordedProfile(AccountProfile $profile, ?string $outboxEventId): array
+    {
+        $account = Account::query()->findOrFail((string) $profile->account_id);
+        $role = $account->roleTemplates()->orderBy('_id')->firstOrFail();
+
+        return [
+            'account' => $account->fresh(),
+            'account_profile' => $profile->fresh(),
+            'role' => $role->fresh(),
+            'outbox_event_id' => $outboxEventId,
+        ];
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function fingerprintPayload(array $payload): array
+    {
+        foreach (['avatar', 'cover'] as $key) {
+            $file = $payload[$key] ?? null;
+            if (! $file instanceof UploadedFile) {
+                continue;
+            }
+
+            $path = $file->getRealPath();
+            $payload[$key] = [
+                'sha256' => is_string($path) && $path !== '' ? hash_file('sha256', $path) : null,
+                'size' => $file->getSize(),
+                'mime_type' => $file->getMimeType(),
+            ];
+        }
+
+        return $payload;
+    }
+
+    private function restoreKnownRollbackMedia(?\App\Application\AccountProfiles\AccountProfileMediaMutationBackup $backup): void
+    {
+        if ($backup === null) {
+            return;
+        }
+
+        try {
+            $backup->restore();
+        } catch (Throwable $exception) {
+            report($exception);
         }
     }
 

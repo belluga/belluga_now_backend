@@ -199,6 +199,16 @@ final class AccountProfileTypeSetProvider
         return in_array($normalized, $this->galleryEnabledTypes(), true);
     }
 
+    public function hasContactChannelsEnabled(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->contactChannelsEnabledTypes(), true);
+    }
+
     /**
      * @param  \Closure(): array<int, string>  $resolver
      * @return array<int, string>

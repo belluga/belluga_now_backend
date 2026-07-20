@@ -38,6 +38,7 @@ final class AccountProfileGalleryController extends Controller
                     'updated_by_type' => $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant',
                 ]
                 : [],
+            $request->header('X-Request-Id'),
         );
 
         return response()->json([

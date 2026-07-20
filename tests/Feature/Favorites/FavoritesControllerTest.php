@@ -222,6 +222,22 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertJsonPath('items.0.navigation.event_target_path', null);
     }
 
+    public function test_favorites_does_not_advertise_a_public_profile_path_for_a_private_profile(): void
+    {
+        $profile = $this->createProfile('Private Favorite Profile', 'private-favorite-profile');
+        $profile->visibility = 'private';
+        $profile->save();
+        $this->createEdge((string) $profile->_id, Carbon::parse('2026-03-19T12:00:00Z'));
+
+        $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('items.0.target.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.target.public_detail_path', null);
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.navigation.profile_target_path', null);
+    }
+
     public function test_favorites_prefers_canonical_event_navigation_target_when_future_event_exists(): void
     {
         $profile = $this->createProfile('Profile Event Preferred', 'profile-event-preferred');

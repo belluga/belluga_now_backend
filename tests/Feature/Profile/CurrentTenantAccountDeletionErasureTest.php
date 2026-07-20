@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Profile;
 
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\Profiles\CurrentTenantAccountDeletionAttemptService;
 use App\Jobs\Push\UnsubscribePushTokensFromAllTopicsJob;
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
@@ -234,6 +237,8 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertNull(AccountProfile::withTrashed()->find((string) $malformedPersonalProfile->_id));
         $this->assertNull(AccountProfile::withTrashed()->find((string) $sharedProfile->_id));
         $this->assertNotNull(Account::query()->find((string) $sharedAccount->_id));
+        $sharedAccount->refresh();
+        $this->assertNull($sharedAccount->account_profile_deletion_gate);
         $this->assertTrue(FavoriteEdge::query()->where('owner_user_id', $otherId)->exists());
 
         $this->assertFalse(FavoriteEdge::query()->where('owner_user_id', $targetId)->exists());
@@ -256,6 +261,16 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertFalse(PersonalAccessToken::query()->where('tokenable_id', $targetId)->exists());
         $tenantDatabase = DB::connection('tenant')->getDatabase();
 
+        $this->assertSame(
+            1,
+            $tenantDatabase
+                ->selectCollection('account_profile_deletion_attempts')
+                ->countDocuments([
+                    '_id' => $targetId,
+                    'profile_descriptors.media_descriptors.purged_at' => ['$exists' => true],
+                ]),
+        );
+
         $this->assertNull($tenantDatabase->selectCollection('push_devices')->findOne([
             'account_user_id' => $targetId,
         ]));
@@ -270,6 +285,464 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $survivingContact->refresh();
         $this->assertNull($survivingContact->matched_user_id);
         $this->assertNull($survivingContact->match_snapshot);
+    }
+
+    public function test_current_account_deletion_cleans_surviving_contact_mirrors_through_the_profile_outbox(): void
+    {
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Mirror Delete Target',
+            'phones' => ['+5527999990211'],
+        ]);
+        $targetId = (string) $target->_id;
+        $targetAccount = Account::create([
+            'name' => 'Mirror Target Account',
+            'slug' => 'mirror-target-account-'.$targetId,
+            'document' => ['type' => 'cpf', 'number' => 'MIRROR-TARGET-'.$targetId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+        $targetProfile = AccountProfile::create([
+            'account_id' => (string) $targetAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Mirror Delete Target',
+            'slug' => 'mirror-delete-target-'.$targetId,
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+
+        $survivor = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Mirror Survivor',
+            'phones' => ['+5527999990212'],
+        ]);
+        $survivorId = (string) $survivor->_id;
+        $survivorAccount = Account::create([
+            'name' => 'Mirror Survivor Account',
+            'slug' => 'mirror-survivor-account-'.$survivorId,
+            'document' => ['type' => 'cpf', 'number' => 'MIRROR-SURVIVOR-'.$survivorId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $survivorId,
+            'created_by_type' => 'tenant',
+        ]);
+        $nestedMemberAccount = Account::create([
+            'name' => 'Nested Member Account',
+            'slug' => 'nested-member-account-'.$survivorId,
+            'document' => ['type' => 'cpf', 'number' => 'NESTED-MEMBER-'.$survivorId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $survivorId,
+            'created_by_type' => 'tenant',
+        ]);
+        $survivingNestedMember = AccountProfile::create([
+            'account_id' => (string) $nestedMemberAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Surviving Nested Member',
+            'slug' => 'surviving-nested-member-'.$survivorId,
+            'created_by' => $survivorId,
+            'created_by_type' => 'tenant',
+        ]);
+        $survivorProfile = AccountProfile::create([
+            'account_id' => (string) $survivorAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Mirror Survivor',
+            'slug' => 'mirror-survivor-'.$survivorId,
+            'created_by' => $survivorId,
+            'created_by_type' => 'tenant',
+            'contact_mode' => 'mirrored_account_profile',
+            'contact_source_account_profile_id' => (string) $targetProfile->_id,
+            'nested_profile_groups' => [[
+                'id' => 'linked-profiles',
+                'label' => 'Linked profiles',
+                'account_profile_ids' => [
+                    (string) $targetProfile->_id,
+                    (string) $survivingNestedMember->_id,
+                ],
+            ]],
+        ]);
+
+        Sanctum::actingAs($target, ['*']);
+        $this->deleteJson("{$this->base_api_tenant}profile", [
+            'confirmation' => 'remove_account',
+        ])->assertNoContent();
+
+        $survivorProfile->refresh();
+        $this->assertSame('own', $survivorProfile->contact_mode);
+        $this->assertNull($survivorProfile->contact_source_account_profile_id);
+        $this->assertSame(
+            [(string) $survivingNestedMember->_id],
+            $survivorProfile->nested_profile_groups[0]['account_profile_ids'] ?? [],
+        );
+
+        $commandId = "current-account-delete:{$targetId}:reference-cleanup:".(string) $survivorProfile->_id;
+        $database = DB::connection('tenant')->getDatabase();
+        $receipt = $database
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+        $this->assertNotNull($receipt);
+
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $receipt['outbox_event_id'] ?? '']);
+        $this->assertNotNull($outbox);
+        $this->assertSame('upsert', $outbox['operation'] ?? null);
+        $this->assertSame('completed', $outbox['delivery_state'] ?? null);
+    }
+
+    public function test_deletion_attempt_resumes_media_purge_after_external_delete_before_descriptor_mark(): void
+    {
+        Storage::fake('public');
+
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Restartable Media Target',
+            'phones' => ['+5527999990213'],
+        ]);
+        $profile = AccountProfile::create([
+            'profile_type' => 'personal',
+            'display_name' => 'Restartable Media Target',
+            'slug' => 'restartable-media-target-'.(string) $user->_id,
+            'created_by' => (string) $user->_id,
+            'created_by_type' => 'tenant',
+        ]);
+        $path = sprintf(
+            'tenants/%s/account_profiles/%s/avatar.png',
+            (string) Tenant::current()->slug,
+            (string) $profile->_id,
+        );
+        Storage::disk('public')->put($path, 'restartable-avatar');
+
+        $attempts = app(CurrentTenantAccountDeletionAttemptService::class);
+        $attempt = $attempts->captureOrResume((string) $user->_id);
+        $attempt = $attempts->transition($attempt, 'captured_and_fenced', 'references_cleaned');
+        $attempt = $attempts->transition($attempt, 'references_cleaned', 'terminalized');
+        $frozenDescriptors = $attempts->frozenMediaDescriptors($attempt);
+        $this->assertCount(1, $frozenDescriptors);
+
+        app(AccountProfileMediaService::class)->purgeFrozenDeletionMediaDescriptors($frozenDescriptors);
+        Storage::disk('public')->assertMissing($path);
+
+        $attempt = $attempts->recordFailure($attempt, new \RuntimeException('simulated process interruption'));
+        $this->assertSame('simulated process interruption', $attempt['last_error']['message'] ?? null);
+        $attempts->releaseClaim($attempt);
+
+        $resumed = $attempts->captureOrResume((string) $user->_id);
+        $resumed = $attempts->purgeFrozenMediaDescriptors($resumed);
+        $this->assertSame([], $attempts->frozenMediaDescriptors($resumed));
+
+        $resumed = $attempts->transition($resumed, 'terminalized', 'media_purged');
+        $resumed = $attempts->transition($resumed, 'media_purged', 'completed');
+        $this->assertSame('completed', $resumed['phase'] ?? null);
+        $this->assertNull($resumed['last_error'] ?? null);
+        $this->assertSame(2, (int) ($resumed['attempts'] ?? 0));
+    }
+
+    public function test_current_account_deletion_rejects_a_partial_account_gate_claim(): void
+    {
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Gate Claim Target',
+            'phones' => ['+5527999990214'],
+        ]);
+        $userId = (string) $user->_id;
+        $firstAccount = Account::create([
+            'name' => 'Gate Claim First Account',
+            'slug' => 'gate-claim-first-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'GATE-CLAIM-FIRST-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $blockedAccount = Account::create([
+            'name' => 'Gate Claim Blocked Account',
+            'slug' => 'gate-claim-blocked-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'GATE-CLAIM-BLOCKED-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $firstProfile = AccountProfile::create([
+            'account_id' => (string) $firstAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Gate Claim First Profile',
+            'slug' => 'gate-claim-first-profile-'.$userId,
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $blockedProfile = AccountProfile::create([
+            'account_id' => (string) $blockedAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Gate Claim Blocked Profile',
+            'slug' => 'gate-claim-blocked-profile-'.$userId,
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $blockedAccount->setAttribute('account_profile_deletion_gate', [
+            'attempt_id' => 'another-deletion-attempt',
+            'attempt_generation' => 1,
+        ]);
+        $blockedAccount->save();
+
+        Sanctum::actingAs($user, ['*']);
+        $this->deleteJson("{$this->base_api_tenant}profile", [
+            'confirmation' => 'remove_account',
+        ])->assertStatus(409);
+
+        $firstAccount->refresh();
+        $blockedAccount->refresh();
+        $firstProfile->refresh();
+        $blockedProfile->refresh();
+
+        $this->assertNotNull(AccountUser::query()->find($userId));
+        $this->assertNull($firstAccount->account_profile_deletion_gate);
+        $this->assertSame(
+            'another-deletion-attempt',
+            $blockedAccount->account_profile_deletion_gate['attempt_id'] ?? null,
+        );
+        $this->assertNull($firstProfile->account_profile_deletion_attempt_id);
+        $this->assertNull($blockedProfile->account_profile_deletion_attempt_id);
+        $this->assertSame(
+            0,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_deletion_attempts')
+                ->countDocuments(['_id' => $userId]),
+        );
+    }
+
+    public function test_expired_pre_capture_claim_resumes_into_one_atomic_capture_and_fence(): void
+    {
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Expired Capture Claim Target',
+            'phones' => ['+5527999990215'],
+        ]);
+        $userId = (string) $user->_id;
+        $account = Account::create([
+            'name' => 'Expired Capture Claim Account',
+            'slug' => 'expired-capture-claim-account-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'EXPIRED-CAPTURE-CLAIM-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Expired Capture Claim Profile',
+            'slug' => 'expired-capture-claim-profile-'.$userId,
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profile_deletion_attempts')->insertOne([
+            '_id' => $userId,
+            'schema_version' => 1,
+            'attempt_generation' => 1,
+            'state_revision' => 1,
+            'phase' => 'capture_claimed',
+            'claim_token' => 'expired-capture-claim',
+            'claim_expires_at' => new \MongoDB\BSON\UTCDateTime((int) now()->subMinute()->getTimestampMs()),
+            'profile_descriptors' => [],
+            'account_descriptors' => [],
+            'attempts' => 1,
+            'last_error' => null,
+            'created_at' => new \MongoDB\BSON\UTCDateTime((int) now()->subMinute()->getTimestampMs()),
+            'updated_at' => new \MongoDB\BSON\UTCDateTime((int) now()->subMinute()->getTimestampMs()),
+        ]);
+
+        $attempt = app(CurrentTenantAccountDeletionAttemptService::class)->captureOrResume($userId);
+
+        $this->assertSame('captured_and_fenced', $attempt['phase'] ?? null);
+        $this->assertSame(2, (int) ($attempt['attempts'] ?? 0));
+        $this->assertCount(1, $attempt['profile_descriptors'] ?? []);
+        $this->assertCount(1, $attempt['account_descriptors'] ?? []);
+        $profile->refresh();
+        $account->refresh();
+        $this->assertSame($userId, $profile->account_profile_deletion_attempt_id);
+        $this->assertSame(1, (int) $profile->lifecycle_fence_revision);
+        $this->assertSame($userId, $account->account_profile_deletion_gate['attempt_id'] ?? null);
+    }
+
+    public function test_active_pre_capture_claim_blocks_personal_profile_update_before_account_gates_are_installed(): void
+    {
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Active Capture Claim Target',
+            'phones' => ['+5527999990216'],
+        ]);
+        $userId = (string) $user->_id;
+        $account = Account::create([
+            'name' => 'Active Capture Claim Account',
+            'slug' => 'active-capture-claim-account-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'ACTIVE-CAPTURE-CLAIM-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Active Capture Claim Profile',
+            'slug' => 'active-capture-claim-profile-'.$userId,
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profile_deletion_attempts')->insertOne([
+            '_id' => $userId,
+            'schema_version' => 1,
+            'attempt_generation' => 1,
+            'state_revision' => 1,
+            'phase' => 'capture_claimed',
+            'claim_token' => 'active-capture-claim',
+            'claim_expires_at' => new \MongoDB\BSON\UTCDateTime((int) now()->addMinute()->getTimestampMs()),
+            'profile_descriptors' => [],
+            'account_descriptors' => [],
+            'attempts' => 1,
+            'last_error' => null,
+            'created_at' => new \MongoDB\BSON\UTCDateTime((int) now()->getTimestampMs()),
+            'updated_at' => new \MongoDB\BSON\UTCDateTime((int) now()->getTimestampMs()),
+        ]);
+
+        try {
+            app(AccountProfileManagementService::class)->update(
+                $profile,
+                ['display_name' => 'Must Not Persist During Capture Claim'],
+                commandId: 'u07a-active-capture-claim-update-'.$userId,
+            );
+            $this->fail('A personal Profile update must conflict while capture is claimed.');
+        } catch (\App\Exceptions\FoundationControlPlane\ConcurrencyConflictException) {
+            // The active pre-capture claim is the deletion serialization point.
+        }
+
+        $this->assertSame('Active Capture Claim Profile', (string) $profile->fresh()->display_name);
+    }
+
+    public function test_active_pre_capture_claim_blocks_personal_profile_creation_before_account_gates_are_installed(): void
+    {
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Active Capture Claim Creation Target',
+            'phones' => ['+5527999990217'],
+        ]);
+        $userId = (string) $user->_id;
+        $existingAccount = Account::create([
+            'name' => 'Active Capture Claim Existing Account',
+            'slug' => 'active-capture-claim-existing-account-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'ACTIVE-CAPTURE-CLAIM-EXISTING-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $existingAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Active Capture Claim Existing Profile',
+            'slug' => 'active-capture-claim-existing-profile-'.$userId,
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $candidateAccount = Account::create([
+            'name' => 'Active Capture Claim Candidate Account',
+            'slug' => 'active-capture-claim-candidate-account-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'ACTIVE-CAPTURE-CLAIM-CANDIDATE-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profile_deletion_attempts')->insertOne([
+            '_id' => $userId,
+            'schema_version' => 1,
+            'attempt_generation' => 1,
+            'state_revision' => 1,
+            'phase' => 'capture_claimed',
+            'claim_token' => 'active-capture-claim-create',
+            'claim_expires_at' => new \MongoDB\BSON\UTCDateTime((int) now()->addMinute()->getTimestampMs()),
+            'profile_descriptors' => [],
+            'account_descriptors' => [],
+            'attempts' => 1,
+            'last_error' => null,
+            'created_at' => new \MongoDB\BSON\UTCDateTime((int) now()->getTimestampMs()),
+            'updated_at' => new \MongoDB\BSON\UTCDateTime((int) now()->getTimestampMs()),
+        ]);
+
+        try {
+            app(AccountProfileManagementService::class)->create([
+                'account_id' => (string) $candidateAccount->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Must Not Create During Capture Claim',
+                'slug' => 'active-capture-claim-created-profile-'.$userId,
+                'created_by' => $userId,
+                'created_by_type' => 'tenant',
+            ], 'u07a-active-capture-claim-create-'.$userId);
+            $this->fail('A personal Profile creation must conflict while capture is claimed.');
+        } catch (\App\Exceptions\FoundationControlPlane\ConcurrencyConflictException) {
+            // The active pre-capture claim is the deletion serialization point.
+        }
+
+        $this->assertFalse(
+            AccountProfile::query()
+                ->where('account_id', (string) $candidateAccount->_id)
+                ->where('profile_type', 'personal')
+                ->exists(),
+        );
+    }
+
+    public function test_captured_personal_account_deletion_blocks_new_personal_profile_creation(): void
+    {
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Captured Creation Target',
+            'phones' => ['+5527999990218'],
+        ]);
+        $userId = (string) $user->_id;
+        $existingAccount = Account::create([
+            'name' => 'Captured Creation Existing Account',
+            'slug' => 'captured-creation-existing-account-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'CAPTURED-CREATION-EXISTING-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $existingAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Captured Creation Existing Profile',
+            'slug' => 'captured-creation-existing-profile-'.$userId,
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+        $candidateAccount = Account::create([
+            'name' => 'Captured Creation Candidate Account',
+            'slug' => 'captured-creation-candidate-account-'.$userId,
+            'document' => ['type' => 'cpf', 'number' => 'CAPTURED-CREATION-CANDIDATE-'.$userId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $userId,
+            'created_by_type' => 'tenant',
+        ]);
+
+        $attempt = app(CurrentTenantAccountDeletionAttemptService::class)->captureOrResume($userId);
+        $this->assertSame('captured_and_fenced', $attempt['phase'] ?? null);
+
+        try {
+            app(AccountProfileManagementService::class)->create([
+                'account_id' => (string) $candidateAccount->_id,
+                'profile_type' => 'personal',
+                'display_name' => 'Must Not Create After Capture',
+                'slug' => 'captured-creation-created-profile-'.$userId,
+                'created_by' => $userId,
+                'created_by_type' => 'tenant',
+            ], 'u07a-captured-creation-'.$userId);
+            $this->fail('A personal Profile creation must conflict after capture.');
+        } catch (\App\Exceptions\FoundationControlPlane\ConcurrencyConflictException) {
+            // The active deletion attempt owns future personal Profile creation.
+        }
+
+        $this->assertFalse(
+            AccountProfile::query()
+                ->where('account_id', (string) $candidateAccount->_id)
+                ->where('profile_type', 'personal')
+                ->exists(),
+        );
     }
 
     public function test_personal_account_discovery_reads_are_constant_for_twelve_and_many_candidates(): void
@@ -324,14 +797,6 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             ]);
         }
 
-        AccountProfile::create([
-            'profile_type' => 'personal',
-            'display_name' => 'Bounded Malformed Candidate',
-            'slug' => "bounded-{$candidateCount}-malformed-candidate",
-            'created_by' => $targetId,
-            'created_by_type' => 'tenant',
-        ]);
-
         $connection = DB::connection('tenant');
         $connection->flushQueryLog();
         $connection->enableQueryLog();
@@ -367,14 +832,14 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'account_roles.account_id',
         ));
 
-        // One preflight read establishes the candidate set; one transactionally
-        // adjacent read revalidates it before hard deletion. Both are bulk
-        // reads, so each class must remain exactly two reads regardless of
-        // candidate cardinality.
+        // Candidate Profiles and eligible Accounts are read once before their
+        // transactionally adjacent revalidation. The profile graph and account
+        // memberships need only that later bulk revalidation. Every class is
+        // cardinality-invariant regardless of candidate count.
         $this->assertCount(2, $initialProfileDiscoveryReads, "Personal-profile discovery must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
         $this->assertCount(2, $accountOwnershipReads, "Account ownership must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
-        $this->assertCount(2, $profileGraphReads, "Profile graph must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
-        $this->assertCount(2, $membershipReads, "Membership cardinality must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
+        $this->assertCount(1, $profileGraphReads, "Profile graph must use one transactionally revalidated bulk read: {$queryLogJson}");
+        $this->assertCount(1, $membershipReads, "Memberships must use one transactionally revalidated bulk read: {$queryLogJson}");
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
 
         return [

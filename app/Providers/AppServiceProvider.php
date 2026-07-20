@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Application\Media\SystemExternalImageDnsResolver;
@@ -33,6 +34,7 @@ class AppServiceProvider extends ServiceProvider
             return new TenantDomainResolverService;
         });
         $this->app->bind(AccountProfileTypeSetProvider::class);
+        $this->app->scoped(AccountProfilePublicCatalogSnapshotReader::class);
 
         $this->app->bind(
             ResetPasswordRequestContract::class,

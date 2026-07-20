@@ -1,5 +1,7 @@
 <?php
 
+use App\Application\AccountProfiles\AccountProfileCommandIndeterminateException;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -181,6 +183,18 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        $exceptions->renderable(function (ConcurrencyConflictException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'code' => 'concurrency_conflict',
+            ], 409);
+        });
+        $exceptions->renderable(function (AccountProfileCommandIndeterminateException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'code' => 'account_profile_command_indeterminate',
+            ], 503);
+        });
         $exceptions->renderable(function (NotFoundHttpException $e) {
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
         });

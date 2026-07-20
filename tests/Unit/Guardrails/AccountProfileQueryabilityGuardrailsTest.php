@@ -137,6 +137,98 @@ PHP,
         $this->assertStringContainsString('stale or mismatched', $output);
     }
 
+    public function test_guard_fails_for_a_stale_allowlist_baseline_without_a_current_query(): void
+    {
+        $fixtureRoot = $this->makeFixtureRepo([
+            'app/Application/Example/RetiredCanonicalGateway.php' => <<<'PHP'
+<?php
+
+final class RetiredCanonicalGateway
+{
+    public function publicPaginate(): array
+    {
+        return [];
+    }
+}
+PHP,
+            'allowlist.php' => <<<'PHP'
+<?php
+
+return [[
+    'key' => 'app/Application/Example/RetiredCanonicalGateway.php::publicPaginate::query',
+    'path' => 'app/Application/Example/RetiredCanonicalGateway.php',
+    'method' => 'publicPaginate',
+    'source_kind' => 'query',
+    'category' => 'canonical_gateway',
+    'owner' => 'test-fixture',
+    'rationale' => 'A removed query must not remain allowlisted.',
+]];
+PHP,
+        ]);
+
+        $process = $this->guardProcess([
+            'php',
+            $this->guardScriptPath(),
+            '--root='.$fixtureRoot,
+            '--scan-dir=app',
+            '--allowlist='.$fixtureRoot.'/allowlist.php',
+        ]);
+        $process->run();
+
+        $output = $process->getOutput().$process->getErrorOutput();
+
+        $this->assertSame(1, $process->getExitCode(), $output);
+        $this->assertStringContainsString('RetiredCanonicalGateway.php', $output);
+        $this->assertStringContainsString('stale or mismatched', $output);
+        $this->assertStringNotContainsString('lacks a reviewed baseline entry', $output);
+    }
+
+    public function test_guard_does_not_ignore_an_operational_builder_that_has_an_empty_result_branch(): void
+    {
+        $fixtureRoot = $this->makeFixtureRepo([
+            'app/Application/Example/PublicCatalogGateway.php' => <<<'PHP'
+<?php
+
+final class PublicCatalogGateway
+{
+    public function publicPaginate(bool $hasEligibleTypes): array
+    {
+        $query = \App\Models\Tenants\AccountProfile::query();
+
+        if (! $hasEligibleTypes) {
+            $query->whereRaw(['_id' => ['$exists' => false]]);
+        }
+
+        return $query
+            ->whereIn('profile_type', ['artist'])
+            ->paginate()
+            ->all();
+    }
+}
+PHP,
+            'allowlist.php' => <<<'PHP'
+<?php
+
+return [];
+PHP,
+        ]);
+
+        $process = $this->guardProcess([
+            'php',
+            $this->guardScriptPath(),
+            '--root='.$fixtureRoot,
+            '--scan-dir=app',
+            '--allowlist='.$fixtureRoot.'/allowlist.php',
+        ]);
+        $process->run();
+
+        $output = $process->getOutput().$process->getErrorOutput();
+
+        $this->assertSame(1, $process->getExitCode(), $output);
+        $this->assertStringContainsString('PublicCatalogGateway.php', $output);
+        $this->assertStringContainsString('lacks a reviewed baseline entry', $output);
+    }
+
     /**
      * @param  array<int, string>  $command
      */

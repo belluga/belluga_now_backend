@@ -14,6 +14,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -481,6 +482,42 @@ class AccountControllerTest extends TestCase
         );
     }
 
+    public function test_delete_unmanaged_account_persists_and_dispatches_a_profile_tombstone_outbox_event(): void
+    {
+        $commandId = 'u07a-account-cascade-delete-'.uniqid('', true);
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.673067,
+                'lng' => -40.498383,
+            ],
+        ]);
+        $createResponse->assertCreated();
+
+        $accountSlug = (string) $createResponse->json('data.account.slug');
+        $profileId = (string) $createResponse->json('data.account_profile.id');
+
+        $this->deleteJson(
+            "{$this->tenantAccountsAdminUrl}/{$accountSlug}",
+            [],
+            ['X-Request-Id' => $commandId],
+        )->assertOk();
+
+        $outbox = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne([
+                'profile_id' => $profileId,
+                'operation' => 'tombstone',
+            ]);
+
+        $this->assertNotNull($outbox);
+        $this->assertSame('completed', $outbox['delivery_state'] ?? null);
+        $this->assertNotNull(AccountProfile::onlyTrashed()->find($profileId));
+    }
+
     public function test_delete_unmanaged_account_removes_related_account_profile_map_pois(): void
     {
         MapPoi::query()->delete();
@@ -664,17 +701,7 @@ class AccountControllerTest extends TestCase
         $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}")
             ->assertOk();
 
-        MapPoi::query()->create([
-            'ref_type' => 'account_profile',
-            'ref_id' => $profileId,
-            'name' => 'Force Delete Target Venue',
-            'location' => [
-                'type' => 'Point',
-                'coordinates' => [-40.498, -20.673],
-            ],
-            'is_active' => true,
-        ]);
-        $this->assertTrue(
+        $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')
                 ->where('ref_id', $profileId)
@@ -684,6 +711,7 @@ class AccountControllerTest extends TestCase
         $response = $this->postJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}/force_delete");
 
         $response->assertOk();
+        $this->assertNull(AccountProfile::withTrashed()->find($profileId));
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')

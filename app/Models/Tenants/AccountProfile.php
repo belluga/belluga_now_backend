@@ -47,17 +47,20 @@ class AccountProfile extends Model
         'created_by_type',
         'updated_by',
         'updated_by_type',
+        'aggregate_revision',
     ];
 
     protected $attributes = [
         'visibility' => 'public',
         'discoverable_by_contacts' => true,
+        'aggregate_revision' => 0,
     ];
 
     protected $casts = [
         'is_active' => 'bool',
         'is_verified' => 'bool',
         'discoverable_by_contacts' => 'bool',
+        'aggregate_revision' => 'int',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',

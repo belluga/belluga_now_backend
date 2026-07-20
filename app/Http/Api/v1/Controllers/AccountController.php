@@ -123,7 +123,7 @@ class AccountController extends Controller
         $account_slug = (string) $request->route('account_slug');
         $account = $this->accountQueryService->findBySlugOrFail($account_slug);
 
-        $this->accountService->delete($account);
+        $this->accountService->delete($account, $request->header('X-Request-Id'));
 
         $user = $request->user();
         if ($user) {
@@ -169,7 +169,7 @@ class AccountController extends Controller
         $account_slug = (string) $request->route('account_slug');
         $account = $this->accountQueryService->findBySlugOrFail($account_slug, true);
 
-        $this->accountService->forceDelete($account);
+        $this->accountService->forceDelete($account, $request->header('X-Request-Id'));
 
         $user = request()->user();
         if ($user) {

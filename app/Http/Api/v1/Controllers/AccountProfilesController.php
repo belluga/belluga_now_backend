@@ -107,8 +107,27 @@ class AccountProfilesController extends Controller
             $validated['updated_by_type'] = $validated['created_by_type'];
         }
 
-        $profile = $this->profileService->create($validated);
-        $this->mediaService->applyUploads($request, $profile);
+        $mediaFingerprint = $this->mediaService->mutationFingerprint($request);
+        $mediaBackup = null;
+        $profile = $this->profileService->create(
+            $validated,
+            $request->header('X-Request-Id'),
+            $mediaFingerprint === []
+                ? null
+                : function (\App\Models\Tenants\AccountProfile $persistedProfile) use ($request, &$mediaBackup): array {
+                    $mediaBackup ??= $this->mediaService->captureMutationBackup($request, $persistedProfile);
+
+                    return $this->mediaService->applyUploads($request, $persistedProfile);
+                },
+            ['media' => $mediaFingerprint],
+            static function () use (&$mediaBackup): mixed {
+                if ($mediaBackup !== null) {
+                    return $mediaBackup->restore();
+                }
+
+                return null;
+            },
+        );
 
         return response()->json([
             'data' => $this->formatter->format($profile),
@@ -136,20 +155,21 @@ class AccountProfilesController extends Controller
             $validated['updated_by_type'] = $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant';
         }
 
-        $hasMediaMutation = $request->hasFile('avatar')
-            || $request->hasFile('cover')
-            || $request->boolean('remove_avatar')
-            || $request->boolean('remove_cover');
+        $mediaFingerprint = $this->mediaService->mutationFingerprint($request);
+        $mediaBackup = $this->mediaService->captureMutationBackup($request, $profile);
 
         $updated = $this->profileService->update(
             $profile,
             $validated,
-            syncMapPoiProjection: ! $hasMediaMutation
+            commandId: $request->header('X-Request-Id'),
+            mutateWithinTransaction: $mediaFingerprint === []
+                ? null
+                : fn (\App\Models\Tenants\AccountProfile $persistedProfile): array => $this->mediaService->applyUploads($request, $persistedProfile),
+            fingerprintSupplement: ['media' => $mediaFingerprint],
+            compensateKnownRollback: $mediaBackup === null
+                ? null
+                : static fn (): mixed => $mediaBackup->restore(),
         );
-        $this->mediaService->applyUploads($request, $updated);
-        if ($hasMediaMutation) {
-            $this->profileService->syncMapPoiProjection($updated);
-        }
 
         return response()->json([
             'data' => $this->formatter->format($updated),
@@ -159,7 +179,7 @@ class AccountProfilesController extends Controller
     public function destroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
-        $this->profileService->delete($profile);
+        $this->profileService->delete($profile, request()->header('X-Request-Id'));
 
         return response()->json();
     }
@@ -167,7 +187,7 @@ class AccountProfilesController extends Controller
     public function restore(string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id, true);
-        $restored = $this->profileService->restore($profile);
+        $restored = $this->profileService->restore($profile, request()->header('X-Request-Id'));
 
         return response()->json([
             'data' => $this->formatter->format($restored),
@@ -177,7 +197,7 @@ class AccountProfilesController extends Controller
     public function forceDestroy(string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id, true);
-        $this->profileService->forceDelete($profile);
+        $this->profileService->forceDelete($profile, request()->header('X-Request-Id'));
 
         return response()->json();
     }

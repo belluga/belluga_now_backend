@@ -14,6 +14,7 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -75,6 +76,18 @@ class AccountMissingProfileRepairCommandTest extends TestCaseTenant
 
         $this->assertSame(1, $executed['totals']['restored']);
         $this->assertNotNull(AccountProfile::query()->find((string) $profile->_id));
+        $outbox = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_outbox')
+            ->findOne([
+                'command_id' => sprintf(
+                    'account-missing-profile-repair:%s:%s:restore',
+                    (string) $account->getKey(),
+                    (string) $profile->getKey(),
+                ),
+            ]);
+        $this->assertNotNull($outbox);
+        $this->assertSame('upsert', $outbox['operation'] ?? null);
         $this->assertSame(
             1,
             AccountProfile::query()

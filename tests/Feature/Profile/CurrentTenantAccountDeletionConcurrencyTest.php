@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Profile;
 
 use App\Application\Profiles\CurrentTenantAccountDeletionAccountGuard;
+use App\Application\Profiles\CurrentTenantAccountDeletionAttemptService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -286,6 +287,9 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         $staleProfileIds = [(string) $profile->_id];
         $staleAccountIds = [(string) $account->_id];
+        $attempts = app(CurrentTenantAccountDeletionAttemptService::class);
+        $attempt = $attempts->captureOrResume($targetId);
+        $attempt = $attempts->transition($attempt, 'captured_and_fenced', 'references_cleaned');
         $other->account_roles = [[
             'account_id' => (string) $account->_id,
             'name' => 'Member',
@@ -298,13 +302,14 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             $targetId,
             $staleProfileIds,
             $staleAccountIds,
+            $attempt,
         );
 
         $this->assertNotNull(Account::query()->find((string) $account->_id));
         $this->assertNull(AccountProfile::withTrashed()->find((string) $profile->_id));
     }
 
-    public function test_stale_personal_account_snapshot_cannot_hard_delete_an_account_that_gained_a_profile(): void
+    public function test_captured_personal_profile_cannot_terminalize_after_its_account_changes(): void
     {
         $target = AccountUser::create([
             'identity_state' => 'registered',
@@ -329,17 +334,26 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             'created_by_type' => 'tenant',
         ]);
 
+        $attempts = app(CurrentTenantAccountDeletionAttemptService::class);
+        $attempt = $attempts->captureOrResume($targetId);
+        $attempt = $attempts->transition($attempt, 'captured_and_fenced', 'references_cleaned');
         $profile->account_id = 'concurrently-reassigned-account';
         $profile->save();
 
-        app(CurrentTenantAccountDeletionAccountGuard::class)->eraseRevalidatedPersonalGraph(
-            $targetId,
-            [(string) $profile->_id],
-            [(string) $account->_id],
-        );
+        try {
+            app(CurrentTenantAccountDeletionAccountGuard::class)->eraseRevalidatedPersonalGraph(
+                $targetId,
+                [(string) $profile->_id],
+                [(string) $account->_id],
+                $attempt,
+            );
+            $this->fail('A captured Profile must not terminalize after its Account changes.');
+        } catch (ConcurrencyConflictException) {
+            // The frozen descriptor and current target no longer agree.
+        }
 
         $this->assertNotNull(Account::query()->find((string) $account->_id));
-        $this->assertNull(AccountProfile::withTrashed()->find((string) $profile->_id));
+        $this->assertNotNull(AccountProfile::withTrashed()->find((string) $profile->_id));
     }
 
     private function configurePhoneOtpReviewAccess(string $phone): void

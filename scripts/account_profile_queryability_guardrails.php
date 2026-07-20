@@ -267,11 +267,7 @@ final class AccountProfileQueryabilityGuard
 
     private function isOperationalListSurface(string $relativePath, string $method, string $block): bool
     {
-        $leadingBlock = substr($block, 0, 220);
-        if (
-            str_contains($leadingBlock, "whereRaw(['_id' => ['\$exists' => false]])")
-            || str_contains($leadingBlock, 'whereRaw(["_id" => ["$exists" => false]])')
-        ) {
+        if ($this->isDirectEmptyResultSentinelQuery($block)) {
             return false;
         }
 
@@ -296,6 +292,21 @@ final class AccountProfileQueryabilityGuard
         }
 
         return $hasOperationalName;
+    }
+
+    private function isDirectEmptyResultSentinelQuery(string $block): bool
+    {
+        $initialQueryChain = substr($block, 0, 160);
+        $isDirectWhereRawChain = preg_match(
+            '/AccountProfile::query\(\)\s*->whereRaw\(/s',
+            $initialQueryChain,
+        ) === 1;
+
+        return $isDirectWhereRawChain
+            && (
+                str_contains($initialQueryChain, "['_id' => ['\$exists' => false]]")
+                || str_contains($initialQueryChain, '["_id" => ["$exists" => false]]')
+            );
     }
 
     private function isCapabilityBoundBuilderMethod(string $normalizedMethod, string $block): bool
@@ -447,15 +458,6 @@ function defaultAccountProfileQueryabilityAllowlist(): array
             'category' => 'canonical_gateway',
             'owner' => $owner,
             'rationale' => 'Canonical follow-up ordered-id hydration for public near discovery results.',
-        ],
-        [
-            'key' => 'app/Application/AccountProfiles/AccountProfileNestedGroupService.php::assertMemberProfilesExist::query',
-            'path' => 'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
-            'method' => 'assertMemberProfilesExist',
-            'source_kind' => 'query',
-            'category' => 'canonical_gateway',
-            'owner' => $owner,
-            'rationale' => 'Canonical nested-group member validation enforcing queryable-only membership.',
         ],
         [
             'key' => 'app/Application/AccountProfiles/AccountProfileNestedGroupService.php::publicProfilesById::query',

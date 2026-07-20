@@ -5,6 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Invites;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\AccountProfiles\AccountProfileInviteablePeopleOutboxConsumer;
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
+use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Initialization\InitializationPayload;
@@ -22,10 +27,10 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Application\Favorites\FavoritesCommandService;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
+use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Belluga\Invites\Models\Tenants\InviteCommandIdempotency;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
-use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Belluga\Invites\Models\Tenants\InviteQuotaCounter;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
@@ -93,9 +98,10 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $viewer = $this->createReleaseUser('Viewer User', '+55 27 99999-0001');
         $target = $this->createReleaseUser('Target User', '+55 27 99999-0002');
         $targetProfile = $this->personalProfileFor($target);
-        $targetProfile->visibility = 'friends_only';
-        $targetProfile->discoverable_by_contacts = true;
-        $targetProfile->save();
+        $targetProfile = $this->updateProfile($targetProfile, [
+            'visibility' => 'friends_only',
+            'discoverable_by_contacts' => true,
+        ]);
 
         Sanctum::actingAs($viewer, ['*']);
 
@@ -112,8 +118,9 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $response->assertJsonPath('matches.0.profile_exposure_level', 'capped_profile');
         $response->assertJsonPath('matches.0.is_inviteable', true);
 
-        $targetProfile->discoverable_by_contacts = false;
-        $targetProfile->save();
+        $targetProfile = $this->updateProfile($targetProfile, [
+            'discoverable_by_contacts' => false,
+        ]);
 
         $blocked = $this->postJson("{$this->base_api_tenant}contacts/import", [
             'contacts' => [
@@ -174,6 +181,38 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $this->assertTrue((bool) data_get($type->capabilities, 'is_favoritable'));
         $this->assertTrue((bool) data_get($type->capabilities, 'is_inviteable'));
         $this->assertTrue((bool) data_get($type->capabilities, 'has_bio'));
+    }
+
+    public function test_personal_account_bootstrap_persists_and_dispatches_a_profile_outbox_event(): void
+    {
+        $user = AccountUser::query()->create([
+            'identity_state' => 'registered',
+            'name' => 'Outbox Bootstrap User',
+            'emails' => ['outbox-bootstrap-'.Str::random(6).'@example.org'],
+            'phones' => ['+55 27 99999-0062'],
+            'fingerprints' => [],
+            'credentials' => [],
+            'consents' => [],
+        ]);
+
+        app(AccountProfileBootstrapService::class)->ensurePersonalAccount($user);
+
+        $profile = $this->personalProfileFor($user);
+        $commandId = 'account-profile-bootstrap:'.(string) $user->_id.':personal';
+        $database = DB::connection('tenant')->getDatabase();
+        $receipt = $database
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+
+        $this->assertNotNull($receipt);
+        $this->assertSame((string) $profile->_id, (string) ($receipt['profile_id'] ?? ''));
+
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['_id' => $receipt['outbox_event_id'] ?? '']);
+        $this->assertNotNull($outbox);
+        $this->assertSame('upsert', $outbox['operation'] ?? null);
+        $this->assertSame('completed', $outbox['delivery_state'] ?? null);
     }
 
     public function test_contact_import_matches_phone_user_that_already_has_non_personal_account_role(): void
@@ -611,6 +650,188 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $this->assertContains('favorite_by_you', $projectionRows->first()->inviteable_reasons ?? []);
     }
 
+    public function test_account_profile_outbox_updates_inviteable_projection_and_checkpoint_atomically(): void
+    {
+        $viewer = $this->createReleaseUser('Outbox Projection Viewer', '+55 27 99999-1171');
+        $target = $this->createReleaseUser('Outbox Projection Target', '+55 27 99999-1172');
+        $targetProfile = $this->personalProfileFor($target);
+        $profileId = (string) $targetProfile->_id;
+        $viewerId = (string) $viewer->_id;
+
+        ContactHashDirectory::query()->create([
+            'importing_user_id' => $viewerId,
+            'contact_hash' => hash('sha256', '5527999991172'),
+            'matched_user_id' => (string) $target->_id,
+            'type' => 'phone',
+            'salt_version' => 'v1',
+            'imported_at' => Carbon::now(),
+            'last_seen_at' => Carbon::now(),
+            'created_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
+        ]);
+        app(InviteablePeopleProjectionService::class)->refreshForUser($viewer);
+
+        $database = DB::connection('tenant')->getDatabase();
+        $checkpointId = 'inviteable_people:'.$profileId;
+        $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->deleteOne(['_id' => $checkpointId]);
+
+        $before = InviteablePeopleProjection::query()
+            ->where('owner_user_id', $viewerId)
+            ->where('receiver_account_profile_id', $profileId)
+            ->firstOrFail();
+        $this->assertSame('Outbox Projection Target', $before->display_name);
+
+        $commandId = 'u07a-inviteable-outbox-'.uniqid('', true);
+        app(AccountProfileManagementService::class)->update(
+            $targetProfile,
+            ['display_name' => 'Outbox Projection Applied'],
+            commandId: $commandId,
+            dispatchOutboxImmediately: false,
+        );
+
+        $outbox = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $commandId]);
+        $this->assertNotNull($outbox);
+
+        try {
+            app(AccountProfileTransactionRunner::class)->run(
+                function (AccountProfileTransactionContext $context) use ($outbox): void {
+                    app(AccountProfileInviteablePeopleOutboxConsumer::class)->consume(
+                        $context,
+                        [
+                            ...$outbox->getArrayCopy(),
+                            'projection' => $outbox['projection']->getArrayCopy(),
+                        ],
+                    );
+
+                    throw new \RuntimeException('forced inviteable effect rollback');
+                },
+            );
+            $this->fail('The inviteable projection transaction should have been rolled back.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced inviteable effect rollback', $exception->getMessage());
+        }
+
+        $this->assertSame(
+            'Outbox Projection Target',
+            InviteablePeopleProjection::query()
+                ->where('owner_user_id', $viewerId)
+                ->where('receiver_account_profile_id', $profileId)
+                ->value('display_name'),
+        );
+        $this->assertSame(
+            0,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => $checkpointId]),
+        );
+
+        app(AccountProfileOutboxDispatcher::class)->dispatchEvent((string) $outbox['_id']);
+
+        $checkpoint = $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->findOne(['_id' => $checkpointId]);
+        $this->assertSame(
+            'Outbox Projection Applied',
+            InviteablePeopleProjection::query()
+                ->where('owner_user_id', $viewerId)
+                ->where('receiver_account_profile_id', $profileId)
+                ->value('display_name'),
+        );
+        $this->assertNotNull($checkpoint);
+        $this->assertSame(
+            (int) ($outbox['aggregate_revision'] ?? 0),
+            (int) ($checkpoint['aggregate_revision'] ?? -1),
+        );
+    }
+
+    public function test_account_profile_outbox_inviteable_projection_ignores_out_of_order_and_duplicate_events(): void
+    {
+        $viewer = $this->createReleaseUser('Outbox Ordering Viewer', '+55 27 99999-1173');
+        $target = $this->createReleaseUser('Outbox Ordering Target', '+55 27 99999-1174');
+        $targetProfile = $this->personalProfileFor($target);
+        $profileId = (string) $targetProfile->_id;
+        $viewerId = (string) $viewer->_id;
+
+        ContactHashDirectory::query()->create([
+            'importing_user_id' => $viewerId,
+            'contact_hash' => hash('sha256', '5527999991174'),
+            'matched_user_id' => (string) $target->_id,
+            'type' => 'phone',
+            'salt_version' => 'v1',
+            'imported_at' => Carbon::now(),
+            'last_seen_at' => Carbon::now(),
+            'created_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
+        ]);
+        app(InviteablePeopleProjectionService::class)->refreshForUser($viewer);
+
+        $database = DB::connection('tenant')->getDatabase();
+        $checkpointId = 'inviteable_people:'.$profileId;
+        $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->deleteOne(['_id' => $checkpointId]);
+
+        $profiles = app(AccountProfileManagementService::class);
+        $firstCommandId = 'u07a-inviteable-order-first-'.uniqid('', true);
+        $first = $profiles->update(
+            $targetProfile,
+            ['display_name' => 'Outbox Ordering First'],
+            commandId: $firstCommandId,
+            dispatchOutboxImmediately: false,
+        );
+        $secondCommandId = 'u07a-inviteable-order-second-'.uniqid('', true);
+        $profiles->update(
+            $first,
+            ['display_name' => 'Outbox Ordering Second'],
+            commandId: $secondCommandId,
+            dispatchOutboxImmediately: false,
+        );
+
+        $firstEvent = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $firstCommandId]);
+        $secondEvent = $database
+            ->selectCollection('account_profile_outbox')
+            ->findOne(['command_id' => $secondCommandId]);
+        $this->assertNotNull($firstEvent);
+        $this->assertNotNull($secondEvent);
+        $this->assertGreaterThan(
+            (int) ($firstEvent['aggregate_revision'] ?? 0),
+            (int) ($secondEvent['aggregate_revision'] ?? 0),
+        );
+
+        $dispatcher = app(AccountProfileOutboxDispatcher::class);
+        $dispatcher->dispatchEvent((string) $secondEvent['_id']);
+        $dispatcher->dispatchEvent((string) $firstEvent['_id']);
+        $dispatcher->dispatchEvent((string) $secondEvent['_id']);
+
+        $checkpoint = $database
+            ->selectCollection('account_profile_projection_checkpoints')
+            ->findOne(['_id' => $checkpointId]);
+        $this->assertSame(
+            'Outbox Ordering Second',
+            InviteablePeopleProjection::query()
+                ->where('owner_user_id', $viewerId)
+                ->where('receiver_account_profile_id', $profileId)
+                ->value('display_name'),
+        );
+        $this->assertNotNull($checkpoint);
+        $this->assertSame(
+            (int) ($secondEvent['aggregate_revision'] ?? 0),
+            (int) ($checkpoint['aggregate_revision'] ?? -1),
+        );
+        $this->assertSame(
+            1,
+            $database
+                ->selectCollection('account_profile_projection_checkpoints')
+                ->countDocuments(['_id' => $checkpointId]),
+        );
+    }
+
     public function test_profile_discoverability_revocation_prunes_projection_without_get_fallback(): void
     {
         $viewer = $this->createReleaseUser('Projection Privacy Viewer', '+55 27 99999-1141');
@@ -628,8 +849,9 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ->where('receiver_account_profile_id', (string) $targetProfile->_id)
             ->exists());
 
-        $targetProfile->discoverable_by_contacts = false;
-        $targetProfile->save();
+        $targetProfile = $this->updateProfile($targetProfile, [
+            'discoverable_by_contacts' => false,
+        ]);
 
         $this->assertFalse(InviteablePeopleProjection::query()
             ->where('owner_user_id', (string) $viewer->_id)
@@ -696,8 +918,9 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $create->assertJsonPath('data.name', 'Rolê');
         $create->assertJsonCount(1, 'data.recipient_account_profile_ids');
 
-        $targetProfile->discoverable_by_contacts = false;
-        $targetProfile->save();
+        $targetProfile = $this->updateProfile($targetProfile, [
+            'discoverable_by_contacts' => false,
+        ]);
 
         $groups = $this->getJson("{$this->base_api_tenant}contact-groups");
 
@@ -869,8 +1092,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $friendProfile = $this->personalProfileFor($friend);
 
         foreach ([$favoriteOnlyProfile, $favoritedViewerProfile, $friendProfile] as $profile) {
-            $profile->visibility = 'friends_only';
-            $profile->save();
+            $this->updateProfile($profile, ['visibility' => 'friends_only']);
         }
 
         $this->favorite($viewer, $favoriteOnlyProfile);
@@ -1278,6 +1500,16 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ->where('created_by_type', 'tenant')
             ->where('profile_type', 'personal')
             ->firstOrFail();
+    }
+
+    /** @param array<string, mixed> $attributes */
+    private function updateProfile(AccountProfile $profile, array $attributes): AccountProfile
+    {
+        return app(AccountProfileManagementService::class)->update(
+            $profile,
+            $attributes,
+            commandId: 'store-release-profile-'.(string) $profile->_id.'-'.uniqid('', true),
+        );
     }
 
     private function favorite(AccountUser $owner, AccountProfile $targetProfile): void

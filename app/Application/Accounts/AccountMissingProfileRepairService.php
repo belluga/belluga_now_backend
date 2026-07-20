@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -11,15 +12,16 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
-use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Illuminate\Support\Collection;
 
 class AccountMissingProfileRepairService
 {
     public function __construct(
         private readonly AccountManagementService $accountManagementService,
+        private readonly AccountProfileLifecycleService $profileLifecycle,
     ) {}
 
     /**
@@ -297,7 +299,14 @@ class AccountMissingProfileRepairService
         if ($row['action'] === 'restore_profile' && is_string($row['profile_id'])) {
             $profile = AccountProfile::onlyTrashed()->find($row['profile_id']);
             if ($profile instanceof AccountProfile) {
-                $profile->restore();
+                $this->profileLifecycle->restore(
+                    $profile,
+                    sprintf(
+                        'account-missing-profile-repair:%s:%s:restore',
+                        (string) $account->getKey(),
+                        (string) $profile->getKey(),
+                    ),
+                );
                 $row['executed'] = true;
                 $row['residual_reason'] = null;
             }

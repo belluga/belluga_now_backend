@@ -18,6 +18,7 @@ final class AccountProfileGalleryService
     public function __construct(
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfileManagementService $profileService,
     ) {}
 
     /**
@@ -30,11 +31,50 @@ final class AccountProfileGalleryService
         string $baseUrl,
         array $uploads = [],
         array $actorContext = [],
+        ?string $commandId = null,
     ): AccountProfile {
         $this->assertGalleryAllowed((string) ($profile->profile_type ?? ''));
-        $existingItems = $this->existingItemsById($profile->gallery_groups ?? []);
-        [$plannedGroups, $removedItemIds] = $this->planReplacement($rawGroups, $existingItems, $uploads);
+        $backup = $this->mediaService->captureGalleryMutationBackup($profile, $baseUrl);
 
+        return $this->profileService->update(
+            $profile,
+            [],
+            commandId: $commandId,
+            mutateWithinTransaction: function (AccountProfile $persistedProfile) use ($rawGroups, $uploads, $baseUrl, $actorContext): void {
+                $existingItems = $this->existingItemsById($persistedProfile->gallery_groups ?? []);
+                [$plannedGroups, $removedItemIds] = $this->planReplacement($rawGroups, $existingItems, $uploads);
+                $persistedProfile->gallery_groups = $this->persistedGroups(
+                    $persistedProfile,
+                    $plannedGroups,
+                    $baseUrl,
+                );
+                if (isset($actorContext['updated_by'])) {
+                    $persistedProfile->updated_by = $actorContext['updated_by'];
+                }
+                if (isset($actorContext['updated_by_type'])) {
+                    $persistedProfile->updated_by_type = $actorContext['updated_by_type'];
+                }
+
+                foreach ($removedItemIds as $itemId) {
+                    $this->mediaService->removeGalleryUpload($persistedProfile, $itemId, $baseUrl);
+                }
+            },
+            fingerprintSupplement: [
+                'gallery' => $this->replacementFingerprint($rawGroups, $uploads, $actorContext),
+            ],
+            compensateKnownRollback: static fn (): mixed => $backup->restore(),
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $plannedGroups
+     * @return array<int, array<string, mixed>>
+     */
+    private function persistedGroups(
+        AccountProfile $profile,
+        array $plannedGroups,
+        string $baseUrl,
+    ): array {
         $persistedGroups = [];
         foreach ($plannedGroups as $groupOrder => $plannedGroup) {
             $persistedItems = [];
@@ -70,21 +110,42 @@ final class AccountProfileGalleryService
             ];
         }
 
-        $profile->gallery_groups = $persistedGroups;
-        if (isset($actorContext['updated_by'])) {
-            $profile->updated_by = $actorContext['updated_by'];
-        }
-        if (isset($actorContext['updated_by_type'])) {
-            $profile->updated_by_type = $actorContext['updated_by_type'];
-        }
-        $profile->save();
-        $profile->refresh();
+        return $persistedGroups;
+    }
 
-        foreach ($removedItemIds as $itemId) {
-            $this->mediaService->removeGalleryUpload($profile, $itemId, $baseUrl);
-        }
+    /**
+     * @param  array<int, mixed>  $rawGroups
+     * @param  array<string, mixed>  $uploads
+     * @param  array<string, mixed>  $actorContext
+     * @return array<string, mixed>
+     */
+    private function replacementFingerprint(array $rawGroups, array $uploads, array $actorContext): array
+    {
+        $uploadFingerprint = [];
+        foreach ($uploads as $key => $upload) {
+            if (! $upload instanceof UploadedFile) {
+                continue;
+            }
 
-        return $profile;
+            $path = $upload->getRealPath();
+            $hash = is_string($path) && $path !== '' ? hash_file('sha256', $path) : false;
+            if (! is_string($hash)) {
+                throw new \RuntimeException("Unable to fingerprint gallery upload {$key}.");
+            }
+
+            $uploadFingerprint[(string) $key] = [
+                'sha256' => $hash,
+                'size' => $upload->getSize(),
+                'mime' => $upload->getMimeType(),
+            ];
+        }
+        ksort($uploadFingerprint);
+
+        return [
+            'groups' => $rawGroups,
+            'uploads' => $uploadFingerprint,
+            'actor' => $actorContext,
+        ];
     }
 
     /**

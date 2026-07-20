@@ -28,6 +28,10 @@ use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
 class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
 {
+    private const SYNC_BARRIER_TIMEOUT_SECONDS = 60;
+
+    private const SYNC_PROCESS_TIMEOUT_SECONDS = 90;
+
     use RefreshLandlordAndTenantDatabases;
 
     protected TenantLabels $tenant {
@@ -560,12 +564,16 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
         $tenantSlugValue = var_export($tenantSlug, true);
         $barrierValue = var_export($barrier, true);
         $concurrencyValue = var_export($concurrency, true);
+        $barrierTimeoutValue = var_export(self::SYNC_BARRIER_TIMEOUT_SECONDS, true);
         $code = <<<PHP
 try {
     \$barrier = {$barrierValue};
     \$concurrency = {$concurrencyValue};
+    \$barrierTimeoutSeconds = {$barrierTimeoutValue};
     file_put_contents(\$barrier.'.ready.'.getmypid(), 'ready');
-    \$deadline = microtime(true) + 10;
+    // Laravel boots before this code runs. The finite budget detects a stuck
+    // worker without mistaking concurrent container bootstrap for sync failure.
+    \$deadline = microtime(true) + \$barrierTimeoutSeconds;
     while (count(glob(\$barrier.'.ready.*')) < \$concurrency) {
         if (microtime(true) >= \$deadline) {
             throw new \\RuntimeException('registry sync barrier timed out');
@@ -589,7 +597,13 @@ try {
 }
 PHP;
 
-        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), null, null, 30);
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            null,
+            null,
+            self::SYNC_PROCESS_TIMEOUT_SECONDS,
+        );
     }
 
     /**

@@ -2,6 +2,7 @@
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -799,6 +800,15 @@ Schedule::call(static function (): void {
 })
     ->name('events:publication:publish_scheduled')
     ->hourly()
+    ->withoutOverlapping();
+
+Schedule::call(static function (): void {
+    app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
+        app(AccountProfileOutboxDispatcher::class)->dispatchAvailable();
+    });
+})
+    ->name('account_profiles:outbox:dispatch')
+    ->everyMinute()
     ->withoutOverlapping();
 
 Schedule::call(static function (): void {

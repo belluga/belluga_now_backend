@@ -112,19 +112,11 @@ final class AccountProfileContactChannelsService
             ]);
         }
 
-        // The source must be an own-mode profile. This bounds both lookup cost and
-        // topology to one hop; legacy nested chains therefore fail closed on reads.
-        $sourceProfile = $this->resolveSameTenantOwnContactSourceOrFail($sourceId);
-        $effectiveChannels = $this->readStoredContactState($sourceProfile)['contact_channels'];
         $bubbleChannelId = $this->resolveBubbleSelectionForWrite(
             $payload,
             $stored['contact_bubble_channel_id'],
             [],
         );
-
-        if ($bubbleChannelId !== null && $this->payloadRequiresBubbleValidation($payload)) {
-            $this->assertBubbleSelectionValid($bubbleChannelId, $effectiveChannels);
-        }
 
         return [
             'contact_mode' => self::CONTACT_MODE_MIRRORED_ACCOUNT_PROFILE,
@@ -219,6 +211,27 @@ final class AccountProfileContactChannelsService
         }
 
         return $this->resolveSameTenantOwnContactSource($stored['contact_source_account_profile_id']);
+    }
+
+    /**
+     * Rechecks the source snapshot selected before the aggregate transaction.
+     * The admission gateway has already fenced this exact source document.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function assertMirroredAdmissionStillValid(AccountProfile $source, array $attributes): void
+    {
+        $stored = $this->readStoredContactState($source);
+        if ($this->normalizeMode($stored['contact_mode']) !== self::CONTACT_MODE_OWN) {
+            throw ValidationException::withMessages([
+                'contact_source_account_profile_id' => ['Mirrored contact source must be an available own-mode profile in this tenant.'],
+            ]);
+        }
+
+        $bubbleChannelId = $this->normalizeNullableString($attributes['contact_bubble_channel_id'] ?? null);
+        if ($bubbleChannelId !== null) {
+            $this->assertBubbleSelectionValid($bubbleChannelId, $stored['contact_channels']);
+        }
     }
 
     /** @return array<string, mixed> */
@@ -390,18 +403,6 @@ final class AccountProfileContactChannelsService
         throw ValidationException::withMessages([
             'contact_bubble_channel_id' => ['The selected contact bubble channel must reference a valid bubble-eligible contact channel.'],
         ]);
-    }
-
-    private function resolveSameTenantOwnContactSourceOrFail(string $sourceId): AccountProfile
-    {
-        $profile = $this->resolveSameTenantOwnContactSource($sourceId);
-        if (! $profile) {
-            throw ValidationException::withMessages([
-                'contact_source_account_profile_id' => ['Mirrored contact source must be an available own-mode profile in this tenant.'],
-            ]);
-        }
-
-        return $profile;
     }
 
     private function resolveSameTenantOwnContactSource(?string $sourceId): ?AccountProfile

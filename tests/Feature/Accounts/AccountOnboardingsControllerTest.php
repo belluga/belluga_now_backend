@@ -251,6 +251,9 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $mediaMock = Mockery::mock(AccountProfileMediaService::class);
+        $mediaMock->shouldReceive('captureMutationBackup')
+            ->once()
+            ->andReturnNull();
         $mediaMock->shouldReceive('applyUploads')
             ->once()
             ->andThrow(new \RuntimeException('Simulated media write failure'));
@@ -276,6 +279,9 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $profileMock = Mockery::mock(AccountProfileManagementService::class);
+        $profileMock->shouldReceive('resultForCommand')
+            ->once()
+            ->andReturnNull();
         $profileMock->shouldReceive('createWithinCurrentTransaction')
             ->once()
             ->andThrow(new \RuntimeException('Simulated profile write failure'));

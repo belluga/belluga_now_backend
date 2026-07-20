@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileLifecycleService;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
+use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
-use Belluga\MapPois\Application\MapPoiProjectionService;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
 
@@ -21,8 +25,10 @@ class AccountManagementService
     public function __construct(
         private readonly AccountQueryService $accountQueryService,
         private readonly AccountOwnershipStateService $ownershipStateService,
-        private readonly MapPoiProjectionService $mapPoiProjectionService,
         private readonly PushUserGatewayContract $pushUsers,
+        private readonly AccountProfileTransactionRunner $transactionRunner,
+        private readonly AccountProfileLifecycleService $profileLifecycle,
+        private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
     ) {}
 
     public function paginateForUser(
@@ -170,10 +176,10 @@ class AccountManagementService
         return $account->fresh();
     }
 
-    public function delete(Account $account): void
+    public function delete(Account $account, ?string $commandId = null): void
     {
         $this->assertUnmanagedAccountForDelete($account);
-        $this->deleteInsideAccountAggregateDeletionBoundary($account);
+        $this->deleteInsideAccountAggregateDeletionBoundary($account, $this->commandId($commandId));
     }
 
     public function deleteRepairApprovedTestSeedAggregate(Account $account): void
@@ -184,7 +190,7 @@ class AccountManagementService
             ]);
         }
 
-        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account);
+        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account, $this->commandId(null));
     }
 
     public function restore(Account $account): Account
@@ -194,44 +200,64 @@ class AccountManagementService
         return $account->fresh();
     }
 
-    public function forceDelete(Account $account): void
+    public function forceDelete(Account $account, ?string $commandId = null): void
     {
         $this->assertUnmanagedAccountForDelete($account);
-        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account);
+        $this->forceDeleteInsideAccountAggregateDeletionBoundary($account, $this->commandId($commandId));
     }
 
-    private function deleteInsideAccountAggregateDeletionBoundary(Account $account): void
+    private function deleteInsideAccountAggregateDeletionBoundary(Account $account, string $commandId): void
     {
-        $tenantConnection = DB::connection('tenant');
+        $accountId = (string) $account->getKey();
+        $profileCommandIds = [];
 
-        $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
-            $profileIds = $this->allAccountProfileIds($account);
+        /** @var list<string> $eventIds */
+        $eventIds = $this->transactionRunner->run(
+            function (AccountProfileTransactionContext $context) use ($accountId, $commandId, &$profileCommandIds): array {
+                $persistedAccount = Account::query()->findOrFail($accountId);
+                $eventIds = $this->cascadeProfilesWithinTransaction(
+                    $persistedAccount,
+                    $context,
+                    $commandId,
+                    false,
+                    $profileCommandIds,
+                );
+                $persistedAccount->roleTemplates()->delete();
+                $persistedAccount->delete();
 
-            $this->deleteProfilesInsideAccountAggregateDeletionBoundary($account);
-            $account->roleTemplates()->delete();
-            $account->delete();
+                return $eventIds;
+            },
+            fn (): ?array => $this->reconcileCascadeCommand($profileCommandIds),
+        );
 
-            $tenantConnection->afterCommit(
-                fn (): bool => $this->deleteMapPoiProjections($profileIds)
-            );
-        });
+        $this->dispatchOutboxEvents($eventIds);
     }
 
-    private function forceDeleteInsideAccountAggregateDeletionBoundary(Account $account): void
+    private function forceDeleteInsideAccountAggregateDeletionBoundary(Account $account, string $commandId): void
     {
-        $tenantConnection = DB::connection('tenant');
+        $accountId = (string) $account->getKey();
+        $profileCommandIds = [];
 
-        $tenantConnection->transaction(function () use ($account, $tenantConnection): void {
-            $profileIds = $this->allAccountProfileIds($account);
+        /** @var list<string> $eventIds */
+        $eventIds = $this->transactionRunner->run(
+            function (AccountProfileTransactionContext $context) use ($accountId, $commandId, &$profileCommandIds): array {
+                $persistedAccount = Account::withTrashed()->findOrFail($accountId);
+                $eventIds = $this->cascadeProfilesWithinTransaction(
+                    $persistedAccount,
+                    $context,
+                    $commandId,
+                    true,
+                    $profileCommandIds,
+                );
+                $persistedAccount->roleTemplates()->withTrashed()->forceDelete();
+                $persistedAccount->forceDelete();
 
-            $this->forceDeleteProfilesInsideAccountAggregateDeletionBoundary($account);
-            $account->roleTemplates()->withTrashed()->forceDelete();
-            $account->forceDelete();
+                return $eventIds;
+            },
+            fn (): ?array => $this->reconcileCascadeCommand($profileCommandIds),
+        );
 
-            $tenantConnection->afterCommit(
-                fn (): bool => $this->deleteMapPoiProjections($profileIds)
-            );
-        });
+        $this->dispatchOutboxEvents($eventIds);
     }
 
     private function assertUnmanagedAccountForDelete(Account $account): void
@@ -244,16 +270,6 @@ class AccountManagementService
         throw ValidationException::withMessages([
             'account' => ['Only unmanaged accounts can be deleted.'],
         ]);
-    }
-
-    private function deleteProfilesInsideAccountAggregateDeletionBoundary(Account $account): void
-    {
-        $account->accountProfiles()->delete();
-    }
-
-    private function forceDeleteProfilesInsideAccountAggregateDeletionBoundary(Account $account): void
-    {
-        $account->accountProfiles()->withTrashed()->forceDelete();
     }
 
     public function attachUser(Account $account, AccountUser $user, AccountRoleTemplate $role): void
@@ -316,27 +332,95 @@ class AccountManagementService
     }
 
     /**
-     * @return array<int, string>
+     * @param  array<int, string>  $profileCommandIds
+     * @return list<string>
      */
-    private function allAccountProfileIds(Account $account): array
-    {
-        return AccountProfile::query()
-            ->withTrashed()
-            ->where('account_id', (string) $account->_id)
-            ->get(['_id'])
-            ->map(static fn (AccountProfile $profile): string => trim((string) $profile->_id))
-            ->filter(static fn (string $id): bool => $id !== '')
+    private function cascadeProfilesWithinTransaction(
+        Account $account,
+        AccountProfileTransactionContext $context,
+        string $accountCommandId,
+        bool $forceDelete,
+        array &$profileCommandIds,
+    ): array {
+        $operation = $forceDelete ? 'force_delete' : 'soft_delete';
+        $eventIds = [];
+        $profiles = AccountProfile::withTrashed()
+            ->where('account_id', (string) $account->getKey())
+            ->orderBy('_id')
+            ->get();
+        $profileIds = $profiles
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
+            ->filter(static fn (string $profileId): bool => trim($profileId) !== '')
             ->values()
             ->all();
+        $eventIds = $this->profileLifecycle->cleanSurvivingReferencesWithinTransaction(
+            $context,
+            $accountCommandId,
+            $profileIds,
+        );
+
+        foreach ($profiles as $profile) {
+            $profileId = (string) $profile->getKey();
+            $profileCommandId = "{$accountCommandId}:profile:{$profileId}:{$operation}";
+            $profileCommandIds[] = $profileCommandId;
+            $profileEventIds = $forceDelete
+                ? $this->profileLifecycle->forceDeleteWithinTransaction(
+                    $profile,
+                    $context,
+                    $profileCommandId,
+                    false,
+                    cleanSurvivingReferences: false,
+                )
+                : $this->profileLifecycle->deleteWithinTransaction(
+                    $profile,
+                    $context,
+                    $profileCommandId,
+                    false,
+                    cleanSurvivingReferences: false,
+                );
+            $eventIds = [...$eventIds, ...$profileEventIds];
+        }
+
+        return array_values(array_unique($eventIds));
     }
 
     /**
-     * @param  array<int, string>  $profileIds
+     * @param  array<int, string>  $profileCommandIds
+     * @return list<string>|null
      */
-    private function deleteMapPoiProjections(array $profileIds): bool
+    private function reconcileCascadeCommand(array $profileCommandIds): ?array
     {
-        $this->mapPoiProjectionService->deleteByRefs('account_profile', $profileIds);
+        if ($profileCommandIds === []) {
+            return null;
+        }
 
-        return true;
+        $eventIds = [];
+        foreach ($profileCommandIds as $profileCommandId) {
+            $receipt = $this->profileLifecycle->committedReceipt($profileCommandId);
+            if ($receipt === null) {
+                return null;
+            }
+            $eventId = trim((string) ($receipt['outbox_event_id'] ?? ''));
+            if ($eventId !== '') {
+                $eventIds[] = $eventId;
+            }
+        }
+
+        return array_values(array_unique($eventIds));
+    }
+
+    /** @param list<string> $eventIds */
+    private function dispatchOutboxEvents(array $eventIds): void
+    {
+        foreach ($eventIds as $eventId) {
+            $this->outboxDispatcher->dispatchEvent($eventId);
+        }
+    }
+
+    private function commandId(?string $commandId): string
+    {
+        $commandId = trim((string) $commandId);
+
+        return $commandId === '' ? (string) Str::uuid() : $commandId;
     }
 }

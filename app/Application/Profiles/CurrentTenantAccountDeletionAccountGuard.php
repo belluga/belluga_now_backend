@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Application\Profiles;
 
+use App\Application\AccountProfiles\AccountProfileDeletionTerminalization;
+use App\Application\AccountProfiles\AccountProfileLifecycleService;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
+use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
 
@@ -18,6 +22,12 @@ use Throwable;
  */
 final class CurrentTenantAccountDeletionAccountGuard
 {
+    public function __construct(
+        private readonly AccountProfileTransactionRunner $transactionRunner,
+        private readonly AccountProfileLifecycleService $profileLifecycle,
+        private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
+    ) {}
+
     /**
      * @param  array<int, string>  $candidateProfileIds
      * @param  array<int, string>  $candidateAccountIds
@@ -26,26 +36,23 @@ final class CurrentTenantAccountDeletionAccountGuard
         string $userId,
         array $candidateProfileIds,
         array $candidateAccountIds,
+        array $attempt,
     ): void {
         if ($candidateProfileIds === []) {
             return;
         }
 
-        $connection = DB::connection('tenant');
-        if (! method_exists($connection, 'transaction')) {
-            throw new RuntimeException('Tenant MongoDB transaction support is required for current-account deletion.');
-        }
-
         try {
-            $connection->transaction(function () use ($userId, $candidateProfileIds, $candidateAccountIds): void {
-                $profiles = AccountProfile::query()
+            $profileCommandIds = [];
+            /** @var list<string> $eventIds */
+            $eventIds = $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use ($userId, $candidateProfileIds, $candidateAccountIds, $attempt, &$profileCommandIds): array {
+                $profiles = AccountProfile::withTrashed()
                     ->whereIn('_id', $candidateProfileIds)
                     ->where('created_by', $userId)
                     ->where('created_by_type', 'tenant')
                     ->where('profile_type', 'personal')
-                    ->whereNull('deleted_at')
                     ->orderBy('_id')
-                    ->get(['_id', 'account_id']);
+                    ->get();
 
                 $profileIds = $this->normalizedStrings($profiles->map(
                     static fn (AccountProfile $profile): string => (string) $profile->getKey(),
@@ -66,10 +73,19 @@ final class CurrentTenantAccountDeletionAccountGuard
                     $profileIdsByAccount,
                 );
 
-                if ($profileIds !== []) {
-                    AccountProfile::withoutEvents(static function () use ($profileIds): void {
-                        AccountProfile::withTrashed()->whereIn('_id', $profileIds)->forceDelete();
-                    });
+                $eventIds = [];
+                foreach ($profiles as $profile) {
+                    $profileId = (string) $profile->getKey();
+                    $commandId = "current-account-delete:{$userId}:{$profileId}:force_delete";
+                    $profileCommandIds[] = $commandId;
+                    $profileEventIds = $this->profileLifecycle->forceDeleteWithinTransaction(
+                        $profile,
+                        $context,
+                        $commandId,
+                        false,
+                        $this->terminalizationForProfile($attempt, $profile),
+                    );
+                    $eventIds = [...$eventIds, ...$profileEventIds];
                 }
 
                 if ($accountIds !== []) {
@@ -83,7 +99,37 @@ final class CurrentTenantAccountDeletionAccountGuard
                             ->forceDelete();
                     });
                 }
+
+                $this->releaseRetainedAccountGates(
+                    $candidateAccountIds,
+                    $accountIds,
+                    $attempt,
+                );
+
+                return array_values(array_unique($eventIds));
+            }, function () use (&$profileCommandIds): ?array {
+                if ($profileCommandIds === []) {
+                    return null;
+                }
+
+                $eventIds = [];
+                foreach ($profileCommandIds as $commandId) {
+                    $receipt = $this->profileLifecycle->committedReceipt($commandId);
+                    if ($receipt === null) {
+                        return null;
+                    }
+                    $eventId = trim((string) ($receipt['outbox_event_id'] ?? ''));
+                    if ($eventId !== '') {
+                        $eventIds[] = $eventId;
+                    }
+                }
+
+                return array_values(array_unique($eventIds));
             });
+
+            foreach ($eventIds as $eventId) {
+                $this->outboxDispatcher->dispatchEvent($eventId);
+            }
         } catch (Throwable $throwable) {
             if ($this->isTransactionSupportError($throwable)) {
                 throw new RuntimeException(
@@ -178,6 +224,32 @@ final class CurrentTenantAccountDeletionAccountGuard
         ));
     }
 
+    /**
+     * @param  array<int, string>  $candidateAccountIds
+     * @param  array<int, string>  $terminalizedAccountIds
+     * @param  array<string, mixed>  $attempt
+     */
+    private function releaseRetainedAccountGates(
+        array $candidateAccountIds,
+        array $terminalizedAccountIds,
+        array $attempt,
+    ): void {
+        $attemptId = trim((string) ($attempt['_id'] ?? ''));
+        $attemptGeneration = (int) ($attempt['attempt_generation'] ?? 0);
+        $candidateAccountIds = $this->normalizedStrings($candidateAccountIds);
+        $terminalizedAccountIds = $this->normalizedStrings($terminalizedAccountIds);
+        $retainedAccountIds = array_values(array_diff($candidateAccountIds, $terminalizedAccountIds));
+        if ($attemptId === '' || $attemptGeneration < 1 || $retainedAccountIds === []) {
+            return;
+        }
+
+        Account::query()
+            ->whereIn('_id', $retainedAccountIds)
+            ->where('account_profile_deletion_gate.attempt_id', $attemptId)
+            ->where('account_profile_deletion_gate.attempt_generation', $attemptGeneration)
+            ->update(['account_profile_deletion_gate' => null]);
+    }
+
     /** @param array<int, mixed> $values @return array<int, string> */
     private function normalizedStrings(array $values): array
     {
@@ -198,5 +270,35 @@ final class CurrentTenantAccountDeletionAccountGuard
             || str_contains($message, 'replica set')
             || str_contains($message, 'mongos')
             || str_contains($message, 'starttransaction');
+    }
+
+    /** @param array<string, mixed> $attempt */
+    private function terminalizationForProfile(
+        array $attempt,
+        AccountProfile $profile,
+    ): AccountProfileDeletionTerminalization {
+        $attemptId = trim((string) ($attempt['_id'] ?? ''));
+        $attemptGeneration = (int) ($attempt['attempt_generation'] ?? 0);
+        $claimToken = trim((string) ($attempt['claim_token'] ?? ''));
+        $profileId = trim((string) $profile->getKey());
+        if ($attemptId === '' || $attemptGeneration < 1 || $claimToken === '' || $profileId === '') {
+            throw new \LogicException('Account Profile deletion terminalization authorization is invalid.');
+        }
+
+        foreach ((array) ($attempt['profile_descriptors'] ?? []) as $descriptor) {
+            if (! is_array($descriptor) || ! hash_equals($profileId, trim((string) ($descriptor['profile_id'] ?? '')))) {
+                continue;
+            }
+
+            return new AccountProfileDeletionTerminalization(
+                $attemptId,
+                $attemptGeneration,
+                $claimToken,
+                trim((string) ($descriptor['account_id'] ?? '')),
+                (int) ($descriptor['lifecycle_fence_revision'] ?? -1),
+            );
+        }
+
+        throw new \LogicException('Account Profile deletion target is absent from the frozen attempt descriptor.');
     }
 }

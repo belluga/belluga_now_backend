@@ -18,7 +18,7 @@ class AccountProfileFormatterService
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileGalleryService $galleryService,
-        private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
     ) {}
@@ -34,11 +34,11 @@ class AccountProfileFormatterService
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $slug !== ''
-            && $this->typeSetProvider->isPublicCatalog((string) $profile->profile_type);
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
 
         $nestedProfileGroups = $includeAgendaOccurrences
-            ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl)
+            ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl, $publicCatalogPolicy)
             : $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
         $selectedSummariesByProfileId = $includeAgendaOccurrences
             ? []

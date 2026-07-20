@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Integration\Favorites;
 
-use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Contracts\AccountProfileFavoriteDirectReadContract;
@@ -20,7 +21,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
     private const int DEFAULT_PAGE_SIZE = 10;
 
     public function __construct(
-        private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
     ) {}
 
     /**
@@ -36,6 +37,9 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             ? min($pageSize, self::DEFAULT_PAGE_SIZE)
             : self::DEFAULT_PAGE_SIZE;
         $skip = ($resolvedPage - 1) * $resolvedPageSize;
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy();
 
         $edges = FavoriteEdge::query()
             ->where('owner_user_id', $ownerUserId)
@@ -83,6 +87,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             $rows[] = $this->buildRow(
                 edge: $edge,
                 profile: $profile,
+                publicCatalogPolicy: $publicCatalogPolicy,
                 liveNowOccurrence: $state['live_now'] ?? null,
                 nextOccurrence: $state['next'] ?? null,
                 lastOccurrence: null,
@@ -138,6 +143,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 'profile_type',
                 'is_active',
                 'deleted_at',
+                'visibility',
             ]);
 
         $activeProfiles = [];
@@ -373,14 +379,14 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
     private function buildRow(
         FavoriteEdge $edge,
         AccountProfile $profile,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
         ?EventOccurrence $liveNowOccurrence,
         ?EventOccurrence $nextOccurrence,
         ?EventOccurrence $lastOccurrence,
     ): array {
         $profileId = (string) $profile->getAttribute('_id');
         $profileSlug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $profileSlug !== ''
-            && $this->typeSetProvider->isPublicCatalog((string) ($profile->profile_type ?? ''));
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
         $publicDetailPath = $canOpenPublicDetail ? '/parceiro/'.$profileSlug : null;
 
         $liveNowOccurrenceId = $liveNowOccurrence ? (string) $liveNowOccurrence->getAttribute('_id') : null;

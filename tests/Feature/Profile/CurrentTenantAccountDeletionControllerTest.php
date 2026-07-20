@@ -7,6 +7,7 @@ namespace Tests\Feature\Profile;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -56,6 +57,31 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             ->assertHeader('X-Api-Security-Domain', 'tenant_public_profile_delete');
 
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
+    }
+
+    public function test_current_tenant_deletion_persists_a_completed_profile_deletion_attempt(): void
+    {
+        $user = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Attempt Ledger User',
+            'phones' => ['+5527999990111'],
+        ]);
+        $userId = (string) $user->getKey();
+
+        Sanctum::actingAs($user, ['*']);
+
+        $this->deleteJson("{$this->base_api_tenant}profile", [
+            'confirmation' => 'remove_account',
+        ])->assertNoContent();
+
+        $attempt = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_deletion_attempts')
+            ->findOne(['_id' => $userId]);
+
+        $this->assertNotNull($attempt);
+        $this->assertSame('completed', $attempt['phase'] ?? null);
+        $this->assertSame(1, $attempt['attempt_generation'] ?? null);
     }
 
     public function test_validated_current_tenant_identity_can_permanently_delete_itself(): void

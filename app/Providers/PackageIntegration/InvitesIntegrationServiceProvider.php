@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
-use App\Application\Social\InviteablePeopleProjectionService;
 use App\Application\Push\InvitePushDeliveryService;
+use App\Application\Social\InviteablePeopleProjectionService;
 use App\Integration\Invites\InviteAttendanceGatewayAdapter;
 use App\Integration\Invites\InviteIdentityGatewayAdapter;
 use App\Integration\Invites\InviteRecipientProfileProjectionAdapter;
 use App\Integration\Invites\InviteTargetReadAdapter;
 use App\Integration\Invites\InviteTelemetryEmitterAdapter;
-use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Favorites\Domain\Events\FavoriteRemoved;
@@ -74,10 +73,6 @@ class InvitesIntegrationServiceProvider extends ServiceProvider
 
         FavoriteEdge::saved(fn (FavoriteEdge $favorite): null => $this->refreshInviteablesForFavoriteEdge($favorite));
         FavoriteEdge::deleted(fn (FavoriteEdge $favorite): null => $this->refreshInviteablesForFavoriteEdge($favorite));
-
-        AccountProfile::saved(fn (AccountProfile $profile): null => $this->projection()->refreshImpactedByProfile($profile));
-        AccountProfile::deleted(fn (AccountProfile $profile): null => $this->projection()->refreshImpactedByProfile($profile));
-        AccountProfile::restored(fn (AccountProfile $profile): null => $this->projection()->refreshImpactedByProfile($profile));
 
         AccountUser::saved(fn (AccountUser $user): null => $this->projection()->refreshImpactedByUser($user));
         AccountUser::deleted(fn (AccountUser $user): null => $this->projection()->refreshImpactedByUser($user));
