@@ -1315,7 +1315,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $detailResponse->assertStatus(404);
     }
 
-    public function test_public_account_profile_detail_rejects_a_navigable_non_favoritable_type(): void
+    public function test_public_account_profile_detail_allows_a_navigable_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
 
@@ -1341,7 +1341,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
 
         $this->getJson("{$this->base_api_tenant}account_profiles/{$profile->slug}")
-            ->assertStatus(404);
+            ->assertStatus(200)
+            ->assertJsonPath('data.slug', $profile->slug)
+            ->assertJsonPath('data.can_open_public_detail', true)
+            ->assertJsonPath('data.public_detail_path', "/parceiro/{$profile->slug}");
     }
 
     public function test_public_account_profile_index_rejects_filter_bypass_for_non_favoritable_type(): void

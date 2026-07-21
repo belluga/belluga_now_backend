@@ -62,6 +62,14 @@ final class AccountProfilePublicCatalogSnapshotReader
             static fn (array $record): string => $record['type'],
             $records,
         ));
+        $publicDetailTypeKeys = TenantProfileType::query()
+            ->publiclyNavigable()
+            ->pluck('type')
+            ->map(static fn ($type): string => trim((string) $type))
+            ->filter(static fn (string $type): bool => $type !== '')
+            ->unique()
+            ->values()
+            ->all();
         $nestedParentTypeKeys = array_values(array_map(
             static fn (array $record): string => $record['type'],
             array_filter(
@@ -73,6 +81,7 @@ final class AccountProfilePublicCatalogSnapshotReader
         return $this->catalogSnapshot = new AccountProfilePublicCatalogSnapshot(
             $records,
             $catalogTypeKeys,
+            $publicDetailTypeKeys,
             $nestedParentTypeKeys,
         );
     }
@@ -106,6 +115,7 @@ final class AccountProfilePublicCatalogSnapshotReader
         }
 
         return $this->publicPoiEligibilityPolicy = new AccountProfilePublicCatalogEligibilityPolicy(
+            $this->publicPoiTypeKeys(),
             $this->publicPoiTypeKeys(),
             [],
         );

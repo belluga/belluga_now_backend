@@ -766,12 +766,13 @@ class AccountProfileQueryService extends AbstractQueryService
             ->catalogSnapshot()
             ->policy();
 
-        if ($normalizedSlug === '' || $publicCatalogPolicy->catalogTypeKeys() === []) {
+        if ($normalizedSlug === '') {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$slug]);
         }
 
-        $query = AccountProfile::query()->where('slug', $normalizedSlug);
-        $publicCatalogPolicy->applyCatalogConstraint($query, requireSlug: true);
+        $query = AccountProfile::query()
+            ->where('slug', $normalizedSlug)
+            ->whereRaw($publicCatalogPolicy->publicDetailMatchExpression(requireSlug: true));
 
         $profile = $query->first();
         if (! $profile) {
@@ -787,6 +788,16 @@ class AccountProfileQueryService extends AbstractQueryService
             ->catalogSnapshot()
             ->policy()
             ->isPubliclyExposed($profile);
+    }
+
+    public function isPubliclyNavigable(AccountProfile $profile): bool
+    {
+        return $profile->getAttribute('is_active') === true
+            && $profile->getAttribute('deleted_at') === null
+            && trim((string) $profile->getAttribute('visibility')) === 'public'
+            && $this->typeSetProvider->isPubliclyNavigable(
+                trim((string) $profile->getAttribute('profile_type'))
+            );
     }
 
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile

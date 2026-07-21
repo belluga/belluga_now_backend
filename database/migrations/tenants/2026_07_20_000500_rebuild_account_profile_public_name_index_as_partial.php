@@ -9,6 +9,17 @@ use MongoDB\Driver\Exception\CommandException;
 
 return new class extends Migration
 {
+    private const INDEX_NAME = 'idx_account_profiles_public_name_v1';
+
+    private const INDEX_KEY = [
+        'visibility' => 1,
+        'is_active' => 1,
+        'deleted_at' => 1,
+        'profile_type' => 1,
+        'name_search_key' => 1,
+        '_id' => 1,
+    ];
+
     public function up(): void
     {
         if (! Schema::hasCollection('account_profiles')) {
@@ -16,18 +27,11 @@ return new class extends Migration
         }
 
         $collection = DB::connection('tenant')->getDatabase()->selectCollection('account_profiles');
-        $this->dropIndexIfPresent($collection, 'idx_account_profiles_public_name_v1');
+        $this->dropIndexIfPresent($collection, self::INDEX_NAME, self::INDEX_KEY);
         $collection->createIndex(
+            self::INDEX_KEY,
             [
-                'visibility' => 1,
-                'is_active' => 1,
-                'deleted_at' => 1,
-                'profile_type' => 1,
-                'name_search_key' => 1,
-                '_id' => 1,
-            ],
-            [
-                'name' => 'idx_account_profiles_public_name_v1',
+                'name' => self::INDEX_NAME,
                 'collation' => ['locale' => 'simple'],
                 // Keep the name index out of empty-search planning; it exists only for explicit name-key reads.
                 'partialFilterExpression' => [
@@ -44,33 +48,49 @@ return new class extends Migration
         }
 
         $collection = DB::connection('tenant')->getDatabase()->selectCollection('account_profiles');
-        $this->dropIndexIfPresent($collection, 'idx_account_profiles_public_name_v1');
+        $this->dropIndexIfPresent($collection, self::INDEX_NAME, self::INDEX_KEY);
         $collection->createIndex(
+            self::INDEX_KEY,
             [
-                'visibility' => 1,
-                'is_active' => 1,
-                'deleted_at' => 1,
-                'profile_type' => 1,
-                'name_search_key' => 1,
-                '_id' => 1,
-            ],
-            [
-                'name' => 'idx_account_profiles_public_name_v1',
+                'name' => self::INDEX_NAME,
                 'collation' => ['locale' => 'simple'],
             ],
         );
     }
 
-    private function dropIndexIfPresent(\MongoDB\Collection $collection, string $name): void
+    /**
+     * @param  array<string, int>  $key
+     */
+    private function dropIndexIfPresent(\MongoDB\Collection $collection, string $name, array $key): void
+    {
+        foreach ($collection->listIndexes() as $index) {
+            $shouldDrop = $index->getName() === $name
+                || $this->normalizeKey($index->getKey()) === $this->normalizeKey($key);
+            if (! $shouldDrop) {
+                continue;
+            }
+
+            $this->dropIndexIgnoringMissing($collection, $index->getName());
+        }
+    }
+
+    private function dropIndexIgnoringMissing(\MongoDB\Collection $collection, string $name): void
     {
         try {
             $collection->dropIndex($name);
         } catch (CommandException $exception) {
-            if ($exception->getCode() === 27) {
-                return;
+            if ($exception->getCode() !== 27) {
+                throw $exception;
             }
-
-            throw $exception;
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $key
+     * @return array<string, int>
+     */
+    private function normalizeKey(array $key): array
+    {
+        return array_map(static fn (mixed $direction): int => (int) $direction, $key);
     }
 };

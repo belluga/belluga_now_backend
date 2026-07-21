@@ -16,15 +16,20 @@ final class AccountProfilePublicCatalogEligibilityPolicy
     private readonly array $catalogTypeKeys;
 
     /** @var array<int, string> */
+    private readonly array $publicDetailTypeKeys;
+
+    /** @var array<int, string> */
     private readonly array $nestedParentTypeKeys;
 
     /**
      * @param  array<int, string>  $catalogTypeKeys
+     * @param  array<int, string>  $publicDetailTypeKeys
      * @param  array<int, string>  $nestedParentTypeKeys
      */
-    public function __construct(array $catalogTypeKeys, array $nestedParentTypeKeys)
+    public function __construct(array $catalogTypeKeys, array $publicDetailTypeKeys, array $nestedParentTypeKeys)
     {
         $this->catalogTypeKeys = $this->normalizeTypeKeys($catalogTypeKeys);
+        $this->publicDetailTypeKeys = $this->normalizeTypeKeys($publicDetailTypeKeys);
         $this->nestedParentTypeKeys = $this->normalizeTypeKeys($nestedParentTypeKeys);
     }
 
@@ -54,13 +59,14 @@ final class AccountProfilePublicCatalogEligibilityPolicy
 
     public function canOpenPublicDetail(AccountProfile $profile): bool
     {
-        return $this->isPubliclyExposed($profile)
+        return $this->isBasePubliclyVisible($profile)
+            && $this->hasPublicDetailType((string) $profile->getAttribute('profile_type'))
             && trim((string) $profile->getAttribute('slug')) !== '';
     }
 
     public function isPublicNestedParent(AccountProfile $profile): bool
     {
-        return $this->isPubliclyExposed($profile)
+        return $this->canOpenPublicDetail($profile)
             && in_array(
                 trim((string) $profile->getAttribute('profile_type')),
                 $this->nestedParentTypeKeys,
@@ -143,9 +149,29 @@ final class AccountProfilePublicCatalogEligibilityPolicy
         return [['$match' => $this->nestedParentMatchExpression($requireSlug)]];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function publicDetailMatchExpression(bool $requireSlug = false): array
+    {
+        return $this->matchExpressionForTypeKeys($this->publicDetailTypeKeys, $requireSlug);
+    }
+
     private function hasCatalogType(string $profileType): bool
     {
         return in_array(trim($profileType), $this->catalogTypeKeys, true);
+    }
+
+    private function hasPublicDetailType(string $profileType): bool
+    {
+        return in_array(trim($profileType), $this->publicDetailTypeKeys, true);
+    }
+
+    private function isBasePubliclyVisible(AccountProfile $profile): bool
+    {
+        return $profile->getAttribute('is_active') === true
+            && $profile->getAttribute('deleted_at') === null
+            && trim((string) $profile->getAttribute('visibility')) === 'public';
     }
 
     /**

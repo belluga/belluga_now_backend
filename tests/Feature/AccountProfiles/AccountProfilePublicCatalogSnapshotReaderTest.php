@@ -58,6 +58,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
         ]);
         $this->createType('hidden', 'Hidden Type', [
             'is_queryable' => true,
+            'is_publicly_navigable' => true,
             'is_publicly_discoverable' => true,
             'is_favoritable' => false,
             'is_poi_enabled' => true,
@@ -78,6 +79,14 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
                 'is_active' => true,
                 'visibility' => 'public',
                 'slug' => 'venue-detail',
+            ]),
+        ));
+        $this->assertTrue($snapshot->policy()->canOpenPublicDetail(
+            new \App\Models\Tenants\AccountProfile([
+                'profile_type' => 'hidden',
+                'is_active' => true,
+                'visibility' => 'public',
+                'slug' => 'hidden-detail',
             ]),
         ));
         $this->assertSame(['artist', 'venue'], array_column($snapshot->filterOptions(), 'value'));
