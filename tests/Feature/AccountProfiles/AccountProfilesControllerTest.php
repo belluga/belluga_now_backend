@@ -5884,8 +5884,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_profile_contact_sources_endpoint_returns_only_contact_capable_profiles(): void
     {
-        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
-
         $this->enableContactChannelsCapability('venue');
 
         $contactOwn = $this->createNestedProfileFixture(
@@ -5904,6 +5902,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $contactOwn->forceFill(['name_search_key' => 'contact own candidate'])->save();
         $mirrored->forceFill(['name_search_key' => 'mirrored candidate'])->save();
+
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
         $response = $this->getJson(
             "{$this->base_tenant_api_admin}account_profiles/contact_sources?exclude_account_profile_id=".(string) $mirrored->_id
