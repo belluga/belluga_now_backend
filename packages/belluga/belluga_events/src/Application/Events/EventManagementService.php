@@ -34,6 +34,7 @@ class EventManagementService
         private readonly EventTypeResolverContract $eventTypeResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
+        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventAccountContextResolver $eventAccountContextResolver,
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
@@ -188,8 +189,15 @@ class EventManagementService
         }
 
         $normalized['event_parties'] = $this->resolveEventParties($payload, $existing);
+        $existingEventGroups = $existing === null
+            ? []
+            : $this->profileGroupMemberStore->inflateGroupsWithMembers(
+                $existing->profile_groups ?? [],
+                'event',
+                (string) $existing->getKey(),
+            );
         $normalized['profile_groups'] = $this->resolveProfileGroups(
-            $payload['profile_groups'] ?? ($existing?->profile_groups ?? []),
+            $payload['profile_groups'] ?? $existingEventGroups,
             $this->profileIdsFromEventParties($normalized['event_parties']),
             'profile_groups',
             array_key_exists('profile_groups', $payload)

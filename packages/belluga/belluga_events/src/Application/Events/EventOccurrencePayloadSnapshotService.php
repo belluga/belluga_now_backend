@@ -12,6 +12,10 @@ use RuntimeException;
 
 class EventOccurrencePayloadSnapshotService
 {
+    public function __construct(
+        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -98,7 +102,11 @@ class EventOccurrencePayloadSnapshotService
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'event_parties' => $this->normalizeArray($occurrence->own_event_parties ?? []),
-                'profile_groups' => $this->normalizeArray($occurrence->own_profile_groups ?? []),
+                'profile_groups' => $this->profileGroupMemberStore->inflateGroupsWithMembers(
+                    $occurrence->own_profile_groups ?? [],
+                    'occurrence',
+                    (string) $occurrence->getKey(),
+                ),
                 'has_location_override' => false,
                 'location_override' => null,
                 'taxonomy_terms' => $this->normalizeArray($occurrence->own_taxonomy_terms ?? []),

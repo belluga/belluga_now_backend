@@ -17,6 +17,8 @@ class AccountProfileFormatterService
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
+        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
@@ -38,8 +40,8 @@ class AccountProfileFormatterService
         $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
 
         $nestedProfileGroups = $includeAgendaOccurrences
-            ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl, $publicCatalogPolicy)
-            : $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
+            ? $this->nestedPublicMembersProjectionService->publicDetailGroups($profile)
+            : $this->nestedGroupMemberStore->metadataGroups($profile);
         $selectedSummariesByProfileId = $includeAgendaOccurrences
             ? []
             : $this->candidateDiscoveryService->selectedSummariesByIds(
@@ -77,12 +79,7 @@ class AccountProfileFormatterService
             'gallery_groups' => $includeAgendaOccurrences
                 ? $this->galleryService->formatForPublicDetail($profile, $baseUrl)
                 : $this->galleryService->formatForRead($profile, $baseUrl),
-            'nested_profile_groups' => $includeAgendaOccurrences
-                ? $nestedProfileGroups
-                : $this->nestedGroupService->withSelectedSummaries(
-                    $nestedProfileGroups,
-                    $selectedSummariesByProfileId,
-                ),
+            'nested_profile_groups' => $nestedProfileGroups,
             'location' => $this->formatLocation($profile->location),
             'ownership_state' => $account
                 ? $this->ownershipStateService->deriveOwnershipState($account)

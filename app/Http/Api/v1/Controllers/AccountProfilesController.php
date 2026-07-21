@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileNestedGroupService;
 use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -33,6 +34,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
     ) {}
@@ -191,7 +193,7 @@ class AccountProfilesController extends Controller
     ): JsonResponse {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
 
-        return response()->json($this->nestedGroupService->adminMemberPage(
+        return response()->json($this->nestedGroupMemberStore->adminMemberPage(
             $profile,
             $group_id,
             $request->perPage(),

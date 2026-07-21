@@ -7,6 +7,7 @@ namespace Belluga\Events\Application\Events;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Facades\Log;
 
 class LegacyEventPartiesCanonicalizationService
@@ -16,6 +17,7 @@ class LegacyEventPartiesCanonicalizationService
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
         private readonly EventOccurrenceReconciliationService $occurrenceReconciliationService,
         private readonly EventQueryService $eventQueryService,
+        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
     ) {}
 
     /**
@@ -94,6 +96,7 @@ class LegacyEventPartiesCanonicalizationService
      *   has_legacy_artists: bool,
      *   has_venue_party: bool,
      *   has_invalid_management_payload: bool,
+     *   has_legacy_profile_group_members: bool,
      *   target_artist_ids: array<int, string>,
      *   canonical_artist_ids: array<int, string>,
      *   artist_parties_by_id: array<string, array<string, mixed>>
@@ -111,6 +114,7 @@ class LegacyEventPartiesCanonicalizationService
         $artistPartiesById = [];
         $missingCanonicalMetadata = false;
         $managementPayloadIssues = $this->analyzeManagementPayloadContract($event);
+        $hasLegacyProfileGroupMembers = $this->hasLegacyProfileGroupMembers($event);
 
         foreach ($legacyArtists as $artist) {
             if (! is_array($artist)) {
@@ -163,6 +167,7 @@ class LegacyEventPartiesCanonicalizationService
         $invalid = $hasLegacyArtists
             || $hasVenueParty
             || $missingCanonicalMetadata
+            || $hasLegacyProfileGroupMembers
             || $targetArtistIds !== $canonicalArtistIds
             || $managementPayloadIssues !== [];
 
@@ -171,6 +176,7 @@ class LegacyEventPartiesCanonicalizationService
             'has_legacy_artists' => $hasLegacyArtists,
             'has_venue_party' => $hasVenueParty,
             'has_invalid_management_payload' => $managementPayloadIssues !== [],
+            'has_legacy_profile_group_members' => $hasLegacyProfileGroupMembers,
             'target_artist_ids' => $targetArtistIds,
             'canonical_artist_ids' => $canonicalArtistIds,
             'artist_parties_by_id' => $artistPartiesById,
@@ -183,6 +189,7 @@ class LegacyEventPartiesCanonicalizationService
      *   has_legacy_artists: bool,
      *   has_venue_party: bool,
      *   has_invalid_management_payload: bool,
+     *   has_legacy_profile_group_members: bool,
      *   target_artist_ids: array<int, string>,
      *   canonical_artist_ids: array<int, string>,
      *   artist_parties_by_id: array<string, array<string, mixed>>
@@ -190,6 +197,8 @@ class LegacyEventPartiesCanonicalizationService
      */
     private function repairEvent(Event $event, array $analysis): void
     {
+        $this->profileGroupMemberStore->materializeLegacyIfNeeded($event, includeTrashedOccurrences: true);
+
         $resolvedProfiles = $analysis['target_artist_ids'] === []
             ? []
             : $this->eventProfileResolver->resolveEventPartyProfilesByIds($analysis['target_artist_ids']);
@@ -260,6 +269,11 @@ class LegacyEventPartiesCanonicalizationService
             $event->artists = null;
             $didMutate = true;
         }
+        $normalizedProfileGroups = $this->stripProfileGroupMembers($event->profile_groups ?? []);
+        if (($event->profile_groups ?? []) !== $normalizedProfileGroups) {
+            $event->profile_groups = $normalizedProfileGroups;
+            $didMutate = true;
+        }
 
         if ($this->canonicalizeManagementPayloadFields($event)) {
             $didMutate = true;
@@ -275,6 +289,63 @@ class LegacyEventPartiesCanonicalizationService
         }
 
         $this->occurrenceReconciliationService->reconcileEvent($refreshed);
+    }
+
+    private function hasLegacyProfileGroupMembers(Event $event): bool
+    {
+        if ($this->groupsContainEmbeddedMembers($event->profile_groups ?? [])) {
+            return true;
+        }
+
+        foreach (EventOccurrence::withTrashed()->where('event_id', (string) $event->getKey())->cursor() as $occurrence) {
+            if ($this->groupsContainEmbeddedMembers($occurrence->own_profile_groups ?? [])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function groupsContainEmbeddedMembers(mixed $rawGroups): bool
+    {
+        foreach ($this->normalizeArray($rawGroups) as $group) {
+            $payload = $this->normalizeArray($group);
+            $members = $this->normalizeArray($payload['account_profile_ids'] ?? $payload['profile_ids'] ?? []);
+            if ($members !== []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function stripProfileGroupMembers(mixed $rawGroups): array
+    {
+        $groups = [];
+
+        foreach ($this->normalizeArray($rawGroups) as $index => $group) {
+            $payload = $this->normalizeArray($group);
+            $label = trim((string) ($payload['label'] ?? ''));
+            if ($label === '') {
+                continue;
+            }
+
+            $id = trim((string) ($payload['id'] ?? $payload['key'] ?? ''));
+            if ($id === '') {
+                $id = 'group-'.$index;
+            }
+
+            $groups[] = [
+                'id' => $id,
+                'label' => $label,
+                'order' => isset($payload['order']) ? (int) $payload['order'] : $index,
+            ];
+        }
+
+        return array_values($groups);
     }
 
 

@@ -15,6 +15,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -42,7 +43,7 @@ class AccountOnboardingService
         $fingerprint = hash(
             'sha256',
             json_encode([
-                'payload' => $payload,
+                'payload' => $this->normalizeFingerprintValue($payload),
             ], JSON_THROW_ON_ERROR),
         );
 
@@ -180,5 +181,29 @@ class AccountOnboardingService
         $errors['location.lng'] = $errors['location.lng'] ?? $messages;
 
         return ValidationException::withMessages($errors);
+    }
+
+    private function normalizeFingerprintValue(mixed $value): mixed
+    {
+        if ($value instanceof UploadedFile) {
+            return [
+                'uploaded_file' => true,
+                'original_name' => $value->getClientOriginalName(),
+                'mime_type' => $value->getClientMimeType(),
+                'size' => $value->getSize(),
+                'error' => $value->getError(),
+            ];
+        }
+
+        if (is_array($value)) {
+            $normalized = [];
+            foreach ($value as $key => $item) {
+                $normalized[$key] = $this->normalizeFingerprintValue($item);
+            }
+
+            return $normalized;
+        }
+
+        return $value;
     }
 }

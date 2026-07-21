@@ -62,14 +62,7 @@ final class AccountProfilePublicCatalogSnapshotReader
             static fn (array $record): string => $record['type'],
             $records,
         ));
-        $publicDetailTypeKeys = TenantProfileType::query()
-            ->publiclyNavigable()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
+        $publicDetailTypeKeys = $catalogTypeKeys;
         $nestedParentTypeKeys = array_values(array_map(
             static fn (array $record): string => $record['type'],
             array_filter(

@@ -40,7 +40,7 @@ final class AccountProfileGalleryService
             $profile,
             [],
             commandId: $commandId,
-            mutateWithinTransaction: function (AccountProfile $persistedProfile) use ($rawGroups, $uploads, $baseUrl, $actorContext): void {
+            mutateWithinTransaction: function (AccountProfile $persistedProfile, AccountProfileTransactionContext $_context) use ($rawGroups, $uploads, $baseUrl, $actorContext): void {
                 $existingItems = $this->existingItemsById($persistedProfile->gallery_groups ?? []);
                 [$plannedGroups, $removedItemIds] = $this->planReplacement($rawGroups, $existingItems, $uploads);
                 $persistedProfile->gallery_groups = $this->persistedGroups(

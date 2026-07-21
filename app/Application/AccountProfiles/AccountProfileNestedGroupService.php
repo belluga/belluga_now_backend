@@ -108,6 +108,72 @@ class AccountProfileNestedGroupService
     /**
      * @return array<int, array<string, mixed>>
      */
+    public function normalizeMetadataForWrite(mixed $rawGroups): array
+    {
+        if (! is_array($rawGroups)) {
+            return [];
+        }
+
+        if (count($rawGroups) > InputConstraints::ACCOUNT_PROFILE_NESTED_GROUPS_MAX) {
+            throw ValidationException::withMessages([
+                'nested_profile_groups' => ['Nested profile groups exceed the configured limit.'],
+            ]);
+        }
+
+        $groups = [];
+        $groupIds = [];
+
+        foreach ($rawGroups as $index => $rawGroup) {
+            if (! is_array($rawGroup)) {
+                throw ValidationException::withMessages([
+                    "nested_profile_groups.{$index}" => ['Nested profile group must be an object.'],
+                ]);
+            }
+
+            $label = trim((string) ($rawGroup['label'] ?? ''));
+            if ($label === '') {
+                throw ValidationException::withMessages([
+                    "nested_profile_groups.{$index}.label" => ['Nested profile group label is required.'],
+                ]);
+            }
+
+            $id = $this->normalizeGroupId($rawGroup['id'] ?? $rawGroup['key'] ?? null, $label, $index);
+            if (isset($groupIds[$id])) {
+                throw ValidationException::withMessages([
+                    "nested_profile_groups.{$index}.id" => ['Nested profile group ids must be unique.'],
+                ]);
+            }
+            $groupIds[$id] = true;
+
+            $groups[] = [
+                '_source_index' => $index,
+                'id' => $id,
+                'label' => $label,
+                'order' => isset($rawGroup['order']) ? (int) $rawGroup['order'] : $index,
+                'member_count' => max(0, (int) ($rawGroup['member_count'] ?? 0)),
+            ];
+        }
+
+        usort(
+            $groups,
+            static fn (array $left, array $right): int => [$left['order'], $left['_source_index']]
+                <=> [$right['order'], $right['_source_index']]
+        );
+
+        return array_values(array_map(
+            static fn (array $group): array => [
+                'id' => $group['id'],
+                'label' => $group['label'],
+                'order' => $group['order'],
+                'member_count' => $group['member_count'],
+            ],
+            $groups
+        ));
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
     public function formatForRead(mixed $rawGroups): array
     {
         if (! is_array($rawGroups)) {

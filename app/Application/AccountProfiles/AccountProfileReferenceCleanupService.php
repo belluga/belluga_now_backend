@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
+use Illuminate\Support\Facades\DB;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 
@@ -19,6 +20,7 @@ final class AccountProfileReferenceCleanupService
         private readonly AccountProfileMutationGate $mutationGate,
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
     ) {}
 
     /** @param list<string> $deletedProfileIds */
@@ -122,7 +124,7 @@ final class AccountProfileReferenceCleanupService
         }
 
         $this->mutationGate->assertProfileMutationAllowed($profile, $context);
-        $attributes = $this->cleanupAttributes($profile, $deletedProfileIds);
+        $attributes = $this->cleanupAttributes($profile, $deletedProfileIds, $context);
         if ($attributes === []) {
             return null;
         }
@@ -141,7 +143,11 @@ final class AccountProfileReferenceCleanupService
      * @param  list<string>  $deletedProfileIds
      * @return array<string, mixed>
      */
-    private function cleanupAttributes(AccountProfile $profile, array $deletedProfileIds): array
+    private function cleanupAttributes(
+        AccountProfile $profile,
+        array $deletedProfileIds,
+        AccountProfileTransactionContext $context,
+    ): array
     {
         $attributes = [];
         $sourceProfileId = trim((string) ($profile->contact_source_account_profile_id ?? ''));
@@ -151,7 +157,7 @@ final class AccountProfileReferenceCleanupService
             $attributes['contact_bubble_channel_id'] = null;
         }
 
-        $groups = $this->plainArray($profile->nested_profile_groups ?? []);
+        $groups = $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $profile);
         $cleanedGroups = [];
         $groupsChanged = false;
         foreach ($groups as $group) {
@@ -161,15 +167,26 @@ final class AccountProfileReferenceCleanupService
                 continue;
             }
 
-            $memberIds = $this->plainArray($group['account_profile_ids'] ?? []);
+            $groupId = trim((string) ($group['id'] ?? ''));
+            $memberIds = $groupId === ''
+                ? []
+                : $this->nestedGroupMemberStore->groupMemberIdsWithinContext($context, $profile, $groupId);
             $cleanedMemberIds = array_values(array_filter(
                 $memberIds,
                 fn (mixed $memberId): bool => ! in_array(trim((string) $memberId), $deletedProfileIds, true),
             ));
             if ($cleanedMemberIds !== $memberIds) {
-                $group['account_profile_ids'] = $cleanedMemberIds;
                 $groupsChanged = true;
+                if ($groupId !== '') {
+                    $this->nestedGroupMemberStore->replaceGroupMembersWithinContext(
+                        $context,
+                        $profile,
+                        $groupId,
+                        $cleanedMemberIds,
+                    );
+                }
             }
+            $group['member_count'] = count($cleanedMemberIds);
             $cleanedGroups[] = $group;
         }
 
@@ -203,12 +220,29 @@ final class AccountProfileReferenceCleanupService
     /** @param list<string> $deletedProfileIds */
     private function survivingProfiles(array $deletedProfileIds): \Illuminate\Support\Collection
     {
+        $parentIdsFromMemberRows = $this->normalizedIds(
+            array_map(
+                static fn (mixed $id): string => trim((string) $id),
+                DB::connection('tenant')
+                    ->getDatabase()
+                    ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
+                    ->distinct('parent_profile_id', [
+                        'doc_type' => 'member_row',
+                        'member_profile_id' => ['$in' => $deletedProfileIds],
+                    ]),
+            ),
+        );
+
         return AccountProfile::withTrashed()
             ->whereNotIn('_id', $deletedProfileIds)
-            ->where(function ($query) use ($deletedProfileIds): void {
+            ->where(function ($query) use ($deletedProfileIds, $parentIdsFromMemberRows): void {
                 $query
                     ->whereIn('contact_source_account_profile_id', $deletedProfileIds)
                     ->orWhereIn('nested_profile_groups.account_profile_ids', $deletedProfileIds);
+
+                if ($parentIdsFromMemberRows !== []) {
+                    $query->orWhereIn('_id', $parentIdsFromMemberRows);
+                }
             })
             ->orderBy('_id')
             ->get();

@@ -38,15 +38,23 @@ final class AccountProfileNestedPublicMembersProjectionService
     public function __construct(
         private readonly AccountProfileTransactionRunner $transactionRunner,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
     ) {}
 
     public function rebuildForProfile(AccountProfile $profile): void
     {
         $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use ($profile): void {
-            $this->rebuildParentProjection($context, $profile);
-            $this->refreshMemberEdges($context, $profile);
+            $this->rebuildForProfileWithinContext($context, $profile);
         });
+    }
+
+    public function rebuildForProfileWithinContext(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+    ): void {
+        $this->rebuildParentProjection($context, $profile);
+        $this->refreshMemberEdges($context, $profile);
     }
 
     /** @param array<string, mixed> $event */
@@ -188,6 +196,65 @@ final class AccountProfileNestedPublicMembersProjectionService
         ];
     }
 
+    /**
+     * @return array<int, array{id:string,label:string,order:int,members_path:string}>
+     */
+    public function publicDetailGroups(AccountProfile $profile): array
+    {
+        $tenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
+        $parentSlug = trim((string) ($profile->slug ?? ''));
+        if ($tenantId === '' || $parentSlug === '') {
+            return [];
+        }
+
+        $rows = iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $tenantId,
+                'parent_slug' => $parentSlug,
+            ],
+            [
+                'sort' => ['group_order' => 1, 'doc_type_rank' => 1, 'raw_position' => 1, '_id' => 1],
+            ],
+        ));
+
+        $groups = [];
+        $visibleCounts = [];
+        foreach ($rows as $row) {
+            $document = $this->documentToArray($row);
+            if (! is_array($document)) {
+                continue;
+            }
+
+            $groupId = trim((string) ($document['group_id'] ?? ''));
+            if ($groupId === '') {
+                continue;
+            }
+
+            if ((string) ($document['doc_type'] ?? '') === self::DOC_TYPE_HEAD) {
+                $groups[$groupId] = [
+                    'id' => $groupId,
+                    'label' => (string) ($document['group_label'] ?? ''),
+                    'order' => (int) ($document['group_order'] ?? 0),
+                    'members_path' => "/api/v1/account_profiles/{$parentSlug}/nested_profile_groups/{$groupId}/members",
+                ];
+                $visibleCounts[$groupId] ??= 0;
+
+                continue;
+            }
+
+            if ((string) ($document['doc_type'] ?? '') === self::DOC_TYPE_EDGE) {
+                $visibleCounts[$groupId] = ($visibleCounts[$groupId] ?? 0) + 1;
+            }
+        }
+
+        return array_values(array_filter(
+            array_map(
+                static fn (array $group): ?array => ($visibleCounts[$group['id']] ?? 0) > 0 ? $group : null,
+                $groups,
+            ),
+        ));
+    }
+
     private function rebuildParentProjection(AccountProfileTransactionContext $context, AccountProfile $profile): void
     {
         $profileId = (string) $profile->getKey();
@@ -207,19 +274,24 @@ final class AccountProfileNestedPublicMembersProjectionService
             return;
         }
 
-        $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
+        $groups = $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $profile);
         if ($groups === []) {
             return;
         }
 
         $aggregateRevision = (int) ($profile->aggregate_revision ?? 0);
+        $memberIdsByGroup = [];
         $memberIds = [];
         foreach ($groups as $group) {
-            foreach ($group['account_profile_ids'] ?? [] as $memberId) {
-                $memberId = trim((string) $memberId);
-                if ($memberId !== '') {
-                    $memberIds[$memberId] = $memberId;
-                }
+            $groupId = trim((string) ($group['id'] ?? ''));
+            if ($groupId === '') {
+                continue;
+            }
+
+            $groupMemberIds = $this->nestedGroupMemberStore->groupMemberIdsWithinContext($context, $profile, $groupId);
+            $memberIdsByGroup[$groupId] = $groupMemberIds;
+            foreach ($groupMemberIds as $memberId) {
+                $memberIds[$memberId] = $memberId;
             }
         }
 
@@ -247,7 +319,7 @@ final class AccountProfileNestedPublicMembersProjectionService
                 'updated_at' => $now,
             ];
 
-            foreach ($group['account_profile_ids'] ?? [] as $rawPosition => $memberId) {
+            foreach (($memberIdsByGroup[$group['id']] ?? []) as $rawPosition => $memberId) {
                 $member = $eligibleMembers->get((string) $memberId);
                 if (! $member instanceof AccountProfile) {
                     continue;

@@ -23,6 +23,8 @@ class AccountProfileManagementService
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
+        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly AccountProfileTransactionRunner $transactionRunner,
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
@@ -110,8 +112,10 @@ class AccountProfileManagementService
                 $relationAttributes,
             );
         }
+        $this->nestedGroupMemberStore->syncGroupsWithinContext($context, $profile);
+        $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $profile);
         if ($mutateWithinTransaction !== null) {
-            $mutateWithinTransaction($profile);
+            $mutateWithinTransaction($profile, $context);
             $profile = $profile->fresh();
         }
         $outboxEventId = $this->recordCreatedProfile($context, $profile, $commandId, $fingerprint);
@@ -189,7 +193,7 @@ class AccountProfileManagementService
                 $profileType,
                 $payload['nested_profile_groups']
             );
-            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
+            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
                 $payload['nested_profile_groups']
             );
         }
@@ -277,14 +281,19 @@ class AccountProfileManagementService
             $attributes['location'] = $this->formatLocation($attributes['location']);
         }
 
+        $expectedAggregateRevision = null;
+        if (array_key_exists('aggregate_revision', $attributes)) {
+            $expectedAggregateRevision = max(0, (int) $attributes['aggregate_revision']);
+            unset($attributes['aggregate_revision']);
+        }
+
         if (array_key_exists('nested_profile_groups', $attributes)) {
             $this->assertNestedProfileGroupsAllowed(
                 $profileType,
                 $attributes['nested_profile_groups']
             );
-            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
-                $attributes['nested_profile_groups'],
-                (string) $profile->getKey()
+            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
+                $attributes['nested_profile_groups']
             );
         }
 
@@ -314,6 +323,7 @@ class AccountProfileManagementService
                     $commandId,
                     $fingerprint,
                     $mutateWithinTransaction,
+                    $expectedAggregateRevision,
                 ): array {
                     $receipt = $this->outboxPublisher->receipt($context, $commandId);
                     if ($receipt !== null) {
@@ -323,6 +333,12 @@ class AccountProfileManagementService
                     $persistedProfile = AccountProfile::query()->findOrFail($profileId);
                     $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
                     $persistedProfile->fill($attributes);
+                    if (! array_key_exists('nested_profile_groups', $attributes)) {
+                        $persistedProfile->setAttribute(
+                            'nested_profile_groups',
+                            $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persistedProfile),
+                        );
+                    }
                     if (! $persistedProfile->isDirty() && $mutateWithinTransaction === null) {
                         $admittedTargets = $this->relationAdmissionService->admit(
                             $context,
@@ -359,13 +375,19 @@ class AccountProfileManagementService
 
                     try {
                         if ($mutateWithinTransaction !== null) {
-                            $mutateWithinTransaction($persistedProfile);
+                            $mutateWithinTransaction($persistedProfile, $context);
                         }
 
                         $persistedProfile = $this->persistWithAggregateRevisionCas(
                             $context,
                             $persistedProfile,
+                            $expectedAggregateRevision,
                         );
+                        $this->nestedGroupMemberStore->materializeLegacyIfNeededWithinContext($context, $persistedProfile);
+                        if (array_key_exists('nested_profile_groups', $attributes)) {
+                            $this->nestedGroupMemberStore->syncGroupsWithinContext($context, $persistedProfile);
+                        }
+                        $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
                     } catch (BulkWriteException $exception) {
                         if (str_contains($exception->getMessage(), 'E11000')) {
                             throw ValidationException::withMessages([
@@ -497,10 +519,7 @@ class AccountProfileManagementService
         $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
         $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
 
-        $existingIds = array_values(array_map(
-            static fn (mixed $profileId): string => trim((string) $profileId),
-            $group['account_profile_ids'] ?? [],
-        ));
+        $existingIds = $this->nestedGroupMemberStore->groupMemberIds($profile, (string) $group['id']);
         $removeLookup = array_fill_keys($removeIds, true);
         $nextIds = array_values(array_filter(
             $existingIds,
@@ -525,7 +544,6 @@ class AccountProfileManagementService
                     'id' => (string) $candidateGroup['id'],
                     'label' => (string) $candidateGroup['label'],
                     'order' => (int) ($candidateGroup['order'] ?? 0),
-                    'account_profile_ids' => $nextIds,
                     'member_count' => count($nextIds),
                 ];
             },
@@ -539,8 +557,28 @@ class AccountProfileManagementService
                 'nested_profile_groups' => $patchedGroups,
             ],
             $commandId,
+            function (AccountProfile $persistedProfile, AccountProfileTransactionContext $context) use ($group, $addIds, $nextIds): void {
+                if ($addIds !== []) {
+                    $this->relationAdmissionService->admit(
+                        $context,
+                        (string) $persistedProfile->getKey(),
+                        [
+                            'nested_profile_groups' => [[
+                                'account_profile_ids' => $addIds,
+                            ]],
+                        ],
+                    );
+                }
+
+                $this->nestedGroupMemberStore->replaceGroupMembersWithinContext(
+                    $context,
+                    $persistedProfile,
+                    (string) $group['id'],
+                    $nextIds,
+                );
+            },
         );
-        $updatedGroups = $this->nestedGroupService->formatForRead($updatedProfile->nested_profile_groups ?? []);
+        $updatedGroups = $this->nestedGroupMemberStore->metadataGroups($updatedProfile);
         $updatedGroup = $this->nestedGroupService->findGroupOrFail($updatedGroups, (string) $group['id']);
 
         return [
@@ -590,6 +628,7 @@ class AccountProfileManagementService
     private function persistWithAggregateRevisionCas(
         AccountProfileTransactionContext $context,
         AccountProfile $profile,
+        ?int $expectedAggregateRevision = null,
     ): AccountProfile {
         $profileId = trim((string) $profile->getKey());
         if ($profileId === '') {
@@ -602,7 +641,7 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate id is invalid for a revision CAS.');
         }
 
-        $expectedRevision = max(0, (int) $profile->getAttribute('aggregate_revision'));
+        $expectedRevision = $expectedAggregateRevision ?? max(0, (int) $profile->getAttribute('aggregate_revision'));
         $profile->setAttribute('aggregate_revision', $expectedRevision + 1);
         if ($profile->isDirty('display_name') || trim((string) $profile->getAttribute('name_search_key')) === '') {
             $profile->setAttribute(
@@ -618,12 +657,18 @@ class AccountProfileManagementService
         }
 
         $revisionFilter = ['aggregate_revision' => $expectedRevision];
-        if ($expectedRevision === 0) {
+        if ($expectedRevision === 0 || ($expectedAggregateRevision !== null && $expectedRevision === 1)) {
+            $acceptedLegacyRevisions = [
+                ['aggregate_revision' => $expectedRevision],
+                ['aggregate_revision' => 0],
+                ['aggregate_revision' => null],
+                ['aggregate_revision' => ['$exists' => false]],
+            ];
             $revisionFilter = [
-                '$or' => [
-                    ['aggregate_revision' => 0],
-                    ['aggregate_revision' => ['$exists' => false]],
-                ],
+                '$or' => array_values(array_map(
+                    static fn (array $candidate): array => $candidate,
+                    $acceptedLegacyRevisions,
+                )),
             ];
         }
         $updated = $context->collection('account_profiles')->findOneAndUpdate(
