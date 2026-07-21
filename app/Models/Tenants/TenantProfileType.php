@@ -59,7 +59,9 @@ class TenantProfileType extends Model
 
     public function scopePublicCatalog($query)
     {
-        return $query->publiclyDiscoverable();
+        return $query
+            ->publiclyDiscoverable()
+            ->favoritable();
     }
 
     public function scopeFavoritable($query)

@@ -63,6 +63,23 @@ class AccountProfilesController extends Controller
         ));
     }
 
+    public function contactSourceCandidates(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'exclude_account_profile_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
+        ]);
+
+        return response()->json($this->candidateDiscoveryService->page(
+            AccountProfileCandidateDiscoveryService::SCOPE_CONTACT_CAPABLE,
+            '',
+            (int) ($validated['page'] ?? 1),
+            (int) ($validated['per_page'] ?? 20),
+            $validated['exclude_account_profile_id'] ?? null,
+        ));
+    }
+
     public function publicIndex(AccountProfilePublicIndexRequest $request): JsonResponse
     {
         $validated = $request->validated();

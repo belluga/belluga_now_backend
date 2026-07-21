@@ -5846,6 +5846,77 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotContains('hidden-profile', $slugs);
     }
 
+    public function test_account_profile_candidates_endpoint_returns_queryable_profiles(): void
+    {
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'hidden_guest'],
+            ['capabilities' => [
+                'is_queryable' => false,
+                'is_publicly_navigable' => false,
+                'is_publicly_discoverable' => false,
+            ]]
+        );
+
+        $queryable = $this->createNestedProfileFixture('Queryable Candidate', 'queryable-candidate');
+        $hidden = $this->createNestedProfileFixture(
+            'Hidden Candidate',
+            'hidden-candidate',
+            [
+                'profile_type' => 'hidden_guest',
+                'name_search_key' => 'hidden candidate',
+            ]
+        );
+        $queryable->forceFill(['name_search_key' => 'queryable candidate'])->save();
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable&exclude_account_profile_id=".(string) $hidden->_id
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.0.id', (string) $queryable->_id);
+        $this->assertSame(
+            [(string) $queryable->_id],
+            collect($response->json('data'))->pluck('id')->all(),
+        );
+    }
+
+    public function test_account_profile_contact_sources_endpoint_returns_only_contact_capable_profiles(): void
+    {
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
+
+        $this->enableContactChannelsCapability('venue');
+
+        $contactOwn = $this->createNestedProfileFixture(
+            'Contact Own Candidate',
+            'contact-own-candidate',
+            [
+                'contact_mode' => 'own',
+            ]
+        );
+        $mirrored = $this->createNestedProfileFixture(
+            'Mirrored Candidate',
+            'mirrored-candidate',
+            [
+                'contact_mode' => 'mirrored_account_profile',
+            ]
+        );
+        $contactOwn->forceFill(['name_search_key' => 'contact own candidate'])->save();
+        $mirrored->forceFill(['name_search_key' => 'mirrored candidate'])->save();
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/contact_sources?exclude_account_profile_id=".(string) $mirrored->_id
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.0.id', (string) $contactOwn->_id);
+        $this->assertSame(
+            [(string) $contactOwn->_id],
+            collect($response->json('data'))->pluck('id')->all(),
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      */
