@@ -299,7 +299,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $profileMock = Mockery::mock(AccountProfileManagementService::class);
-        $profileMock->shouldReceive('createWithinCurrentTransaction')
+        $profileMock->shouldReceive('createWithinTransactionContext')
             ->once()
             ->andThrow(new \RuntimeException('Simulated profile write failure'));
         $this->app->instance(AccountProfileManagementService::class, $profileMock);
