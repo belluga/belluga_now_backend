@@ -60,8 +60,7 @@ class TenantProfileType extends Model
     public function scopePublicCatalog($query)
     {
         return $query
-            ->publiclyDiscoverable()
-            ->favoritable();
+            ->publiclyDiscoverable();
     }
 
     public function scopeFavoritable($query)
@@ -78,7 +77,7 @@ class TenantProfileType extends Model
     public function scopePublicPoiCatalog($query)
     {
         return $query
-            ->publicCatalog()
+            ->publiclyDiscoverable()
             ->where('capabilities.is_poi_enabled', true);
     }
 

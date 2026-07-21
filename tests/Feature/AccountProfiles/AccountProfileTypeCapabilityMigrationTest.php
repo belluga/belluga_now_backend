@@ -249,8 +249,8 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
             iterator_to_array($this->profileTypesCollection()->listIndexes()),
         );
 
-        $this->assertContains('idx_account_profile_types_queryable_candidates_v1', $indexNames);
-        $this->assertContains('idx_account_profile_types_public_catalog_v2', $indexNames);
+        $this->assertContains('idx_account_profile_types_candidate_queryable_v1', $indexNames);
+        $this->assertContains('idx_account_profile_types_public_discovery_v1', $indexNames);
     }
 
     public function test_historical_capability_migration_can_reapply_after_candidate_name_transition(): void
@@ -275,8 +275,8 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
     public function test_migration_repairs_only_the_current_tenant_collection(): void
     {
         $primary = Tenant::query()->firstOrFail();
-        $primary->makeCurrent();
-        $this->profileTypesCollection()->insertOne([
+        $primaryCollection = $this->profileTypesCollectionForTenant($primary);
+        $primaryCollection->insertOne([
             'type' => 'primary-isolation-type',
             'capabilities' => [
                 'is_favoritable' => null,
@@ -289,21 +289,22 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
         ]);
 
         try {
-            $secondary->makeCurrent();
-            $this->profileTypesCollection()->insertOne([
+            $secondaryCollection = $this->profileTypesCollectionForTenant($secondary);
+            $secondaryCollection->insertOne([
                 'type' => 'secondary-isolation-type',
                 'capabilities' => [
                     'is_favoritable' => null,
                 ],
             ]);
 
-            $primary->makeCurrent();
-            $this->runCapabilityCanonicalizationMigration();
+            $this->runCapabilityCanonicalizationMigrationForDatabase((string) $primary->database);
 
-            $this->assertFalse($this->capabilitiesFor('primary-isolation-type')['is_favoritable']);
-
-            $secondary->makeCurrent();
-            $this->assertNull($this->capabilitiesFor('secondary-isolation-type')['is_favoritable']);
+            $this->assertFalse(
+                $this->capabilitiesForTypeInCollection($primaryCollection, 'primary-isolation-type')['is_favoritable'],
+            );
+            $this->assertNull(
+                $this->capabilitiesForTypeInCollection($secondaryCollection, 'secondary-isolation-type')['is_favoritable'],
+            );
         } finally {
             $primary->makeCurrent();
         }
@@ -350,15 +351,12 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
             $this->assertArrayHasKey('type', $filter);
             $this->assertTrue((bool) ($update['multi'] ?? false));
 
-            $capabilityFields = array_values(array_filter(
-                array_keys($filter),
-                static fn (string $field): bool => str_starts_with($field, 'capabilities.'),
-            ));
+            $capabilityFields = $this->repairCapabilityFields($filter);
             $this->assertCount(1, $capabilityFields);
-
-            $repairability = $this->arrayFrom($filter[$capabilityFields[0]]);
-            $not = $this->arrayFrom($repairability['$not'] ?? []);
-            $this->assertSame('bool', $not['$type'] ?? null);
+            $this->assertSame(
+                $capabilityFields,
+                $this->repairCapabilityFieldsFromMutation($update),
+            );
 
             $fieldsByGroup[$this->repairTypeGroupFor($filter['type'])][] = $capabilityFields[0];
         }
@@ -369,6 +367,51 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
         unset($fields);
 
         return $fieldsByGroup;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filter
+     * @return list<string>
+     */
+    private function repairCapabilityFields(array $filter): array
+    {
+        $directFields = array_values(array_filter(
+            array_keys($filter),
+            static fn (string $field): bool => str_starts_with($field, 'capabilities.'),
+        ));
+
+        if ($directFields !== []) {
+            return $directFields;
+        }
+
+        $fields = [];
+        foreach ($this->arrayFrom($filter['$or'] ?? []) as $branch) {
+            foreach (array_keys($this->arrayFrom($branch)) as $field) {
+                if (str_starts_with($field, 'capabilities.')) {
+                    $fields[] = $field;
+                }
+            }
+        }
+
+        sort($fields);
+
+        return array_values(array_unique($fields));
+    }
+
+    /**
+     * @param  array<string, mixed>  $update
+     * @return list<string>
+     */
+    private function repairCapabilityFieldsFromMutation(array $update): array
+    {
+        $set = $this->arrayFrom($this->arrayFrom($update['u'] ?? [])['$set'] ?? []);
+        $fields = array_values(array_filter(
+            array_keys($set),
+            static fn (string $field): bool => str_starts_with($field, 'capabilities.'),
+        ));
+        sort($fields);
+
+        return $fields;
     }
 
     private function repairTypeGroupFor(mixed $typeFilter): string
@@ -406,6 +449,21 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
     private function runCapabilityCanonicalizationMigration(): void
     {
         $this->capabilityCanonicalizationMigration()->up();
+    }
+
+    private function runCapabilityCanonicalizationMigrationForDatabase(string $databaseName): void
+    {
+        $originalDatabase = config('database.connections.tenant.database');
+
+        config(['database.connections.tenant.database' => $databaseName]);
+        DB::purge('tenant');
+
+        try {
+            $this->runCapabilityCanonicalizationMigration();
+        } finally {
+            config(['database.connections.tenant.database' => $originalDatabase]);
+            DB::purge('tenant');
+        }
     }
 
     private function capabilityCanonicalizationMigration(): Migration
@@ -469,6 +527,17 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
     }
 
     /**
+     * @return \MongoDB\Collection<array<string, mixed>>
+     */
+    private function profileTypesCollectionForTenant(Tenant $tenant): \MongoDB\Collection
+    {
+        return DB::connection('tenant')
+            ->getMongoClient()
+            ->selectDatabase((string) $tenant->database)
+            ->selectCollection('account_profile_types');
+    }
+
+    /**
      * @return array<string, array<string, mixed>>
      */
     private function profileTypeIndexesByName(): array
@@ -490,7 +559,16 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
      */
     private function capabilitiesFor(string $type): array
     {
-        $document = $this->profileTypesCollection()->findOne(['type' => $type]);
+        return $this->capabilitiesForTypeInCollection($this->profileTypesCollection(), $type);
+    }
+
+    /**
+     * @param  \MongoDB\Collection<array<string, mixed>>  $collection
+     * @return array<string, mixed>
+     */
+    private function capabilitiesForTypeInCollection(\MongoDB\Collection $collection, string $type): array
+    {
+        $document = $collection->findOne(['type' => $type]);
         $this->assertNotNull($document);
 
         return $this->arrayFrom($document['capabilities'] ?? []);

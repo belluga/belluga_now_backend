@@ -44,6 +44,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
     {
         $this->createType('venue', 'Zoo Venue', [
             'is_queryable' => true,
+            'is_publicly_navigable' => true,
             'is_publicly_discoverable' => true,
             'is_favoritable' => true,
             'is_poi_enabled' => true,
@@ -71,8 +72,8 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
 
         $snapshot = $reader->catalogSnapshot();
 
-        $this->assertSame(['artist', 'venue'], $snapshot->catalogTypeKeys());
-        $this->assertSame(['venue'], $snapshot->nestedParentTypeKeys());
+        $this->assertSame(['artist', 'hidden', 'venue'], $snapshot->catalogTypeKeys());
+        $this->assertSame(['hidden', 'venue'], $snapshot->nestedParentTypeKeys());
         $this->assertTrue($snapshot->policy()->canOpenPublicDetail(
             new \App\Models\Tenants\AccountProfile([
                 'profile_type' => 'venue',
@@ -89,8 +90,8 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
                 'slug' => 'hidden-detail',
             ]),
         ));
-        $this->assertSame(['artist', 'venue'], array_column($snapshot->filterOptions(), 'value'));
-        $this->assertSame(['Alpha Artist', 'Zoo Venue'], array_column($snapshot->filterOptions(), 'label'));
+        $this->assertSame(['artist', 'hidden', 'venue'], array_column($snapshot->filterOptions(), 'value'));
+        $this->assertSame(['Alpha Artist', 'Hidden Type', 'Zoo Venue'], array_column($snapshot->filterOptions(), 'label'));
         $this->assertNotSame('', trim((string) ($snapshot->filterOptions()[0]['id'] ?? '')));
         $this->assertSame($snapshot, $reader->catalogSnapshot());
     }

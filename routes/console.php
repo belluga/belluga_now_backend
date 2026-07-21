@@ -46,18 +46,20 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
     }
 
     $tenant->makeCurrent();
+    try {
+        app(AccountProfileRegistrySyncIndexPrecondition::class)->assertCompatibleTypeIndex();
+        app(AccountProfileRegistrySeeder::class)->ensureDefaults();
+        $this->info("Profile type registry additively repaired for tenant [{$tenantSlug}].");
 
-    $registry = (new AccountProfileRegistrySeeder)->defaults();
+        return 0;
+    } catch (\Throwable $exception) {
+        $this->error($exception->getMessage());
 
-    TenantProfileType::query()->delete();
-    foreach ($registry as $entry) {
-        TenantProfileType::create($entry);
+        return 1;
+    } finally {
+        Tenant::forgetCurrent();
     }
-
-    $this->info("Profile type registry updated for tenant [{$tenantSlug}].");
-
-    return 0;
-})->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+})->purpose('Additive repair for the tenant profile_type_registry V1 defaults without overwriting tenant-owned entries.');
 
 Artisan::command('accounts:missing-profiles:repair {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
     if (! app()->environment(['local', 'testing'])) {
