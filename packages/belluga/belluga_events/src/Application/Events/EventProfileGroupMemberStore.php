@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use App\Models\Landlord\Tenant;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +25,10 @@ final class EventProfileGroupMemberStore
     private const OWNER_EVENT = 'event';
 
     private const OWNER_OCCURRENCE = 'occurrence';
+
+    public function __construct(
+        private readonly EventTenantContextContract $tenantContext,
+    ) {}
 
     /**
      * @param  array<int, array<string, mixed>>  $groups
@@ -382,7 +386,7 @@ final class EventProfileGroupMemberStore
 
     private function tenantId(): string
     {
-        $tenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
+        $tenantId = trim((string) ($this->tenantContext->resolveCurrentTenantId() ?? ''));
         if ($tenantId === '') {
             throw new RuntimeException('Current tenant is required for Event profile group member storage.');
         }

@@ -18,6 +18,7 @@ use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
@@ -540,12 +541,19 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
             return 1;
         }
 
+        $profileGroupMemberStore = app(EventProfileGroupMemberStore::class);
+        $groups = $profileGroupMemberStore->inflateGroupsWithMembers(
+            $groups,
+            'event',
+            (string) $event->getKey(),
+        );
+
         $memberIds = $normalizeScalarArray($groups[0]['account_profile_ids'] ?? []);
         if (! in_array($profileId, $memberIds, true)) {
             $memberIds[] = $profileId;
         }
         $groups[0]['account_profile_ids'] = $memberIds;
-        $event->profile_groups = $groups;
+        $event->profile_groups = $profileGroupMemberStore->metadataOnly($groups);
 
         if ((bool) $this->option('with-event-party')) {
             $eventParties = $normalizeDocumentArray($event->event_parties ?? []);
@@ -591,6 +599,7 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
 
         $event->save();
         $event = $event->fresh() ?? $event;
+        $profileGroupMemberStore->syncEventGroups($event, $groups);
         app(EventOccurrenceReconciliationService::class)->reconcileEvent($event);
 
         $this->line(json_encode([

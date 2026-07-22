@@ -42,11 +42,32 @@ class AccountProfileFormatterService
         $nestedProfileGroups = $includeAgendaOccurrences
             ? $this->nestedPublicMembersProjectionService->publicDetailGroups($profile)
             : $this->nestedGroupMemberStore->metadataGroups($profile);
+        if (! $includeAgendaOccurrences) {
+            $nestedProfileGroups = array_values(array_map(
+                function (array $group) use ($profile): array {
+                    $groupId = trim((string) ($group['id'] ?? ''));
+
+                    return [
+                        ...$group,
+                        'account_profile_ids' => $groupId === ''
+                            ? []
+                            : $this->nestedGroupMemberStore->groupMemberIds($profile, $groupId),
+                    ];
+                },
+                $nestedProfileGroups,
+            ));
+        }
         $selectedSummariesByProfileId = $includeAgendaOccurrences
             ? []
             : $this->candidateDiscoveryService->selectedSummariesByIds(
                 $this->linkedSelectionIds($nestedProfileGroups, $profile),
             );
+        if (! $includeAgendaOccurrences) {
+            $nestedProfileGroups = $this->nestedGroupService->withSelectedSummaries(
+                $nestedProfileGroups,
+                $selectedSummariesByProfileId,
+            );
+        }
 
         $payload = [
             'id' => (string) $profile->_id,

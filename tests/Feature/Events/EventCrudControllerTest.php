@@ -5212,7 +5212,8 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $event->_id;
         $beforeOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $this->assertSame([(string) $this->artist->_id], data_get($beforeOccurrence, 'profile_groups.0.account_profile_ids'));
+        $this->assertSame('atracoes', data_get($beforeOccurrence, 'profile_groups.0.id'));
+        $this->assertArrayNotHasKey('account_profile_ids', data_get($beforeOccurrence, 'profile_groups.0', []));
         $this->assertNull(
             collect($beforeOccurrence->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id)
         );
@@ -5232,13 +5233,24 @@ class EventCrudControllerTest extends TestCaseTenant
         $freshEvent = Event::query()->findOrFail($eventId);
         $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
+        $this->assertSame('atracoes', data_get($freshEvent, 'profile_groups.0.id'));
+        $this->assertArrayNotHasKey('account_profile_ids', data_get($freshEvent, 'profile_groups.0', []));
+        $this->assertSame('atracoes', data_get($freshOccurrence, 'profile_groups.0.id'));
+        $this->assertArrayNotHasKey('account_profile_ids', data_get($freshOccurrence, 'profile_groups.0', []));
+
+        $memberRows = $this->eventProfileGroupRows([
+            'event_id' => $eventId,
+            'owner_type' => 'event',
+            'owner_id' => $eventId,
+            'doc_type' => 'member_row',
+        ]);
+        $this->assertCount(2, $memberRows);
         $this->assertSame(
             [(string) $this->artist->_id, (string) $this->band->_id],
-            data_get($freshEvent, 'profile_groups.0.account_profile_ids')
-        );
-        $this->assertSame(
-            [(string) $this->artist->_id, (string) $this->band->_id],
-            data_get($freshOccurrence, 'profile_groups.0.account_profile_ids')
+            array_values(array_map(
+                static fn (array $row): ?string => $row['member_profile_id'] ?? null,
+                $memberRows
+            ))
         );
 
         $bandParty = collect($freshEvent->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id);
@@ -5261,6 +5273,17 @@ class EventCrudControllerTest extends TestCaseTenant
             [(string) $this->artist->_id, (string) $this->band->_id],
             collect($public->json('data.profile_groups.0.profiles') ?? [])
                 ->pluck('id')
+                ->values()
+                ->all()
+        );
+
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+        $management = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
+        $management->assertStatus(200);
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            collect($management->json('data.profile_groups.0.account_profile_ids') ?? [])
                 ->values()
                 ->all()
         );

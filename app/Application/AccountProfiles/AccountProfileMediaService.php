@@ -220,6 +220,39 @@ class AccountProfileMediaService
         );
     }
 
+    public function removeAllUploads(
+        AccountProfile $profile,
+        ?string $baseUrl = null,
+    ): void {
+        foreach ($this->definition()->slots as $slot) {
+            $this->modelMediaService->removeUpload(
+                model: $profile,
+                kind: $slot,
+                definition: $this->definition(),
+                baseUrl: $baseUrl,
+            );
+        }
+
+        foreach ($profile->gallery_groups ?? [] as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            foreach ($group['items'] ?? [] as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+
+                $itemId = trim((string) ($item['item_id'] ?? ''));
+                if ($itemId === '') {
+                    continue;
+                }
+
+                $this->removeGalleryUpload($profile, $itemId, $baseUrl);
+            }
+        }
+    }
+
     /**
      * @return list<array{path:string,checksum:string}>
      */
