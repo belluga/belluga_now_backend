@@ -20,6 +20,7 @@ class EventOccurrenceSyncService
     public function __construct(
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventAccountContextResolver $eventAccountContextResolver,
     ) {}
 
@@ -66,7 +67,11 @@ class EventOccurrenceSyncService
             $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
             $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
             $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
-            $eventProfileGroups = $this->normalizeProfileGroups($event->profile_groups ?? []);
+            $eventProfileGroups = $this->profileGroupMemberStore->inflateGroupsWithMembers(
+                $event->profile_groups ?? [],
+                'event',
+                (string) $event->getKey(),
+            );
             $ownProfileGroups = $this->normalizeProfileGroups($occurrence['profile_groups'] ?? []);
             $effectiveProfileGroups = $this->mergeProfileGroups($eventProfileGroups, $ownProfileGroups);
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
@@ -90,8 +95,8 @@ class EventOccurrenceSyncService
                 'own_event_parties' => $ownEventParties,
                 'own_linked_account_profiles' => $this->resolveLinkedAccountProfiles($ownEventParties),
                 'linked_account_profiles' => $this->resolveLinkedAccountProfiles($effectiveEventParties),
-                'own_profile_groups' => $ownProfileGroups,
-                'profile_groups' => $effectiveProfileGroups,
+                'own_profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
+                'profile_groups' => $this->profileGroupMemberStore->metadataOnly($effectiveProfileGroups),
                 'artists' => $this->deriveArtistsReadProjection($effectiveEventParties),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'own_taxonomy_terms' => $ownTaxonomyTerms,
@@ -126,6 +131,11 @@ class EventOccurrenceSyncService
             }
 
             if (isset($document->_id)) {
+                $this->profileGroupMemberStore->syncOccurrenceGroups(
+                    $eventId,
+                    $document,
+                    $ownProfileGroups,
+                );
                 $documentId = (string) $document->_id;
                 $activeDocumentIds[] = $documentId;
                 $occurrenceRefs[] = [

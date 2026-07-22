@@ -39,7 +39,7 @@ class AccountProfileMediaController extends Controller
         }
 
         $profile = $this->profileQueryService->findOrFail(trim($profileId));
-        if (! $this->profileQueryService->isPubliclyExposed($profile)
+        if (! $this->profileQueryService->isPubliclyNavigable($profile)
             || ! $this->galleryService->isExposedForProfile($profile)) {
             abort(404);
         }
@@ -81,6 +81,9 @@ class AccountProfileMediaController extends Controller
 
         $accountProfileId = trim($profileId);
         $profile = $this->profileQueryService->findOrFail($accountProfileId);
+        if (! $this->profileQueryService->isPubliclyExposed($profile)) {
+            abort(404);
+        }
         $path = $this->mediaService->resolveMediaPathForBaseUrl(
             $profile,
             $kind,

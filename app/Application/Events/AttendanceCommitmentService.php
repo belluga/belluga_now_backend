@@ -71,10 +71,10 @@ class AttendanceCommitmentService
 
     public function confirm(string $userId, string $eventId, string $occurrenceId): AttendanceCommitment
     {
-        $this->inviteMutationService->prepareReceiverForDirectConfirmation($userId);
+        $receiverAccountProfileId = $this->inviteMutationService->prepareReceiverForDirectConfirmation($userId);
 
         /** @var AttendanceCommitment $commitment */
-        $commitment = $this->transactions->run(function () use ($userId, $eventId, $occurrenceId): AttendanceCommitment {
+        $commitment = $this->transactions->run(function () use ($userId, $eventId, $occurrenceId, $receiverAccountProfileId): AttendanceCommitment {
             $now = Carbon::now();
 
             $commitment = $this->findByScope($userId, $eventId, $occurrenceId)
@@ -100,6 +100,7 @@ class AttendanceCommitmentService
                 userId: $userId,
                 eventId: $eventId,
                 occurrenceId: $occurrenceId,
+                receiverAccountProfileId: $receiverAccountProfileId,
             );
 
             return $commitment;

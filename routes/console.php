@@ -1,6 +1,9 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -15,6 +18,7 @@ use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
@@ -43,18 +47,20 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
     }
 
     $tenant->makeCurrent();
+    try {
+        app(AccountProfileRegistrySyncIndexPrecondition::class)->assertCompatibleTypeIndex();
+        app(AccountProfileRegistrySeeder::class)->ensureDefaults();
+        $this->info("Profile type registry additively repaired for tenant [{$tenantSlug}].");
 
-    $registry = (new AccountProfileRegistrySeeder)->defaults();
+        return 0;
+    } catch (\Throwable $exception) {
+        $this->error($exception->getMessage());
 
-    TenantProfileType::query()->delete();
-    foreach ($registry as $entry) {
-        TenantProfileType::create($entry);
+        return 1;
+    } finally {
+        Tenant::forgetCurrent();
     }
-
-    $this->info("Profile type registry updated for tenant [{$tenantSlug}].");
-
-    return 0;
-})->purpose('Overwrite tenant profile_type_registry with V1 defaults (personal/artist/venue only).');
+})->purpose('Additive repair for the tenant profile_type_registry V1 defaults without overwriting tenant-owned entries.');
 
 Artisan::command('accounts:missing-profiles:repair {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
     if (! app()->environment(['local', 'testing'])) {
@@ -258,6 +264,70 @@ Artisan::command('invites:inviteable-people-projection:backfill {tenant_slug?} {
 
     return 0;
 })->purpose('Backfill inviteable_people_projection for one tenant or every tenant before projection-only reads.');
+
+Artisan::command('account-profiles:nested-public-members-projection:backfill {tenant_slug?} {--all}', function () {
+    $runCurrentTenant = function (?string $tenantSlug = null): array {
+        $summary = app(AccountProfileNestedPublicMembersProjectionBackfillService::class)
+            ->rebuildCurrentTenant();
+        if ($tenantSlug !== null) {
+            $summary['tenant_slug'] = $tenantSlug;
+        }
+
+        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return $summary;
+    };
+
+    if ($this->option('all')) {
+        $count = 0;
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $tenant->makeCurrent();
+            try {
+                $runCurrentTenant((string) $tenant->slug);
+                $count++;
+            } finally {
+                $tenant->forgetCurrent();
+            }
+        }
+
+        $this->info(sprintf('Processed nested public members projection rebuild for tenants: %d', $count));
+
+        return 0;
+    }
+
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    if ($tenantSlug !== '') {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
+        if (! $tenant) {
+            $this->error("Tenant not found for slug [{$tenantSlug}].");
+
+            return 1;
+        }
+
+        $tenant->makeCurrent();
+        try {
+            $runCurrentTenant($tenantSlug);
+        } finally {
+            $tenant->forgetCurrent();
+        }
+
+        return 0;
+    }
+
+    if (! Tenant::current()) {
+        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
+
+        return 1;
+    }
+
+    $runCurrentTenant((string) Tenant::current()?->slug);
+
+    return 0;
+})->purpose('Rebuild nested public member projection rows for one tenant or all tenants.');
 
 Artisan::command('api-security:abuse-signals:prune', function () {
     $result = app(ApiAbuseSignalRecorder::class)->pruneExpired();
@@ -471,12 +541,19 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
             return 1;
         }
 
+        $profileGroupMemberStore = app(EventProfileGroupMemberStore::class);
+        $groups = $profileGroupMemberStore->inflateGroupsWithMembers(
+            $groups,
+            'event',
+            (string) $event->getKey(),
+        );
+
         $memberIds = $normalizeScalarArray($groups[0]['account_profile_ids'] ?? []);
         if (! in_array($profileId, $memberIds, true)) {
             $memberIds[] = $profileId;
         }
         $groups[0]['account_profile_ids'] = $memberIds;
-        $event->profile_groups = $groups;
+        $event->profile_groups = $profileGroupMemberStore->metadataOnly($groups);
 
         if ((bool) $this->option('with-event-party')) {
             $eventParties = $normalizeDocumentArray($event->event_parties ?? []);
@@ -522,6 +599,7 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
 
         $event->save();
         $event = $event->fresh() ?? $event;
+        $profileGroupMemberStore->syncEventGroups($event, $groups);
         app(EventOccurrenceReconciliationService::class)->reconcileEvent($event);
 
         $this->line(json_encode([

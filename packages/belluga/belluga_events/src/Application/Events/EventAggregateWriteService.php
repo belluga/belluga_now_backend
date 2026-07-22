@@ -13,6 +13,7 @@ class EventAggregateWriteService
 {
     public function __construct(
         private readonly EventTransactionRunner $transactions,
+        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventOccurrenceSyncService $occurrenceSyncService,
         private readonly EventOccurrencePayloadSnapshotService $occurrencePayloadSnapshots,
     ) {}
@@ -25,7 +26,16 @@ class EventAggregateWriteService
     {
         /** @var Event $event */
         $event = $this->transactions->run(function () use ($payload, $occurrences): Event {
-            $created = Event::query()->create($payload);
+            $canonicalPayload = $payload;
+            $canonicalPayload['profile_groups'] = $this->profileGroupMemberStore->metadataOnly(
+                $payload['profile_groups'] ?? []
+            );
+
+            $created = Event::query()->create($canonicalPayload);
+            $this->profileGroupMemberStore->syncEventGroups(
+                $created,
+                $payload['profile_groups'] ?? []
+            );
             $this->occurrenceSyncService->syncFromEvent($created, $occurrences);
 
             return $created->fresh() ?? $created;
@@ -42,11 +52,22 @@ class EventAggregateWriteService
     {
         /** @var Event $updated */
         $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
+            $this->profileGroupMemberStore->materializeLegacyIfNeeded($event);
+
+            $canonicalPayload = $payload;
+            $canonicalPayload['profile_groups'] = $this->profileGroupMemberStore->metadataOnly(
+                $payload['profile_groups'] ?? []
+            );
+
             $event->unset('tags');
-            $event->fill($payload);
+            $event->fill($canonicalPayload);
             $event->save();
 
             $fresh = $event->fresh() ?? $event;
+            $this->profileGroupMemberStore->syncEventGroups(
+                $fresh,
+                $payload['profile_groups'] ?? []
+            );
             $this->occurrenceSyncService->syncFromEvent($fresh, $occurrences);
 
             return $fresh;
@@ -76,6 +97,7 @@ class EventAggregateWriteService
             $deletedAt = $event->deleted_at;
 
             $this->transactions->run(function () use ($event, $eventId, $occurrences, $deletedAt): null {
+                $this->profileGroupMemberStore->materializeLegacyIfNeeded($event, includeTrashedOccurrences: true);
                 if ($occurrences !== []) {
                     $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
                 }
@@ -97,6 +119,7 @@ class EventAggregateWriteService
         }
 
         $this->transactions->run(function () use ($event, $occurrences): null {
+            $this->profileGroupMemberStore->materializeLegacyIfNeeded($event);
             $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
 
             return null;

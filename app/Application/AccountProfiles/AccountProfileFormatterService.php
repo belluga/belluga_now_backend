@@ -17,9 +17,12 @@ class AccountProfileFormatterService
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
+        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileGalleryService $galleryService,
-        private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
     ) {}
 
     /**
@@ -29,13 +32,42 @@ class AccountProfileFormatterService
         AccountProfile $profile,
         bool $includeAgendaOccurrences = false,
         bool $publicContactProjection = false,
-    ): array
-    {
+    ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $slug !== ''
-            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
+
+        $nestedProfileGroups = $includeAgendaOccurrences
+            ? $this->nestedPublicMembersProjectionService->publicDetailGroups($profile)
+            : $this->nestedGroupMemberStore->metadataGroups($profile);
+        if (! $includeAgendaOccurrences) {
+            $nestedProfileGroups = array_values(array_map(
+                function (array $group) use ($profile): array {
+                    $groupId = trim((string) ($group['id'] ?? ''));
+
+                    return [
+                        ...$group,
+                        'account_profile_ids' => $groupId === ''
+                            ? []
+                            : $this->nestedGroupMemberStore->groupMemberIds($profile, $groupId),
+                    ];
+                },
+                $nestedProfileGroups,
+            ));
+        }
+        $selectedSummariesByProfileId = $includeAgendaOccurrences
+            ? []
+            : $this->candidateDiscoveryService->selectedSummariesByIds(
+                $this->linkedSelectionIds($nestedProfileGroups, $profile),
+            );
+        if (! $includeAgendaOccurrences) {
+            $nestedProfileGroups = $this->nestedGroupService->withSelectedSummaries(
+                $nestedProfileGroups,
+                $selectedSummariesByProfileId,
+            );
+        }
 
         $payload = [
             'id' => (string) $profile->_id,
@@ -43,6 +75,9 @@ class AccountProfileFormatterService
             'profile_type' => $profile->profile_type,
             'display_name' => $profile->display_name,
             'slug' => $profile->slug,
+            'aggregate_revision' => $includeAgendaOccurrences
+                ? null
+                : max(0, (int) ($profile->aggregate_revision ?? 0)),
             'can_open_public_detail' => $canOpenPublicDetail,
             'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
             'avatar_url' => $this->mediaService->normalizePublicUrl(
@@ -65,9 +100,7 @@ class AccountProfileFormatterService
             'gallery_groups' => $includeAgendaOccurrences
                 ? $this->galleryService->formatForPublicDetail($profile, $baseUrl)
                 : $this->galleryService->formatForRead($profile, $baseUrl),
-            'nested_profile_groups' => $includeAgendaOccurrences
-                ? $this->nestedGroupService->formatForPublicDetail($profile, $baseUrl)
-                : $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []),
+            'nested_profile_groups' => $nestedProfileGroups,
             'location' => $this->formatLocation($profile->location),
             'ownership_state' => $account
                 ? $this->ownershipStateService->deriveOwnershipState($account)
@@ -81,7 +114,7 @@ class AccountProfileFormatterService
             ...$payload,
             ...($publicContactProjection
                 ? $this->contactChannelsService->formatForPublicRead($profile)
-                : $this->contactChannelsService->formatForRead($profile)),
+                : $this->contactChannelsService->formatForRead($profile, $selectedSummariesByProfileId)),
         ];
 
         if ($includeAgendaOccurrences) {
@@ -109,5 +142,29 @@ class AccountProfileFormatterService
             'lat' => (float) $coordinates[1],
             'lng' => (float) $coordinates[0],
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $nestedProfileGroups
+     * @return array<int, string>
+     */
+    private function linkedSelectionIds(array $nestedProfileGroups, AccountProfile $profile): array
+    {
+        $ids = [];
+        foreach ($nestedProfileGroups as $group) {
+            foreach ($group['account_profile_ids'] ?? [] as $profileId) {
+                $profileId = trim((string) $profileId);
+                if ($profileId !== '') {
+                    $ids[$profileId] = true;
+                }
+            }
+        }
+
+        $contactSourceId = trim((string) ($profile->contact_source_account_profile_id ?? ''));
+        if ($contactSourceId !== '') {
+            $ids[$contactSourceId] = true;
+        }
+
+        return array_keys($ids);
     }
 }

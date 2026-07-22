@@ -6,11 +6,13 @@ namespace Tests\Unit\Events;
 
 use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
 use Belluga\Events\Application\Events\EventHeroImageResolver;
+use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
@@ -66,6 +68,9 @@ class EventQueryServiceTest extends TestCase
             Mockery::mock(EventAttendanceReadContract::class),
             Mockery::mock(EventTaxonomySnapshotResolverContract::class),
             new EventHeroImageResolver(new AccountProfileHeroImageResolver),
+            new EventProfileGroupMemberStore(
+                Mockery::mock(EventTenantContextContract::class)
+            ),
         );
     }
 }

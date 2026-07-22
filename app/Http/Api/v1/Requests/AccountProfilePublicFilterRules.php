@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Application\AccountProfiles\AccountProfileNameSearchKey;
 use App\Support\Validation\InputConstraints;
 
 final class AccountProfilePublicFilterRules
@@ -14,7 +15,16 @@ final class AccountProfilePublicFilterRules
     public static function commonRules(): array
     {
         return [
-            'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'search' => [
+                'bail',
+                'sometimes',
+                'string',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || AccountProfileNameSearchKey::normalizeRequestSearch($value) === null) {
+                        $fail('The search must contain 2 to 400 UTF-8 characters and normalize to 2 to 100 ASCII characters.');
+                    }
+                },
+            ],
             'profile_type' => ['sometimes', self::stringOrStringListRule()],
             'filter' => 'sometimes|array:profile_type,taxonomy',
             'filter.profile_type' => ['sometimes', self::stringOrStringListRule()],
