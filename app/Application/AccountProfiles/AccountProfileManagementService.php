@@ -6,36 +6,137 @@ namespace App\Application\AccountProfiles;
 
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Application\Taxonomies\TaxonomyValidationService;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use Belluga\MapPois\Application\MapPoiProjectionService;
-use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
-use Illuminate\Support\Facades\DB;
+use Closure;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Operation\FindOneAndUpdate;
 
 class AccountProfileManagementService
 {
-    private const LAST_PROFILE_ERROR_KEY = 'account_profile_lifecycle';
-
-    private const LAST_PROFILE_ERROR_MESSAGE = 'A live account must keep at least one active account profile. Delete the account aggregate instead.';
-
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly TaxonomyValidationService $taxonomyValidationService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
+        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
-        private readonly MapPoiProjectionService $mapPoiProjectionService,
+        private readonly AccountProfileTransactionRunner $transactionRunner,
+        private readonly AccountProfileOutboxPublisher $outboxPublisher,
+        private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
+        private readonly AccountProfileLifecycleService $lifecycleService,
+        private readonly AccountProfileRelationAdmissionService $relationAdmissionService,
     ) {}
 
     /**
      * @param  array<string, mixed>  $payload
      */
-    public function create(array $payload): AccountProfile
-    {
-        return DB::connection('tenant')->transaction(
-            fn (): AccountProfile => $this->createWithinCurrentTransaction($payload)
+    public function create(
+        array $payload,
+        ?string $commandId = null,
+        ?Closure $mutateWithinTransaction = null,
+        array $fingerprintSupplement = [],
+        ?Closure $compensateKnownRollback = null,
+    ): AccountProfile {
+        $commandId = $this->normalizeCommandId($commandId);
+        $fingerprint = $this->outboxPublisher->fingerprintForCreate($payload, $fingerprintSupplement);
+
+        try {
+            /** @var array{profile:AccountProfile,outbox_event_id:?string} $result */
+            $result = $this->transactionRunner->run(
+                fn (AccountProfileTransactionContext $context): array => $this->createWithinTransactionContext(
+                    $payload,
+                    $context,
+                    $commandId,
+                    $fingerprint,
+                    $mutateWithinTransaction,
+                ),
+                fn (): ?array => $this->resultForCommittedCommand($commandId, $fingerprint),
+            );
+        } catch (AccountProfileCommandIndeterminateException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            if ($compensateKnownRollback !== null) {
+                try {
+                    $compensateKnownRollback();
+                } catch (\Throwable $compensationException) {
+                    report($compensationException);
+                }
+            }
+
+            throw $exception;
+        }
+
+        if ($result['outbox_event_id'] !== null) {
+            $this->outboxDispatcher->dispatchEvent($result['outbox_event_id']);
+        }
+
+        return $result['profile'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{profile:AccountProfile,outbox_event_id:?string}
+     */
+    public function createWithinTransactionContext(
+        array $payload,
+        AccountProfileTransactionContext $context,
+        string $commandId,
+        string $fingerprint,
+        ?Closure $mutateWithinTransaction = null,
+    ): array {
+        $existing = $this->resultForCommand($context, $commandId, $fingerprint);
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $profile = $this->createWithinCurrentTransaction(
+            [...$payload, 'aggregate_revision' => 1],
+            $context,
+        );
+        $relationAttributes = [
+            'nested_profile_groups' => $profile->nested_profile_groups,
+            'contact_source_account_profile_id' => $profile->contact_source_account_profile_id,
+            'contact_bubble_channel_id' => $profile->contact_bubble_channel_id,
+        ];
+        $admittedTargets = $this->relationAdmissionService->admit($context, null, $relationAttributes);
+        $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
+        if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+            $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                $admittedTargets[$contactSourceId],
+                $relationAttributes,
+            );
+        }
+        $this->nestedGroupMemberStore->syncGroupsWithinContext($context, $profile);
+        $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $profile);
+        if ($mutateWithinTransaction !== null) {
+            $mutateWithinTransaction($profile, $context);
+            $profile = $profile->fresh();
+        }
+        $outboxEventId = $this->recordCreatedProfile($context, $profile, $commandId, $fingerprint);
+
+        return [
+            'profile' => $profile,
+            'outbox_event_id' => $outboxEventId,
+        ];
+    }
+
+    public function recordCreatedProfile(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        string $commandId,
+        string $fingerprint,
+    ): string {
+        return $this->outboxPublisher->recordUpsert(
+            $context,
+            $profile,
+            $commandId,
+            $fingerprint,
         );
     }
 
@@ -44,9 +145,11 @@ class AccountProfileManagementService
      */
     public function createWithinCurrentTransaction(
         array $payload,
-        bool $queueMapPoiSyncAfterCommit = true,
+        AccountProfileTransactionContext $context,
     ): AccountProfile {
         $payload = AccountProfileRichTextSanitizer::sanitizePayload($payload);
+
+        $this->lifecycleService->assertProfileCreationAllowed($payload, $context);
 
         $profileType = (string) $payload['profile_type'];
 
@@ -90,7 +193,7 @@ class AccountProfileManagementService
                 $profileType,
                 $payload['nested_profile_groups']
             );
-            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
+            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
                 $payload['nested_profile_groups']
             );
         }
@@ -120,10 +223,6 @@ class AccountProfileManagementService
             ]);
         }
 
-        if ($queueMapPoiSyncAfterCommit) {
-            $this->queueMapPoiSyncAfterCommit($profile);
-        }
-
         return $profile;
     }
 
@@ -133,7 +232,11 @@ class AccountProfileManagementService
     public function update(
         AccountProfile $profile,
         array $attributes,
-        bool $syncMapPoiProjection = true,
+        ?string $commandId = null,
+        ?Closure $mutateWithinTransaction = null,
+        array $fingerprintSupplement = [],
+        bool $dispatchOutboxImmediately = true,
+        ?Closure $compensateKnownRollback = null,
     ): AccountProfile {
         $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
 
@@ -178,14 +281,19 @@ class AccountProfileManagementService
             $attributes['location'] = $this->formatLocation($attributes['location']);
         }
 
+        $expectedAggregateRevision = null;
+        if (array_key_exists('aggregate_revision', $attributes)) {
+            $expectedAggregateRevision = max(0, (int) $attributes['aggregate_revision']);
+            unset($attributes['aggregate_revision']);
+        }
+
         if (array_key_exists('nested_profile_groups', $attributes)) {
             $this->assertNestedProfileGroupsAllowed(
                 $profileType,
                 $attributes['nested_profile_groups']
             );
-            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeForWrite(
-                $attributes['nested_profile_groups'],
-                (string) $profile->getKey()
+            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
+                $attributes['nested_profile_groups']
             );
         }
 
@@ -198,67 +306,288 @@ class AccountProfileManagementService
             ),
         ];
 
+        $profileId = (string) $profile->getKey();
+        $commandId = $this->normalizeCommandId($commandId);
+        $fingerprint = $this->outboxPublisher->fingerprintForUpdate(
+            $profileId,
+            $attributes,
+            $fingerprintSupplement,
+        );
+
         try {
-            $profile->fill($attributes);
-            $profile->save();
-        } catch (BulkWriteException $exception) {
-            if (str_contains($exception->getMessage(), 'E11000')) {
-                throw ValidationException::withMessages([
-                    'slug' => ['Account profile slug already exists.'],
-                ]);
+            /** @var array{profile:AccountProfile,outbox_event_id:?string} $result */
+            $result = $this->transactionRunner->run(
+                function (AccountProfileTransactionContext $context) use (
+                    $profileId,
+                    $attributes,
+                    $commandId,
+                    $fingerprint,
+                    $mutateWithinTransaction,
+                    $expectedAggregateRevision,
+                ): array {
+                    $receipt = $this->outboxPublisher->receipt($context, $commandId);
+                    if ($receipt !== null) {
+                        return $this->resultForCommandReceipt($receipt, $fingerprint);
+                    }
+
+                    $persistedProfile = AccountProfile::query()->findOrFail($profileId);
+                    $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
+                    $persistedProfile->fill($attributes);
+                    if (! array_key_exists('nested_profile_groups', $attributes)) {
+                        $persistedProfile->setAttribute(
+                            'nested_profile_groups',
+                            $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persistedProfile),
+                        );
+                    }
+                    if (! $persistedProfile->isDirty() && $mutateWithinTransaction === null) {
+                        $admittedTargets = $this->relationAdmissionService->admit(
+                            $context,
+                            $profileId,
+                            $attributes,
+                            touchTargets: false,
+                        );
+                        $contactSourceId = trim((string) ($attributes['contact_source_account_profile_id'] ?? ''));
+                        if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+                            $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                                $admittedTargets[$contactSourceId],
+                                $attributes,
+                            );
+                        }
+
+                        return [
+                            'profile' => $persistedProfile,
+                            'outbox_event_id' => null,
+                        ];
+                    }
+
+                    $admittedTargets = $this->relationAdmissionService->admit(
+                        $context,
+                        $profileId,
+                        $attributes,
+                    );
+                    $contactSourceId = trim((string) ($attributes['contact_source_account_profile_id'] ?? ''));
+                    if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+                        $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                            $admittedTargets[$contactSourceId],
+                            $attributes,
+                        );
+                    }
+
+                    try {
+                        if ($mutateWithinTransaction !== null) {
+                            $mutateWithinTransaction($persistedProfile, $context);
+                        }
+
+                        $persistedProfile = $this->persistWithAggregateRevisionCas(
+                            $context,
+                            $persistedProfile,
+                            $expectedAggregateRevision,
+                        );
+                        $this->nestedGroupMemberStore->materializeLegacyIfNeededWithinContext($context, $persistedProfile);
+                        if (array_key_exists('nested_profile_groups', $attributes)) {
+                            $this->nestedGroupMemberStore->syncGroupsWithinContext($context, $persistedProfile);
+                        }
+                        $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
+                    } catch (BulkWriteException $exception) {
+                        if (str_contains($exception->getMessage(), 'E11000')) {
+                            throw ValidationException::withMessages([
+                                'slug' => ['Account profile slug already exists.'],
+                            ]);
+                        }
+
+                        throw ValidationException::withMessages([
+                            'account_profile' => ['Something went wrong when trying to update the account profile.'],
+                        ]);
+                    }
+
+                    $persistedProfile = $persistedProfile->fresh();
+                    $outboxEventId = $this->outboxPublisher->recordUpsert(
+                        $context,
+                        $persistedProfile,
+                        $commandId,
+                        $fingerprint,
+                    );
+
+                    return [
+                        'profile' => $persistedProfile,
+                        'outbox_event_id' => $outboxEventId,
+                    ];
+                },
+                function () use ($commandId, $fingerprint): ?array {
+                    $receipt = $this->outboxPublisher->committedReceipt($commandId);
+
+                    return $receipt === null ? null : $this->resultForCommandReceipt($receipt, $fingerprint);
+                },
+            );
+        } catch (AccountProfileCommandIndeterminateException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            if ($compensateKnownRollback !== null) {
+                try {
+                    $compensateKnownRollback();
+                } catch (\Throwable $compensationException) {
+                    report($compensationException);
+                }
             }
 
-            throw ValidationException::withMessages([
-                'account_profile' => ['Something went wrong when trying to update the account profile.'],
-            ]);
+            throw $exception;
         }
 
-        $profile = $profile->fresh();
-        if ($syncMapPoiProjection) {
-            $this->syncMapPoiProjectionById((string) $profile->_id);
-            $profile = $profile->fresh();
+        $profile = $result['profile'];
+        if ($dispatchOutboxImmediately && $result['outbox_event_id'] !== null) {
+            $this->outboxDispatcher->dispatchEvent($result['outbox_event_id']);
         }
 
         return $profile;
     }
 
-    public function syncMapPoiProjection(AccountProfile $profile): void
+    /**
+     * @param  array<string, mixed>  $receipt
+     * @return array{profile:AccountProfile,outbox_event_id:?string}
+     */
+    public function resultForCommandReceipt(array $receipt, string $fingerprint): array
     {
-        $this->syncMapPoiProjectionById((string) $profile->_id);
+        $this->outboxPublisher->assertReceiptMatches($receipt, $fingerprint);
+
+        return [
+            'profile' => AccountProfile::withTrashed()->findOrFail((string) $receipt['profile_id']),
+            'outbox_event_id' => trim((string) ($receipt['outbox_event_id'] ?? '')) ?: null,
+        ];
     }
 
-    public function delete(AccountProfile $profile): void
-    {
-        $profileId = (string) $profile->_id;
+    /** @return array{profile:AccountProfile,outbox_event_id:?string}|null */
+    public function resultForCommand(
+        AccountProfileTransactionContext $context,
+        string $commandId,
+        string $fingerprint,
+    ): ?array {
+        $receipt = $this->outboxPublisher->receipt($context, $commandId);
 
-        DB::connection('tenant')->transaction(function () use ($profile): void {
-            $this->assertProfileMayBeSoftDeleted($profile);
-            $profile->delete();
-        });
-
-        $this->queueMapPoiDeleteAfterCommit($profileId);
+        return $receipt === null ? null : $this->resultForCommandReceipt($receipt, $fingerprint);
     }
 
-    public function restore(AccountProfile $profile): AccountProfile
+    /** @return array{profile:AccountProfile,outbox_event_id:?string}|null */
+    public function resultForCommittedCommand(string $commandId, string $fingerprint): ?array
     {
-        $profile->restore();
+        $receipt = $this->outboxPublisher->committedReceipt($commandId);
 
-        $profile = $profile->fresh();
-        $this->syncMapPoiProjectionById((string) $profile->_id);
-
-        return $profile;
+        return $receipt === null ? null : $this->resultForCommandReceipt($receipt, $fingerprint);
     }
 
-    public function forceDelete(AccountProfile $profile): void
+    public function dispatchOutboxEvent(?string $outboxEventId): void
     {
-        $profileId = (string) $profile->_id;
+        if ($outboxEventId !== null) {
+            $this->outboxDispatcher->dispatchEvent($outboxEventId);
+        }
+    }
 
-        DB::connection('tenant')->transaction(function () use ($profile): void {
-            $this->assertProfileMayBeForceDeleted($profile);
-            $profile->forceDelete();
-        });
+    private function normalizeCommandId(?string $commandId): string
+    {
+        $commandId = trim((string) $commandId);
 
-        $this->queueMapPoiDeleteAfterCommit($profileId);
+        return $commandId === '' ? (string) Str::uuid() : $commandId;
+    }
+
+    public function delete(AccountProfile $profile, ?string $commandId = null): void
+    {
+        $this->lifecycleService->delete($profile, $commandId);
+    }
+
+    public function restore(AccountProfile $profile, ?string $commandId = null): AccountProfile
+    {
+        return $this->lifecycleService->restore($profile, $commandId);
+    }
+
+    public function forceDelete(AccountProfile $profile, ?string $commandId = null): void
+    {
+        $this->lifecycleService->forceDelete($profile, $commandId);
+    }
+
+    /**
+     * @param  array<int, string>  $addIds
+     * @param  array<int, string>  $removeIds
+     * @return array<string, mixed>
+     */
+    public function patchNestedGroupMembers(
+        AccountProfile $profile,
+        string $groupId,
+        int $aggregateRevision,
+        array $addIds,
+        array $removeIds,
+        ?string $commandId = null,
+    ): array {
+        $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
+        $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
+
+        $existingIds = $this->nestedGroupMemberStore->groupMemberIds($profile, (string) $group['id']);
+        $removeLookup = array_fill_keys($removeIds, true);
+        $nextIds = array_values(array_filter(
+            $existingIds,
+            static fn (string $profileId): bool => $profileId !== '' && ! isset($removeLookup[$profileId]),
+        ));
+        $seen = array_fill_keys($nextIds, true);
+        foreach ($addIds as $profileId) {
+            if ($profileId === '' || isset($seen[$profileId])) {
+                continue;
+            }
+            $nextIds[] = $profileId;
+            $seen[$profileId] = true;
+        }
+
+        $patchedGroups = array_map(
+            function (array $candidateGroup) use ($group, $nextIds): array {
+                if ((string) ($candidateGroup['id'] ?? '') !== (string) $group['id']) {
+                    return $candidateGroup;
+                }
+
+                return [
+                    'id' => (string) $candidateGroup['id'],
+                    'label' => (string) $candidateGroup['label'],
+                    'order' => (int) ($candidateGroup['order'] ?? 0),
+                    'member_count' => count($nextIds),
+                ];
+            },
+            $groups,
+        );
+
+        $updatedProfile = $this->update(
+            $profile,
+            [
+                'aggregate_revision' => $aggregateRevision,
+                'nested_profile_groups' => $patchedGroups,
+            ],
+            $commandId,
+            function (AccountProfile $persistedProfile, AccountProfileTransactionContext $context) use ($group, $addIds, $nextIds): void {
+                if ($addIds !== []) {
+                    $this->relationAdmissionService->admit(
+                        $context,
+                        (string) $persistedProfile->getKey(),
+                        [
+                            'nested_profile_groups' => [[
+                                'account_profile_ids' => $addIds,
+                            ]],
+                        ],
+                    );
+                }
+
+                $this->nestedGroupMemberStore->replaceGroupMembersWithinContext(
+                    $context,
+                    $persistedProfile,
+                    (string) $group['id'],
+                    $nextIds,
+                );
+            },
+        );
+        $updatedGroups = $this->nestedGroupMemberStore->metadataGroups($updatedProfile);
+        $updatedGroup = $this->nestedGroupService->findGroupOrFail($updatedGroups, (string) $group['id']);
+
+        return [
+            'id' => (string) $updatedGroup['id'],
+            'label' => (string) $updatedGroup['label'],
+            'order' => (int) ($updatedGroup['order'] ?? 0),
+            'member_count' => max(0, (int) ($updatedGroup['member_count'] ?? count($updatedGroup['account_profile_ids'] ?? []))),
+            'aggregate_revision' => max(0, (int) ($updatedProfile->aggregate_revision ?? 0)),
+        ];
     }
 
     private function assertNestedProfileGroupsAllowed(string $profileType, mixed $rawGroups): void
@@ -296,91 +625,62 @@ class AccountProfileManagementService
         return true;
     }
 
-    private function assertProfileMayBeSoftDeleted(AccountProfile $profile): void
-    {
-        if (! $this->isActiveProfile($profile)) {
-            return;
+    private function persistWithAggregateRevisionCas(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        ?int $expectedAggregateRevision = null,
+    ): AccountProfile {
+        $profileId = trim((string) $profile->getKey());
+        if ($profileId === '') {
+            throw new ConcurrencyConflictException('Account Profile aggregate id is required for a revision CAS.');
         }
 
-        $account = $this->liveAccountForProfile($profile);
-        if (! $account) {
-            return;
+        try {
+            $objectId = new ObjectId($profileId);
+        } catch (\Throwable) {
+            throw new ConcurrencyConflictException('Account Profile aggregate id is invalid for a revision CAS.');
         }
 
-        $this->touchAccountLifecycleGuard($account);
-
-        if ($this->activeProfileCount((string) $account->_id) <= 1) {
-            $this->throwLastProfileValidationException();
+        $expectedRevision = $expectedAggregateRevision ?? max(0, (int) $profile->getAttribute('aggregate_revision'));
+        $profile->setAttribute('aggregate_revision', $expectedRevision + 1);
+        if ($profile->isDirty('display_name') || trim((string) $profile->getAttribute('name_search_key')) === '') {
+            $profile->setAttribute(
+                'name_search_key',
+                AccountProfileNameSearchKey::fromDisplayName((string) $profile->getAttribute('display_name')),
+            );
         }
-    }
-
-    private function assertProfileMayBeForceDeleted(AccountProfile $profile): void
-    {
-        $account = $this->liveAccountForProfile($profile);
-        if (! $account) {
-            return;
-        }
-
-        $this->touchAccountLifecycleGuard($account);
-
-        $accountId = (string) $account->_id;
-        $activeCount = $this->activeProfileCount($accountId);
-
-        if ($this->isActiveProfile($profile) && $activeCount <= 1) {
-            $this->throwLastProfileValidationException();
+        $profile->setAttribute('updated_at', now());
+        $dirty = $profile->getDirty();
+        unset($dirty['_id']);
+        if ($dirty === []) {
+            return $profile;
         }
 
-        if ($this->isTrashedProfile($profile) && $activeCount === 0 && $this->restorableProfileCount($accountId) <= 1) {
-            $this->throwLastProfileValidationException();
+        $revisionFilter = ['aggregate_revision' => $expectedRevision];
+        if ($expectedRevision === 0 || ($expectedAggregateRevision !== null && $expectedRevision === 1)) {
+            $acceptedLegacyRevisions = [
+                ['aggregate_revision' => $expectedRevision],
+                ['aggregate_revision' => 0],
+                ['aggregate_revision' => null],
+                ['aggregate_revision' => ['$exists' => false]],
+            ];
+            $revisionFilter = [
+                '$or' => array_values(array_map(
+                    static fn (array $candidate): array => $candidate,
+                    $acceptedLegacyRevisions,
+                )),
+            ];
         }
-    }
-
-    private function liveAccountForProfile(AccountProfile $profile): ?Account
-    {
-        $accountId = trim((string) $profile->account_id);
-        if ($accountId === '') {
-            return null;
+        $updated = $context->collection('account_profiles')->findOneAndUpdate(
+            ['_id' => $objectId, ...$revisionFilter],
+            ['$set' => $dirty],
+            [...$context->rawOptions(), 'returnDocument' => FindOneAndUpdate::RETURN_DOCUMENT_AFTER],
+        );
+        if ($updated === null) {
+            throw new ConcurrencyConflictException('Account Profile aggregate revision changed during mutation.');
         }
 
-        return Account::query()->where('_id', $accountId)->first();
-    }
-
-    private function touchAccountLifecycleGuard(Account $account): void
-    {
-        $account->setAttribute('profile_lifecycle_guarded_at', now()->toJSON());
-        $account->save();
-    }
-
-    private function activeProfileCount(string $accountId): int
-    {
-        return AccountProfile::query()
-            ->where('account_id', $accountId)
-            ->where('is_active', true)
-            ->count();
-    }
-
-    private function restorableProfileCount(string $accountId): int
-    {
-        return AccountProfile::onlyTrashed()
-            ->where('account_id', $accountId)
-            ->count();
-    }
-
-    private function isActiveProfile(AccountProfile $profile): bool
-    {
-        return ! $this->isTrashedProfile($profile) && (bool) $profile->is_active;
-    }
-
-    private function isTrashedProfile(AccountProfile $profile): bool
-    {
-        return $profile->deleted_at !== null;
-    }
-
-    private function throwLastProfileValidationException(): void
-    {
-        throw ValidationException::withMessages([
-            self::LAST_PROFILE_ERROR_KEY => [self::LAST_PROFILE_ERROR_MESSAGE],
-        ]);
+        return AccountProfile::query()->findOrFail($profileId);
     }
 
     /**
@@ -403,33 +703,6 @@ class AccountProfileManagementService
             'type' => 'Point',
             'coordinates' => [(float) $lng, (float) $lat],
         ];
-    }
-
-    public function queueMapPoiSyncAfterCommit(AccountProfile $profile): void
-    {
-        $profileId = (string) $profile->_id;
-        DB::connection('tenant')->afterCommit(
-            fn () => $this->syncMapPoiProjectionById($profileId)
-        );
-    }
-
-    private function queueMapPoiDeleteAfterCommit(string $profileId): void
-    {
-        DB::connection('tenant')->afterCommit(
-            static fn () => DeleteMapPoiByRefJob::dispatch('account_profile', $profileId)
-        );
-    }
-
-    private function syncMapPoiProjectionById(string $profileId): void
-    {
-        $profile = AccountProfile::query()->find($profileId);
-        if (! $profile) {
-            $this->mapPoiProjectionService->deleteByRef('account_profile', $profileId);
-
-            return;
-        }
-
-        $this->mapPoiProjectionService->upsertFromAccountProfile($profile);
     }
 
     /**

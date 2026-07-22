@@ -46,6 +46,7 @@ class EventQueryService
         private readonly EventAttendanceReadContract $eventAttendanceRead,
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventHeroImageResolver $eventHeroImages,
+        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
@@ -660,7 +661,9 @@ class EventQueryService
             'linked_account_profiles' => $linkedAccountProfiles,
             'profile_groups' => $this->formatProfileGroupsForManagement(
                 $event->profile_groups ?? [],
-                $eventLinkedAccountProfiles
+                $eventLinkedAccountProfiles,
+                'event',
+                isset($event->_id) ? (string) $event->_id : '',
             ),
             'capabilities' => $this->resolveEventCapabilities($event),
             'taxonomy_terms' => $taxonomyTerms,
@@ -1928,12 +1931,17 @@ class EventQueryService
         if ($parentEvent !== null && $isOccurrence) {
             $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
         }
-        $profileGroups = $this->formatProfileGroupsForPublic($event->profile_groups ?? [], $linkedAccountProfiles);
+        $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
+        $profileGroups = $this->formatProfileGroupsForPublic(
+            $event->profile_groups ?? [],
+            $linkedAccountProfiles,
+            'event',
+            $eventId,
+        );
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
 
-        $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
         $occurrenceId = $isOccurrence && isset($event->_id) ? (string) $event->_id : null;
         $startAt = $isOccurrence
             ? $this->formatDate($this->extractRawAttribute($event, 'starts_at'))
@@ -2421,11 +2429,15 @@ class EventQueryService
                     ? $this->formatProfileGroupsForPublic(
                         $event->own_profile_groups ?? [],
                         $ownLinkedAccountProfiles,
+                        'occurrence',
+                        $occurrenceId ?? '',
                         false
                     )
                     : $this->formatProfileGroupsForManagement(
                         $event->own_profile_groups ?? [],
-                        $ownLinkedAccountProfiles
+                        $ownLinkedAccountProfiles,
+                        'occurrence',
+                        $occurrenceId ?? '',
                     ),
                 'programming_items' => $programmingItems,
                 'programming_count' => count($programmingItems),
@@ -2467,11 +2479,15 @@ class EventQueryService
                             ? $this->formatProfileGroupsForPublic(
                                 $occurrence->own_profile_groups ?? [],
                                 $ownLinkedAccountProfiles,
+                                'occurrence',
+                                $occurrenceId ?? '',
                                 false
                             )
                             : $this->formatProfileGroupsForManagement(
                                 $occurrence->own_profile_groups ?? [],
-                                $ownLinkedAccountProfiles
+                                $ownLinkedAccountProfiles,
+                                'occurrence',
+                                $occurrenceId ?? '',
                             ),
                         'programming_items' => $programmingItems,
                         'programming_count' => count($programmingItems),
@@ -2764,9 +2780,14 @@ class EventQueryService
      * @param  array<int, array<string, mixed>>  $linkedProfiles
      * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
      */
-    private function formatProfileGroupsForManagement(mixed $rawGroups, array $linkedProfiles = []): array
+    private function formatProfileGroupsForManagement(
+        mixed $rawGroups,
+        array $linkedProfiles = [],
+        string $ownerType = 'event',
+        string $ownerId = '',
+    ): array
     {
-        $groups = $this->normalizeProfileGroups($rawGroups);
+        $groups = $this->normalizeProfileGroups($rawGroups, $ownerType, $ownerId);
         if ($groups !== []) {
             $allowedProfileIds = $this->managementLinkedProfileIdLookup($linkedProfiles);
 
@@ -2816,9 +2837,11 @@ class EventQueryService
     private function formatProfileGroupsForPublic(
         mixed $rawGroups,
         array $linkedProfiles,
+        string $ownerType = 'event',
+        string $ownerId = '',
         bool $allowFallback = true
     ): array {
-        $groups = $this->normalizeProfileGroups($rawGroups);
+        $groups = $this->normalizeProfileGroups($rawGroups, $ownerType, $ownerId);
         if ($groups === []) {
             return $allowFallback ? $this->fallbackProfileGroupsByType($linkedProfiles) : [];
         }
@@ -2896,11 +2919,15 @@ class EventQueryService
         $eventExplicitGroups = $this->formatProfileGroupsForPublic(
             $event->profile_groups ?? [],
             $eventLinkedProfiles,
+            'event',
+            (string) $event->getKey(),
             false
         );
         $occurrenceExplicitGroups = $this->formatProfileGroupsForPublic(
             $occurrence->own_profile_groups ?? [],
             $occurrenceLinkedProfiles,
+            'occurrence',
+            (string) $occurrence->getKey(),
             false
         );
 
@@ -2943,6 +2970,8 @@ class EventQueryService
         $eventExplicitGroups = $this->formatProfileGroupsForPublic(
             $event->profile_groups ?? [],
             $eventLinkedProfiles,
+            'event',
+            (string) $event->getKey(),
             false
         );
 
@@ -2958,6 +2987,8 @@ class EventQueryService
             $occurrenceExplicitGroups = $this->formatProfileGroupsForPublic(
                 $occurrence->own_profile_groups ?? [],
                 $occurrenceLinkedProfiles,
+                'occurrence',
+                (string) $occurrence->getKey(),
                 false
             );
 
@@ -3370,58 +3401,17 @@ class EventQueryService
     /**
      * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
      */
-    private function normalizeProfileGroups(mixed $rawGroups): array
+    private function normalizeProfileGroups(
+        mixed $rawGroups,
+        string $ownerType = 'event',
+        string $ownerId = '',
+    ): array
     {
-        $rows = $this->normalizeArray($rawGroups);
-        $groups = [];
-
-        foreach ($rows as $index => $row) {
-            $payload = $this->normalizeArray($row);
-            $label = trim((string) ($payload['label'] ?? ''));
-            if ($label === '') {
-                continue;
-            }
-
-            $id = trim((string) ($payload['id'] ?? $payload['key'] ?? ''));
-            if ($id === '') {
-                $id = Str::slug($label);
-            }
-            if ($id === '') {
-                $id = 'group-'.$index;
-            }
-
-            $memberIds = [];
-            foreach ($this->normalizeArray($payload['account_profile_ids'] ?? $payload['profile_ids'] ?? []) as $rawMemberId) {
-                $memberId = trim((string) $rawMemberId);
-                if ($memberId !== '' && ! in_array($memberId, $memberIds, true)) {
-                    $memberIds[] = $memberId;
-                }
-            }
-
-            $groups[] = [
-                '_source_index' => $index,
-                'id' => $id,
-                'label' => $label,
-                'order' => isset($payload['order']) ? (int) $payload['order'] : $index,
-                'account_profile_ids' => $memberIds,
-            ];
-        }
-
-        usort(
-            $groups,
-            static fn (array $left, array $right): int => [$left['order'], $left['_source_index']]
-                <=> [$right['order'], $right['_source_index']]
+        return $this->profileGroupMemberStore->inflateGroupsWithMembers(
+            $rawGroups,
+            $ownerType,
+            $ownerId,
         );
-
-        return array_values(array_map(
-            static fn (array $group): array => [
-                'id' => $group['id'],
-                'label' => $group['label'],
-                'order' => $group['order'],
-                'account_profile_ids' => $group['account_profile_ids'],
-            ],
-            $groups
-        ));
     }
 
     /**

@@ -22,6 +22,7 @@ final class AccountProfileContactChannelsService
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly ContactChannelDefinitionRegistry $definitionRegistry,
         private readonly ContactChannelCollectionNormalizer $collectionNormalizer,
     ) {}
@@ -30,7 +31,7 @@ final class AccountProfileContactChannelsService
      * The host owns profile persistence, tenant-local source lookup, mirror topology,
      * and the atomically persisted bubble pointer. The package owns channel data rules.
      *
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function normalizeForWrite(
@@ -111,19 +112,11 @@ final class AccountProfileContactChannelsService
             ]);
         }
 
-        // The source must be an own-mode profile. This bounds both lookup cost and
-        // topology to one hop; legacy nested chains therefore fail closed on reads.
-        $sourceProfile = $this->resolveSameTenantOwnContactSourceOrFail($sourceId);
-        $effectiveChannels = $this->readStoredContactState($sourceProfile)['contact_channels'];
         $bubbleChannelId = $this->resolveBubbleSelectionForWrite(
             $payload,
             $stored['contact_bubble_channel_id'],
             [],
         );
-
-        if ($bubbleChannelId !== null && $this->payloadRequiresBubbleValidation($payload)) {
-            $this->assertBubbleSelectionValid($bubbleChannelId, $effectiveChannels);
-        }
 
         return [
             'contact_mode' => self::CONTACT_MODE_MIRRORED_ACCOUNT_PROFILE,
@@ -134,7 +127,7 @@ final class AccountProfileContactChannelsService
     }
 
     /** @return array<string, mixed> */
-    public function formatForRead(AccountProfile $profile): array
+    public function formatForRead(AccountProfile $profile, array $selectedSummariesByProfileId = []): array
     {
         $stored = $this->readStoredContactState($profile);
         $mode = $this->normalizeMode($stored['contact_mode']);
@@ -147,7 +140,10 @@ final class AccountProfileContactChannelsService
         return [
             'contact_mode' => $mode,
             'contact_source_account_profile_id' => $stored['contact_source_account_profile_id'],
-            'contact_source_account_profile' => $this->profileSummary($directSource),
+            'contact_source_account_profile' => $this->selectedSummary(
+                $stored['contact_source_account_profile_id'],
+                $selectedSummariesByProfileId,
+            ),
             'contact_channels' => $stored['contact_channels'],
             'contact_bubble_channel_id' => $stored['contact_bubble_channel_id'],
             'effective_contact_source' => $this->profileSummary($effectiveSource),
@@ -215,6 +211,27 @@ final class AccountProfileContactChannelsService
         }
 
         return $this->resolveSameTenantOwnContactSource($stored['contact_source_account_profile_id']);
+    }
+
+    /**
+     * Rechecks the source snapshot selected before the aggregate transaction.
+     * The admission gateway has already fenced this exact source document.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function assertMirroredAdmissionStillValid(AccountProfile $source, array $attributes): void
+    {
+        $stored = $this->readStoredContactState($source);
+        if ($this->normalizeMode($stored['contact_mode']) !== self::CONTACT_MODE_OWN) {
+            throw ValidationException::withMessages([
+                'contact_source_account_profile_id' => ['Mirrored contact source must be an available own-mode profile in this tenant.'],
+            ]);
+        }
+
+        $bubbleChannelId = $this->normalizeNullableString($attributes['contact_bubble_channel_id'] ?? null);
+        if ($bubbleChannelId !== null) {
+            $this->assertBubbleSelectionValid($bubbleChannelId, $stored['contact_channels']);
+        }
     }
 
     /** @return array<string, mixed> */
@@ -334,8 +351,8 @@ final class AccountProfileContactChannelsService
      * request-local channel and is translated before persistence. Omitting both
      * preserves the pointer for unrelated PATCH requests.
      *
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $draftKeyToChannelId
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $draftKeyToChannelId
      */
     private function resolveBubbleSelectionForWrite(
         array $payload,
@@ -388,33 +405,20 @@ final class AccountProfileContactChannelsService
         ]);
     }
 
-    private function resolveSameTenantOwnContactSourceOrFail(string $sourceId): AccountProfile
-    {
-        $profile = $this->resolveSameTenantOwnContactSource($sourceId);
-        if (! $profile) {
-            throw ValidationException::withMessages([
-                'contact_source_account_profile_id' => ['Mirrored contact source must be an available own-mode profile in this tenant.'],
-            ]);
-        }
-
-        return $profile;
-    }
-
     private function resolveSameTenantOwnContactSource(?string $sourceId): ?AccountProfile
     {
         if ($sourceId === null || $sourceId === '') {
             return null;
         }
 
-        $profile = AccountProfile::query()->find($sourceId);
-        if (! $profile instanceof AccountProfile
-            || ! $profile->is_active
-            || ! $this->hasContactChannelsCapability((string) $profile->profile_type)
-            || $this->normalizeMode($profile->contact_mode ?? null) !== self::CONTACT_MODE_OWN) {
-            return null;
-        }
+        $profile = $this->candidateDiscoveryService
+            ->eligibleProfilesByIds(
+                AccountProfileCandidateDiscoveryService::SCOPE_CONTACT_CAPABLE,
+                [$sourceId],
+            )
+            ->first();
 
-        return $profile;
+        return $profile instanceof AccountProfile ? $profile : null;
     }
 
     private function hasContactChannelsCapability(string $profileType): bool
@@ -424,7 +428,7 @@ final class AccountProfileContactChannelsService
             ? $definition['capabilities']
             : [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
             $capabilities,
         );
@@ -442,6 +446,24 @@ final class AccountProfileContactChannelsService
             'display_name' => trim((string) $profile->display_name),
             'slug' => $this->normalizeNullableString($profile->slug ?? null),
             'profile_type' => trim((string) $profile->profile_type),
+        ];
+    }
+
+    /**
+     * @param  array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>  $selectedSummariesByProfileId
+     * @return array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}|null
+     */
+    private function selectedSummary(?string $profileId, array $selectedSummariesByProfileId): ?array
+    {
+        if ($profileId === null) {
+            return null;
+        }
+
+        return $selectedSummariesByProfileId[$profileId] ?? [
+            'id' => $profileId,
+            'display_name' => null,
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
         ];
     }
 

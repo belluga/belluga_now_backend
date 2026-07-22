@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Unit\Application\Accounts;
 
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
@@ -22,6 +24,7 @@ class AccountProfileQueryServiceTest extends TestCase
             $this->createMock(AccountProfileMediaService::class),
             $this->createMock(TaxonomyTermSummaryResolverService::class),
             new AccountProfileTypeSetProvider,
+            new AccountProfilePublicCatalogSnapshotReader(new AccountProfileTypeCapabilityCatalog),
         );
 
         $resolver = new ReflectionMethod($service, 'resolveAggregateRowId');

@@ -7,11 +7,13 @@ namespace Tests\Feature\AccountProfiles;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
@@ -35,6 +37,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
     protected function setUp(): void
     {
         parent::setUp();
+
+        Queue::fake([RebuildTenantEnvironmentSnapshotJob::class]);
 
         if (! self::$bootstrapped) {
             $this->refreshLandlordAndTenantDatabases();
@@ -357,10 +361,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ->all();
 
         $this->assertEqualsCanonicalizing(
-            ['non-favoritable-poi', 'public-non-poi', 'public-poi'],
+            ['public-non-poi', 'public-poi'],
             $publicCatalogTypes
         );
-        $this->assertEqualsCanonicalizing(['non-favoritable-poi', 'public-poi'], $publicPoiCatalogTypes);
+        $this->assertEqualsCanonicalizing(['public-poi'], $publicPoiCatalogTypes);
     }
 
     public function test_queryability_and_public_navigation_backfill_repairs_missing_flags_without_overwriting_explicit_values(): void

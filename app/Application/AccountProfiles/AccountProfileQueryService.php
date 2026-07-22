@@ -31,6 +31,7 @@ class AccountProfileQueryService extends AbstractQueryService
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
@@ -49,43 +50,6 @@ class AccountProfileQueryService extends AbstractQueryService
             $includeArchived,
             $perPage
         );
-
-        return $this->hydrateOwnershipState($paginator);
-    }
-
-    public function paginateContactSourceCandidates(
-        ?string $excludedProfileId,
-        int $perPage = InputConstraints::PUBLIC_PAGE_SIZE_MAX,
-    ): LengthAwarePaginator {
-        $eligibleTypes = $this->typeSetProvider->contactChannelsEnabledTypes();
-        if ($eligibleTypes === []) {
-            return new LengthAwarePaginator(
-                collect(),
-                0,
-                $perPage,
-                max(1, (int) request()->query('page', 1)),
-            );
-        }
-
-        $query = AccountProfile::query()
-            ->where(function (Builder $query): void {
-                $query
-                    ->where('contact_mode', 'own')
-                    ->orWhereNull('contact_mode');
-            })
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->whereIn('profile_type', $eligibleTypes);
-
-        $normalizedExcludedProfileId = trim((string) $excludedProfileId);
-        if ($normalizedExcludedProfileId !== '') {
-            $query->where('_id', '!=', $normalizedExcludedProfileId);
-        }
-
-        $paginator = $query
-            ->orderBy('display_name')
-            ->orderBy('_id')
-            ->paginate($perPage);
 
         return $this->hydrateOwnershipState($paginator);
     }
@@ -125,7 +89,10 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $allowedTypes = $this->publiclyDiscoverableProfileTypes();
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy();
+        $allowedTypes = $publicCatalogPolicy->catalogTypeKeys();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
 
         $query = $this->withoutPublicProfileTypeFilters($queryParams);
@@ -134,9 +101,8 @@ class AccountProfileQueryService extends AbstractQueryService
         $search = trim((string) ($query['search'] ?? ''));
         unset($query['search']);
 
-        $baseQuery = AccountProfile::query()
-            ->where('is_active', true);
-        $this->applyPublicVisibilityConstraint($baseQuery);
+        $baseQuery = AccountProfile::query();
+        $publicCatalogPolicy->applyCatalogConstraint($baseQuery);
 
         if ($effectiveTypes === []) {
             $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
@@ -165,7 +131,10 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $allowedTypes = $this->publiclyDiscoverableProfileTypes();
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy();
+        $allowedTypes = $publicCatalogPolicy->catalogTypeKeys();
         $selectedTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $hasExplicitTypeFilter = $this->hasExplicitPublicTypeFilter($queryParams);
         $selectedTypesForItems = $hasExplicitTypeFilter && $selectedTypes === []
@@ -187,7 +156,7 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         $aggregate = $this->runPublicDiscoveryAggregate(
-            allowedTypes: $allowedTypes,
+            publicCatalogPolicy: $publicCatalogPolicy,
             selectedTypes: $selectedTypesForItems,
             taxonomyFilters: $taxonomyFilters,
             search: $search,
@@ -229,7 +198,8 @@ class AccountProfileQueryService extends AbstractQueryService
             ->map(fn (AccountProfile $profile): array => $this->format(
                 $profile,
                 $accountsById[(string) $profile->account_id] ?? null,
-                $userOperatedLookup
+                $userOperatedLookup,
+                $publicCatalogPolicy,
             ))
             ->values()
             ->all();
@@ -278,7 +248,8 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     public function publicNear(array $queryParams): array
     {
-        $allowedTypes = $this->nearEligibleProfileTypes();
+        $publicPoiPolicy = $this->publicCatalogSnapshotReader->publicPoiEligibilityPolicy();
+        $allowedTypes = $publicPoiPolicy->catalogTypeKeys();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $taxonomyFilters = $this->resolvePublicTaxonomyFilters($queryParams);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
@@ -308,15 +279,8 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         $search = trim((string) ($queryParams['search'] ?? ''));
-        $baseMatch = [
-            '$and' => [
-                ['is_active' => true],
-                ['deleted_at' => null],
-                ['profile_type' => ['$in' => $effectiveTypes]],
-                ['location' => ['$ne' => null]],
-                $this->publicVisibilityConstraintExpression(),
-            ],
-        ];
+        $baseMatch = $publicPoiPolicy->matchExpressionForTypeKeys($effectiveTypes);
+        $baseMatch['$and'][] = ['location' => ['$ne' => null]];
         if ($search !== '') {
             $baseMatch['$and'][] = $this->publicSearchExpression($search);
         }
@@ -400,12 +364,13 @@ class AccountProfileQueryService extends AbstractQueryService
         );
 
         $data = $orderedProfiles
-            ->map(function (AccountProfile $profile) use ($accountsById, $userOperatedLookup, $distanceById): array {
+            ->map(function (AccountProfile $profile) use ($accountsById, $userOperatedLookup, $distanceById, $publicPoiPolicy): array {
                 $id = (string) $profile->getKey();
                 $payload = $this->format(
                     $profile,
                     $accountsById[(string) $profile->account_id] ?? null,
-                    $userOperatedLookup
+                    $userOperatedLookup,
+                    $publicPoiPolicy,
                 );
                 $payload['distance_meters'] = $distanceById[$id] ?? null;
 
@@ -423,13 +388,12 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
-     * @param  array<int, string>  $allowedTypes
      * @param  array<int, string>  $selectedTypes
      * @param  array<string, array<int, string>>  $taxonomyFilters
      * @return array{page_rows: array<int, mixed>, total: int, discovery_filter_facets: array<string, mixed>}
      */
     private function runPublicDiscoveryAggregate(
-        array $allowedTypes,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
         array $selectedTypes,
         array $taxonomyFilters,
         string $search,
@@ -440,7 +404,7 @@ class AccountProfileQueryService extends AbstractQueryService
         $limit = $perPage;
 
         $pipeline = $this->buildPublicDiscoveryAggregatePipeline(
-            allowedTypes: $allowedTypes,
+            publicCatalogPolicy: $publicCatalogPolicy,
             selectedTypes: $selectedTypes,
             taxonomyFilters: $taxonomyFilters,
             search: $search,
@@ -466,27 +430,19 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
-     * @param  array<int, string>  $allowedTypes
      * @param  array<int, string>  $selectedTypes
      * @param  array<string, array<int, string>>  $taxonomyFilters
      * @return array<int, array<string, mixed>>
      */
     private function buildPublicDiscoveryAggregatePipeline(
-        array $allowedTypes,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
         array $selectedTypes,
         array $taxonomyFilters,
         string $search,
         int $skip,
         int $limit,
     ): array {
-        $baseMatch = [
-            '$and' => [
-                ['is_active' => true],
-                ['deleted_at' => null],
-                ['profile_type' => ['$in' => $allowedTypes]],
-                $this->publicVisibilityConstraintExpression(),
-            ],
-        ];
+        $baseMatch = $publicCatalogPolicy->catalogMatchExpression();
 
         if ($search !== '') {
             $baseMatch['$and'][] = $this->publicSearchExpression($search);
@@ -806,17 +762,17 @@ class AccountProfileQueryService extends AbstractQueryService
     public function publicFindBySlugOrFail(string $slug): AccountProfile
     {
         $normalizedSlug = trim($slug);
-        $allowedTypes = $this->publiclyNavigableProfileTypes();
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy();
 
-        if ($normalizedSlug === '' || $allowedTypes === []) {
+        if ($normalizedSlug === '') {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$slug]);
         }
 
         $query = AccountProfile::query()
             ->where('slug', $normalizedSlug)
-            ->where('is_active', true)
-            ->whereIn('profile_type', $allowedTypes);
-        $this->applyPublicVisibilityConstraint($query);
+            ->whereRaw($publicCatalogPolicy->publicDetailMatchExpression(requireSlug: true));
 
         $profile = $query->first();
         if (! $profile) {
@@ -828,17 +784,20 @@ class AccountProfileQueryService extends AbstractQueryService
 
     public function isPubliclyExposed(AccountProfile $profile): bool
     {
-        if ((bool) ($profile->is_active ?? false) === false) {
-            return false;
-        }
+        return $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy()
+            ->isPubliclyExposed($profile);
+    }
 
-        if (trim((string) ($profile->visibility ?? '')) !== 'public') {
-            return false;
-        }
-
-        return $this->typeSetProvider->isPubliclyNavigable(
-            trim((string) ($profile->profile_type ?? ''))
-        );
+    public function isPubliclyNavigable(AccountProfile $profile): bool
+    {
+        return $profile->getAttribute('is_active') === true
+            && $profile->getAttribute('deleted_at') === null
+            && trim((string) $profile->getAttribute('visibility')) === 'public'
+            && $this->typeSetProvider->isPubliclyNavigable(
+                trim((string) $profile->getAttribute('profile_type'))
+            );
     }
 
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
@@ -879,14 +838,16 @@ class AccountProfileQueryService extends AbstractQueryService
     private function format(
         AccountProfile $profile,
         ?Account $account = null,
-        array $userOperatedLookup = []
+        array $userOperatedLookup = [],
+        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
     ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
         $resolvedAccount = $account
             ?? Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $slug !== ''
-            && $this->typeSetProvider->isPubliclyNavigable((string) $profile->profile_type);
+        $canOpenPublicDetail = ($publicCatalogPolicy
+            ?? $this->publicCatalogSnapshotReader->catalogSnapshot()->policy())
+            ->canOpenPublicDetail($profile);
 
         return [
             'id' => (string) $profile->_id,
@@ -1034,14 +995,10 @@ class AccountProfileQueryService extends AbstractQueryService
             return;
         }
 
-        $pattern = '%'.addcslashes($search, '%_\\').'%';
-
-        $query->where(function (Builder $searchQuery) use ($pattern): void {
-            $searchQuery
-                ->where('display_name', 'like', $pattern)
-                ->orWhere('slug', 'like', $pattern)
-                ->orWhere('taxonomy_terms.value', 'like', $pattern);
-        });
+        $query->where(
+            'name_search_key',
+            new Regex('^'.preg_quote($search, '/'), 'i'),
+        );
     }
 
     /**
@@ -1055,43 +1012,6 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         $query->whereRaw($expression);
-    }
-
-    private function applyPublicVisibilityConstraint(Builder $query): void
-    {
-        $query->whereRaw($this->publicVisibilityConstraintExpression());
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function publicVisibilityConstraintExpression(): array
-    {
-        return ['visibility' => 'public'];
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function publiclyDiscoverableProfileTypes(): array
-    {
-        return $this->typeSetProvider->publicDiscoverySurfaceTypes();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function publiclyNavigableProfileTypes(): array
-    {
-        return $this->typeSetProvider->publiclyNavigableTypes();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function nearEligibleProfileTypes(): array
-    {
-        return $this->typeSetProvider->publicPoiCatalogTypes();
     }
 
     /**
@@ -1324,14 +1244,8 @@ class AccountProfileQueryService extends AbstractQueryService
             return [];
         }
 
-        $regex = new Regex(preg_quote($query, '/'), 'i');
-
         return [
-            '$or' => [
-                ['display_name' => $regex],
-                ['slug' => $regex],
-                ['taxonomy_terms.value' => $regex],
-            ],
+            'name_search_key' => new Regex('^'.preg_quote($query, '/'), 'i'),
         ];
     }
 

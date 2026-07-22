@@ -205,6 +205,29 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertNotEmpty($errors['location.lng'] ?? null);
     }
 
+    public function test_onboarding_rejects_nested_group_member_arrays(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        $accountsBefore = Account::query()->count();
+        $profilesBefore = AccountProfile::query()->count();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Nested Onboarding '.Str::random(6),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'venue',
+            'nested_profile_groups' => [[
+                'id' => 'parceiros',
+                'label' => 'Parceiros',
+                'account_profile_ids' => ['605b9b3b8f1d2c6d88f4c123'],
+            ]],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups.0.account_profile_ids']);
+        $this->assertSame($accountsBefore, Account::query()->count());
+        $this->assertSame($profilesBefore, AccountProfile::query()->count());
+    }
+
     public function test_poi_enabled_onboarding_projects_map_poi_without_queue_worker_dependency(): void
     {
         Queue::fake();
@@ -276,7 +299,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $profileMock = Mockery::mock(AccountProfileManagementService::class);
-        $profileMock->shouldReceive('createWithinCurrentTransaction')
+        $profileMock->shouldReceive('createWithinTransactionContext')
             ->once()
             ->andThrow(new \RuntimeException('Simulated profile write failure'));
         $this->app->instance(AccountProfileManagementService::class, $profileMock);

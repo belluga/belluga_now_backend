@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\DiscoveryFilters;
 
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeMediaService;
 use App\Application\Events\EventTypeMediaService;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
@@ -33,6 +34,7 @@ final class DiscoveryFilterPublicCatalogService
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly EventTypeMediaService $eventTypeMediaService,
         private readonly AccountProfileTypeMediaService $accountProfileTypeMediaService,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
     ) {}
 
     /**
@@ -410,31 +412,50 @@ final class DiscoveryFilterPublicCatalogService
      */
     private function publiclyDiscoverableAccountProfileTypeOptions(?string $baseUrl = null): array
     {
-        return TenantProfileType::query()
-            ->publicDiscoverySurface()
-            ->orderBy('label')
-            ->limit(self::TYPE_OPTIONS_MAX)
-            ->get(['_id', 'type', 'label', 'visual', 'poi_visual', 'allowed_taxonomies', 'type_asset_url'])
-            ->map(fn (TenantProfileType $type): array => [
-                'value' => trim((string) ($type->type ?? '')),
-                'label' => trim((string) ($type->label ?? $type->type ?? '')),
-                'visual' => $this->resolveTypeOptionVisual(
-                    rawVisual: $type->poi_visual ?? $type->visual ?? null,
-                    rawTypeAssetUrl: $type->type_asset_url ?? null,
-                    publicUrlResolver: fn (string $url): ?string => $baseUrl === null
-                        ? $url
-                        : $this->accountProfileTypeMediaService->normalizePublicUrl(
-                            $baseUrl,
-                            $type,
-                            'type_asset',
-                            $url
-                        ),
-                ),
-                'allowed_taxonomies' => $this->normalizeTokenList($type->allowed_taxonomies ?? []),
-            ])
+        return collect($this->publicCatalogSnapshotReader->catalogSnapshot()->filterOptions())
+            ->take(self::TYPE_OPTIONS_MAX)
+            ->map(function (array $option) use ($baseUrl): array {
+                $type = $this->snapshotProfileType($option);
+
+                return [
+                    'value' => trim((string) ($option['value'] ?? '')),
+                    'label' => trim((string) ($option['label'] ?? $option['value'] ?? '')),
+                    'visual' => $this->resolveTypeOptionVisual(
+                        rawVisual: $option['poi_visual'] ?? $option['visual'] ?? null,
+                        rawTypeAssetUrl: $option['type_asset_url'] ?? null,
+                        publicUrlResolver: fn (string $url): ?string => $baseUrl === null
+                            ? $url
+                            : $this->accountProfileTypeMediaService->normalizePublicUrl(
+                                $baseUrl,
+                                $type,
+                                'type_asset',
+                                $url
+                            ),
+                    ),
+                    'allowed_taxonomies' => $this->normalizeTokenList($option['allowed_taxonomies'] ?? []),
+                ];
+            })
             ->filter(static fn (array $item): bool => $item['value'] !== '' && $item['label'] !== '')
             ->values()
             ->all();
+    }
+
+    /**
+     * The snapshot already holds the metadata required by ModelMediaService.
+     * This model is never persisted or queried.
+     *
+     * @param  array<string, mixed>  $option
+     */
+    private function snapshotProfileType(array $option): TenantProfileType
+    {
+        $type = new TenantProfileType;
+        $type->setRawAttributes([
+            '_id' => (string) ($option['id'] ?? ''),
+            'type' => (string) ($option['value'] ?? ''),
+            'type_asset_url' => $option['type_asset_url'] ?? null,
+        ]);
+
+        return $type;
     }
 
     /**
