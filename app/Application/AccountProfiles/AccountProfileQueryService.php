@@ -995,14 +995,10 @@ class AccountProfileQueryService extends AbstractQueryService
             return;
         }
 
-        $pattern = '%'.addcslashes($search, '%_\\').'%';
-
-        $query->where(function (Builder $searchQuery) use ($pattern): void {
-            $searchQuery
-                ->where('display_name', 'like', $pattern)
-                ->orWhere('slug', 'like', $pattern)
-                ->orWhere('taxonomy_terms.value', 'like', $pattern);
-        });
+        $query->where(
+            'name_search_key',
+            new Regex('^'.preg_quote($search, '/'), 'i'),
+        );
     }
 
     /**
@@ -1248,14 +1244,8 @@ class AccountProfileQueryService extends AbstractQueryService
             return [];
         }
 
-        $regex = new Regex(preg_quote($query, '/'), 'i');
-
         return [
-            '$or' => [
-                ['display_name' => $regex],
-                ['slug' => $regex],
-                ['taxonomy_terms.value' => $regex],
-            ],
+            'name_search_key' => new Regex('^'.preg_quote($query, '/'), 'i'),
         ];
     }
 

@@ -1494,6 +1494,70 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('Italian Venue', $items->first()['display_name'] ?? null);
     }
 
+    public function test_public_account_profile_index_uses_name_search_key_prefix_only(): void
+    {
+        $this->createAccountUser([]);
+
+        $prefix = $this->createNestedProfileFixture(
+            'Xapuri Cafe',
+            'slug-ignorada',
+            [
+                'taxonomy_terms' => [
+                    ['type' => 'cuisine', 'value' => 'amazonia'],
+                ],
+                'taxonomy_terms_flat' => ['cuisine:amazonia'],
+            ]
+        );
+        $prefix->forceFill(['name_search_key' => 'xapuri cafe'])->save();
+        $interior = $this->createNestedProfileFixture(
+            'Casa Xapuri',
+            'casa-xapuri',
+        );
+        $interior->forceFill(['name_search_key' => 'casa xapuri'])->save();
+        $slugOnly = $this->createNestedProfileFixture(
+            'Slug Only',
+            'xapuri-slug',
+        );
+        $slugOnly->forceFill(['name_search_key' => 'slug only'])->save();
+        $taxonomyOnly = $this->createNestedProfileFixture(
+            'Taxonomy Only',
+            'taxonomy-only',
+            [
+                'taxonomy_terms' => [
+                    ['type' => 'cuisine', 'value' => 'xapuri'],
+                ],
+                'taxonomy_terms_flat' => ['cuisine:xapuri'],
+            ]
+        );
+        $taxonomyOnly->forceFill(['name_search_key' => 'taxonomy only'])->save();
+        $accented = $this->createNestedProfileFixture(
+            'João Café',
+            'joao-cafe',
+        );
+        $accented->forceFill(['name_search_key' => 'joao cafe'])->save();
+
+        $prefixResponse = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?search=xa"
+        );
+
+        $prefixResponse->assertOk();
+        $prefixIds = collect($prefixResponse->json('data'))->pluck('id')->all();
+        $this->assertSame([(string) $prefix->_id], $prefixIds);
+        $this->assertNotContains((string) $interior->_id, $prefixIds);
+        $this->assertNotContains((string) $slugOnly->_id, $prefixIds);
+        $this->assertNotContains((string) $taxonomyOnly->_id, $prefixIds);
+
+        $accentedResponse = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?search=joao"
+        );
+
+        $accentedResponse->assertOk();
+        $this->assertSame(
+            [(string) $accented->_id],
+            collect($accentedResponse->json('data'))->pluck('id')->all(),
+        );
+    }
+
     public function test_public_account_profile_index_returns_runtime_facets_for_the_full_filtered_universe_before_pagination(): void
     {
         $this->createAccountUser([]);
@@ -3498,7 +3562,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame(10, $payload['page_size']);
     }
 
-    public function test_public_account_profile_index_supports_search_param(): void
+    public function test_public_account_profile_index_supports_name_search_key_prefix_param(): void
     {
         $this->createAccountUser([]);
 
@@ -3507,7 +3571,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'document' => 'DOC-SEARCH-2',
         ]);
 
-        AccountProfile::create([
+        $searchable = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'Jazz House',
@@ -3516,14 +3580,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ],
             'is_active' => true,
         ]);
-        AccountProfile::create([
+        $searchable->forceFill(['name_search_key' => 'vegan venue'])->save();
+        $nonMatching = AccountProfile::create([
             'account_id' => (string) $secondAccount->_id,
-            'profile_type' => 'personal',
-            'display_name' => 'Classical Club',
+            'profile_type' => 'venue',
+            'display_name' => 'Interior Vegan Match',
             'is_active' => true,
         ]);
+        $nonMatching->forceFill(['name_search_key' => 'interior vegan match'])->save();
 
-        $response = $this->getJson("{$this->base_api_tenant}account_profiles?search=vegan");
+        $response = $this->getJson("{$this->base_api_tenant}account_profiles?search=ve");
 
         $response->assertStatus(200);
         $items = collect($response->json('data'));
@@ -3533,8 +3599,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $partialResponse = $this->getJson("{$this->base_api_tenant}account_profiles?search=ega");
         $partialResponse->assertStatus(200);
         $partialItems = collect($partialResponse->json('data'));
-        $this->assertCount(1, $partialItems);
-        $this->assertSame('Jazz House', $partialItems->first()['display_name'] ?? null);
+        $this->assertCount(0, $partialItems);
     }
 
     public function test_admin_account_profile_index_filters_by_ownership_state(): void
