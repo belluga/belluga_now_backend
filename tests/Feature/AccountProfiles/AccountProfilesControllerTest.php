@@ -1182,7 +1182,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue($items->every(fn (array $item): bool => $item['profile_type'] === 'venue'));
     }
 
-    public function test_public_account_profile_index_returns_only_favoritable_types(): void
+    public function test_public_account_profile_index_returns_only_publicly_discoverable_non_personal_types(): void
     {
         $this->createAccountUser([]);
 
@@ -1213,7 +1213,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('venue', $items->first()['profile_type'] ?? null);
     }
 
-    public function test_public_account_profile_index_excludes_publicly_discoverable_non_favoritable_types(): void
+    public function test_public_account_profile_index_includes_publicly_discoverable_non_favoritable_types(): void
     {
         $this->createAccountUser([]);
 
@@ -1256,8 +1256,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $items = collect($response->json('data'));
-        $this->assertSame(['venue'], $items->pluck('profile_type')->unique()->values()->all());
-        $this->assertFalse(
+        $this->assertEqualsCanonicalizing(
+            ['internal_partner', 'venue'],
+            $items->pluck('profile_type')->unique()->values()->all()
+        );
+        $this->assertTrue(
             $items->contains(fn (array $item): bool => ($item['profile_type'] ?? null) === 'internal_partner')
         );
     }
@@ -1331,7 +1334,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $detailResponse->assertStatus(404);
     }
 
-    public function test_public_account_profile_detail_rejects_a_navigable_non_favoritable_type(): void
+    public function test_public_account_profile_detail_shows_a_navigable_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
 
@@ -1357,10 +1360,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
 
         $this->getJson("{$this->base_api_tenant}account_profiles/{$profile->slug}")
-            ->assertStatus(404);
+            ->assertStatus(200)
+            ->assertJsonPath('data.profile_type', 'navigable_non_favoritable');
     }
 
-    public function test_public_account_profile_index_rejects_filter_bypass_for_non_favoritable_type(): void
+    public function test_public_account_profile_index_allows_filter_for_publicly_discoverable_non_favoritable_type(): void
     {
         $this->createAccountUser([]);
 
@@ -1394,7 +1398,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(200);
-        $this->assertSame([], $response->json('data'));
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('internal_partner', $items->first()['profile_type'] ?? null);
     }
 
     public function test_public_account_profile_index_excludes_unbackfilled_types_missing_required_public_capabilities(): void
@@ -2936,7 +2942,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         return $event;
     }
 
-    public function test_public_account_profile_near_returns_distance_sorted_favoritable_profiles_only(): void
+    public function test_public_account_profile_near_returns_distance_sorted_public_poi_types(): void
     {
         $this->createAccountUser([]);
 
@@ -3031,16 +3037,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('has_more', false);
 
         $items = collect($response->json('data'));
-        $this->assertCount(2, $items);
-        $this->assertTrue(
-            $items->every(static fn (array $item): bool => ($item['profile_type'] ?? null) === 'venue')
-        );
+        $this->assertCount(3, $items);
         $this->assertSame(
-            ['Near Venue', 'Far Venue'],
+            ['Near Venue', 'Blocked Poi', 'Far Venue'],
             $items->pluck('display_name')->values()->all()
         );
         $this->assertFalse(
-            $items->contains(static fn (array $item): bool => ($item['display_name'] ?? null) === 'Blocked Poi')
+            $items->contains(static fn (array $item): bool => ($item['display_name'] ?? null) === 'Non Poi Artist')
         );
         $this->assertNotNull($items->first()['distance_meters'] ?? null);
         $this->assertIsNumeric($items->first()['distance_meters'] ?? null);
