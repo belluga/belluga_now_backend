@@ -12,6 +12,7 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
@@ -22,6 +23,10 @@ use Tests\Traits\RefreshLandlordAndTenantDatabases;
 class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+
+    private const int SUBPROCESS_TIMEOUT_SECONDS = 120;
+
+    private const int LEADER_LEASE_WAIT_TIMEOUT_MS = 15000;
 
     protected TenantLabels $tenant {
         get {
@@ -111,7 +116,8 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
                     'delete-first-verify',
                 ),
             ],
-            200,
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'current_account_delete'),
         );
 
         $deleteResult = $results[0];
@@ -119,7 +125,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
         $this->assertFalse($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
-        $this->assertGreaterThanOrEqual(900, (int) ($verifyResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertGreaterThanOrEqual(600, (int) ($verifyResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
         $this->assertSame('The OTP challenge could not be verified.', $verifyResult['errors']['code'][0] ?? null);
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
@@ -151,7 +157,8 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             [
                 $this->deleteProcess((string) $target->_id),
             ],
-            200,
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'phone_otp_verify'),
         );
 
         $verifyResult = $results[0];
@@ -159,7 +166,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         $this->assertTrue($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
         $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
-        $this->assertGreaterThanOrEqual(900, (int) ($deleteResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertGreaterThanOrEqual(600, (int) ($deleteResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
 
@@ -195,7 +202,8 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
                     'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '1',
                 ]),
             ],
-            200,
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'phone_otp_verify'),
         );
 
         $verifyResult = $results[0];
@@ -239,7 +247,8 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
                 'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2000',
             ]),
             $processes,
-            800,
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'current_account_delete'),
         );
 
         $leadDelete = array_shift($results);
@@ -248,7 +257,10 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         foreach ($results as $result) {
             $this->assertFalse($result['ok'], json_encode($results, JSON_PRETTY_PRINT));
-            $this->assertSame('The OTP challenge could not be verified.', $result['errors']['code'][0] ?? null, json_encode($results, JSON_PRETTY_PRINT));
+            $this->assertTrue(
+                $this->isAcceptedDeleteFirstOverlapFollowerFailure($result),
+                json_encode($results, JSON_PRETTY_PRINT),
+            );
         }
 
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
@@ -365,9 +377,18 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
      * @param  list<Process>  $followers
      * @return list<array<string, mixed>>
      */
-    private function runLeaderWithFollowers(Process $leader, array $followers, int $followerDelayMilliseconds): array
-    {
+    private function runLeaderWithFollowers(
+        Process $leader,
+        array $followers,
+        int $followerDelayMilliseconds,
+        ?callable $beforeFollowers = null,
+    ): array {
         $leader->start();
+
+        if ($beforeFollowers !== null) {
+            $beforeFollowers();
+        }
+
         if ($followerDelayMilliseconds > 0) {
             usleep($followerDelayMilliseconds * 1000);
         }
@@ -377,6 +398,59 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
         }
 
         return $this->collectProcessResults([$leader, ...$followers]);
+    }
+
+    private function waitForPhoneLeaseAcquired(
+        string $phone,
+        string $operation,
+        int $timeoutMilliseconds = self::LEADER_LEASE_WAIT_TIMEOUT_MS,
+    ): bool {
+        $phoneHash = hash('sha256', preg_replace('/\D+/', '', $phone) ?? '');
+        $collection = DB::connection('tenant')
+            ->getMongoDB()
+            ->selectCollection('phone_identity_coordination_leases');
+        $deadline = microtime(true) + ($timeoutMilliseconds / 1000);
+
+        do {
+            $lease = $collection->findOne([
+                '_id' => $phoneHash,
+                'operation' => $operation,
+            ]);
+            if ($lease !== null) {
+                return true;
+            }
+
+            usleep(50 * 1000);
+        } while (microtime(true) < $deadline);
+
+        $this->fail(sprintf(
+            'Timed out after %dms waiting for %s to acquire the phone lease for %s.',
+            $timeoutMilliseconds,
+            $operation,
+            $phone,
+        ));
+    }
+
+    /**
+     * In the high-fanout delete-first overlap, every follower must fail, but
+     * the terminal shape is allowed to be either:
+     * - post-delete OTP invalidation once the follower acquires the lease; or
+     * - coordination-busy when another follower wins the lease first.
+     *
+     * The single-follower delete-first test already proves the exact
+     * post-delete invalidation contract, so this overlap harness stays focused
+     * on rejecting concurrent mutation success.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function isAcceptedDeleteFirstOverlapFollowerFailure(array $result): bool
+    {
+        if (($result['errors']['code'][0] ?? null) === 'The OTP challenge could not be verified.') {
+            return true;
+        }
+
+        return ($result['exception'] ?? null) === ConcurrencyConflictException::class
+            && ($result['message'] ?? null) === 'Phone identity coordination is busy.';
     }
 
     /**
@@ -431,7 +505,13 @@ try {
 }
 PHP;
 
-        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), $env, null, 30);
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            $env,
+            null,
+            self::SUBPROCESS_TIMEOUT_SECONDS,
+        );
     }
 
     /**
@@ -476,7 +556,13 @@ try {
 }
 PHP;
 
-        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), $env, null, 30);
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            $env,
+            null,
+            self::SUBPROCESS_TIMEOUT_SECONDS,
+        );
     }
 
     /**

@@ -52,7 +52,7 @@ final class CurrentTenantAccountDeletionService
             throw new \RuntimeException('Current tenant identity is not resolvable for deletion.');
         }
 
-        $phoneHashes = $this->normalizedStrings((array) ($user->phone_hashes ?? []));
+        $phoneHashes = $this->phoneHashesFor($user);
         $lease = $this->phoneIdentityCoordination->acquire($phoneHashes, 'current_account_delete');
 
         try {
@@ -465,6 +465,26 @@ final class CurrentTenantAccountDeletionService
             ->unique()
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function phoneHashesFor(AccountUser $user): array
+    {
+        $persistedHashes = $this->normalizedStrings((array) ($user->phone_hashes ?? []));
+        $derivedHashes = [];
+
+        foreach ((array) ($user->phones ?? []) as $phone) {
+            $digits = preg_replace('/\D+/', '', (string) $phone) ?? '';
+            if ($digits === '') {
+                continue;
+            }
+
+            $derivedHashes[] = hash('sha256', $digits);
+        }
+
+        return $this->normalizedStrings([...$persistedHashes, ...$derivedHashes]);
     }
 
     private function sleepBeforeCriticalMutationHook(): void
