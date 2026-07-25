@@ -8,8 +8,12 @@
       "repo": "laravel-app",
       "kind": "workflow-parity",
       "cwd": "../../../..",
-      "command": ["docker", "compose", "exec", "-T", "app", "composer", "run", "architecture:guardrails"],
-      "description": "Run the Laravel architecture guardrails inside the canonical local app container."
+      "command": [
+        "bash",
+        "-lc",
+        "if ! docker compose ps --status running --services | grep -Fxq app; then echo \"INFO: reconciling local Docker runtime for Laravel architecture gate...\"; COMPOSE_PROFILES=local-db docker compose down --remove-orphans >/dev/null 2>&1 || true; COMPOSE_PROFILES=local-db docker compose up -d app worker scheduler nginx; fi && docker compose exec -T app composer run architecture:guardrails"
+      ],
+      "description": "Run the Laravel architecture guardrails inside the canonical local app container, bootstrapping the local Docker runtime first when needed."
     },
     {
       "id": "laravel-stage-full-suite",
