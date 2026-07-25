@@ -1136,16 +1136,36 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.1.display_name', 'Zulu Collective 102');
     }
 
-    public function test_event_account_profile_candidates_endpoint_excludes_canonical_venue_profiles_from_related_results(): void
+    public function test_event_account_profile_candidates_endpoint_includes_every_queryable_profile_type_in_related_results(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
 
-        $venue = $this->createAccountProfile('venue', 'Selector Shared Venue');
-        $artist = $this->createAccountProfile('artist', 'Selector Shared Artist');
+        $queryableTypes = TenantProfileType::query()
+            ->get()
+            ->filter(static function (TenantProfileType $profileType): bool {
+                $capabilities = is_array($profileType->capabilities ?? null)
+                    ? $profileType->capabilities
+                    : [];
+
+                return (bool) ($capabilities['is_queryable'] ?? false);
+            })
+            ->map(static fn (TenantProfileType $profileType): string => trim((string) $profileType->type))
+            ->filter()
+            ->values();
+
+        $this->assertNotEmpty($queryableTypes);
+
+        $expectedIds = $queryableTypes
+            ->map(fn (string $profileType): string => (string) $this->createAccountProfile(
+                $profileType,
+                'Selector Capability Coverage '.$profileType,
+            )->_id)
+            ->values()
+            ->all();
 
         $response = $this->getJson(
-            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&search=selector%20shared"
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&search=selector%20capability%20coverage"
         );
 
         $response->assertStatus(200);
@@ -1153,8 +1173,51 @@ class EventCrudControllerTest extends TestCaseTenant
         $candidates = collect($response->json('data') ?? []);
         $candidateIds = $candidates->pluck('id')->values()->all();
 
-        $this->assertContains((string) $artist->_id, $candidateIds);
-        $this->assertNotContains((string) $venue->_id, $candidateIds);
+        $this->assertEqualsCanonicalizing($expectedIds, $candidateIds);
+    }
+
+    public function test_event_account_profile_candidates_endpoint_filters_related_results_by_queryable_profile_type(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $queryableTypes = TenantProfileType::query()
+            ->get()
+            ->filter(static function (TenantProfileType $profileType): bool {
+                $capabilities = is_array($profileType->capabilities ?? null)
+                    ? $profileType->capabilities
+                    : [];
+
+                return (bool) ($capabilities['is_queryable'] ?? false);
+            })
+            ->map(static fn (TenantProfileType $profileType): string => trim((string) $profileType->type))
+            ->filter()
+            ->values();
+
+        $this->assertGreaterThanOrEqual(2, $queryableTypes->count());
+
+        $profilesByType = $queryableTypes
+            ->mapWithKeys(fn (string $profileType): array => [
+                $profileType => $this->createAccountProfile(
+                    $profileType,
+                    'Selector Server Filter Coverage '.$profileType,
+                ),
+            ]);
+        $selectedType = (string) $queryableTypes->first();
+        $expectedIds = [(string) $profilesByType->get($selectedType)->_id];
+
+        $response = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&profile_type={$selectedType}&search=selector%20server%20filter%20coverage"
+        );
+
+        $response->assertStatus(200);
+
+        $candidateIds = collect($response->json('data') ?? [])
+            ->pluck('id')
+            ->values()
+            ->all();
+
+        $this->assertSame($expectedIds, $candidateIds);
     }
 
     public function test_event_account_profile_candidates_endpoint_excludes_non_queryable_related_profiles(): void
@@ -3185,21 +3248,51 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['event_parties.0.metadata']);
     }
 
-    public function test_event_create_rejects_venue_account_profile_reference_in_event_parties(): void
+    public function test_event_create_accepts_every_queryable_account_profile_type_in_event_parties(): void
     {
+        $queryableTypes = TenantProfileType::query()
+            ->get()
+            ->filter(static function (TenantProfileType $profileType): bool {
+                $capabilities = is_array($profileType->capabilities ?? null)
+                    ? $profileType->capabilities
+                    : [];
+
+                return (bool) ($capabilities['is_queryable'] ?? false);
+            })
+            ->map(static fn (TenantProfileType $profileType): string => trim((string) $profileType->type))
+            ->filter()
+            ->values();
+
+        $this->assertNotEmpty($queryableTypes);
+
+        $profiles = $queryableTypes
+            ->map(fn (string $profileType): AccountProfile => $this->createAccountProfile(
+                $profileType,
+                'Event party capability coverage '.$profileType,
+            ));
         $payload = $this->makeEventPayload([
-            'event_parties' => [
-                [
-                    'party_ref_id' => (string) $this->venue->_id,
+            'event_parties' => $profiles
+                ->map(static fn (AccountProfile $profile): array => [
+                    'party_ref_id' => (string) $profile->_id,
                     'permissions' => ['can_edit' => true],
-                ],
-            ],
+                ])
+                ->values()
+                ->all(),
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['event_parties']);
+        $response->assertCreated();
+        $actualIds = collect($response->json('data.event_parties') ?? [])
+            ->pluck('party_ref_id')
+            ->values()
+            ->all();
+        $expectedIds = $profiles
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+            ->values()
+            ->all();
+
+        $this->assertEqualsCanonicalizing($expectedIds, $actualIds);
     }
 
     public function test_event_create_rejects_non_queryable_account_profile_reference_in_event_parties(): void

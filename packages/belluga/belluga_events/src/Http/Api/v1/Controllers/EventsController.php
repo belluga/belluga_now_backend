@@ -58,6 +58,7 @@ class EventsController extends Controller
         $validated = $request->validated();
         $candidateType = trim((string) ($validated['type'] ?? ''));
         $search = isset($validated['search']) ? trim((string) $validated['search']) : null;
+        $profileType = isset($validated['profile_type']) ? trim((string) $validated['profile_type']) : null;
         $page = isset($validated['page']) ? (int) $validated['page'] : 1;
         $perPage = isset($validated['per_page']) ? (int) $validated['per_page'] : (isset($validated['page_size']) ? (int) $validated['page_size'] : 15);
         $accountContextId = $candidateType === 'physical_host'
@@ -72,6 +73,7 @@ class EventsController extends Controller
             $perPage,
             $accountContextId,
             $baseUrl !== '' ? $baseUrl : null,
+            $profileType,
         );
 
         return response()->json($candidates->toArray());

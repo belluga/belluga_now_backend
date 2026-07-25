@@ -63,6 +63,7 @@ interface EventProfileResolverContract
         int $perPage = 15,
         ?string $accountId = null,
         ?string $baseUrl = null,
+        ?string $profileType = null,
     ): LengthAwarePaginator;
 
     public function isProfileTypeQueryable(string $profileType): bool;

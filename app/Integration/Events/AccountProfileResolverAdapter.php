@@ -176,10 +176,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [];
         }
 
-        $eligibleTypes = array_values(array_filter(
-            $this->resolveQueryableProfileTypes(),
-            static fn (string $type): bool => $type !== 'venue'
-        ));
+        $eligibleTypes = $this->resolveQueryableProfileTypes();
         $profiles = AccountProfile::query()
             ->whereIn('_id', $requestedIds)
             ->whereIn('profile_type', $eligibleTypes)
@@ -273,16 +270,22 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         int $perPage = 15,
         ?string $accountId = null,
         ?string $baseUrl = null,
+        ?string $profileType = null,
     ): LengthAwarePaginator {
         $normalizedPage = max(1, $page);
         $normalizedPerPage = max(1, min($perPage, 50));
         $normalizedSearch = trim((string) ($search ?? ''));
+        $normalizedProfileType = trim((string) ($profileType ?? ''));
         $likePattern = $normalizedSearch === ''
             ? null
             : '%'.addcslashes($normalizedSearch, '%_\\').'%';
 
         $query = match ($candidateType) {
-            'related_account_profile' => $this->queryRelatedAccountProfileCandidates($likePattern, $accountId),
+            'related_account_profile' => $this->queryRelatedAccountProfileCandidates(
+                $likePattern,
+                $accountId,
+                $normalizedProfileType !== '' ? $normalizedProfileType : null,
+            ),
             'physical_host' => $this->queryPhysicalHostCandidates($likePattern, $accountId),
             default => throw ValidationException::withMessages([
                 'type' => ['Unsupported account profile candidate type.'],
@@ -335,18 +338,23 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @return Builder<AccountProfile>
      */
-    private function queryRelatedAccountProfileCandidates(?string $likePattern, ?string $accountId): Builder
+    private function queryRelatedAccountProfileCandidates(
+        ?string $likePattern,
+        ?string $accountId,
+        ?string $profileType = null,
+    ): Builder
     {
-        $allowedTypes = array_values(array_filter(
-            $this->resolveQueryableProfileTypes(),
-            static fn (string $type): bool => $type !== 'venue'
-        ));
+        $allowedTypes = $this->resolveQueryableProfileTypes();
         if ($allowedTypes === []) {
             return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
         }
 
         $query = AccountProfile::query()
             ->whereIn('profile_type', $allowedTypes);
+
+        if ($profileType !== null) {
+            $query->where('profile_type', $profileType);
+        }
 
         if ($accountId !== null) {
             $query->where('account_id', $accountId);
@@ -470,7 +478,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             }
 
             $profileType = trim((string) ($profile->profile_type ?? ''));
-            if (! $this->isProfileTypeQueryable($profileType) || $profileType === 'venue') {
+            if (! $this->isProfileTypeQueryable($profileType)) {
                 throw ValidationException::withMessages([
                     'event_parties' => ['Related account profile type is not selectable.'],
                 ]);
