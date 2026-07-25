@@ -2129,6 +2129,78 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
     }
 
+    public function test_public_account_profile_show_by_slug_inherits_source_bubble_when_mirror_has_no_local_bubble_selection(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+
+        $source = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Bubble Source Venue',
+            'slug' => 'bubble-source-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $sourceResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $source->_id,
+            [
+                'contact_mode' => 'own',
+                'contact_channels' => [
+                    [
+                        'draft_key' => 'whatsapp-source',
+                        'type' => 'whatsapp',
+                        'value' => '+55 (27) 99999-1111',
+                        'title' => 'WhatsApp principal',
+                    ],
+                ],
+                'contact_bubble_channel_draft_key' => 'whatsapp-source',
+            ],
+            $this->getHeaders()
+        );
+
+        $sourceResponse->assertOk();
+        $sourceBubbleChannelId = $sourceResponse->json('data.contact_bubble_channel_id');
+        $this->assertIsString($sourceBubbleChannelId);
+
+        $mirrorAccount = Account::create([
+            'name' => 'Mirror Account Without Bubble Override',
+            'document' => 'DOC-MIRROR-WITHOUT-BUBBLE-'.uniqid('', true),
+        ]);
+        $mirror = AccountProfile::create([
+            'account_id' => (string) $mirrorAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Mirrored Bubble Venue',
+            'slug' => 'mirrored-bubble-venue',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $mirrorResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $mirror->_id,
+            [
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+            ],
+            $this->getHeaders()
+        );
+
+        $mirrorResponse->assertOk();
+        $mirrorResponse->assertJsonPath('data.contact_bubble_channel_id', null);
+        $mirrorResponse->assertJsonPath('data.effective_contact_bubble_channel.id', $sourceBubbleChannelId);
+
+        $this->createAccountUser([]);
+
+        $publicResponse = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/mirrored-bubble-venue"
+        );
+
+        $publicResponse->assertOk();
+        $publicResponse->assertJsonPath('data.contact_mode', 'mirrored_account_profile');
+        $publicResponse->assertJsonPath('data.effective_contact_source.id', (string) $source->_id);
+        $publicResponse->assertJsonPath('data.effective_contact_bubble_channel.id', $sourceBubbleChannelId);
+    }
+
     public function test_contact_mirror_source_deactivation_fails_closed_for_reads_and_new_writes(): void
     {
         $this->enableContactChannelsCapability('venue');
@@ -5160,6 +5232,78 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sponsorsPage->assertJsonPath('data.0.id', (string) $sponsor->_id);
     }
 
+    public function test_account_profile_update_persists_nested_profile_groups_with_members_in_single_request(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Parent Single Request',
+            'slug' => 'nested-parent-single-request',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $partnerA = $this->createNestedProfileFixture('Single Request Partner A', 'single-request-partner-a');
+        $partnerB = $this->createNestedProfileFixture('Single Request Partner B', 'single-request-partner-b');
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'nested_profile_groups' => [[
+                    'id' => 'parceiros',
+                    'label' => 'Parceiros',
+                    'order' => 0,
+                    'account_profile_ids' => [
+                        (string) $partnerB->_id,
+                        (string) $partnerA->_id,
+                    ],
+                ]],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $response->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
+
+        $readback = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            $this->getHeaders()
+        );
+
+        $readback->assertOk();
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
+
+        $membersPage = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        );
+        $membersPage->assertOk();
+        $membersPage->assertJsonPath('data.0.id', (string) $partnerB->_id);
+        $membersPage->assertJsonPath('data.1.id', (string) $partnerA->_id);
+
+        $publicDetail = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/{$parent->slug}",
+            $this->getHeaders()
+        );
+
+        $publicDetail->assertOk();
+        $publicDetail->assertJsonCount(1, 'data.nested_profile_groups');
+        $publicDetail->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $publicDetail->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
+        $publicDetail->assertJsonPath(
+            'data.nested_profile_groups.0.members_path',
+            "/api/v1/account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members"
+        );
+        $publicDetail->assertJsonPath('data.nested_profile_groups.0.profiles.0.id', (string) $partnerB->_id);
+        $publicDetail->assertJsonPath('data.nested_profile_groups.0.profiles.1.id', (string) $partnerA->_id);
+        $this->assertSame(
+            ['single-request-partner-b', 'single-request-partner-a'],
+            collect($publicDetail->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
+        );
+    }
+
     public function test_relation_admission_touches_contact_and_nested_targets_before_the_parent_commit(): void
     {
         $this->enableContactChannelsCapability('venue');
@@ -5554,10 +5698,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadataResponse->assertOk();
 
         $collection = DB::connection('tenant')->getDatabase()
-            ->selectCollection('account_profile_nested_group_members');
+            ->selectCollection('accounts_nested');
         $groupHead = $collection->findOne([
-            'parent_profile_id' => (string) $parent->_id,
-            'group_id' => 'linked',
+            'parent_type' => 'account_profile',
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'linked',
             'doc_type' => 'group_head',
         ]);
         $this->assertNotNull($groupHead);
@@ -5566,49 +5711,62 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $collection->deleteMany([
             'tenant_id' => $tenantId,
-            'parent_profile_id' => (string) $parent->_id,
-            'group_id' => 'linked',
+            'parent_type' => 'account_profile',
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'linked',
             'doc_type' => 'member_row',
         ]);
         $collection->insertMany([
             [
-                '_id' => (string) $parent->_id.':linked:'.(string) $queryable->_id,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.(string) $queryable->_id,
                 'tenant_id' => $tenantId,
-                'parent_profile_id' => (string) $parent->_id,
-                'group_id' => 'linked',
-                'member_profile_id' => (string) $queryable->_id,
-                'raw_position' => 0,
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $parent->_id,
+                'group_key' => 'linked',
+                'group_label' => 'Linked profiles',
+                'group_order' => 0,
+                'item_order' => 0,
                 'doc_type' => 'member_row',
+                'nested_profile' => ['id' => (string) $queryable->_id],
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
             [
-                '_id' => (string) $parent->_id.':linked:'.(string) $inactive->_id,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.(string) $inactive->_id,
                 'tenant_id' => $tenantId,
-                'parent_profile_id' => (string) $parent->_id,
-                'group_id' => 'linked',
-                'member_profile_id' => (string) $inactive->_id,
-                'raw_position' => 1,
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $parent->_id,
+                'group_key' => 'linked',
+                'group_label' => 'Linked profiles',
+                'group_order' => 0,
+                'item_order' => 1,
                 'doc_type' => 'member_row',
+                'nested_profile' => ['id' => (string) $inactive->_id],
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
             [
-                '_id' => (string) $parent->_id.':linked:'.(string) $deleted->_id,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.(string) $deleted->_id,
                 'tenant_id' => $tenantId,
-                'parent_profile_id' => (string) $parent->_id,
-                'group_id' => 'linked',
-                'member_profile_id' => (string) $deleted->_id,
-                'raw_position' => 2,
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $parent->_id,
+                'group_key' => 'linked',
+                'group_label' => 'Linked profiles',
+                'group_order' => 0,
+                'item_order' => 2,
                 'doc_type' => 'member_row',
+                'nested_profile' => ['id' => (string) $deleted->_id],
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
             [
-                '_id' => (string) $parent->_id.':linked:'.$missingId,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.$missingId,
                 'tenant_id' => $tenantId,
-                'parent_profile_id' => (string) $parent->_id,
-                'group_id' => 'linked',
-                'member_profile_id' => $missingId,
-                'raw_position' => 3,
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $parent->_id,
+                'group_key' => 'linked',
+                'group_label' => 'Linked profiles',
+                'group_order' => 0,
+                'item_order' => 3,
                 'doc_type' => 'member_row',
+                'nested_profile' => ['id' => $missingId],
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
         ]);
@@ -5897,6 +6055,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'data.nested_profile_groups.0.members_path',
             '/api/v1/account_profiles/nested-public-parent/nested_profile_groups/parceiros/members'
         );
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.id', (string) $partnerB->_id);
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.id', (string) $partnerA->_id);
+        $this->assertSame(
+            ['public-partner-b', 'public-partner-a'],
+            collect($response->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
+        );
 
         $members = $this->getJson(
             "{$this->base_api_tenant}account_profiles/nested-public-parent/nested_profile_groups/parceiros/members",
@@ -5989,6 +6153,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath(
             'data.nested_profile_groups.0.members_path',
             '/api/v1/account_profiles/queryability-contract-parent/nested_profile_groups/parceiros/members'
+        );
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.slug', 'navigable-member');
+        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.can_open_public_detail', true);
+        $response->assertJsonPath(
+            'data.nested_profile_groups.0.profiles.0.public_detail_path',
+            '/parceiro/navigable-member'
         );
 
         $members = $this->getJson(
@@ -6140,7 +6310,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_account_profile_contact_sources_endpoint_returns_only_contact_capable_profiles(): void
+    public function test_account_profile_index_supports_contact_eligible_filters_on_the_generic_endpoint(): void
     {
         $this->enableContactChannelsCapability('venue');
 
@@ -6164,11 +6334,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
         $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/contact_sources?exclude_account_profile_id=".(string) $mirrored->_id
+            "{$this->base_tenant_api_admin}account_profiles?contact_channels_enabled_only=1&contact_mode=own&search=co&exclude_account_profile_id=".(string) $mirrored->_id
         );
 
         $response->assertOk();
         $response->assertJsonPath('data.0.id', (string) $contactOwn->_id);
+        $response->assertJsonPath('data.0.display_name', 'Contact Own Candidate');
+        $response->assertJsonIsArray('data.0.effective_contact_channels');
         $this->assertSame(
             [(string) $contactOwn->_id],
             collect($response->json('data'))->pluck('id')->all(),

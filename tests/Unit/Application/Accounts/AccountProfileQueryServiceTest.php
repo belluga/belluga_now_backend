@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileContactChannelsService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -12,6 +13,7 @@ use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use MongoDB\BSON\ObjectId;
+use ReflectionClass;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -19,12 +21,17 @@ class AccountProfileQueryServiceTest extends TestCase
 {
     public function test_near_aggregation_id_resolution_accepts__id_and_id_variants(): void
     {
+        $contactChannelsService = (new ReflectionClass(
+            AccountProfileContactChannelsService::class
+        ))->newInstanceWithoutConstructor();
+
         $service = new AccountProfileQueryService(
             $this->createMock(AccountOwnershipStateService::class),
             $this->createMock(AccountProfileMediaService::class),
             $this->createMock(TaxonomyTermSummaryResolverService::class),
             new AccountProfileTypeSetProvider,
             new AccountProfilePublicCatalogSnapshotReader(new AccountProfileTypeCapabilityCatalog),
+            $contactChannelsService,
         );
 
         $resolver = new ReflectionMethod($service, 'resolveAggregateRowId');

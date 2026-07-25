@@ -258,9 +258,10 @@ final class CurrentTenantAccountDeletionService
         $memberRows = $this->tenantCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
         $affectedParentIds = $this->normalizedStrings(array_map(
             static fn (mixed $value): string => trim((string) $value),
-            $memberRows->distinct('parent_profile_id', [
+            $memberRows->distinct('parent_id', [
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
                 'doc_type' => 'member_row',
-                'member_profile_id' => ['$in' => $profileIds],
+                'nested_profile.id' => ['$in' => $profileIds],
             ]),
         ));
 
@@ -269,20 +270,22 @@ final class CurrentTenantAccountDeletionService
         }
 
         $memberRows->deleteMany([
+            'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
             'doc_type' => 'member_row',
-            'member_profile_id' => ['$in' => $profileIds],
+            'nested_profile.id' => ['$in' => $profileIds],
         ]);
 
         $groupCountsByParent = [];
         foreach ($memberRows->find(
             [
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
                 'doc_type' => 'member_row',
-                'parent_profile_id' => ['$in' => $affectedParentIds],
+                'parent_id' => ['$in' => $affectedParentIds],
             ],
-            ['projection' => ['parent_profile_id' => 1, 'group_id' => 1]],
+            ['projection' => ['parent_id' => 1, 'group_key' => 1]],
         ) as $row) {
-            $parentProfileId = trim((string) ($row['parent_profile_id'] ?? ''));
-            $groupId = trim((string) ($row['group_id'] ?? ''));
+            $parentProfileId = trim((string) ($row['parent_id'] ?? ''));
+            $groupId = trim((string) ($row['group_key'] ?? ''));
             if ($parentProfileId === '' || $groupId === '') {
                 continue;
             }

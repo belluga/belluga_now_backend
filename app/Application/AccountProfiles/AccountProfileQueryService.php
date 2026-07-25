@@ -32,12 +32,22 @@ class AccountProfileQueryService extends AbstractQueryService
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
+        private readonly AccountProfileContactChannelsService $contactChannelsService,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         $query = AccountProfile::query();
         $queryParams = $this->applyAdminCandidateFilters($query, $queryParams);
+        $search = trim((string) ($queryParams['search'] ?? ''));
+        unset($queryParams['search']);
+
+        if ($search !== '') {
+            $query->where(
+                'name_search_key',
+                new Regex('^'.preg_quote($search, '/'), 'i')
+            );
+        }
 
         $ownershipState = $this->extractOwnershipState($queryParams);
         if ($ownershipState !== null) {
@@ -75,12 +85,31 @@ class AccountProfileQueryService extends AbstractQueryService
             }
         }
 
+        $contactChannelsEnabledOnly = filter_var(
+            $queryParams['contact_channels_enabled_only'] ?? false,
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE
+        ) ?? false;
+        if ($contactChannelsEnabledOnly) {
+            $contactChannelsEnabledTypes = $this->typeSetProvider->contactChannelsEnabledTypes();
+            if ($contactChannelsEnabledTypes === []) {
+                $query->whereRaw(['_id' => ['$exists' => false]]);
+            } else {
+                $query->whereIn('profile_type', $contactChannelsEnabledTypes)
+                    ->where('is_active', true);
+            }
+        }
+
         $excludedProfileId = trim((string) ($queryParams['exclude_account_profile_id'] ?? ''));
         if ($excludedProfileId !== '') {
             $query->where('_id', '!=', $excludedProfileId);
         }
 
-        unset($queryParams['queryable_only'], $queryParams['exclude_account_profile_id']);
+        unset(
+            $queryParams['queryable_only'],
+            $queryParams['contact_channels_enabled_only'],
+            $queryParams['exclude_account_profile_id']
+        );
 
         return $queryParams;
     }
@@ -881,6 +910,8 @@ class AccountProfileQueryService extends AbstractQueryService
                     $userOperatedLookup
                 )
                 : null,
+            'effective_contact_channels' => $this->contactChannelsService
+                ->resolveEffectiveContactChannels($profile),
             'created_at' => $profile->created_at?->toJSON(),
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),

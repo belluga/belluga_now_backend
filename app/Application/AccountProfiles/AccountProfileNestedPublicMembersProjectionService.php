@@ -179,17 +179,7 @@ final class AccountProfileNestedPublicMembersProjectionService
 
         return [
             'data' => array_values(array_map(
-                static fn (array $row): array => [
-                    'id' => (string) ($row['member_profile_id'] ?? ''),
-                    'profile_type' => (string) ($row['profile_type'] ?? ''),
-                    'display_name' => (string) ($row['display_name'] ?? ''),
-                    'slug' => ($slug = trim((string) ($row['slug'] ?? ''))) === '' ? null : $slug,
-                    'avatar_url' => is_string($row['avatar_url'] ?? null) ? $row['avatar_url'] : null,
-                    'cover_url' => is_string($row['cover_url'] ?? null) ? $row['cover_url'] : null,
-                    'taxonomy_terms' => is_array($row['taxonomy_terms'] ?? null) ? $row['taxonomy_terms'] : [],
-                    'can_open_public_detail' => ($slug = trim((string) ($row['slug'] ?? ''))) !== '',
-                    'public_detail_path' => ($slug = trim((string) ($row['slug'] ?? ''))) === '' ? null : '/parceiro/'.$slug,
-                ],
+                fn (array $row): array => $this->formatMemberRow($row),
                 $pageRows,
             )),
             'next_cursor' => $nextCursor,
@@ -249,7 +239,12 @@ final class AccountProfileNestedPublicMembersProjectionService
 
         return array_values(array_filter(
             array_map(
-                static fn (array $group): ?array => ($visibleCounts[$group['id']] ?? 0) > 0 ? $group : null,
+                fn (array $group): ?array => ($visibleCounts[$group['id']] ?? 0) > 0
+                    ? [
+                        ...$group,
+                        'profiles' => $this->groupProfiles($tenantId, $parentSlug, (string) $group['id']),
+                    ]
+                    : null,
                 $groups,
             ),
         ));
@@ -434,6 +429,45 @@ final class AccountProfileNestedPublicMembersProjectionService
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /** @return array<string, mixed> */
+    private function formatMemberRow(array $row): array
+    {
+        $slug = trim((string) ($row['slug'] ?? ''));
+
+        return [
+            'id' => (string) ($row['member_profile_id'] ?? ''),
+            'profile_type' => (string) ($row['profile_type'] ?? ''),
+            'display_name' => (string) ($row['display_name'] ?? ''),
+            'slug' => $slug === '' ? null : $slug,
+            'avatar_url' => is_string($row['avatar_url'] ?? null) ? $row['avatar_url'] : null,
+            'cover_url' => is_string($row['cover_url'] ?? null) ? $row['cover_url'] : null,
+            'taxonomy_terms' => is_array($row['taxonomy_terms'] ?? null) ? $row['taxonomy_terms'] : [],
+            'can_open_public_detail' => $slug !== '',
+            'public_detail_path' => $slug === '' ? null : '/parceiro/'.$slug,
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function groupProfiles(string $tenantId, string $parentSlug, string $groupId): array
+    {
+        $rows = iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $tenantId,
+                'parent_slug' => $parentSlug,
+                'group_id' => $groupId,
+                'doc_type' => self::DOC_TYPE_EDGE,
+            ],
+            [
+                'sort' => ['raw_position' => 1, '_id' => 1],
+            ],
+        ));
+
+        return array_values(array_map(
+            fn (mixed $row): array => $this->formatMemberRow($this->documentToArray($row) ?? []),
+            array_values(array_filter($rows, fn (mixed $row): bool => $this->documentToArray($row) !== null)),
+        ));
     }
 
     private function collection(): \MongoDB\Collection
