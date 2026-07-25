@@ -5243,8 +5243,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'visibility' => 'public',
         ])->fresh();
 
-        $partnerA = $this->createNestedProfileFixture('Single Request Partner A', 'single-request-partner-a');
-        $partnerB = $this->createNestedProfileFixture('Single Request Partner B', 'single-request-partner-b');
+        $partnerA = $this->createNestedProfileFixture('Single Request Partner A', 'single-request-partner-a', [
+            'taxonomy_terms_flat' => ['cuisine:italian'],
+        ]);
+        $partnerB = $this->createNestedProfileFixture('Single Request Partner B', 'single-request-partner-b', [
+            'taxonomy_terms_flat' => ['cuisine:japanese'],
+        ]);
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
@@ -5282,6 +5286,22 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $membersPage->assertOk();
         $membersPage->assertJsonPath('data.0.id', (string) $partnerB->_id);
         $membersPage->assertJsonPath('data.1.id', (string) $partnerA->_id);
+
+        $storedMember = DB::connection('tenant')->getDatabase()
+            ->selectCollection('accounts_nested')
+            ->findOne([
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $parent->_id,
+                'group_key' => 'parceiros',
+                'doc_type' => 'member_row',
+                'nested_profile.id' => (string) $partnerB->_id,
+            ]);
+        $this->assertNotNull($storedMember);
+        $this->assertSame(
+            ['cuisine:japanese'],
+            array_values((array) data_get($storedMember, 'nested_profile.taxonomy_terms_flat')),
+        );
+        $this->assertNull(data_get($storedMember, 'nested_profile.tags'));
 
         $publicDetail = $this->getJson(
             "{$this->base_api_tenant}account_profiles/{$parent->slug}",

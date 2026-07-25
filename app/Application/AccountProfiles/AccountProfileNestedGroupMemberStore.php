@@ -608,7 +608,7 @@ final class AccountProfileNestedGroupMemberStore
             'search_key' => $searchKey === '' ? null : $searchKey,
             'profile_type' => $profileType === '' ? null : $profileType,
             'category' => $profileType === '' ? null : $profileType,
-            'tags' => $this->normalizedStrings((array) ($profile?->getAttribute('taxonomy_terms_flat') ?? [])),
+            'taxonomy_terms_flat' => $this->normalizedStrings((array) ($profile?->getAttribute('taxonomy_terms_flat') ?? [])),
             'slug' => $slug === '' ? null : $slug,
             'avatar_url' => is_string($profile?->avatar_url ?? null) ? $profile->avatar_url : null,
             'cover_url' => is_string($profile?->cover_url ?? null) ? $profile->cover_url : null,
