@@ -487,11 +487,11 @@ class EventQueryService
         $preloadedOccurrences = $this->loadEventOccurrenceDocuments($event);
         $selectedOccurrence = $this->resolveSelectedOccurrence($event, $occurrenceRef, $preloadedOccurrences);
         if (! $selectedOccurrence) {
-            return $this->formatPublicDetailPayload($event, $userId);
+            return $this->formatPublicDetailPayload($event, $userId, true, null, $preloadedOccurrences);
         }
 
         $selectedOccurrenceId = (string) $selectedOccurrence->_id;
-        $payload = $this->formatPublicDetailPayload($selectedOccurrence, $userId, true, $event);
+        $payload = $this->formatPublicDetailPayload($selectedOccurrence, $userId, true, $event, $preloadedOccurrences);
         $payload['event_id'] = (string) $event->_id;
         $payload['slug'] = $this->scalarString($event->slug ?? null) ?? $payload['slug'];
         $payload['thumb'] = $this->normalizeThumbPayload(
@@ -1882,7 +1882,8 @@ class EventQueryService
         mixed $event,
         ?string $userId = null,
         bool $includeArtists = true,
-        ?Event $parentEvent = null
+        ?Event $parentEvent = null,
+        ?iterable $preloadedOccurrences = null,
     ): array {
         $isOccurrence = $this->isOccurrencePayload($event);
         $type = $this->normalizeArray($event->type ?? null);
@@ -1916,13 +1917,14 @@ class EventQueryService
         }
 
         $eventRoot = $parentEvent !== null && $isOccurrence ? $parentEvent : $event;
-        $occurrences = $this->resolveEventOccurrences($eventRoot);
+        $detailOccurrences = $preloadedOccurrences ?? $this->loadEventOccurrenceDocuments($eventRoot);
+        $occurrences = $this->resolveEventOccurrences($eventRoot, null, $detailOccurrences);
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
         $profileGroups = $this->publicRelatedProfileGroupMetadata(
             $eventRoot,
-            $this->loadEventOccurrenceDocuments($eventRoot),
+            $detailOccurrences,
         );
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)

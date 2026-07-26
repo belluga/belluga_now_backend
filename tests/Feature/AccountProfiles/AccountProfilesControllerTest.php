@@ -5654,7 +5654,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('completed', $cleanupOutbox['delivery_state'] ?? null);
     }
 
-    public function test_account_profile_admin_readback_keeps_linked_selection_summaries_in_one_contract(): void
+    public function test_account_profile_admin_readback_keeps_linked_metadata_lazy_and_resolves_member_summaries_via_members_contract(): void
     {
         $this->enableContactChannelsCapability('venue');
         TenantProfileType::create([
@@ -5792,35 +5792,47 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
-        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.0', [
-            'id' => (string) $queryable->_id,
-            'display_name' => 'Queryable Linked Profile',
-            'is_queryable_candidate' => true,
-            'is_contact_capable_candidate' => false,
-        ]);
-        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.1', [
-            'id' => (string) $inactive->_id,
-            'display_name' => 'Inactive Linked Profile',
-            'is_queryable_candidate' => false,
-            'is_contact_capable_candidate' => false,
-        ]);
-        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.2', [
-            'id' => (string) $deleted->_id,
-            'display_name' => 'Deleted Linked Profile',
-            'is_queryable_candidate' => false,
-            'is_contact_capable_candidate' => false,
-        ]);
-        $response->assertJsonPath('data.nested_profile_groups.0.account_profile_summaries.3', [
-            'id' => $missingId,
-            'display_name' => null,
-            'is_queryable_candidate' => false,
-            'is_contact_capable_candidate' => false,
-        ]);
+        $response->assertJsonPath('data.nested_profile_groups.0.id', 'linked');
+        $response->assertJsonPath('data.nested_profile_groups.0.label', 'Linked profiles');
+        $response->assertJsonPath('data.nested_profile_groups.0.member_count', 4);
+        $response->assertJsonMissingPath('data.nested_profile_groups.0.account_profile_summaries');
         $response->assertJsonPath('data.contact_source_account_profile', [
             'id' => (string) $contactSource->_id,
             'display_name' => 'Contact Linked Profile',
             'is_queryable_candidate' => true,
             'is_contact_capable_candidate' => true,
+        ]);
+
+        $membersResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/linked/members",
+            $this->getHeaders(),
+        );
+
+        $membersResponse->assertOk();
+        $membersResponse->assertJsonCount(4, 'data');
+        $membersResponse->assertJsonPath('data.0', [
+            'id' => (string) $queryable->_id,
+            'display_name' => 'Queryable Linked Profile',
+            'is_queryable_candidate' => true,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $membersResponse->assertJsonPath('data.1', [
+            'id' => (string) $inactive->_id,
+            'display_name' => 'Inactive Linked Profile',
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $membersResponse->assertJsonPath('data.2', [
+            'id' => (string) $deleted->_id,
+            'display_name' => 'Deleted Linked Profile',
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
+        ]);
+        $membersResponse->assertJsonPath('data.3', [
+            'id' => $missingId,
+            'display_name' => null,
+            'is_queryable_candidate' => false,
+            'is_contact_capable_candidate' => false,
         ]);
     }
 

@@ -1612,12 +1612,19 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonPath('data.venue.public_detail_path', '/parceiro/0');
     }
 
-    public function test_event_create_preserves_linked_profile_contract_for_numeric_zero_related_profile_slug(): void
+    public function test_event_create_preserves_numeric_zero_related_profile_slug_in_management_and_public_related_profile_members_contract(): void
     {
         $this->artist->slug = '0';
         $this->artist->save();
 
-        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'profile_groups' => [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [(string) $this->artist->_id],
+            ]],
+        ]));
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.linked_account_profiles.0.slug', '0');
@@ -1629,10 +1636,15 @@ class EventCrudControllerTest extends TestCaseTenant
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
 
         $public->assertStatus(200);
-        $public->assertJsonPath('data.linked_account_profiles.0.slug', '0');
-        $public->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
-        $public->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/0');
+        $tabId = $this->assertPublicEventProfileGroupMetadata($public, 0, 'Artists', 1);
+        $public->assertJsonMissingPath('data.linked_account_profiles');
         $public->assertJsonPath('data.artists.0.slug', '0');
+
+        $member = $this->publicEventRelatedProfileMemberRows((string) $public->json('data.slug'), $tabId)[0] ?? null;
+        $this->assertIsArray($member);
+        $this->assertSame('0', data_get($member, 'slug'));
+        $this->assertTrue((bool) data_get($member, 'can_open_public_detail'));
+        $this->assertSame('/parceiro/0', data_get($member, 'public_detail_path'));
     }
 
     public function test_event_create_rejects_legacy_single_date_payload_without_occurrences(): void
@@ -5215,7 +5227,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 $this->publicEventRelatedProfileMemberRows((string) $public->json('data.slug'), $expositoresTabId)
             )->pluck('id')->values()->all()
         );
-        $public->assertJsonCount(0, 'data.occurrences.0.profile_groups');
+        $public->assertJsonMissingPath('data.occurrences.0.profile_groups');
     }
 
     public function test_event_profile_groups_persist_metadata_only_and_survive_update_without_profile_groups_payload(): void

@@ -1596,7 +1596,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertJsonCount(0, 'items');
     }
 
-    public function test_event_detail_exposes_linked_account_profiles_for_dynamic_category_tabs(): void
+    public function test_event_detail_exposes_related_profile_group_metadata_and_resolves_members_lazily(): void
     {
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'band'],
@@ -1661,20 +1661,46 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                     ],
                 ],
             ],
+            'profile_groups' => [[
+                'id' => 'bands',
+                'label' => 'Bands',
+                'order' => 0,
+                'account_profile_ids' => [(string) $profile->_id],
+            ]],
         ]);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);
-        $response->assertJsonCount(1, 'data.linked_account_profiles');
-        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $profile->_id);
-        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'band');
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $profile->slug);
-        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
-        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
+        $response->assertJsonCount(1, 'data.profile_groups');
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.profile_groups.0.label', 'Bands');
+        $response->assertJsonPath('data.profile_groups.0.member_count', 1);
+        $response->assertJsonMissingPath('data.profile_groups.0.profiles');
+        $response->assertJsonPath('data.artists.0.id', (string) $profile->_id);
+        $response->assertJsonPath('data.artists.0.profile_type', 'band');
+        $response->assertJsonPath('data.artists.0.slug', (string) $profile->slug);
         $response->assertJsonPath(
-            'data.linked_account_profiles.0.taxonomy_terms.0.name',
+            'data.artists.0.taxonomy_terms.0.name',
             'Showcase'
         );
+
+        $groupId = (string) $response->json('data.profile_groups.0.id');
+        $this->assertNotSame('', $groupId);
+        $response->assertJsonPath(
+            'data.profile_groups.0.members_path',
+            "/api/v1/events/{$response->json('data.slug')}/related_profile_tabs/{$groupId}/members"
+        );
+
+        $members = $this->getJson(
+            "{$this->base_api_tenant}events/{$response->json('data.slug')}/related_profile_tabs/{$groupId}/members"
+        );
+        $members->assertOk();
+        $members->assertJsonCount(1, 'data.data');
+        $members->assertJsonPath('data.data.0.id', (string) $profile->_id);
+        $members->assertJsonPath('data.data.0.profile_type', 'band');
+        $members->assertJsonPath('data.data.0.slug', (string) $profile->slug);
+        $members->assertJsonPath('data.data.0.can_open_public_detail', true);
+        $members->assertJsonPath('data.data.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
     }
 
     public function test_event_stream_returns_deltas(): void
