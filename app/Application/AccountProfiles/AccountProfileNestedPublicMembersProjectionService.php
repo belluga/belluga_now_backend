@@ -187,9 +187,9 @@ final class AccountProfileNestedPublicMembersProjectionService
     }
 
     /**
-     * @return array<int, array{id:string,label:string,order:int,members_path:string}>
+     * @return array<int, array{id:string,label:string,order:int,member_count:int,members_path:string}>
      */
-    public function publicDetailGroups(AccountProfile $profile): array
+    public function publicMetadataGroups(AccountProfile $profile): array
     {
         $tenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
         $parentSlug = trim((string) ($profile->slug ?? ''));
@@ -225,6 +225,7 @@ final class AccountProfileNestedPublicMembersProjectionService
                     'id' => $groupId,
                     'label' => (string) ($document['group_label'] ?? ''),
                     'order' => (int) ($document['group_order'] ?? 0),
+                    'member_count' => 0,
                     'members_path' => "/api/v1/account_profiles/{$parentSlug}/nested_profile_groups/{$groupId}/members",
                 ];
                 $visibleCounts[$groupId] ??= 0;
@@ -237,17 +238,28 @@ final class AccountProfileNestedPublicMembersProjectionService
             }
         }
 
-        return array_values(array_filter(
-            array_map(
-                fn (array $group): ?array => ($visibleCounts[$group['id']] ?? 0) > 0
-                    ? [
-                        ...$group,
-                        'profiles' => $this->groupProfiles($tenantId, $parentSlug, (string) $group['id']),
-                    ]
-                    : null,
-                $groups,
-            ),
-        ));
+        return array_values(array_filter(array_map(
+            function (array $group) use ($visibleCounts): ?array {
+                $visibleCount = max(0, (int) ($visibleCounts[$group['id']] ?? 0));
+                if ($visibleCount === 0) {
+                    return null;
+                }
+
+                return [
+                    ...$group,
+                    'member_count' => $visibleCount,
+                ];
+            },
+            $groups,
+        )));
+    }
+
+    /**
+     * @return array<int, array{id:string,label:string,order:int,member_count:int,members_path:string}>
+     */
+    public function publicDetailGroups(AccountProfile $profile): array
+    {
+        return $this->publicMetadataGroups($profile);
     }
 
     private function rebuildParentProjection(AccountProfileTransactionContext $context, AccountProfile $profile): void
@@ -447,27 +459,6 @@ final class AccountProfileNestedPublicMembersProjectionService
             'can_open_public_detail' => $slug !== '',
             'public_detail_path' => $slug === '' ? null : '/parceiro/'.$slug,
         ];
-    }
-
-    /** @return array<int, array<string, mixed>> */
-    private function groupProfiles(string $tenantId, string $parentSlug, string $groupId): array
-    {
-        $rows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $tenantId,
-                'parent_slug' => $parentSlug,
-                'group_id' => $groupId,
-                'doc_type' => self::DOC_TYPE_EDGE,
-            ],
-            [
-                'sort' => ['raw_position' => 1, '_id' => 1],
-            ],
-        ));
-
-        return array_values(array_map(
-            fn (mixed $row): array => $this->formatMemberRow($this->documentToArray($row) ?? []),
-            array_values(array_filter($rows, fn (mixed $row): bool => $this->documentToArray($row) !== null)),
-        ));
     }
 
     private function collection(): \MongoDB\Collection

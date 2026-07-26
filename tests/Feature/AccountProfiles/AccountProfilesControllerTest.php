@@ -5316,12 +5316,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'data.nested_profile_groups.0.members_path',
             "/api/v1/account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members"
         );
-        $publicDetail->assertJsonPath('data.nested_profile_groups.0.profiles.0.id', (string) $partnerB->_id);
-        $publicDetail->assertJsonPath('data.nested_profile_groups.0.profiles.1.id', (string) $partnerA->_id);
-        $this->assertSame(
-            ['single-request-partner-b', 'single-request-partner-a'],
-            collect($publicDetail->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
-        );
+        $publicDetail->assertJsonMissingPath('data.nested_profile_groups.0.profiles');
     }
 
     public function test_relation_admission_touches_contact_and_nested_targets_before_the_parent_commit(): void
@@ -6075,12 +6070,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'data.nested_profile_groups.0.members_path',
             '/api/v1/account_profiles/nested-public-parent/nested_profile_groups/parceiros/members'
         );
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.id', (string) $partnerB->_id);
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.1.id', (string) $partnerA->_id);
-        $this->assertSame(
-            ['public-partner-b', 'public-partner-a'],
-            collect($response->json('data.nested_profile_groups.0.profiles'))->pluck('slug')->all()
-        );
+        $response->assertJsonMissingPath('data.nested_profile_groups.0.profiles');
 
         $members = $this->getJson(
             "{$this->base_api_tenant}account_profiles/nested-public-parent/nested_profile_groups/parceiros/members",
@@ -6174,12 +6164,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'data.nested_profile_groups.0.members_path',
             '/api/v1/account_profiles/queryability-contract-parent/nested_profile_groups/parceiros/members'
         );
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.slug', 'navigable-member');
-        $response->assertJsonPath('data.nested_profile_groups.0.profiles.0.can_open_public_detail', true);
-        $response->assertJsonPath(
-            'data.nested_profile_groups.0.profiles.0.public_detail_path',
-            '/parceiro/navigable-member'
-        );
+        $response->assertJsonMissingPath('data.nested_profile_groups.0.profiles');
 
         $members = $this->getJson(
             "{$this->base_api_tenant}account_profiles/queryability-contract-parent/nested_profile_groups/parceiros/members",

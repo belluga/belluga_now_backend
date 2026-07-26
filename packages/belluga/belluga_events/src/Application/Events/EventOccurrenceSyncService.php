@@ -21,6 +21,7 @@ class EventOccurrenceSyncService
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
+        private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
         private readonly EventAccountContextResolver $eventAccountContextResolver,
     ) {}
 
@@ -136,6 +137,11 @@ class EventOccurrenceSyncService
                     $document,
                     $ownProfileGroups,
                 );
+                $this->occurrenceNestedAccountStore->syncOccurrenceGroups(
+                    $eventId,
+                    $document,
+                    $effectiveProfileGroups,
+                );
                 $documentId = (string) $document->_id;
                 $activeDocumentIds[] = $documentId;
                 $occurrenceRefs[] = [
@@ -162,6 +168,8 @@ class EventOccurrenceSyncService
             $document->updated_at = $now;
             $document->save();
         }
+
+        $this->occurrenceNestedAccountStore->purgeMissingOccurrences($eventId, $activeDocumentIds);
     }
 
     private function assertIdentitySafeForExistingDocuments(array $occurrences, array $existingDocuments): void

@@ -47,10 +47,11 @@ class EventQueryService
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventHeroImageResolver $eventHeroImages,
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
+        private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
-            ?? new EventManagementOccurrenceQuery;
+            ?? new EventManagementOccurrenceQuery($this->occurrenceNestedAccountStore);
     }
 
     /**
@@ -426,16 +427,17 @@ class EventQueryService
 
     private function applyManagementRelatedAccountProfileFilter(mixed $query, string $relatedAccountProfileId): void
     {
-        $profileIds = $this->buildProfileIdCandidates($relatedAccountProfileId);
-
-        $query->whereRaw([
-            'event_parties' => [
-                '$elemMatch' => [
-                    'party_type' => ['$ne' => 'venue'],
-                    'party_ref_id' => ['$in' => $profileIds],
-                ],
-            ],
+        $eventIds = $this->occurrenceNestedAccountStore->eventIdsForMemberProfiles([
+            $relatedAccountProfileId,
         ]);
+
+        if ($eventIds === []) {
+            $query->whereRaw(['_id' => ['$in' => []]]);
+
+            return;
+        }
+
+        $query->whereIn('_id', $this->buildEventIdCandidates($eventIds));
     }
 
     public function findByIdOrSlug(string $eventId): ?Event
@@ -501,23 +503,15 @@ class EventQueryService
             $preloadedOccurrences,
             true
         );
-        $payload['linked_account_profiles'] = $this->resolveDetailLinkedAccountProfiles(
-            $this->resolveLinkedAccountProfiles(
-                $this->normalizeEventParties($event->event_parties ?? [])
-            ),
-            $payload['occurrences']
-        );
-        $payload['profile_groups'] = $this->formatAggregateProfileGroupsForPublic(
+        $payload['profile_groups'] = $this->publicRelatedProfileGroupMetadata(
             $event,
             $preloadedOccurrences
         );
-        $payload['profile_groups'] = $this->hydratePublicProfileGroupsFromLinkedProfiles(
-            $payload['profile_groups'],
-            $payload['linked_account_profiles']
-        );
         if (array_key_exists('artists', $payload)) {
-            $payload['artists'] = $this->resolveArtistsReadProjectionFromLinkedProfiles(
-                $payload['linked_account_profiles']
+            $payload['artists'] = $this->publicDetailArtistProjection(
+                $selectedOccurrence,
+                $event,
+                $payload['occurrences'],
             );
         }
 
@@ -1908,9 +1902,6 @@ class EventQueryService
         if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
             $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
         }
-        $artists = $includeArtists
-            ? $this->resolveArtistsReadProjection($eventParties)
-            : [];
         $taxonomyTerms = $this->resolvePublicEventTaxonomyTerms($event);
 
         $venuePayload = $this->formatVenueDetailPayload($venue);
@@ -1924,19 +1915,14 @@ class EventQueryService
             $lat = (float) $coordinates[1];
         }
 
-        $occurrences = $this->resolveEventOccurrences($event);
+        $eventRoot = $parentEvent !== null && $isOccurrence ? $parentEvent : $event;
+        $occurrences = $this->resolveEventOccurrences($eventRoot);
         $capabilities = $this->resolveEventCapabilities($event);
         $createdBy = $this->normalizeArray($event->created_by ?? []);
-        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
-        if ($parentEvent !== null && $isOccurrence) {
-            $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
-        }
         $eventId = $isOccurrence ? (string) $event->event_id : (isset($event->_id) ? (string) $event->_id : '');
-        $profileGroups = $this->formatProfileGroupsForPublic(
-            $event->profile_groups ?? [],
-            $linkedAccountProfiles,
-            'event',
-            $eventId,
+        $profileGroups = $this->publicRelatedProfileGroupMetadata(
+            $eventRoot,
+            $this->loadEventOccurrenceDocuments($eventRoot),
         );
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
@@ -1981,7 +1967,6 @@ class EventQueryService
                 'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
             ],
             'event_parties' => $eventParties,
-            'linked_account_profiles' => $linkedAccountProfiles,
             'profile_groups' => $profileGroups,
             'programming_items' => $this->normalizeProgrammingItems($event->programming_items ?? []),
             'capabilities' => $capabilities,
@@ -1989,10 +1974,77 @@ class EventQueryService
         ];
 
         if ($includeArtists) {
-            $payload['artists'] = $artists;
+            $payload['artists'] = $this->publicDetailArtistProjection(
+                $event,
+                $parentEvent,
+                $occurrences,
+            );
         }
 
         return $this->withCanonicalHeroImage($payload);
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function publicRelatedProfileGroupMetadata(Event $event, iterable $occurrences): array
+    {
+        $eventRouteKey = trim((string) ($event->slug ?? ''));
+        if ($eventRouteKey === '') {
+            $eventRouteKey = trim((string) $event->getKey());
+        }
+
+        return $this->occurrenceNestedAccountStore->mergedPublicGroupMetadata(
+            $event,
+            $occurrences,
+            $eventRouteKey,
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    private function publicDetailArtistProjection(
+        mixed $event,
+        ?Event $parentEvent,
+        array $occurrences,
+    ): array {
+        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
+        $isOccurrence = $this->isOccurrencePayload($event);
+        if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
+            $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
+        }
+
+        $linkedAccountProfiles = $this->resolveLinkedAccountProfiles($eventParties);
+        if ($parentEvent !== null && $isOccurrence) {
+            $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
+        }
+
+        return $this->resolveArtistsReadProjectionFromLinkedProfiles($linkedAccountProfiles);
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array<int, array<string, mixed>>
+     */
+    public function relatedProfileTabMembers(
+        Event $event,
+        string $tabId,
+        ?string $cursor = null,
+        ?int $perPage = null,
+    ): array {
+        $occurrences = $this->loadEventOccurrenceDocuments($event);
+
+        return $this->occurrenceNestedAccountStore->publicMemberPage(
+            $event,
+            $occurrences,
+            $tabId,
+            InputConstraints::PUBLIC_PAGE_SIZE_MAX,
+            $perPage,
+            $cursor,
+        );
     }
 
     /**
@@ -2407,13 +2459,7 @@ class EventQueryService
 
             $occurrenceId = isset($event->_id) ? (string) $event->_id : null;
             $programmingItems = $this->normalizeProgrammingItems($event->programming_items ?? []);
-            $ownEventParties = $this->normalizeEventParties($event->own_event_parties ?? []);
-            $ownLinkedAccountProfiles = $this->normalizeManagementLinkedAccountProfiles(
-                $event->own_linked_account_profiles ?? [],
-                $ownEventParties
-            );
-
-            return [[
+            $payload = [
                 'occurrence_id' => $occurrenceId,
                 'occurrence_slug' => isset($event->occurrence_slug) ? (string) $event->occurrence_slug : null,
                 'date_time_start' => $start,
@@ -2423,25 +2469,27 @@ class EventQueryService
                 'location_override' => null,
                 'own_taxonomy_terms' => $this->ensureTaxonomySnapshots($event->own_taxonomy_terms ?? []),
                 'taxonomy_terms' => $this->ensureTaxonomySnapshots($event->taxonomy_terms ?? []),
-                'own_event_parties' => $ownEventParties,
-                'own_linked_account_profiles' => $ownLinkedAccountProfiles,
-                'profile_groups' => $forPublic
-                    ? $this->formatProfileGroupsForPublic(
-                        $event->own_profile_groups ?? [],
-                        $ownLinkedAccountProfiles,
-                        'occurrence',
-                        $occurrenceId ?? '',
-                        false
-                    )
-                    : $this->formatProfileGroupsForManagement(
-                        $event->own_profile_groups ?? [],
-                        $ownLinkedAccountProfiles,
-                        'occurrence',
-                        $occurrenceId ?? '',
-                    ),
                 'programming_items' => $programmingItems,
                 'programming_count' => count($programmingItems),
-            ]];
+            ];
+
+            if (! $forPublic) {
+                $ownEventParties = $this->normalizeEventParties($event->own_event_parties ?? []);
+                $ownLinkedAccountProfiles = $this->normalizeManagementLinkedAccountProfiles(
+                    $event->own_linked_account_profiles ?? [],
+                    $ownEventParties
+                );
+                $payload['own_event_parties'] = $ownEventParties;
+                $payload['own_linked_account_profiles'] = $ownLinkedAccountProfiles;
+                $payload['profile_groups'] = $this->formatProfileGroupsForManagement(
+                    $event->own_profile_groups ?? [],
+                    $ownLinkedAccountProfiles,
+                    'occurrence',
+                    $occurrenceId ?? '',
+                );
+            }
+
+            return [$payload];
         }
 
         $eventId = isset($event->_id) ? (string) $event->_id : '';
@@ -2457,13 +2505,7 @@ class EventQueryService
                 return $documents->map(function (EventOccurrence $occurrence) use ($selectedOccurrenceId, $forPublic): array {
                     $occurrenceId = isset($occurrence->_id) ? (string) $occurrence->_id : null;
                     $programmingItems = $this->normalizeProgrammingItems($occurrence->programming_items ?? []);
-                    $ownEventParties = $this->normalizeEventParties($occurrence->own_event_parties ?? []);
-                    $ownLinkedAccountProfiles = $this->normalizeManagementLinkedAccountProfiles(
-                        $occurrence->own_linked_account_profiles ?? [],
-                        $ownEventParties
-                    );
-
-                    return [
+                    $payload = [
                         'occurrence_id' => $occurrenceId,
                         'occurrence_slug' => isset($occurrence->occurrence_slug) ? (string) $occurrence->occurrence_slug : null,
                         'date_time_start' => $this->formatDate($this->extractRawAttribute($occurrence, 'starts_at')),
@@ -2473,25 +2515,27 @@ class EventQueryService
                         'location_override' => null,
                         'own_taxonomy_terms' => $this->ensureTaxonomySnapshots($occurrence->own_taxonomy_terms ?? []),
                         'taxonomy_terms' => $this->ensureTaxonomySnapshots($occurrence->taxonomy_terms ?? []),
-                        'own_event_parties' => $ownEventParties,
-                        'own_linked_account_profiles' => $ownLinkedAccountProfiles,
-                        'profile_groups' => $forPublic
-                            ? $this->formatProfileGroupsForPublic(
-                                $occurrence->own_profile_groups ?? [],
-                                $ownLinkedAccountProfiles,
-                                'occurrence',
-                                $occurrenceId ?? '',
-                                false
-                            )
-                            : $this->formatProfileGroupsForManagement(
-                                $occurrence->own_profile_groups ?? [],
-                                $ownLinkedAccountProfiles,
-                                'occurrence',
-                                $occurrenceId ?? '',
-                            ),
                         'programming_items' => $programmingItems,
                         'programming_count' => count($programmingItems),
                     ];
+
+                    if (! $forPublic) {
+                        $ownEventParties = $this->normalizeEventParties($occurrence->own_event_parties ?? []);
+                        $ownLinkedAccountProfiles = $this->normalizeManagementLinkedAccountProfiles(
+                            $occurrence->own_linked_account_profiles ?? [],
+                            $ownEventParties
+                        );
+                        $payload['own_event_parties'] = $ownEventParties;
+                        $payload['own_linked_account_profiles'] = $ownLinkedAccountProfiles;
+                        $payload['profile_groups'] = $this->formatProfileGroupsForManagement(
+                            $occurrence->own_profile_groups ?? [],
+                            $ownLinkedAccountProfiles,
+                            'occurrence',
+                            $occurrenceId ?? '',
+                        );
+                    }
+
+                    return $payload;
                 })->filter(static fn (array $item): bool => $item['date_time_start'] !== null)->values()->all();
             }
         }

@@ -16,6 +16,10 @@ class EventManagementOccurrenceQuery
 {
     private const DEFAULT_EVENT_DURATION_MS = 10800000; // 3h
 
+    public function __construct(
+        private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $queryParams
      * @param  array<int, string>  $temporalBuckets
@@ -196,15 +200,8 @@ class EventManagementOccurrenceQuery
 
         $relatedAccountProfileId = $this->extractProfileFilterId($queryParams, 'related_account_profile_id');
         if ($relatedAccountProfileId !== null) {
-            $profileIds = $this->buildProfileIdCandidates($relatedAccountProfileId);
-            $clauses[] = [
-                'event_parties' => [
-                    '$elemMatch' => [
-                        'party_type' => ['$ne' => 'venue'],
-                        'party_ref_id' => ['$in' => $profileIds],
-                    ],
-                ],
-            ];
+            $eventIds = $this->occurrenceNestedAccountStore->eventIdsForMemberProfiles([$relatedAccountProfileId]);
+            $clauses[] = ['event_id' => ['$in' => $eventIds]];
         }
 
         if ($clauses === []) {
@@ -249,19 +246,6 @@ class EventManagementOccurrenceQuery
                 '$or' => [
                     ['event.place_ref.id' => ['$in' => $profileIds]],
                     ['event.place_ref._id' => ['$in' => $profileIds]],
-                ],
-            ];
-        }
-
-        $relatedAccountProfileId = $this->extractProfileFilterId($queryParams, 'related_account_profile_id');
-        if ($relatedAccountProfileId !== null) {
-            $profileIds = $this->buildProfileIdCandidates($relatedAccountProfileId);
-            $match['$and'][] = [
-                'event.event_parties' => [
-                    '$elemMatch' => [
-                        'party_type' => ['$ne' => 'venue'],
-                        'party_ref_id' => ['$in' => $profileIds],
-                    ],
                 ],
             ];
         }

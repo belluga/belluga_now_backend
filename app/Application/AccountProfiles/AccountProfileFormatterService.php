@@ -16,7 +16,6 @@ class AccountProfileFormatterService
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
-        private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileGalleryService $galleryService,
@@ -40,34 +39,11 @@ class AccountProfileFormatterService
         $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
 
         $nestedProfileGroups = $includeAgendaOccurrences
-            ? $this->nestedPublicMembersProjectionService->publicDetailGroups($profile)
+            ? $this->nestedPublicMembersProjectionService->publicMetadataGroups($profile)
             : $this->nestedGroupMemberStore->metadataGroups($profile);
-        if (! $includeAgendaOccurrences) {
-            $nestedProfileGroups = array_values(array_map(
-                function (array $group) use ($profile): array {
-                    $groupId = trim((string) ($group['id'] ?? ''));
-
-                    return [
-                        ...$group,
-                        'account_profile_ids' => $groupId === ''
-                            ? []
-                            : $this->nestedGroupMemberStore->groupMemberIds($profile, $groupId),
-                    ];
-                },
-                $nestedProfileGroups,
-            ));
-        }
         $selectedSummariesByProfileId = $includeAgendaOccurrences
             ? []
-            : $this->candidateDiscoveryService->selectedSummariesByIds(
-                $this->linkedSelectionIds($nestedProfileGroups, $profile),
-            );
-        if (! $includeAgendaOccurrences) {
-            $nestedProfileGroups = $this->nestedGroupService->withSelectedSummaries(
-                $nestedProfileGroups,
-                $selectedSummariesByProfileId,
-            );
-        }
+            : $this->contactSourceSelectedSummaries($profile);
 
         $payload = [
             'id' => (string) $profile->_id,
@@ -145,26 +121,26 @@ class AccountProfileFormatterService
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $nestedProfileGroups
      * @return array<int, string>
      */
-    private function linkedSelectionIds(array $nestedProfileGroups, AccountProfile $profile): array
+    private function contactSourceSelectionIds(AccountProfile $profile): array
     {
         $ids = [];
-        foreach ($nestedProfileGroups as $group) {
-            foreach ($group['account_profile_ids'] ?? [] as $profileId) {
-                $profileId = trim((string) $profileId);
-                if ($profileId !== '') {
-                    $ids[$profileId] = true;
-                }
-            }
-        }
-
         $contactSourceId = trim((string) ($profile->contact_source_account_profile_id ?? ''));
         if ($contactSourceId !== '') {
             $ids[$contactSourceId] = true;
         }
 
         return array_keys($ids);
+    }
+
+    /**
+     * @return array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>
+     */
+    private function contactSourceSelectedSummaries(AccountProfile $profile): array
+    {
+        return $this->candidateDiscoveryService->selectedSummariesByIds(
+            $this->contactSourceSelectionIds($profile),
+        );
     }
 }

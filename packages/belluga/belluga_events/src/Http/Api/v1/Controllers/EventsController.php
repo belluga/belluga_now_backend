@@ -196,6 +196,39 @@ class EventsController extends Controller
         ]);
     }
 
+    public function relatedProfileTabMembers(Request $request, string $event_id, string $tab_id): JsonResponse
+    {
+        $eventId = (string) ($request->route('event_id') ?? $event_id);
+        $tabId = trim((string) ($request->route('tab_id') ?? $tab_id));
+        $event = $this->eventQueryService->findByIdOrSlug($eventId);
+
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+
+        try {
+            $this->eventQueryService->assertPublicVisible($event);
+        } catch (EventNotPubliclyVisibleException) {
+            abort(404, 'Event not found.');
+        }
+
+        $requestedPerPage = $request->query('per_page', $request->query('page_size'));
+        $perPage = is_numeric($requestedPerPage)
+            ? max(1, min((int) $requestedPerPage, InputConstraints::PUBLIC_PAGE_SIZE_MAX))
+            : null;
+        $cursor = is_string($request->query('cursor')) ? $request->query('cursor') : null;
+
+        return response()->json([
+            'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
+            'data' => $this->eventQueryService->relatedProfileTabMembers(
+                $event,
+                $tabId,
+                $cursor,
+                $perPage,
+            ),
+        ]);
+    }
+
     private function isAdminContext(Request $request): bool
     {
         if ($request->route('account_slug')) {
