@@ -194,6 +194,43 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         return $resolved;
     }
 
+    public function resolveNestedAccountProfileSnapshotsByIds(array $profileIds): array
+    {
+        $requestedIds = $this->normalizeProfileIds($profileIds);
+        if ($requestedIds === []) {
+            return [];
+        }
+
+        $resolved = [];
+        foreach (
+            AccountProfile::withTrashed()
+                ->whereIn('_id', $requestedIds)
+                ->get([
+                    '_id',
+                    'display_name',
+                    'name_search_key',
+                    'profile_type',
+                    'slug',
+                    'avatar_url',
+                    'cover_url',
+                    'taxonomy_terms_flat',
+                ]) as $profile
+        ) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $profileId = trim((string) $profile->getKey());
+            if ($profileId === '') {
+                continue;
+            }
+
+            $resolved[$profileId] = $this->mapNestedAccountProfileSnapshot($profile);
+        }
+
+        return $resolved;
+    }
+
     public function listProfileIdsForAccount(string $accountId): array
     {
         return AccountProfile::query()
@@ -523,6 +560,42 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   id: string,
+     *   label: ?string,
+     *   search_key: ?string,
+     *   profile_type: ?string,
+     *   category: ?string,
+     *   taxonomy_terms_flat: array<int, string>,
+     *   slug: ?string,
+     *   avatar_url: ?string,
+     *   cover_url: ?string
+     * }
+     */
+    private function mapNestedAccountProfileSnapshot(AccountProfile $profile): array
+    {
+        $profileType = trim((string) ($profile->profile_type ?? ''));
+        $label = trim((string) ($profile->display_name ?? ''));
+        $searchKey = trim((string) ($profile->getAttribute('name_search_key') ?? ''));
+        $slug = trim((string) ($profile->slug ?? ''));
+
+        return [
+            'id' => (string) $profile->getKey(),
+            'label' => $label === '' ? null : $label,
+            'search_key' => $searchKey === '' ? null : $searchKey,
+            'profile_type' => $profileType === '' ? null : $profileType,
+            'category' => $profileType === '' ? null : $profileType,
+            'taxonomy_terms_flat' => array_values(array_filter(array_map(
+                static fn (mixed $term): string => trim((string) $term),
+                (array) ($profile->getAttribute('taxonomy_terms_flat') ?? []),
+            ), static fn (string $term): bool => $term !== '')),
+            'slug' => $slug === '' ? null : $slug,
+            'avatar_url' => is_string($profile->avatar_url ?? null) ? $profile->avatar_url : null,
+            'cover_url' => is_string($profile->cover_url ?? null) ? $profile->cover_url : null,
         ];
     }
 

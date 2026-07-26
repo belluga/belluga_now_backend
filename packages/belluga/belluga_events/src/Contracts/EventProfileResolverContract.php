@@ -38,6 +38,22 @@ interface EventProfileResolverContract
     public function resolveExistingEventPartyProfilesByIds(array $profileIds): array;
 
     /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array{
+     *   id: string,
+     *   label: ?string,
+     *   search_key: ?string,
+     *   profile_type: ?string,
+     *   category: ?string,
+     *   taxonomy_terms_flat: array<int, string>,
+     *   slug: ?string,
+     *   avatar_url: ?string,
+     *   cover_url: ?string
+     * }>
+     */
+    public function resolveNestedAccountProfileSnapshotsByIds(array $profileIds): array;
+
+    /**
      * @return array<int, string>
      */
     public function listProfileIdsForAccount(string $accountId): array;

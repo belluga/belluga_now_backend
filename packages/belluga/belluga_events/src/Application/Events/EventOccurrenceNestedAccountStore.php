@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Models\Tenants\Event;
@@ -642,7 +641,7 @@ final class EventOccurrenceNestedAccountStore
 
     /**
      * @param  array<int, string>  $memberIds
-     * @return array<string, AccountProfile>
+     * @return array<string, array<string, mixed>>
      */
     private function profilesByIdForIds(array $memberIds): array
     {
@@ -656,25 +655,12 @@ final class EventOccurrenceNestedAccountStore
         }
 
         $profilesById = [];
-        foreach (
-            AccountProfile::withTrashed()
-                ->whereIn('_id', $normalizedIds)
-                ->get([
-                    '_id',
-                    'display_name',
-                    'name_search_key',
-                    'profile_type',
-                    'slug',
-                    'avatar_url',
-                    'cover_url',
-                    'taxonomy_terms_flat',
-                ]) as $profile
-        ) {
-            if (! $profile instanceof AccountProfile) {
+        foreach ($this->eventProfileResolver->resolveNestedAccountProfileSnapshotsByIds($normalizedIds) as $profile) {
+            if (! is_array($profile)) {
                 continue;
             }
 
-            $profileId = trim((string) $profile->getKey());
+            $profileId = trim((string) ($profile['id'] ?? ''));
             if ($profileId !== '') {
                 $profilesById[$profileId] = $profile;
             }
@@ -686,13 +672,13 @@ final class EventOccurrenceNestedAccountStore
     /**
      * @return array<string, mixed>
      */
-    private function nestedProfileDocument(string $memberProfileId, ?AccountProfile $profile): array
+    private function nestedProfileDocument(string $memberProfileId, ?array $profile): array
     {
         $memberProfileId = trim($memberProfileId);
-        $profileType = trim((string) ($profile?->profile_type ?? ''));
-        $label = trim((string) ($profile?->display_name ?? ''));
-        $searchKey = trim((string) ($profile?->getAttribute('name_search_key') ?? ''));
-        $slug = trim((string) ($profile?->slug ?? ''));
+        $profileType = trim((string) ($profile['profile_type'] ?? ''));
+        $label = trim((string) ($profile['label'] ?? ''));
+        $searchKey = trim((string) ($profile['search_key'] ?? ''));
+        $slug = trim((string) ($profile['slug'] ?? ''));
 
         return [
             'id' => $memberProfileId,
@@ -702,11 +688,11 @@ final class EventOccurrenceNestedAccountStore
             'category' => $profileType === '' ? null : $profileType,
             'taxonomy_terms_flat' => array_values(array_filter(array_map(
                 static fn (mixed $term): string => trim((string) $term),
-                (array) ($profile?->getAttribute('taxonomy_terms_flat') ?? []),
+                (array) ($profile['taxonomy_terms_flat'] ?? []),
             ), static fn (string $term): bool => $term !== '')),
             'slug' => $slug === '' ? null : $slug,
-            'avatar_url' => is_string($profile?->avatar_url ?? null) ? $profile->avatar_url : null,
-            'cover_url' => is_string($profile?->cover_url ?? null) ? $profile->cover_url : null,
+            'avatar_url' => is_string($profile['avatar_url'] ?? null) ? $profile['avatar_url'] : null,
+            'cover_url' => is_string($profile['cover_url'] ?? null) ? $profile['cover_url'] : null,
         ];
     }
 
