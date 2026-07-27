@@ -1611,10 +1611,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->artist->save();
 
         $occurrences = $this->makeOccurrences(1);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-            'permissions' => ['can_edit' => true],
-        ]];
         $occurrences[0]['profile_groups'] = [[
             'id' => 'artists',
             'label' => 'Artists',
