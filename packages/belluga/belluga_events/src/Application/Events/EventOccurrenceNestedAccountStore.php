@@ -360,20 +360,8 @@ final class EventOccurrenceNestedAccountStore
             $eventRouteKey = $eventId;
         }
 
-        $this->materializeLegacyIfNeeded($event);
-
         $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
-        $headRows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => self::PARENT_TYPE,
-                'doc_type' => self::DOC_TYPE_HEAD,
-            ],
-            [
-                'sort' => ['group_order' => 1, '_id' => 1],
-            ],
-        ));
+        $headRows = $this->headRowsForEvent($eventId);
         if ($headRows === []) {
             return [];
         }
@@ -505,8 +493,6 @@ final class EventOccurrenceNestedAccountStore
             throw new NotFoundHttpException;
         }
 
-        $this->materializeLegacyIfNeeded($event);
-
         $resolvedTabId = trim($tabId);
         if ($resolvedTabId === '') {
             throw new NotFoundHttpException;
@@ -573,26 +559,29 @@ final class EventOccurrenceNestedAccountStore
      */
     private function memberRowsForTab(string $eventId, iterable $occurrences, string $tabId): array
     {
-        $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
-        $memberRows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => self::PARENT_TYPE,
-                'doc_type' => self::DOC_TYPE_MEMBER,
-            ],
-            [
-                'sort' => ['group_order' => 1, 'item_order' => 1, '_id' => 1],
-            ],
-        ));
+        $backings = $this->tabBackingsForEvent($eventId, $occurrences, $tabId);
+        if ($backings === []) {
+            return [];
+        }
 
-        $deduped = [];
-        $seenProfileIds = [];
+        $backingOrderByHead = [];
+        foreach ($backings as $index => $backing) {
+            $backingOrderByHead[$this->headKey($backing['parent_id'], $backing['group_key'])] = [
+                'occurrence_order' => (int) $backing['occurrence_order'],
+                'group_order' => (int) $backing['group_order'],
+                'backing_order' => $index,
+            ];
+        }
+
+        $candidateRows = [];
+        $memberRows = $this->memberRowsForBackings($eventId, $backings);
         foreach ($memberRows as $row) {
             $document = $this->documentToArray($row);
-            $groupLabel = trim((string) ($document['group_label'] ?? ''));
-            $normalizedLabel = $this->normalizedLabel($groupLabel);
-            if ($normalizedLabel === '' || $this->tabId($normalizedLabel) !== $tabId) {
+            $parentId = trim((string) ($document['parent_id'] ?? ''));
+            $groupKey = trim((string) ($document['group_key'] ?? ''));
+            $headKey = $this->headKey($parentId, $groupKey);
+            $backingOrder = $backingOrderByHead[$headKey] ?? null;
+            if (! is_array($backingOrder)) {
                 continue;
             }
 
@@ -603,33 +592,156 @@ final class EventOccurrenceNestedAccountStore
                 $profileId === ''
                 || $profileType === ''
                 || ! $this->eventProfileResolver->isProfileTypeQueryable($profileType)
-                || isset($seenProfileIds[$profileId])
             ) {
                 continue;
             }
 
-            $parentId = trim((string) ($document['parent_id'] ?? ''));
-            $document['_occurrence_order'] = $occurrenceOrderById[$parentId] ?? PHP_INT_MAX;
-            $seenProfileIds[$profileId] = true;
-            $deduped[] = $document;
+            $document['_occurrence_order'] = (int) $backingOrder['occurrence_order'];
+            $document['_backing_order'] = (int) $backingOrder['backing_order'];
+            $candidateRows[] = $document;
         }
 
         usort(
-            $deduped,
+            $candidateRows,
             static fn (array $left, array $right): int => [
                 (int) ($left['_occurrence_order'] ?? PHP_INT_MAX),
-                (int) ($left['group_order'] ?? 0),
+                (int) ($left['_backing_order'] ?? PHP_INT_MAX),
                 (int) ($left['item_order'] ?? 0),
                 (string) ($left['_id'] ?? ''),
             ] <=> [
                 (int) ($right['_occurrence_order'] ?? PHP_INT_MAX),
-                (int) ($right['group_order'] ?? 0),
+                (int) ($right['_backing_order'] ?? PHP_INT_MAX),
                 (int) ($right['item_order'] ?? 0),
                 (string) ($right['_id'] ?? ''),
             ],
         );
 
+        $deduped = [];
+        $seenProfileIds = [];
+        foreach ($candidateRows as $document) {
+            $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
+            $profileId = trim((string) ($nestedProfile['id'] ?? ''));
+            if ($profileId === '' || isset($seenProfileIds[$profileId])) {
+                continue;
+            }
+
+            $seenProfileIds[$profileId] = true;
+            $deduped[] = $document;
+        }
+
         return $deduped;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function headRowsForEvent(string $eventId): array
+    {
+        return array_values(iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $this->tenantId(),
+                'event_id' => $eventId,
+                'parent_type' => self::PARENT_TYPE,
+                'doc_type' => self::DOC_TYPE_HEAD,
+            ],
+            [
+                'sort' => ['group_order' => 1, '_id' => 1],
+            ],
+        )));
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array<int, array{parent_id:string,group_key:string,group_order:int,occurrence_order:int}>
+     */
+    private function tabBackingsForEvent(string $eventId, iterable $occurrences, string $tabId): array
+    {
+        $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
+        $backings = [];
+
+        foreach ($this->headRowsForEvent($eventId) as $row) {
+            $document = $this->documentToArray($row);
+            $parentId = trim((string) ($document['parent_id'] ?? ''));
+            $groupKey = trim((string) ($document['group_key'] ?? ''));
+            $label = trim((string) ($document['group_label'] ?? ''));
+            if ($parentId === '' || $groupKey === '' || $label === '') {
+                continue;
+            }
+
+            $normalizedLabel = $this->normalizedLabel($label);
+            if ($normalizedLabel === '' || $this->tabId($normalizedLabel) !== $tabId) {
+                continue;
+            }
+
+            $backings[] = [
+                'parent_id' => $parentId,
+                'group_key' => $groupKey,
+                'group_order' => (int) ($document['group_order'] ?? 0),
+                'occurrence_order' => $occurrenceOrderById[$parentId] ?? PHP_INT_MAX,
+            ];
+        }
+
+        usort(
+            $backings,
+            static fn (array $left, array $right): int => [
+                (int) $left['occurrence_order'],
+                (int) $left['group_order'],
+                (string) $left['parent_id'],
+                (string) $left['group_key'],
+            ] <=> [
+                (int) $right['occurrence_order'],
+                (int) $right['group_order'],
+                (string) $right['parent_id'],
+                (string) $right['group_key'],
+            ],
+        );
+
+        return $backings;
+    }
+
+    /**
+     * @param  array<int, array{parent_id:string,group_key:string,group_order:int,occurrence_order:int}>  $backings
+     * @return array<int, array<string, mixed>>
+     */
+    private function memberRowsForBackings(string $eventId, array $backings): array
+    {
+        $scopedPairs = [];
+        $seenPairs = [];
+        foreach ($backings as $backing) {
+            $parentId = trim((string) ($backing['parent_id'] ?? ''));
+            $groupKey = trim((string) ($backing['group_key'] ?? ''));
+            if ($parentId === '' || $groupKey === '') {
+                continue;
+            }
+
+            $pairKey = $this->headKey($parentId, $groupKey);
+            if (isset($seenPairs[$pairKey])) {
+                continue;
+            }
+
+            $seenPairs[$pairKey] = true;
+            $scopedPairs[] = [
+                'parent_id' => $parentId,
+                'group_key' => $groupKey,
+            ];
+        }
+
+        if ($scopedPairs === []) {
+            return [];
+        }
+
+        return array_values(iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $this->tenantId(),
+                'event_id' => $eventId,
+                'parent_type' => self::PARENT_TYPE,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+                '$or' => $scopedPairs,
+            ],
+            [
+                'sort' => ['item_order' => 1, '_id' => 1],
+            ],
+        )));
     }
 
     /**

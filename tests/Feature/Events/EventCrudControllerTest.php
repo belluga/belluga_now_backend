@@ -6090,6 +6090,54 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonMissingPath('data.linked_account_profiles');
     }
 
+    public function test_public_event_detail_does_not_materialize_legacy_occurrence_groups_on_read(): void
+    {
+        $legacy = $this->createEvent([
+            'artists' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+        ]);
+
+        $eventId = (string) $legacy->_id;
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrence->own_profile_groups = [[
+            'id' => 'artistas-occurrence',
+            'label' => $this->profileTypePluralLabel('artist'),
+            'order' => 0,
+            'account_profile_ids' => [(string) $this->artist->_id],
+        ]];
+        $occurrence->profile_groups = $occurrence->own_profile_groups;
+        $occurrence->own_event_parties = [[
+            'party_type' => 'artist',
+            'party_ref_id' => (string) $this->artist->_id,
+            'permissions' => ['can_edit' => true],
+            'metadata' => [
+                'display_name' => $this->artist->display_name,
+                'slug' => (string) $this->artist->slug,
+                'profile_type' => (string) $this->artist->profile_type,
+            ],
+        ]];
+        $occurrence->event_parties = $occurrence->own_event_parties;
+        $occurrence->own_linked_account_profiles = [];
+        $occurrence->linked_account_profiles = [];
+        $occurrence->save();
+
+        $this->assertSame([], $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+        ]));
+
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$occurrence->_id}");
+
+        $public->assertStatus(200);
+        $public->assertJsonCount(0, 'data.profile_groups');
+        $public->assertJsonMissingPath('data.linked_account_profiles');
+        $this->assertSame([], $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+        ]));
+    }
+
     public function test_management_event_hydrates_legacy_profile_groups_by_type_without_mutation(): void
     {
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -6121,7 +6169,6 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $occurrences = $this->makeOccurrences(2);
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -6205,7 +6252,6 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ];
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -6306,7 +6352,6 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -6591,9 +6636,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_public_event_detail_merges_event_type_fallback_with_explicit_occurrence_groups(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'convidados',
             'label' => 'Convidados',
@@ -6642,7 +6684,6 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -6867,9 +6908,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_public_event_detail_merges_groups_when_labels_match_even_if_ids_differ(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [[
             'id' => 'grupo-evento',
             'label' => 'Participantes',
@@ -6877,9 +6915,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'account_profile_ids' => [
                 (string) $this->artist->_id,
             ],
-        ]];
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
         ]];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'grupo-ocorrencia',
@@ -6889,7 +6924,6 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -7260,9 +7294,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_public_event_detail_repeated_gets_do_not_degrade_programming_or_occurrence_profiles(): void
     {
         $firstOccurrences = $this->makeOccurrences(2);
-        $firstOccurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $firstOccurrences[1]['profile_groups'] = [[
             'id' => 'bandas',
             'label' => 'Bandas',
@@ -7280,9 +7311,6 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $secondOccurrences = $this->makeOccurrences(2);
-        $secondOccurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-        ]];
         $secondOccurrences[1]['profile_groups'] = [[
             'id' => 'atracoes',
             'label' => 'Atrações',
