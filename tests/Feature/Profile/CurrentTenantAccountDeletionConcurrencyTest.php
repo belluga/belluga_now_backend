@@ -152,10 +152,15 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
                 $phone,
                 '123456',
                 'verify-first-verify',
-                ['BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS' => '1200'],
+                [
+                    'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '15',
+                    'BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS' => '1200',
+                ],
             ),
             [
-                $this->deleteProcess((string) $target->_id),
+                $this->deleteProcess((string) $target->_id, [
+                    'BELLUGA_TEST_PHONE_IDENTITY_ACQUIRE_TIMEOUT_SECONDS' => '15',
+                ]),
             ],
             0,
             fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'phone_otp_verify'),
