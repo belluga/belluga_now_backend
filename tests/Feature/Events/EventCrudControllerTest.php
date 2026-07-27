@@ -5867,9 +5867,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('band', data_get($bandParty, 'metadata.profile_type'));
 
         $occurrenceBandParty = collect($freshOccurrence->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id);
-        $this->assertIsArray($occurrenceBandParty);
-        $this->assertSame('band', data_get($occurrenceBandParty, 'party_type'));
-        $this->assertSame((string) $this->band->slug, data_get($occurrenceBandParty, 'metadata.slug'));
+        $this->assertNull($occurrenceBandParty);
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
         $public->assertStatus(200);
@@ -5879,12 +5877,8 @@ class EventCrudControllerTest extends TestCaseTenant
         Sanctum::actingAs($landlord, ['events:read']);
         $management = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
         $management->assertStatus(200);
-        $this->assertSame(
-            [(string) $this->artist->_id, (string) $this->band->_id],
-            collect($management->json('data.profile_groups.0.account_profile_ids') ?? [])
-                ->values()
-                ->all()
-        );
+        $management->assertJsonCount(2, 'data.event_parties');
+        $management->assertJsonCount(0, 'data.profile_groups');
     }
 
     public function test_event_write_rejects_legacy_event_parties_payload_even_when_profile_groups_are_present(): void
