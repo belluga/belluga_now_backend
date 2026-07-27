@@ -2270,9 +2270,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_create_persists_programming_item_end_time_in_admin_and_public_payloads(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'bandas',
             'label' => 'Bandas',
@@ -2338,9 +2335,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_update_occurrence_payload_preserves_omitted_owned_profiles_taxonomy_and_programming(): void
     {
         $occurrences = $this->makeOccurrences(1);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -2396,9 +2390,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_update_occurrence_payload_clears_owned_profiles_taxonomy_and_programming_with_explicit_empty_arrays(): void
     {
         $occurrences = $this->makeOccurrences(1);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -2425,7 +2416,6 @@ class EventCrudControllerTest extends TestCaseTenant
                 'occurrence_id' => (string) $storedOccurrence->_id,
                 'date_time_start' => $occurrences[0]['date_time_start'],
                 'date_time_end' => $occurrences[0]['date_time_end'],
-                'event_parties' => [],
                 'profile_groups' => [],
                 'taxonomy_terms' => [],
                 'programming_items' => [],
@@ -2454,9 +2444,6 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('atracoes', 'Atrações', [(string) $this->artist->_id]),
         ];
@@ -2468,9 +2455,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'end_time' => '18:00',
             'title' => 'Primeira programacao',
             'account_profile_ids' => [(string) $this->artist->_id],
-        ]];
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
         ]];
         $occurrences[1]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
@@ -2549,9 +2533,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_update_inserting_unidentified_occurrence_preserves_existing_identity_rows(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('atracoes', 'Atrações', [(string) $this->artist->_id]),
         ];
@@ -2563,9 +2544,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'end_time' => '18:00',
             'title' => 'Primeira programacao',
             'account_profile_ids' => [(string) $this->artist->_id],
-        ]];
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
         ]];
         $occurrences[1]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
@@ -4623,10 +4601,6 @@ class EventCrudControllerTest extends TestCaseTenant
         Storage::fake('public');
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-            'permissions' => ['can_edit' => false],
-        ]];
         $occurrences[1]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -4676,10 +4650,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_management_show_preserves_single_occurrence_programming_and_occurrence_profiles(): void
     {
         $occurrences = $this->makeOccurrences(1);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-            'permissions' => ['can_edit' => false],
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -5230,10 +5200,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_create_persists_occurrence_owned_profiles_and_programming_location_profile(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-            'permissions' => ['can_edit' => false],
-        ]];
         $occurrences[1]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -5257,7 +5223,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.occurrences.1.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $response->assertJsonPath('data.occurrences.1.programming_items.0.place_ref.id', (string) $this->venue->_id);
         $response->assertJsonPath('data.occurrences.1.programming_items.0.location_profile.id', (string) $this->venue->_id);
-        $response->assertJsonPath('data.linked_account_profiles.1.id', (string) $this->band->_id);
 
         $eventId = (string) $response->json('data.event_id');
         $firstOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
@@ -5272,10 +5237,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('physical', data_get($secondOccurrence, 'location.mode'));
         $this->assertSame((string) $this->venue->_id, data_get($secondOccurrence, 'place_ref.id'));
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'own_event_parties.0.party_ref_id'));
-        $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'event_parties.0.party_ref_id'));
-        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'event_parties.1.party_ref_id'));
-        $this->assertSame((string) $this->artist->_id, data_get($secondOccurrence, 'linked_account_profiles.0.id'));
-        $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'linked_account_profiles.1.id'));
         $this->assertSame('17:00', data_get($secondOccurrence, 'programming_items.0.time'));
         $this->assertSame($this->sanitizedProgrammingTitle('Show com a banda'), data_get($secondOccurrence, 'programming_items.0.title'));
         $this->assertSame((string) $this->band->_id, data_get($secondOccurrence, 'programming_items.0.linked_account_profiles.0.id'));
@@ -6005,9 +5966,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_occurrence_profile_groups_are_local_and_selected_public_detail_ignores_event_root_groups(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'convidados',
             'label' => 'Convidados',
@@ -6221,12 +6179,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $profileOneTag = $this->createAccountProfile('smoke_public', 'QA Discovery Tag Uma Tag');
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [
-            ['party_ref_id' => (string) $this->artist->_id],
-            ['party_ref_id' => (string) $profileInBandas->_id],
-            ['party_ref_id' => (string) $profileWithoutTags->_id],
-            ['party_ref_id' => (string) $profileOneTag->_id],
-        ];
         $occurrences[1]['profile_groups'] = [
             [
                 'id' => 'bandas',
@@ -6333,10 +6285,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $hiddenGuest->save();
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [
-            ['party_ref_id' => (string) $this->artist->_id],
-            ['party_ref_id' => (string) $delegate->_id],
-        ];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'participantes',
             'label' => 'Participantes',
@@ -6477,10 +6425,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $hiddenGuest = $this->createAccountProfile('hidden_guest', 'Hidden Guest');
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [
-            ['party_ref_id' => (string) $this->artist->_id],
-            ['party_ref_id' => (string) $delegate->_id],
-        ];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'outro-grupo',
             'label' => 'Outro Grupo',
@@ -6571,12 +6515,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $guestArtist->save();
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [
-            ['party_ref_id' => (string) $this->artist->_id],
-            ['party_ref_id' => (string) $this->band->_id],
-            ['party_ref_id' => (string) $secondArtist->_id],
-            ['party_ref_id' => (string) $guestArtist->_id],
-        ];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'outro-grupo',
             'label' => 'Outro Grupo',
@@ -6669,9 +6607,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->artist->save();
 
         $occurrences = $this->makeOccurrences(1);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [[
             'id' => 'artistas',
             'label' => 'Artistas',
@@ -6716,9 +6651,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->artist->save();
 
         $occurrences = $this->makeOccurrences(1);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->artist->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [[
             'id' => 'artistas',
             'label' => 'Artistas',
@@ -6727,7 +6659,6 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -6786,12 +6717,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->band->save();
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [
-            ['party_ref_id' => (string) $this->artist->_id],
-            ['party_ref_id' => (string) $this->band->_id],
-            ['party_ref_id' => (string) $secondArtist->_id],
-            ['party_ref_id' => (string) $guestArtist->_id],
-        ];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'outro-grupo',
             'label' => 'Outro Grupo',
@@ -6862,10 +6787,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_public_event_detail_keeps_explicit_occurrence_group_when_profiles_overlap_with_event_linked_profiles(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [
-            ['party_ref_id' => (string) $this->artist->_id],
-            ['party_ref_id' => (string) $this->band->_id],
-        ];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'outro-grupo',
             'label' => 'Outro Grupo',
@@ -6877,10 +6798,15 @@ class EventCrudControllerTest extends TestCaseTenant
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'event_parties' => [
-                ['party_ref_id' => (string) $this->artist->_id],
-                ['party_ref_id' => (string) $this->band->_id],
-            ],
+            'profile_groups' => [[
+                'id' => 'participantes',
+                'label' => 'Participantes',
+                'order' => 0,
+                'account_profile_ids' => [
+                    (string) $this->artist->_id,
+                    (string) $this->band->_id,
+                ],
+            ]],
             'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
@@ -7028,9 +6954,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_public_event_detail_selects_occurrence_and_returns_all_dates_with_selected_highlight(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'bandas',
             'label' => 'Bandas',
@@ -7091,9 +7014,6 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_public_event_detail_occurrence_slug_alias_selects_occurrence(): void
     {
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[1]['profile_groups'] = [[
             'id' => 'bandas',
             'label' => 'Bandas',
@@ -7220,9 +7140,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $guestArtist->save();
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -7234,9 +7151,6 @@ class EventCrudControllerTest extends TestCaseTenant
                 'type' => 'account_profile',
                 'id' => (string) $this->venue->_id,
             ],
-        ]];
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $guestArtist->_id,
         ]];
         $occurrences[1]['profile_groups'] = [
             $this->occurrenceProfileGroup('convidados', 'Convidados', [(string) $guestArtist->_id]),
@@ -7400,16 +7314,13 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->artist->_id, data_get($freshSecondSelectedOccurrence, 'own_linked_account_profiles.0.id'));
     }
 
-    public function test_agenda_occurrence_cards_only_include_event_profiles_and_their_own_occurrence_profiles(): void
+    public function test_agenda_occurrence_cards_only_include_their_own_occurrence_profiles(): void
     {
         $guestArtist = $this->createAccountProfile('artist', 'DJ Visitante');
         $guestArtist->slug = 'dj-visitante-'.Str::lower(Str::random(6));
         $guestArtist->save();
 
         $occurrences = $this->makeOccurrences(2);
-        $occurrences[0]['event_parties'] = [[
-            'party_ref_id' => (string) $this->band->_id,
-        ]];
         $occurrences[0]['profile_groups'] = [
             $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
         ];
@@ -7421,9 +7332,6 @@ class EventCrudControllerTest extends TestCaseTenant
                 'type' => 'account_profile',
                 'id' => (string) $this->venue->_id,
             ],
-        ]];
-        $occurrences[1]['event_parties'] = [[
-            'party_ref_id' => (string) $guestArtist->_id,
         ]];
         $occurrences[1]['profile_groups'] = [
             $this->occurrenceProfileGroup('convidados', 'Convidados', [(string) $guestArtist->_id]),
@@ -7445,12 +7353,6 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
-        $event = Event::query()->findOrFail($eventId);
-        $this->assertSame(
-            [(string) $this->artist->_id],
-            collect($event->event_parties ?? [])->pluck('party_ref_id')->map(static fn ($id) => (string) $id)->values()->all()
-        );
-
         $firstOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
 
@@ -7467,7 +7369,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($secondItem);
 
         $this->assertSame(
-            [(string) $this->artist->_id, (string) $this->band->_id],
+            [(string) $this->band->_id],
             collect($firstItem['linked_account_profiles'] ?? [])
                 ->pluck('id')
                 ->map(static fn ($id) => (string) $id)
@@ -7475,7 +7377,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->all()
         );
         $this->assertSame(
-            [(string) $this->artist->_id, (string) $guestArtist->_id],
+            [(string) $guestArtist->_id],
             collect($secondItem['linked_account_profiles'] ?? [])
                 ->pluck('id')
                 ->map(static fn ($id) => (string) $id)
