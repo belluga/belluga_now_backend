@@ -200,8 +200,8 @@ class EventManagementOccurrenceQuery
 
         $relatedAccountProfileId = $this->extractProfileFilterId($queryParams, 'related_account_profile_id');
         if ($relatedAccountProfileId !== null) {
-            $eventIds = $this->occurrenceNestedAccountStore->eventIdsForMemberProfiles([$relatedAccountProfileId]);
-            $clauses[] = ['event_id' => ['$in' => $eventIds]];
+            $occurrenceIds = $this->occurrenceNestedAccountStore->occurrenceIdsForMemberProfiles([$relatedAccountProfileId]);
+            $clauses[] = ['_id' => ['$in' => $this->buildDocumentIdCandidates($occurrenceIds)]];
         }
 
         if ($clauses === []) {
@@ -374,6 +374,29 @@ class EventManagementOccurrenceQuery
 
         if ($this->looksLikeObjectId($profileId)) {
             $candidates[] = new ObjectId($profileId);
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * @param  array<int, string>  $documentIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildDocumentIdCandidates(array $documentIds): array
+    {
+        $candidates = [];
+
+        foreach ($documentIds as $documentId) {
+            $normalized = trim($documentId);
+            if ($normalized === '') {
+                continue;
+            }
+
+            $candidates[] = $normalized;
+            if ($this->looksLikeObjectId($normalized)) {
+                $candidates[] = new ObjectId($normalized);
+            }
         }
 
         return $candidates;

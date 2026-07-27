@@ -2729,6 +2729,22 @@ class InvitesFlowTest extends TestCaseTenant
     private function decorateEventWithParticipantGroups(Event $event): Event
     {
         TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_inviteable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                    'has_content' => false,
+                ],
+            ]
+        );
+        TenantProfileType::query()->updateOrCreate(
             ['type' => 'exhibitor'],
             [
                 'label' => 'Exhibitor',
@@ -2745,38 +2761,21 @@ class InvitesFlowTest extends TestCaseTenant
             ]
         );
 
-        $bandId = 'band-profile-1';
-        $exhibitorId = 'exhibitor-profile-1';
+        $bandId = $this->createRelatedAccountProfile(
+            displayName: 'Invite Band',
+            profileType: 'artist',
+            slug: 'invite-band',
+        );
+        $exhibitorId = $this->createRelatedAccountProfile(
+            displayName: 'Invite Exhibitor',
+            profileType: 'exhibitor',
+            slug: 'invite-exhibitor',
+        );
 
-        $event->forceFill([
-            'event_parties' => [
-                [
-                    'party_type' => 'artist',
-                    'party_ref_id' => $bandId,
-                    'permissions' => ['can_edit' => false],
-                    'metadata' => [
-                        'display_name' => 'Invite Band',
-                        'slug' => 'invite-band',
-                        'profile_type' => 'artist',
-                        'avatar_url' => 'https://example.org/band.png',
-                        'cover_url' => 'https://example.org/band-cover.png',
-                        'taxonomy_terms' => [],
-                    ],
-                ],
-                [
-                    'party_type' => 'exhibitor',
-                    'party_ref_id' => $exhibitorId,
-                    'permissions' => ['can_edit' => false],
-                    'metadata' => [
-                        'display_name' => 'Invite Exhibitor',
-                        'slug' => 'invite-exhibitor',
-                        'profile_type' => 'exhibitor',
-                        'avatar_url' => 'https://example.org/exhibitor.png',
-                        'cover_url' => 'https://example.org/exhibitor-cover.png',
-                        'taxonomy_terms' => [],
-                    ],
-                ],
-            ],
+        $freshEvent = $event->fresh();
+        $this->syncEventWithPersistedOccurrenceIdentity($freshEvent, [[
+            'date_time_start' => Carbon::instance($freshEvent->date_time_start),
+            'date_time_end' => $freshEvent->date_time_end ? Carbon::instance($freshEvent->date_time_end) : null,
             'profile_groups' => [
                 [
                     'id' => 'bandas',
@@ -2791,12 +2790,6 @@ class InvitesFlowTest extends TestCaseTenant
                     'account_profile_ids' => [$exhibitorId],
                 ],
             ],
-        ])->save();
-
-        $freshEvent = $event->fresh();
-        app(EventOccurrenceSyncService::class)->syncFromEvent($freshEvent, [[
-            'date_time_start' => Carbon::instance($freshEvent->date_time_start),
-            'date_time_end' => $freshEvent->date_time_end ? Carbon::instance($freshEvent->date_time_end) : null,
         ]]);
 
         return $event->fresh();
@@ -2808,7 +2801,7 @@ class InvitesFlowTest extends TestCaseTenant
         $start = Carbon::instance($event->date_time_start);
         $end = $event->date_time_end ? Carbon::instance($event->date_time_end) : null;
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+        $this->syncEventWithPersistedOccurrenceIdentity($event, [
             [
                 'date_time_start' => $start,
                 'date_time_end' => $end,
@@ -2820,6 +2813,68 @@ class InvitesFlowTest extends TestCaseTenant
         ]);
 
         return $event->fresh();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $occurrences
+     */
+    private function syncEventWithPersistedOccurrenceIdentity(Event $event, array $occurrences): void
+    {
+        $storedOccurrences = EventOccurrence::withTrashed()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        foreach ($occurrences as $index => &$occurrence) {
+            $storedOccurrence = $storedOccurrences->get($index);
+            if (! $storedOccurrence instanceof EventOccurrence) {
+                continue;
+            }
+
+            $occurrence['occurrence_id'] = (string) $storedOccurrence->_id;
+            $storedSlug = trim((string) ($storedOccurrence->occurrence_slug ?? ''));
+            if ($storedSlug !== '') {
+                $occurrence['occurrence_slug'] = $storedSlug;
+            }
+        }
+        unset($occurrence);
+
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+    }
+
+    private function createRelatedAccountProfile(
+        string $displayName,
+        string $profileType,
+        string $slug,
+    ): string {
+        $account = Account::query()->create([
+            'name' => $displayName,
+            'ownership_state' => 'unmanaged',
+            'document' => [
+                'type' => 'cpf',
+                'number' => Str::upper($profileType).'-'.Str::random(8),
+            ],
+            'created_by' => (string) $this->sender->_id,
+            'created_by_type' => 'tenant',
+            'updated_by' => (string) $this->sender->_id,
+            'updated_by_type' => 'tenant',
+        ]);
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => $profileType,
+            'display_name' => $displayName,
+            'slug' => $slug,
+            'created_by' => (string) $this->sender->_id,
+            'created_by_type' => 'tenant',
+            'updated_by' => (string) $this->sender->_id,
+            'updated_by_type' => 'tenant',
+            'is_active' => true,
+        ]);
+
+        return (string) $profile->_id;
     }
 
     private function configureInviteTelemetry(): void

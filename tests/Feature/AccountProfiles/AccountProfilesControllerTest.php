@@ -2728,7 +2728,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('Future Artist Event', $occurrences[0]['title'] ?? null);
     }
 
-    public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_capability_enabled_poi_profile_via_linked_event_parties(): void
+    public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_capability_enabled_poi_profile_via_linked_profile_groups(): void
     {
         Queue::fake();
 
@@ -2910,39 +2910,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ?Carbon $endsAt = null,
         bool $viaLinkedParticipation = false,
     ): Event {
-        $eventParties = $viaLinkedParticipation
+        $profileGroups = $viaLinkedParticipation
             ? [[
-                'party_type' => $profile->profile_type,
-                'party_ref_id' => (string) $profile->_id,
-                'metadata' => [
-                    'display_name' => $profile->display_name,
-                    'slug' => $profile->slug,
-                    'profile_type' => $profile->profile_type,
-                    'avatar_url' => null,
-                    'cover_url' => null,
-                    'taxonomy_terms' => [],
-                ],
-                'permissions' => [
-                    'can_view' => true,
-                    'can_edit' => false,
-                ],
+                'id' => 'linked-profiles',
+                'label' => 'Linked profiles',
+                'order' => 0,
+                'account_profile_ids' => [(string) $profile->_id],
             ]]
-            : [[
-                'party_type' => 'personal',
-                'party_ref_id' => 'personal-1',
-                'metadata' => [
-                    'display_name' => 'Performer One',
-                    'slug' => 'performer-one',
-                    'profile_type' => 'personal',
-                    'avatar_url' => null,
-                    'cover_url' => null,
-                    'taxonomy_terms' => [],
-                ],
-                'permissions' => [
-                    'can_view' => true,
-                    'can_edit' => false,
-                ],
-            ]];
+            : [];
 
         $event = Event::create([
             'title' => $title,
@@ -2993,7 +2968,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ],
             'date_time_start' => $startsAt,
             'date_time_end' => $endsAt,
-            'event_parties' => $eventParties,
+            'event_parties' => [],
+            'profile_groups' => array_map(
+                static fn (array $group): array => [
+                    'id' => $group['id'],
+                    'label' => $group['label'],
+                    'order' => $group['order'],
+                ],
+                $profileGroups
+            ),
             'tags' => ['music'],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
@@ -3007,6 +2990,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
             'date_time_start' => Carbon::instance($startsAt),
             'date_time_end' => $endsAt !== null ? Carbon::instance($endsAt) : null,
+            'profile_groups' => $profileGroups,
         ]]);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);

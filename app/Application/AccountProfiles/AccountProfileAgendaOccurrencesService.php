@@ -6,6 +6,7 @@ namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
 use App\Support\Validation\InputConstraints;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
@@ -16,6 +17,7 @@ class AccountProfileAgendaOccurrencesService
     public function __construct(
         private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly EventQueryService $eventQueryService,
+        private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
     ) {}
 
     /**
@@ -28,24 +30,25 @@ class AccountProfileAgendaOccurrencesService
             return [];
         }
 
-        $profileIdCandidates = $this->buildProfileIdCandidates($profileId);
+        $profileIdCandidates = $this->buildDocumentIdCandidates([$profileId]);
+        $occurrenceIdCandidates = $this->buildDocumentIdCandidates(
+            $this->occurrenceNestedAccountStore->occurrenceIdsForMemberProfiles([$profileId])
+        );
         $query = EventOccurrence::query()
             ->where('is_event_published', true)
             ->where('effective_ends_at', '>', Carbon::now())
-            ->where(function ($query) use ($profileIdCandidates): void {
+            ->where(function ($query) use ($profileIdCandidates, $occurrenceIdCandidates): void {
                 $query->where(function ($query) use ($profileIdCandidates): void {
                     $query->where('place_ref.type', 'account_profile')
                         ->where(function ($query) use ($profileIdCandidates): void {
                             $query->whereIn('place_ref.id', $profileIdCandidates)
                                 ->orWhereIn('place_ref._id', $profileIdCandidates);
                         });
-                })->orWhereRaw([
-                    'event_parties' => [
-                        '$elemMatch' => [
-                            'party_ref_id' => ['$in' => $profileIdCandidates],
-                        ],
-                    ],
-                ]);
+                });
+
+                if ($occurrenceIdCandidates !== []) {
+                    $query->orWhereIn('_id', $occurrenceIdCandidates);
+                }
             });
 
         $occurrences = $query
@@ -67,12 +70,21 @@ class AccountProfileAgendaOccurrencesService
     /**
      * @return array<int, string|ObjectId>
      */
-    private function buildProfileIdCandidates(string $profileId): array
+    private function buildDocumentIdCandidates(array $ids): array
     {
-        $candidates = [$profileId];
+        $candidates = [];
 
-        if ($this->looksLikeObjectId($profileId)) {
-            $candidates[] = new ObjectId($profileId);
+        foreach ($ids as $id) {
+            $normalizedId = trim((string) $id);
+            if ($normalizedId === '') {
+                continue;
+            }
+
+            $candidates[] = $normalizedId;
+
+            if ($this->looksLikeObjectId($normalizedId)) {
+                $candidates[] = new ObjectId($normalizedId);
+            }
         }
 
         return $candidates;

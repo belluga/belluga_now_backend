@@ -11,10 +11,17 @@ trait InteractsWithEventWritePayload
 {
     protected function prepareForValidation(): void
     {
-        $eventParties = $this->decodeJsonArrayField($this->input('event_parties'));
-        if ($eventParties !== null) {
+        $profileGroups = $this->decodeJsonArrayField($this->input('profile_groups'));
+        if ($profileGroups !== null) {
             $this->merge([
-                'event_parties' => $eventParties,
+                'profile_groups' => $profileGroups,
+            ]);
+        }
+
+        $occurrences = $this->decodeOccurrenceProfileGroupFields($this->input('occurrences'));
+        if ($occurrences !== null) {
+            $this->merge([
+                'occurrences' => $occurrences,
             ]);
         }
     }
@@ -46,5 +53,35 @@ trait InteractsWithEventWritePayload
         }
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * @param  mixed  $occurrences
+     * @return array<int|string, mixed>|null
+     */
+    private function decodeOccurrenceProfileGroupFields(mixed $occurrences): ?array
+    {
+        if (! is_array($occurrences)) {
+            return null;
+        }
+
+        $didMutate = false;
+        $normalized = $occurrences;
+
+        foreach ($normalized as $index => $occurrence) {
+            if (! is_array($occurrence)) {
+                continue;
+            }
+
+            $profileGroups = $this->decodeJsonArrayField($occurrence['profile_groups'] ?? null);
+            if ($profileGroups === null) {
+                continue;
+            }
+
+            $normalized[$index]['profile_groups'] = $profileGroups;
+            $didMutate = true;
+        }
+
+        return $didMutate ? $normalized : null;
     }
 }

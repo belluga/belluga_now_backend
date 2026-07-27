@@ -65,16 +65,12 @@ class EventOccurrenceSyncService
             );
             $ownTaxonomyTerms = $this->ensureTaxonomySnapshots($occurrence['taxonomy_terms'] ?? []);
             $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
-            $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-            $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
-            $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
-            $eventProfileGroups = $this->profileGroupMemberStore->inflateGroupsWithMembers(
-                $event->profile_groups ?? [],
-                'event',
-                (string) $event->getKey(),
-            );
             $ownProfileGroups = $this->normalizeProfileGroups($occurrence['profile_groups'] ?? []);
-            $effectiveProfileGroups = $this->mergeProfileGroups($eventProfileGroups, $ownProfileGroups);
+            $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
+            $effectiveProfileGroups = $ownProfileGroups;
+            $effectiveEventParties = $ownEventParties;
+            $linkedAccountProfiles = $this->resolveLinkedAccountProfilesFromGroups($effectiveProfileGroups);
+            $ownLinkedAccountProfiles = $this->resolveLinkedAccountProfilesFromGroups($ownProfileGroups);
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
             $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
             $document = $resolvedDocuments[$index] ?? null;
@@ -94,11 +90,11 @@ class EventOccurrenceSyncService
                 'has_location_override' => $effectiveLocation['has_location_override'],
                 'location_override' => $effectiveLocation['location_override'],
                 'own_event_parties' => $ownEventParties,
-                'own_linked_account_profiles' => $this->resolveLinkedAccountProfiles($ownEventParties),
-                'linked_account_profiles' => $this->resolveLinkedAccountProfiles($effectiveEventParties),
+                'own_linked_account_profiles' => $ownLinkedAccountProfiles,
+                'linked_account_profiles' => $linkedAccountProfiles,
                 'own_profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
                 'profile_groups' => $this->profileGroupMemberStore->metadataOnly($effectiveProfileGroups),
-                'artists' => $this->deriveArtistsReadProjection($effectiveEventParties),
+                'artists' => $this->deriveArtistsReadProjection($linkedAccountProfiles),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'own_taxonomy_terms' => $ownTaxonomyTerms,
                 'taxonomy_terms' => $effectiveTaxonomyTerms,
@@ -663,10 +659,10 @@ class EventOccurrenceSyncService
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $eventParties
+     * @param  array<int, array<string, mixed>>  $linkedProfiles
      * @return array<int, array<string, mixed>>
      */
-    private function deriveArtistsReadProjection(array $eventParties): array
+    private function deriveArtistsReadProjection(array $linkedProfiles): array
     {
         return array_map(
             static function (array $profile): array {
@@ -674,77 +670,68 @@ class EventOccurrenceSyncService
 
                 return $profile;
             },
-            $this->resolveLinkedAccountProfiles($eventParties)
+            $linkedProfiles
         );
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $eventParties
+     * @param  array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>  $profileGroups
      * @return array<int, array<string, mixed>>
      */
-    private function resolveLinkedAccountProfiles(array $eventParties): array
+    private function resolveLinkedAccountProfilesFromGroups(array $profileGroups): array
     {
-        $profiles = [];
+        $orderedProfileIds = [];
+        foreach ($profileGroups as $group) {
+            foreach ($this->normalizeArray($group['account_profile_ids'] ?? []) as $rawProfileId) {
+                $profileId = trim((string) $rawProfileId);
+                if ($profileId !== '' && ! in_array($profileId, $orderedProfileIds, true)) {
+                    $orderedProfileIds[] = $profileId;
+                }
+            }
+        }
 
-        foreach ($eventParties as $party) {
-            $partyPayload = $this->normalizeArray($party);
-            $partyType = trim((string) ($partyPayload['party_type'] ?? ''));
-            if ($partyType === 'venue') {
+        if ($orderedProfileIds === []) {
+            return [];
+        }
+
+        $profilesById = [];
+        foreach ($this->eventProfileResolver->resolveNestedAccountProfileSnapshotsByIds($orderedProfileIds) as $profile) {
+            if (! is_array($profile)) {
                 continue;
             }
 
-            $metadata = $this->normalizeArray($partyPayload['metadata'] ?? []);
-            $profileId = trim((string) ($partyPayload['party_ref_id'] ?? ''));
-            $displayName = trim((string) ($metadata['display_name'] ?? ''));
-            if ($profileId === '' || $displayName === '') {
+            $profileId = trim((string) ($profile['id'] ?? ''));
+            if ($profileId !== '') {
+                $profilesById[$profileId] = $profile;
+            }
+        }
+
+        $profiles = [];
+        foreach ($orderedProfileIds as $profileId) {
+            $profile = $profilesById[$profileId] ?? null;
+            if (! is_array($profile)) {
+                continue;
+            }
+
+            $displayName = trim((string) ($profile['label'] ?? ''));
+            $profileType = trim((string) ($profile['profile_type'] ?? ''));
+            if ($displayName === '' || $profileType === '') {
                 continue;
             }
 
             $profiles[] = [
                 'id' => $profileId,
                 'display_name' => $displayName,
-                'slug' => isset($metadata['slug']) ? (string) $metadata['slug'] : null,
-                'profile_type' => isset($metadata['profile_type']) ? (string) $metadata['profile_type'] : $partyType,
-                'avatar_url' => $metadata['avatar_url'] ?? null,
-                'cover_url' => $metadata['cover_url'] ?? null,
-                'genres' => array_values($this->normalizeArray($metadata['genres'] ?? [])),
-                'taxonomy_terms' => $this->ensureTaxonomySnapshots($metadata['taxonomy_terms'] ?? []),
+                'slug' => isset($profile['slug']) ? (string) $profile['slug'] : null,
+                'profile_type' => $profileType,
+                'avatar_url' => $profile['avatar_url'] ?? null,
+                'cover_url' => $profile['cover_url'] ?? null,
+                'genres' => [],
+                'taxonomy_terms' => [],
             ];
         }
 
         return $profiles;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventParties
-     * @param  array<int, array<string, mixed>>  $ownEventParties
-     * @return array<int, array<string, mixed>>
-     */
-    private function mergeEventParties(array $eventParties, array $ownEventParties): array
-    {
-        $merged = [];
-        $seen = [];
-
-        foreach ([$eventParties, $ownEventParties] as $rows) {
-            foreach ($rows as $row) {
-                $party = $this->normalizeArray($row);
-                $partyType = trim((string) ($party['party_type'] ?? ''));
-                $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
-                if ($partyType === '' || $partyRefId === '') {
-                    continue;
-                }
-
-                $key = "{$partyType}:{$partyRefId}";
-                if (isset($seen[$key])) {
-                    continue;
-                }
-
-                $merged[] = $party;
-                $seen[$key] = true;
-            }
-        }
-
-        return $merged;
     }
 
     /**
