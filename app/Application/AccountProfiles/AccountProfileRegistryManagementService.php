@@ -86,6 +86,7 @@ class AccountProfileRegistryManagementService
             AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
             $currentCapabilities,
             $currentCapabilities,
+            $currentType,
         );
         $nextCapabilities = is_array($entry['capabilities'] ?? null)
             ? $entry['capabilities']
@@ -94,6 +95,7 @@ class AccountProfileRegistryManagementService
             AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
             $nextCapabilities,
             $nextCapabilities,
+            $nextType,
         );
         $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->visual ?? $model->poi_visual ?? null);
         $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['visual'] ?? $entry['poi_visual'] ?? null);
@@ -213,7 +215,7 @@ class AccountProfileRegistryManagementService
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities),
+            'capabilities' => $this->normalizeCapabilities($type, is_array($capabilities) ? $capabilities : []),
         ];
     }
 
@@ -237,7 +239,11 @@ class AccountProfileRegistryManagementService
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities, $currentCapabilities),
+            'capabilities' => $this->normalizeCapabilities(
+                $resolvedType,
+                is_array($capabilities) ? $capabilities : [],
+                $currentCapabilities,
+            ),
         ];
     }
 
@@ -246,9 +252,13 @@ class AccountProfileRegistryManagementService
      * @param  array<string, mixed>  $currentCapabilities
      * @return array<string, bool>
      */
-    private function normalizeCapabilities(array $capabilities, array $currentCapabilities = []): array
+    private function normalizeCapabilities(string $type, array $capabilities, array $currentCapabilities = []): array
     {
-        return $this->capabilityCatalog->normalize($capabilities, $currentCapabilities);
+        return $this->capabilityCatalog->completeForPersistence(
+            trim($type),
+            $capabilities,
+            $currentCapabilities,
+        );
     }
 
     /**
@@ -294,9 +304,10 @@ class AccountProfileRegistryManagementService
         $visual = $this->resolvePayloadVisual($model, $baseUrl);
         $labels = $this->normalizeLabels([], $model);
         $capabilities = $this->arrayFrom($model->capabilities ?? []);
+        $type = trim((string) ($model->type ?? ''));
 
         return [
-            'type' => (string) $model->type,
+            'type' => $type,
             'label' => $labels['singular'],
             'labels' => $labels,
             'allowed_taxonomies' => array_values(array_filter(
@@ -307,7 +318,7 @@ class AccountProfileRegistryManagementService
             )),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($capabilities, $capabilities),
+            'capabilities' => $this->normalizeCapabilities($type, $capabilities, $capabilities),
         ];
     }
 
@@ -413,32 +424,27 @@ class AccountProfileRegistryManagementService
     private function ensureTypeAssetRequirements(
         ?array $visual,
         Request $request,
-        ?string $existingTypeAssetUrl,
+        ?string $currentTypeAssetUrl,
         bool $removeTypeAsset,
     ): void {
-        if (! is_array($visual)) {
-            return;
-        }
-
         if (($visual['mode'] ?? null) !== 'image' || ($visual['image_source'] ?? null) !== 'type_asset') {
             return;
         }
 
-        $hasUpload = $request->hasFile('type_asset');
-        $hasExisting = $existingTypeAssetUrl !== null && ! $removeTypeAsset;
-        if ($hasUpload || $hasExisting) {
-            return;
-        }
+        $hasNewUpload = $request->hasFile('type_asset');
+        $hasExistingAsset = $currentTypeAssetUrl !== null && $currentTypeAssetUrl !== '' && ! $removeTypeAsset;
 
-        throw ValidationException::withMessages([
-            'type_asset' => ['Type asset image is required when image_source is type_asset.'],
-        ]);
+        if (! $hasNewUpload && ! $hasExistingAsset) {
+            throw ValidationException::withMessages([
+                'type_asset' => ['Type asset upload is required when poi_visual uses type_asset.'],
+            ]);
+        }
     }
 
-    private function normalizeTypeAssetUrl(mixed $raw): ?string
+    private function normalizeTypeAssetUrl(mixed $value): ?string
     {
-        $value = trim((string) $raw);
+        $url = trim((string) $value);
 
-        return $value === '' ? null : $value;
+        return $url === '' ? null : $url;
     }
 }

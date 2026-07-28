@@ -208,13 +208,14 @@ class InviteMutationService
         string $userId,
         string $eventId,
         string $occurrenceId,
+        ?string $receiverAccountProfileId = null,
     ): array {
         $targetRef = [
             'event_id' => $eventId,
             'occurrence_id' => $occurrenceId,
         ];
 
-        $receiverAccountProfileId = $this->recipientAccountProfileIdForUserId($userId);
+        $receiverAccountProfileId ??= $this->recipientAccountProfileIdForUserId($userId);
         if ($receiverAccountProfileId === null) {
             throw new RuntimeException('Receiver account profile is required before direct confirmation invite supersession.');
         }

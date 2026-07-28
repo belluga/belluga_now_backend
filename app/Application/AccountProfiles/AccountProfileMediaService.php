@@ -10,6 +10,7 @@ use Belluga\Media\Application\ModelMediaService;
 use Belluga\Media\Support\MediaModelDefinition;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 class AccountProfileMediaService
 {
@@ -31,6 +32,100 @@ class AccountProfileMediaService
     public function applyUploads(Request $request, AccountProfile $profile): array
     {
         return $this->modelMediaService->applyUploads($request, $profile, $this->definition());
+    }
+
+    /**
+     * @return array<string, array{action:string,sha256?:string,size?:int|null,mime?:string|null}>
+     */
+    public function mutationFingerprint(Request $request): array
+    {
+        $fingerprint = [];
+
+        foreach ($this->definition()->slots as $slot) {
+            $file = $request->file($slot);
+            if ($file instanceof UploadedFile) {
+                $path = $file->getRealPath();
+                $hash = is_string($path) && $path !== ''
+                    ? hash_file('sha256', $path)
+                    : false;
+
+                if (! is_string($hash)) {
+                    throw new \RuntimeException("Unable to fingerprint the {$slot} upload.");
+                }
+
+                $fingerprint[$slot] = [
+                    'action' => 'upload',
+                    'sha256' => $hash,
+                    'size' => $file->getSize(),
+                    'mime' => $file->getMimeType(),
+                ];
+
+                continue;
+            }
+
+            if ($request->boolean("remove_{$slot}")) {
+                $fingerprint[$slot] = ['action' => 'remove'];
+            }
+        }
+
+        return $fingerprint;
+    }
+
+    public function captureMutationBackup(
+        Request $request,
+        AccountProfile $profile,
+    ): ?AccountProfileMediaMutationBackup {
+        $slots = array_keys($this->mutationFingerprint($request));
+        if ($slots === []) {
+            return null;
+        }
+
+        $directory = $this->modelMediaService->resolveModelBaseDirectory(
+            $profile,
+            $this->definition(),
+            $request->getSchemeAndHttpHost(),
+        );
+        $disk = Storage::disk('public');
+        $files = [];
+        foreach ($disk->allFiles($directory) as $path) {
+            $filename = basename($path);
+            if (! collect($slots)->contains(static fn (string $slot): bool => str_starts_with($filename, $slot.'.'))) {
+                continue;
+            }
+
+            $files[$path] = $disk->get($path);
+        }
+
+        return new AccountProfileMediaMutationBackup(
+            $directory,
+            array_map(static fn (string $slot): string => "{$slot}.", $slots),
+            $files,
+        );
+    }
+
+    public function captureGalleryMutationBackup(
+        AccountProfile $profile,
+        ?string $baseUrl = null,
+    ): AccountProfileMediaMutationBackup {
+        $directory = $this->modelMediaService->resolveModelBaseDirectory(
+            $profile,
+            $this->definition(),
+            $baseUrl,
+        );
+        $disk = Storage::disk('public');
+        $files = [];
+        foreach ($disk->allFiles($directory) as $path) {
+            if (! str_starts_with(basename($path), self::GALLERY_KIND_PREFIX)) {
+                continue;
+            }
+            $files[$path] = $disk->get($path);
+        }
+
+        return new AccountProfileMediaMutationBackup(
+            $directory,
+            [self::GALLERY_KIND_PREFIX],
+            $files,
+        );
     }
 
     public function resolveMediaPath(AccountProfile $profile, string $kind): ?string
@@ -125,15 +220,14 @@ class AccountProfileMediaService
         );
     }
 
-    /**
-     * Erases all profile-owned media before an irreversible account deletion.
-     */
-    public function removeAllUploads(AccountProfile $profile, ?string $baseUrl = null): void
-    {
-        foreach (['avatar', 'cover'] as $kind) {
+    public function removeAllUploads(
+        AccountProfile $profile,
+        ?string $baseUrl = null,
+    ): void {
+        foreach ($this->definition()->slots as $slot) {
             $this->modelMediaService->removeUpload(
                 model: $profile,
-                kind: $kind,
+                kind: $slot,
                 definition: $this->definition(),
                 baseUrl: $baseUrl,
             );
@@ -145,11 +239,60 @@ class AccountProfileMediaService
             }
 
             foreach ($group['items'] ?? [] as $item) {
-                $itemId = trim((string) (is_array($item) ? ($item['item_id'] ?? '') : ''));
-                if ($itemId !== '') {
-                    $this->removeGalleryUpload($profile, $itemId, $baseUrl);
+                if (! is_array($item)) {
+                    continue;
                 }
+
+                $itemId = trim((string) ($item['item_id'] ?? ''));
+                if ($itemId === '') {
+                    continue;
+                }
+
+                $this->removeGalleryUpload($profile, $itemId, $baseUrl);
             }
+        }
+    }
+
+    /**
+     * @return list<array{path:string,checksum:string}>
+     */
+    public function freezeDeletionMediaDescriptors(AccountProfile $profile): array
+    {
+        $directory = $this->modelMediaService->resolveModelBaseDirectory(
+            $profile,
+            $this->definition(),
+        );
+        $disk = Storage::disk('public');
+        $descriptors = [];
+        foreach ($disk->allFiles($directory) as $path) {
+            $contents = $disk->get($path);
+            $descriptors[] = [
+                'path' => $path,
+                'checksum' => hash('sha256', $contents),
+            ];
+        }
+
+        return $descriptors;
+    }
+
+    /** @param list<array{path:string,checksum:string}> $descriptors */
+    public function purgeFrozenDeletionMediaDescriptors(array $descriptors): void
+    {
+        $disk = Storage::disk('public');
+        foreach ($descriptors as $descriptor) {
+            $path = trim((string) ($descriptor['path'] ?? ''));
+            $checksum = trim((string) ($descriptor['checksum'] ?? ''));
+            if ($path === '' || $checksum === '') {
+                throw new \RuntimeException('Frozen Account Profile media descriptor is invalid.');
+            }
+            if (! $disk->exists($path)) {
+                continue;
+            }
+            if (! hash_equals($checksum, hash('sha256', $disk->get($path)))) {
+                throw new \RuntimeException('Frozen Account Profile media checksum no longer matches.');
+            }
+
+            $disk->delete($path);
         }
     }
 

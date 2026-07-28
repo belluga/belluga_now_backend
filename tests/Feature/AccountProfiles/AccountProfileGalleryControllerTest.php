@@ -197,7 +197,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
                     'is_publicly_discoverable' => true,
                     'is_poi_enabled' => false,
                     'has_events' => false,
@@ -289,7 +289,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
                     'is_publicly_discoverable' => true,
                     'is_poi_enabled' => false,
                     'has_events' => false,
@@ -321,7 +321,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
                 'capabilities' => [
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
-                    'is_favoritable' => false,
+                    'is_favoritable' => true,
                     'is_publicly_discoverable' => true,
                     'is_poi_enabled' => false,
                     'has_events' => false,

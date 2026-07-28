@@ -4,13 +4,18 @@ declare(strict_types=1);
 
 namespace App\Integration\DiscoveryFilters;
 
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Integration\DiscoveryFilters\Concerns\FormatsDiscoveryFilterTypeOptions;
-use App\Models\Tenants\TenantProfileType;
 use Belluga\DiscoveryFilters\Contracts\DiscoveryFilterEntityProviderContract;
+use Illuminate\Contracts\Container\Container;
 
 final class AccountProfileDiscoveryFilterEntityProvider implements DiscoveryFilterEntityProviderContract
 {
     use FormatsDiscoveryFilterTypeOptions;
+
+    public function __construct(
+        private readonly Container $container,
+    ) {}
 
     public function entity(): string
     {
@@ -19,17 +24,14 @@ final class AccountProfileDiscoveryFilterEntityProvider implements DiscoveryFilt
 
     public function types(): array
     {
-        return TenantProfileType::query()
-            ->publicDiscoverySurface()
-            ->orderBy('label')
-            ->get()
-            ->map(fn (TenantProfileType $type): array => [
-                'value' => (string) ($type->type ?? ''),
-                'label' => (string) ($type->label ?? $type->type ?? ''),
-                ...($this->normalizeVisual($type->poi_visual ?? $type->visual ?? null) !== null
-                    ? ['visual' => $this->normalizeVisual($type->poi_visual ?? $type->visual ?? null)]
+        return collect($this->snapshotReader()->catalogSnapshot()->filterOptions())
+            ->map(fn (array $type): array => [
+                'value' => (string) ($type['value'] ?? ''),
+                'label' => (string) ($type['label'] ?? $type['value'] ?? ''),
+                ...($this->normalizeVisual($type['poi_visual'] ?? $type['visual'] ?? null) !== null
+                    ? ['visual' => $this->normalizeVisual($type['poi_visual'] ?? $type['visual'] ?? null)]
                     : []),
-                'allowed_taxonomies' => $this->normalizeStringList($type->allowed_taxonomies ?? []),
+                'allowed_taxonomies' => $this->normalizeStringList($type['allowed_taxonomies'] ?? []),
             ])
             ->filter(static fn (array $item): bool => trim($item['value']) !== '' && trim($item['label']) !== '')
             ->values()
@@ -51,5 +53,13 @@ final class AccountProfileDiscoveryFilterEntityProvider implements DiscoveryFilt
         }
 
         return $this->taxonomyOptions($this->normalizeStringList($allowed));
+    }
+
+    private function snapshotReader(): AccountProfilePublicCatalogSnapshotReader
+    {
+        /** @var AccountProfilePublicCatalogSnapshotReader $reader */
+        $reader = $this->container->make(AccountProfilePublicCatalogSnapshotReader::class);
+
+        return $reader;
     }
 }

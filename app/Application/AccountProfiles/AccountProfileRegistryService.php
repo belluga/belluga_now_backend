@@ -105,7 +105,7 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
             is_array($capabilities) ? $capabilities : [],
         );
@@ -116,7 +116,7 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
             is_array($capabilities) ? $capabilities : [],
         );
@@ -127,7 +127,7 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_EVENTS,
             is_array($capabilities) ? $capabilities : [],
         );
@@ -138,7 +138,7 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_GALLERY,
             is_array($capabilities) ? $capabilities : [],
         );
@@ -149,7 +149,7 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
             is_array($capabilities) ? $capabilities : [],
         );
@@ -160,7 +160,7 @@ class AccountProfileRegistryService
         $definition = $this->typeDefinition($profileType);
         $capabilities = $definition['capabilities'] ?? [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
             is_array($capabilities) ? $capabilities : [],
         );
@@ -232,7 +232,7 @@ class AccountProfileRegistryService
      */
     private function resolveCapabilitiesPayload(array $capabilities): array
     {
-        return $this->capabilityCatalog->normalize($capabilities, $capabilities);
+        return $this->capabilityCatalog->runtimeCapabilities($capabilities);
     }
 
     /**

@@ -201,7 +201,7 @@ Route::prefix('account_profiles')
         Route::get('/', [AccountProfilesController::class, 'index'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
-        Route::get('/contact_sources', [AccountProfilesController::class, 'contactSourceCandidates'])
+        Route::get('/candidates', [AccountProfilesController::class, 'candidates'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
         Route::post('/', [AccountProfilesController::class, 'store'])
@@ -209,6 +209,11 @@ Route::prefix('account_profiles')
 
         Route::prefix('{account_profile_id}')
             ->group(function () {
+                Route::get('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'nestedGroupMembers'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+                Route::patch('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'patchNestedGroupMembers'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
                 Route::get('/', [AccountProfilesController::class, 'show'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 

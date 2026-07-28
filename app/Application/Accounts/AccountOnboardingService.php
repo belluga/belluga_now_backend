@@ -6,13 +6,17 @@ namespace App\Application\Accounts;
 
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
+use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -24,6 +28,8 @@ class AccountOnboardingService
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileRegistrySeeder $registrySeeder,
         private readonly AccountProfileRegistryService $registryService,
+        private readonly AccountProfileTransactionRunner $transactionRunner,
+        private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
     ) {}
 
     /**
@@ -33,9 +39,18 @@ class AccountOnboardingService
     public function create(array $payload, Request $request): array
     {
         $this->registrySeeder->ensureDefaults();
+        $commandId = 'account-onboarding:'.Str::uuid()->toString();
+        $fingerprint = hash(
+            'sha256',
+            json_encode([
+                'payload' => $this->normalizeFingerprintValue($payload),
+            ], JSON_THROW_ON_ERROR),
+        );
 
         try {
-            return DB::connection('tenant')->transaction(function () use ($payload, $request): array {
+            $result = $this->transactionRunner->run(function (
+                AccountProfileTransactionContext $context,
+            ) use ($payload, $request, $commandId, $fingerprint): array {
                 $accountResult = $this->accountService->createWithinCurrentTransaction([
                     'name' => $payload['name'],
                     'ownership_state' => $payload['ownership_state'],
@@ -77,23 +92,35 @@ class AccountOnboardingService
                     }
                 }
 
-                $profile = $this->profileService->createWithinCurrentTransaction(
+                $profileResult = $this->profileService->createWithinTransactionContext(
                     $profilePayload,
-                    queueMapPoiSyncAfterCommit: false,
+                    $context,
+                    $commandId,
+                    $fingerprint,
                 );
+                $profile = $profileResult['profile'];
 
                 $this->mediaService->applyUploads($request, $profile);
-                $this->profileService->queueMapPoiSyncAfterCommit($profile);
 
                 return [
                     'account' => $account->fresh(),
                     'account_profile' => $profile->fresh(),
                     'role' => $role->fresh(),
+                    'outbox_event_id' => $profileResult['outbox_event_id'],
                 ];
             });
+
+            if (($result['outbox_event_id'] ?? null) !== null) {
+                $this->outboxDispatcher->dispatchEvent($result['outbox_event_id']);
+            }
+
+            unset($result['outbox_event_id']);
+
+            return $result;
         } catch (ValidationException $exception) {
             throw $this->normalizeValidationException($exception);
         } catch (Throwable $exception) {
+            report($exception);
             throw ValidationException::withMessages([
                 'account' => ['Account onboarding could not be completed.'],
             ]);
@@ -154,5 +181,29 @@ class AccountOnboardingService
         $errors['location.lng'] = $errors['location.lng'] ?? $messages;
 
         return ValidationException::withMessages($errors);
+    }
+
+    private function normalizeFingerprintValue(mixed $value): mixed
+    {
+        if ($value instanceof UploadedFile) {
+            return [
+                'uploaded_file' => true,
+                'original_name' => $value->getClientOriginalName(),
+                'mime_type' => $value->getClientMimeType(),
+                'size' => $value->getSize(),
+                'error' => $value->getError(),
+            ];
+        }
+
+        if (is_array($value)) {
+            $normalized = [];
+            foreach ($value as $key => $item) {
+                $normalized[$key] = $this->normalizeFingerprintValue($item);
+            }
+
+            return $normalized;
+        }
+
+        return $value;
     }
 }

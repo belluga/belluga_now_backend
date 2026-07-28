@@ -756,9 +756,8 @@ class InviteablePeopleService
         if (array_key_exists($profileType, $capabilitiesByType)) {
             $capabilities = $capabilitiesByType[$profileType];
 
-            return $this->capabilityCatalog->isEnabled(
+            return $this->capabilityCatalog->isExplicitlyEnabled(
                 AccountProfileTypeCapabilityCatalog::IS_INVITEABLE,
-                $capabilities,
                 $capabilities,
             );
         }
@@ -770,9 +769,8 @@ class InviteablePeopleService
 
         $capabilities = is_array($type?->capabilities ?? null) ? $type->capabilities : [];
 
-        return $this->capabilityCatalog->isEnabled(
+        return $this->capabilityCatalog->isExplicitlyEnabled(
             AccountProfileTypeCapabilityCatalog::IS_INVITEABLE,
-            $capabilities,
             $capabilities,
         );
     }
@@ -890,7 +888,7 @@ class InviteablePeopleService
             ->mapWithKeys(function (TenantProfileType $type): array {
                 $capabilities = is_array($type->capabilities ?? null) ? $type->capabilities : [];
 
-                return [(string) $type->type => $this->capabilityCatalog->normalize($capabilities, $capabilities)];
+                return [(string) $type->type => $this->capabilityCatalog->runtimeCapabilities($capabilities)];
             })
             ->all();
     }

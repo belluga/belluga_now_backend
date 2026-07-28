@@ -1832,6 +1832,41 @@ class MapPoisControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_discovery_account_profiles_catalog_includes_publicly_discoverable_non_favoritable_types(): void
+    {
+        TenantProfileType::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'discoverable_without_favorite',
+            'label' => 'Discoverable Without Favorite',
+            'allowed_taxonomies' => [],
+            'visual' => [
+                'mode' => 'icon',
+                'icon' => 'restaurant',
+                'color' => '#A94A00',
+                'icon_color' => '#FFFFFF',
+            ],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => false,
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}discovery-filters/discovery.account_profiles");
+
+        $response->assertStatus(200);
+        $this->assertNotNull(
+            collect($response->json('filters') ?? [])
+                ->firstWhere('key', 'discoverable_without_favorite')
+        );
+        $this->assertNotNull(
+            collect($response->json('type_options.account_profile') ?? [])
+                ->firstWhere('value', 'discoverable_without_favorite')
+        );
+    }
+
     public function test_map_pois_supports_source_and_types_filters(): void
     {
         $location = $this->point(-40.0, -20.0);

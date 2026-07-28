@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Application\Media\SystemExternalImageDnsResolver;
@@ -32,6 +33,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TenantDomainResolverService::class, function ($app) {
             return new TenantDomainResolverService;
         });
+        $this->app->scoped(AccountProfilePublicCatalogSnapshotReader::class);
         $this->app->bind(AccountProfileTypeSetProvider::class);
 
         $this->app->bind(

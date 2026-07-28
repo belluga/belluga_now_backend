@@ -101,8 +101,9 @@ class InviteTargetResolverService
                     $detailProjection,
                     $eventPayload,
                 ),
-                'linked_account_profiles' => $this->normalizeListOfMaps(
-                    $detailProjection['linked_account_profiles'] ?? [],
+                'linked_account_profiles' => $this->resolveSnapshotLinkedAccountProfiles(
+                    $detailProjection,
+                    $occurrencePayload,
                 ),
                 'profile_groups' => $this->normalizeListOfMaps(
                     $detailProjection['profile_groups'] ?? [],
@@ -169,6 +170,29 @@ class InviteTargetResolverService
     {
         return $this->normalizeListOfMaps(
             $detailProjection['taxonomy_terms'] ?? $eventPayload['taxonomy_terms'] ?? [],
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $detailProjection
+     * @param  array<string, mixed>  $occurrencePayload
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveSnapshotLinkedAccountProfiles(
+        array $detailProjection,
+        array $occurrencePayload,
+    ): array {
+        $detailProfiles = $this->normalizeListOfMaps(
+            $detailProjection['linked_account_profiles'] ?? [],
+        );
+        if ($detailProfiles !== []) {
+            return $detailProfiles;
+        }
+
+        return $this->normalizeListOfMaps(
+            $occurrencePayload['linked_account_profiles']
+                ?? $occurrencePayload['own_linked_account_profiles']
+                ?? [],
         );
     }
 

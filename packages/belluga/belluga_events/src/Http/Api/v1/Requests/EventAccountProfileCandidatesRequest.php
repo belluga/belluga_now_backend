@@ -21,6 +21,7 @@ class EventAccountProfileCandidatesRequest extends FormRequest
     {
         return [
             'type' => ['required', 'string', Rule::in(['related_account_profile', 'physical_host'])],
+            'profile_type' => 'sometimes|string|max:120',
             'search' => 'sometimes|string|max:120',
             'page' => 'sometimes|integer|min:1',
             'per_page' => 'sometimes|integer|min:1|max:50',

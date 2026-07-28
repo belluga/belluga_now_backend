@@ -72,14 +72,6 @@ trait RefreshLandlordAndTenantDatabases
         $isMongo = $dsn !== '' && str_contains($dsn, 'mongodb');
         $isAtlas = $dsn !== '' && str_contains($dsn, 'mongodb+srv://');
 
-        Log::info('Tests: landlord collections before wipe', [
-            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
-            'landlords_count' => Landlord::query()->count(),
-            'tenants_count' => Tenant::query()->count(),
-        ]);
-        Log::info('Tests: tenant collections before wipe', [
-            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
-        ]);
         if ($isMongo) {
             $this->wipeMongoCollectionsForRefresh($landlordDatabase, $tenantDatabase, $tenantDatabaseNames, $isAtlas);
             LandlordUser::withTrashed()->forceDelete();
@@ -100,15 +92,6 @@ trait RefreshLandlordAndTenantDatabases
 
             static::$migrationsRan = false;
         }
-
-        Log::info('Tests: landlord collections after wipe', [
-            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
-            'landlords_count' => Landlord::query()->count(),
-            'tenants_count' => Tenant::query()->count(),
-        ]);
-        Log::info('Tests: tenant collections after wipe', [
-            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
-        ]);
 
         $this->resetRuntimeState();
 

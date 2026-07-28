@@ -205,6 +205,97 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertNotEmpty($errors['location.lng'] ?? null);
     }
 
+    public function test_onboarding_rejects_invalid_nested_group_member_ids(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        $accountsBefore = Account::query()->count();
+        $profilesBefore = AccountProfile::query()->count();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Nested Onboarding '.Str::random(6),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.3155,
+                'lng' => -40.3128,
+            ],
+            'nested_profile_groups' => [[
+                'id' => 'parceiros',
+                'label' => 'Parceiros',
+                'account_profile_ids' => ['not-an-object-id'],
+            ]],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups.0.account_profile_ids.0']);
+        $this->assertSame($accountsBefore, Account::query()->count());
+        $this->assertSame($profilesBefore, AccountProfile::query()->count());
+    }
+
+    public function test_onboarding_persists_nested_group_members_in_single_request(): void
+    {
+        $this->actingAsAdmin(['account-users:create', 'account-users:update', 'account-users:view']);
+
+        TenantProfileType::query()
+            ->where('type', 'venue')
+            ->update([
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'has_nested_profile_groups' => true,
+                ],
+            ]);
+
+        $supportingAccount = Account::query()->create([
+            'name' => 'Nested Candidate '.Str::random(8),
+            'document' => strtoupper('N'.bin2hex(random_bytes(7))),
+        ]);
+        $supportingProfile = AccountProfile::query()->create([
+            'account_id' => (string) $supportingAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Candidate Profile',
+            'slug' => 'nested-candidate-'.Str::lower(Str::random(8)),
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Nested Parent '.Str::random(8),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'venue',
+            'location' => [
+                'lat' => -20.671339,
+                'lng' => -40.495395,
+            ],
+            'nested_profile_groups' => [[
+                'id' => 'parceiros',
+                'label' => 'Parceiros',
+                'order' => 0,
+                'account_profile_ids' => [(string) $supportingProfile->_id],
+            ]],
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.account_profile.nested_profile_groups.0.id', 'parceiros');
+        $response->assertJsonPath('data.account_profile.nested_profile_groups.0.label', 'Parceiros');
+        $response->assertJsonPath('data.account_profile.nested_profile_groups.0.member_count', 1);
+
+        $profileId = (string) $response->json('data.account_profile.id');
+
+        $readback = $this->getJson(
+            "{$this->tenantAccountProfilesLegacyUrl}/{$profileId}"
+        );
+        $readback->assertOk();
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+
+        $members = $this->getJson(
+            "{$this->tenantAccountProfilesLegacyUrl}/{$profileId}/nested_profile_groups/parceiros/members"
+        );
+        $members->assertOk();
+        $members->assertJsonPath('data.0.id', (string) $supportingProfile->_id);
+    }
+
     public function test_poi_enabled_onboarding_projects_map_poi_without_queue_worker_dependency(): void
     {
         Queue::fake();
@@ -276,7 +367,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $profileMock = Mockery::mock(AccountProfileManagementService::class);
-        $profileMock->shouldReceive('createWithinCurrentTransaction')
+        $profileMock->shouldReceive('createWithinTransactionContext')
             ->once()
             ->andThrow(new \RuntimeException('Simulated profile write failure'));
         $this->app->instance(AccountProfileManagementService::class, $profileMock);

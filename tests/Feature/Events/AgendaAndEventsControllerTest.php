@@ -383,39 +383,83 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     {
         $now = Carbon::now();
 
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'labels' => [
+                    'singular' => 'Artist',
+                    'plural' => 'Artists',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Band',
+                'labels' => [
+                    'singular' => 'Band',
+                    'plural' => 'Bands',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+
+        $liveArtistOneAccount = Account::create([
+            'name' => 'Live Artist One Account',
+            'document' => uniqid('live-artist-one-', true),
+        ]);
+        $liveArtistOne = AccountProfile::create([
+            'account_id' => (string) $liveArtistOneAccount->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Live Artist One',
+            'avatar_url' => 'https://example.org/artist-live-1.jpg',
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+        $liveArtistTwoAccount = Account::create([
+            'name' => 'Live Artist Two Account',
+            'document' => uniqid('live-artist-two-', true),
+        ]);
+        $liveArtistTwo = AccountProfile::create([
+            'account_id' => (string) $liveArtistTwoAccount->_id,
+            'profile_type' => 'band',
+            'display_name' => 'Live Artist Two',
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
         $this->createEvent([
             'title' => 'Live Discovery Slot',
             'date_time_start' => $now->copy()->subMinutes(15),
             'date_time_end' => $now->copy()->addMinutes(45),
             'artists' => [],
-            'event_parties' => [
+            'event_parties' => [],
+            'profile_groups' => [
                 [
-                    'party_type' => 'artist',
-                    'party_ref_id' => 'artist-live-1',
-                    'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => 'Live Artist One',
-                        'slug' => 'live-artist-one',
-                        'profile_type' => 'artist',
-                        'avatar_url' => 'https://example.org/artist-live-1.jpg',
-                        'cover_url' => null,
-                        'genres' => ['samba'],
-                        'taxonomy_terms' => [],
-                    ],
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $liveArtistOne->_id],
                 ],
                 [
-                    'party_type' => 'band',
-                    'party_ref_id' => 'artist-live-2',
-                    'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => 'Live Artist Two',
-                        'slug' => 'live-artist-two',
-                        'profile_type' => 'band',
-                        'avatar_url' => null,
-                        'cover_url' => null,
-                        'genres' => ['mpb'],
-                        'taxonomy_terms' => [],
-                    ],
+                    'id' => 'bands',
+                    'label' => 'Bands',
+                    'order' => 1,
+                    'account_profile_ids' => [(string) $liveArtistTwo->_id],
                 ],
             ],
         ]);
@@ -439,7 +483,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertCount(1, $items);
         $this->assertSame('Live Discovery Slot', (string) ($items[0]['title'] ?? ''));
         $this->assertSame('Live Artist One', (string) ($items[0]['artists'][0]['display_name'] ?? ''));
-        $this->assertSame('artist-live-1', (string) ($items[0]['artists'][0]['id'] ?? ''));
+        $this->assertSame((string) $liveArtistOne->_id, (string) ($items[0]['artists'][0]['id'] ?? ''));
     }
 
     public function test_agenda_public_endpoint_shows_only_effectively_published_items(): void
@@ -1596,7 +1640,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertJsonCount(0, 'items');
     }
 
-    public function test_event_detail_exposes_linked_account_profiles_for_dynamic_category_tabs(): void
+    public function test_event_detail_exposes_related_profile_group_metadata_and_resolves_members_lazily(): void
     {
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'band'],
@@ -1644,37 +1688,50 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
             ],
             'artists' => [],
-            'event_parties' => [
-                [
-                    'party_type' => 'band',
-                    'party_ref_id' => (string) $profile->_id,
-                    'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => 'Ananda Torres',
-                        'slug' => (string) $profile->slug,
-                        'profile_type' => 'band',
-                        'avatar_url' => 'https://example.org/artist-avatar.jpg',
-                        'cover_url' => 'https://example.org/artist-cover.jpg',
-                        'taxonomy_terms' => [
-                            ['type' => 'event_style', 'value' => 'showcase', 'name' => 'Showcase'],
-                        ],
-                    ],
-                ],
-            ],
+            'event_parties' => [],
+            'profile_groups' => [],
         ]);
+
+        $this->syncEventWithPersistedOccurrenceIdentity($event->fresh(), [[
+            'date_time_start' => Carbon::instance($event->date_time_start),
+            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
+            'profile_groups' => [[
+                'id' => 'bands',
+                'label' => 'Bands',
+                'order' => 0,
+                'account_profile_ids' => [(string) $profile->_id],
+            ]],
+        ]]);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);
-        $response->assertJsonCount(1, 'data.linked_account_profiles');
-        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $profile->_id);
-        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', 'band');
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $profile->slug);
-        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
-        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
+        $response->assertJsonCount(1, 'data.profile_groups');
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.profile_groups.0.label', 'Bands');
+        $response->assertJsonPath('data.profile_groups.0.member_count', 1);
+        $response->assertJsonMissingPath('data.profile_groups.0.profiles');
+        $response->assertJsonPath('data.artists.0.id', (string) $profile->_id);
+        $response->assertJsonPath('data.artists.0.profile_type', 'band');
+        $response->assertJsonPath('data.artists.0.slug', (string) $profile->slug);
+        $response->assertJsonPath('data.artists.0.taxonomy_terms', []);
+
+        $groupId = (string) $response->json('data.profile_groups.0.id');
+        $this->assertNotSame('', $groupId);
         $response->assertJsonPath(
-            'data.linked_account_profiles.0.taxonomy_terms.0.name',
-            'Showcase'
+            'data.profile_groups.0.members_path',
+            "/api/v1/events/{$response->json('data.slug')}/related_profile_tabs/{$groupId}/members"
         );
+
+        $members = $this->getJson(
+            "{$this->base_api_tenant}events/{$response->json('data.slug')}/related_profile_tabs/{$groupId}/members"
+        );
+        $members->assertOk();
+        $members->assertJsonCount(1, 'data.data');
+        $members->assertJsonPath('data.data.0.id', (string) $profile->_id);
+        $members->assertJsonPath('data.data.0.profile_type', 'band');
+        $members->assertJsonPath('data.data.0.slug', (string) $profile->slug);
+        $members->assertJsonPath('data.data.0.can_open_public_detail', true);
+        $members->assertJsonPath('data.data.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
     }
 
     public function test_event_stream_returns_deltas(): void
@@ -2084,6 +2141,34 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         ?string $profileCoverUrl,
         ?string $profileAvatarUrl,
     ): array {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'labels' => [
+                    'singular' => 'Artist',
+                    'plural' => 'Artists',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => $title.' Artist',
+            'avatar_url' => $profileAvatarUrl,
+            'cover_url' => $profileCoverUrl,
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
         return [
             'title' => $title,
             'thumb' => $eventCoverUrl === null ? null : [
@@ -2104,23 +2189,13 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 'logo_url' => 'https://example.org/canonical-venue-logo.jpg',
                 'taxonomy_terms' => [],
             ],
-            'event_parties' => [
-                [
-                    'party_type' => 'artist',
-                    'party_ref_id' => 'canonical-profile-1',
-                    'permissions' => ['can_edit' => true],
-                    'metadata' => [
-                        'display_name' => 'Canonical Profile',
-                        'slug' => 'canonical-profile',
-                        'profile_type' => 'artist',
-                        'avatar_url' => $profileAvatarUrl,
-                        'cover_url' => $profileCoverUrl,
-                        'highlight' => false,
-                        'genres' => [],
-                        'taxonomy_terms' => [],
-                    ],
-                ],
-            ],
+            'event_parties' => [],
+            'profile_groups' => [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [(string) $profile->_id],
+            ]],
         ];
     }
 

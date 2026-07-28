@@ -5,6 +5,9 @@ declare(strict_types=1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use MongoDB\Collection;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\BSONDocument;
 use MongoDB\Laravel\Schema\Blueprint;
 
 return new class extends Migration
@@ -66,12 +69,14 @@ return new class extends Migration
                 ],
             );
 
-            Schema::table('account_profile_types', static function (Blueprint $collection): void {
-                $collection->index(
-                    ['capabilities.is_inviteable' => 1],
-                    options: ['name' => 'idx_account_profile_types_inviteable_v1']
-                );
-            });
+            if (! $this->hasAccountProfileTypeIndex(['capabilities.is_inviteable' => 1])) {
+                Schema::table('account_profile_types', static function (Blueprint $collection): void {
+                    $collection->index(
+                        ['capabilities.is_inviteable' => 1],
+                        options: ['name' => 'idx_account_profile_types_inviteable_v1']
+                    );
+                });
+            }
         }
 
         if (Schema::hasCollection('favorite_edges')) {
@@ -148,5 +153,36 @@ return new class extends Migration
                 $collection->dropIndex('idx_account_profiles_owner_personal_v1');
             });
         }
+    }
+
+    /**
+     * @param  array<string, int>  $keys
+     */
+    private function hasAccountProfileTypeIndex(array $keys): bool
+    {
+        /** @var Collection<array<string, mixed>> $collection */
+        $collection = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_types');
+
+        foreach ($collection->listIndexes() as $index) {
+            if ($this->arrayFrom($index->getKey()) === $keys) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function arrayFrom(mixed $value): array
+    {
+        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        return is_array($value) ? $value : [];
     }
 };

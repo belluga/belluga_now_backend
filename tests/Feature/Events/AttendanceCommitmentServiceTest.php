@@ -146,7 +146,12 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
             ->andReturn($this->personalAccountProfileIdFor($this->user));
         $inviteMutations->shouldReceive('supersedePendingInvitesForDirectConfirmation')
             ->once()
-            ->with((string) $this->user->_id, (string) $event->_id, $occurrenceId)
+            ->with(
+                (string) $this->user->_id,
+                (string) $event->_id,
+                $occurrenceId,
+                $this->personalAccountProfileIdFor($this->user),
+            )
             ->andThrow(new RuntimeException('forced supersession failure'));
         $this->app->instance(InviteMutationService::class, $inviteMutations);
 

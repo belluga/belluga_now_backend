@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\TenantProfileType;
+use MongoDB\BSON\UTCDateTime;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistrySeeder
 {
+    public function __construct(
+        private readonly ?AccountProfileRegistryDefaultUpserter $defaultUpserter = null,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -73,6 +78,9 @@ class AccountProfileRegistrySeeder
 
     public function ensureDefaults(): void
     {
+        $upserter = $this->defaultUpserter ?? new AccountProfileRegistryDefaultUpserter;
+        $now = new UTCDateTime((int) (microtime(true) * 1000));
+
         foreach ($this->defaults() as $entry) {
             $type = trim((string) ($entry['type'] ?? ''));
             if ($type === '') {
@@ -84,7 +92,7 @@ class AccountProfileRegistrySeeder
                 ->first();
 
             if (! $existing instanceof TenantProfileType) {
-                TenantProfileType::create($entry);
+                $upserter->ensureDefault($entry, $now);
 
                 continue;
             }
