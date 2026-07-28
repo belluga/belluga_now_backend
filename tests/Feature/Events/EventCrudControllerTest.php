@@ -6022,18 +6022,26 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function test_public_event_detail_keeps_type_grouping_fallback_without_profile_groups(): void
+    public function test_public_event_detail_does_not_materialize_legacy_event_root_parties_on_read(): void
     {
-        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+        $legacy = $this->createEvent([
+            'artists' => null,
             'event_parties' => [
                 [
+                    'party_type' => 'artist',
                     'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->artist->display_name,
+                        'slug' => $this->artist->slug ? (string) $this->artist->slug : null,
+                        'profile_type' => (string) $this->artist->profile_type,
+                    ],
                 ],
             ],
-        ]));
-        $response->assertStatus(201);
+            'profile_groups' => [],
+        ]);
 
-        $eventId = (string) $response->json('data.event_id');
+        $eventId = (string) $legacy->_id;
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
 
         $public->assertStatus(200);
