@@ -6097,30 +6097,42 @@ class EventCrudControllerTest extends TestCaseTenant
         ]));
     }
 
-    public function test_management_event_hydrates_legacy_profile_groups_by_type_without_mutation(): void
+    public function test_management_event_does_not_materialize_legacy_event_root_groups_without_mutation(): void
     {
-        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+        $legacy = $this->createEvent([
+            'artists' => null,
             'event_parties' => [
                 [
+                    'party_type' => 'artist',
                     'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->artist->display_name,
+                        'slug' => $this->artist->slug ? (string) $this->artist->slug : null,
+                        'profile_type' => (string) $this->artist->profile_type,
+                    ],
                 ],
                 [
+                    'party_type' => 'band',
                     'party_ref_id' => (string) $this->band->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->band->display_name,
+                        'slug' => $this->band->slug ? (string) $this->band->slug : null,
+                        'profile_type' => (string) $this->band->profile_type,
+                    ],
                 ],
             ],
-        ]));
-        $created->assertStatus(201);
+            'profile_groups' => [],
+        ]);
 
-        $eventId = (string) $created->json('data.event_id');
+        $eventId = (string) $legacy->_id;
         $storedBefore = Event::query()->findOrFail($eventId);
         $this->assertSame([], $storedBefore->profile_groups ?? []);
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);
-        $management->assertJsonPath('data.profile_groups.0.id', 'artist');
-        $management->assertJsonPath('data.profile_groups.0.account_profile_ids.0', (string) $this->artist->_id);
-        $management->assertJsonPath('data.profile_groups.1.id', 'band');
-        $management->assertJsonPath('data.profile_groups.1.account_profile_ids.0', (string) $this->band->_id);
+        $management->assertJsonCount(0, 'data.profile_groups');
         $this->assertSame([], $storedBefore->fresh()->profile_groups ?? []);
     }
 
