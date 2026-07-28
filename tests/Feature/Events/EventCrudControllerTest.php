@@ -6004,7 +6004,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonMissingPath('data.occurrences.1.profile_groups');
     }
 
-    public function test_occurrence_related_profiles_without_profile_group_are_rejected_on_write(): void
+    public function test_occurrence_legacy_event_parties_are_rejected_on_write_with_teach_message(): void
     {
         $occurrences = $this->makeOccurrences(2);
         $occurrences[1]['event_parties'] = [[
@@ -6016,7 +6016,10 @@ class EventCrudControllerTest extends TestCaseTenant
         ]));
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['occurrences.1.profile_groups']);
+        $response->assertJsonValidationErrors(['occurrences.1.event_parties']);
+        $response->assertJsonFragment([
+            'event_parties was removed from normal occurrence writes; use profile_groups.',
+        ]);
     }
 
     public function test_public_event_detail_keeps_type_grouping_fallback_without_profile_groups(): void
