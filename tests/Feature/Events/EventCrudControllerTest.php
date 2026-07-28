@@ -8030,11 +8030,6 @@ class EventCrudControllerTest extends TestCaseTenant
             [
                 'date_time_start' => $now->copy()->addDays(2)->setHour(17)->setMinute(0)->setSecond(0)->toISOString(),
                 'date_time_end' => $now->copy()->addDays(2)->setHour(21)->setMinute(0)->setSecond(0)->toISOString(),
-                'event_parties' => [
-                    [
-                        'party_ref_id' => (string) $this->band->_id,
-                    ],
-                ],
                 'profile_groups' => [
                     $this->occurrenceProfileGroup('bandas', 'Bandas', [(string) $this->band->_id]),
                 ],
