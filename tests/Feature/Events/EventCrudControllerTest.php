@@ -7696,17 +7696,18 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function test_event_create_rejects_unbounded_total_occurrence_parties(): void
+    public function test_event_create_rejects_unbounded_total_occurrence_profile_group_members(): void
     {
         $occurrences = $this->makeOccurrences(4);
         foreach ($occurrences as $occurrenceIndex => $_) {
-            $occurrences[$occurrenceIndex]['event_parties'] = array_map(
-                static fn (int $index): array => [
-                    'party_ref_id' => (string) new ObjectId,
-                    'permissions' => ['can_edit' => false],
-                ],
-                range(1, InputConstraints::EVENT_OCCURRENCE_PARTIES_MAX)
-            );
+            $occurrences[$occurrenceIndex]['profile_groups'] = [[
+                'id' => "grupo-{$occurrenceIndex}",
+                'label' => "Grupo {$occurrenceIndex}",
+                'account_profile_ids' => array_map(
+                    static fn (int $index): string => (string) new ObjectId,
+                    range(1, InputConstraints::EVENT_OCCURRENCE_PARTIES_MAX)
+                ),
+            ]];
         }
 
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -7714,7 +7715,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]));
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['event_parties']);
+        $response->assertJsonValidationErrors(['profile_groups']);
     }
 
     public function test_event_update_without_schedule_mutation_keeps_stored_occurrences(): void
