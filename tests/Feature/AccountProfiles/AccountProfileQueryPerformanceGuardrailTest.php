@@ -37,17 +37,20 @@ class AccountProfileQueryPerformanceGuardrailTest extends TestCaseTenant
         Tenant::query()->firstOrFail()->makeCurrent();
     }
 
-    public function test_public_account_profile_agenda_occurrence_lookup_uses_generic_party_ref_index_support(): void
+    public function test_public_account_profile_agenda_occurrence_lookup_uses_canonical_nested_member_index_support(): void
     {
-        $source = $this->readSource('app/Application/AccountProfiles/AccountProfileAgendaOccurrencesService.php');
+        $serviceSource = $this->readSource('app/Application/AccountProfiles/AccountProfileAgendaOccurrencesService.php');
+        $storeSource = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventOccurrenceNestedAccountStore.php');
 
-        $this->assertStringContainsString("'event_parties'", $source);
-        $this->assertStringContainsString("'party_ref_id' => ['\$in' => \$profileIdCandidates]", $source);
-        $this->assertStringNotContainsString("where('artists.id'", $source);
+        $this->assertStringContainsString('EventOccurrenceNestedAccountStore', $serviceSource);
+        $this->assertStringContainsString('occurrenceIdsForMemberProfiles([$profileId])', $serviceSource);
+        $this->assertStringNotContainsString("'event_parties'", $serviceSource);
+        $this->assertStringNotContainsString("where('artists.id'", $serviceSource);
+        $this->assertStringContainsString("'nested_profile.id' => ['\$in' => \$normalizedProfileIds]", $storeSource);
         $this->assertContains(
-            'idx_event_occurrences_public_agenda_party_ref_v1',
-            $this->indexNames('event_occurrences'),
-            'Public account-profile agenda lookup must be backed by a generic event_parties.party_ref_id index.'
+            'idx_accounts_nested_member_lookup_v1',
+            $this->indexNames('accounts_nested'),
+            'Public account-profile agenda lookup must be backed by the canonical accounts_nested member lookup index.'
         );
     }
 

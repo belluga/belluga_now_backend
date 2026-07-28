@@ -17,24 +17,24 @@ return new class extends Migration
 
         $collection = DB::connection('tenant')
             ->getDatabase()
-            ->selectCollection('account_profile_nested_group_members');
+            ->selectCollection('accounts_nested');
 
-        $this->dropIndexIfPresent($collection, 'idx_account_profile_nested_group_members_parent_group_page_v1');
-        $this->dropIndexIfPresent($collection, 'idx_account_profile_nested_group_members_parent_scan_v1');
-        $this->dropIndexIfPresent($collection, 'idx_account_profile_nested_group_members_member_lookup_v1');
+        $this->dropIndexIfPresent($collection, 'idx_accounts_nested_parent_group_page_v1');
+        $this->dropIndexIfPresent($collection, 'idx_accounts_nested_parent_scan_v1');
+        $this->dropIndexIfPresent($collection, 'idx_accounts_nested_member_lookup_v1');
 
         $collection->createIndex(
-            ['tenant_id' => 1, 'parent_profile_id' => 1, 'group_id' => 1, 'doc_type' => 1, 'raw_position' => 1, '_id' => 1],
-            ['name' => 'idx_account_profile_nested_group_members_parent_group_page_v1'],
+            ['tenant_id' => 1, 'parent_type' => 1, 'parent_id' => 1, 'group_key' => 1, 'doc_type' => 1, 'item_order' => 1, '_id' => 1],
+            ['name' => 'idx_accounts_nested_parent_group_page_v1'],
         );
         $collection->createIndex(
-            ['tenant_id' => 1, 'parent_profile_id' => 1, 'group_id' => 1, 'doc_type' => 1, '_id' => 1],
-            ['name' => 'idx_account_profile_nested_group_members_parent_scan_v1'],
+            ['tenant_id' => 1, 'parent_type' => 1, 'parent_id' => 1, 'group_key' => 1, 'doc_type' => 1, '_id' => 1],
+            ['name' => 'idx_accounts_nested_parent_scan_v1'],
         );
         $collection->createIndex(
-            ['tenant_id' => 1, 'member_profile_id' => 1, 'doc_type' => 1, '_id' => 1],
+            ['tenant_id' => 1, 'nested_profile.id' => 1, 'doc_type' => 1, '_id' => 1],
             [
-                'name' => 'idx_account_profile_nested_group_members_member_lookup_v1',
+                'name' => 'idx_accounts_nested_member_lookup_v1',
                 'partialFilterExpression' => ['doc_type' => 'member_row'],
             ],
         );
@@ -44,11 +44,11 @@ return new class extends Migration
     {
         $collection = DB::connection('tenant')
             ->getDatabase()
-            ->selectCollection('account_profile_nested_group_members');
+            ->selectCollection('accounts_nested');
 
-        $this->dropIndexIfPresent($collection, 'idx_account_profile_nested_group_members_parent_group_page_v1');
-        $this->dropIndexIfPresent($collection, 'idx_account_profile_nested_group_members_parent_scan_v1');
-        $this->dropIndexIfPresent($collection, 'idx_account_profile_nested_group_members_member_lookup_v1');
+        $this->dropIndexIfPresent($collection, 'idx_accounts_nested_parent_group_page_v1');
+        $this->dropIndexIfPresent($collection, 'idx_accounts_nested_parent_scan_v1');
+        $this->dropIndexIfPresent($collection, 'idx_accounts_nested_member_lookup_v1');
     }
 
     private function dropIndexIfPresent(\MongoDB\Collection $collection, string $name): void

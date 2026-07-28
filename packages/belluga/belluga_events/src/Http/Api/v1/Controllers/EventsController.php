@@ -58,6 +58,7 @@ class EventsController extends Controller
         $validated = $request->validated();
         $candidateType = trim((string) ($validated['type'] ?? ''));
         $search = isset($validated['search']) ? trim((string) $validated['search']) : null;
+        $profileType = isset($validated['profile_type']) ? trim((string) $validated['profile_type']) : null;
         $page = isset($validated['page']) ? (int) $validated['page'] : 1;
         $perPage = isset($validated['per_page']) ? (int) $validated['per_page'] : (isset($validated['page_size']) ? (int) $validated['page_size'] : 15);
         $accountContextId = $candidateType === 'physical_host'
@@ -72,6 +73,7 @@ class EventsController extends Controller
             $perPage,
             $accountContextId,
             $baseUrl !== '' ? $baseUrl : null,
+            $profileType,
         );
 
         return response()->json($candidates->toArray());
@@ -191,6 +193,39 @@ class EventsController extends Controller
         return response()->json([
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
             'data' => $payload,
+        ]);
+    }
+
+    public function relatedProfileTabMembers(Request $request, string $event_id, string $tab_id): JsonResponse
+    {
+        $eventId = (string) ($request->route('event_id') ?? $event_id);
+        $tabId = trim((string) ($request->route('tab_id') ?? $tab_id));
+        $event = $this->eventQueryService->findByIdOrSlug($eventId);
+
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+
+        try {
+            $this->eventQueryService->assertPublicVisible($event);
+        } catch (EventNotPubliclyVisibleException) {
+            abort(404, 'Event not found.');
+        }
+
+        $requestedPerPage = $request->query('per_page', $request->query('page_size'));
+        $perPage = is_numeric($requestedPerPage)
+            ? max(1, min((int) $requestedPerPage, InputConstraints::PUBLIC_PAGE_SIZE_MAX))
+            : null;
+        $cursor = is_string($request->query('cursor')) ? $request->query('cursor') : null;
+
+        return response()->json([
+            'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
+            'data' => $this->eventQueryService->relatedProfileTabMembers(
+                $event,
+                $tabId,
+                $cursor,
+                $perPage,
+            ),
         ]);
     }
 

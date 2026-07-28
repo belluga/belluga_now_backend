@@ -428,7 +428,21 @@ class Tenant extends BaseTenant
             return true;
         }
 
-        return ! Str::endsWith($domain, '.'.$rootHost);
+        if (! Str::endsWith($domain, '.'.$rootHost)) {
+            return true;
+        }
+
+        $implicitHost = self::defaultDomainForSubdomain((string) $this->subdomain);
+        if ($domain === $implicitHost) {
+            return false;
+        }
+
+        $normalizedSubdomain = Str::lower(trim((string) $this->subdomain));
+        if ($normalizedSubdomain !== '' && $domain === "{$normalizedSubdomain}-legacy.$rootHost") {
+            return false;
+        }
+
+        return true;
     }
 
     /**

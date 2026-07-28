@@ -519,6 +519,30 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $this->assertSame(['custom-tenant-main.test'], $response->json('domains', []));
     }
 
+    public function test_environment_api_on_explicit_root_host_alias_request_uses_current_alias_and_keeps_it_in_domains(): void
+    {
+        $tenant = $this->currentTenant();
+        $this->snapshotTenant($tenant);
+        $rootHost = $this->rootHost();
+        $aliasHost = "guarappari.$rootHost";
+
+        $tenant->domains()->withTrashed()->forceDelete();
+        $tenant->domains()->create([
+            'path' => $aliasHost,
+            'type' => 'web',
+        ]);
+        $tenant->makeCurrent();
+
+        $response = $this->get("http://{$aliasHost}/api/v1/environment");
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            $aliasHost,
+            parse_url((string) $response->json('main_domain'), PHP_URL_HOST)
+        );
+        $this->assertSame([$aliasHost], $response->json('domains', []));
+    }
+
     public function test_environment_api_ignores_legacy_persisted_landlord_fallback_domains(): void
     {
         $tenant = $this->currentTenant();

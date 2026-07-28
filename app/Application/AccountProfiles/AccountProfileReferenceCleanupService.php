@@ -226,9 +226,10 @@ final class AccountProfileReferenceCleanupService
                 DB::connection('tenant')
                     ->getDatabase()
                     ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
-                    ->distinct('parent_profile_id', [
+                    ->distinct('parent_id', [
+                        'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
                         'doc_type' => 'member_row',
-                        'member_profile_id' => ['$in' => $deletedProfileIds],
+                        'nested_profile.id' => ['$in' => $deletedProfileIds],
                     ]),
             ),
         );

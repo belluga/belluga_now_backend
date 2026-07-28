@@ -215,12 +215,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.map_ui.radius.default_km', 5);
         $response->assertJsonPath('data.map_ui.default_origin.lat', -20.671339);
         $response->assertJsonPath('data.map_ui.default_origin.lng', -40.495395);
-        $response->assertJsonPath('data.map_ui.filters.0.key', 'event');
-        $response->assertJsonPath('data.map_ui.filters.0.label', 'Eventos');
-        $response->assertJsonPath(
-            'data.map_ui.filters.0.image_uri',
-            'https://tenant-omega.test/storage/map-filters/event.png'
-        );
+        $this->assertArrayNotHasKey('filters', $response->json('data.map_ui') ?? []);
         $response->assertJsonPath('data.events.default_duration_hours', 3);
         $response->assertJsonPath('data.push.max_ttl_days', 7);
         $response->assertJsonPath('data.telemetry.location_freshness_minutes', 5);

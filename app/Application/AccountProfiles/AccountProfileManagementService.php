@@ -95,12 +95,16 @@ class AccountProfileManagementService
             return $existing;
         }
 
+        $relationNestedGroups = $this->prepareNestedProfileGroupsForWrite(
+            (string) ($payload['profile_type'] ?? ''),
+            $payload,
+        );
         $profile = $this->createWithinCurrentTransaction(
             [...$payload, 'aggregate_revision' => 1],
             $context,
         );
         $relationAttributes = [
-            'nested_profile_groups' => $profile->nested_profile_groups,
+            'nested_profile_groups' => $relationNestedGroups ?? [],
             'contact_source_account_profile_id' => $profile->contact_source_account_profile_id,
             'contact_bubble_channel_id' => $profile->contact_bubble_channel_id,
         ];
@@ -112,7 +116,12 @@ class AccountProfileManagementService
                 $relationAttributes,
             );
         }
-        $this->nestedGroupMemberStore->syncGroupsWithinContext($context, $profile);
+        $this->nestedGroupMemberStore->replaceAllGroupsWithinContext(
+            $context,
+            $profile,
+            $relationNestedGroups ?? [],
+            $admittedTargets,
+        );
         $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $profile);
         if ($mutateWithinTransaction !== null) {
             $mutateWithinTransaction($profile, $context);
@@ -186,16 +195,6 @@ class AccountProfileManagementService
         } elseif (array_key_exists('taxonomy_terms', $payload)) {
             $payload['taxonomy_terms'] = [];
             $payload['taxonomy_terms_flat'] = [];
-        }
-
-        if (array_key_exists('nested_profile_groups', $payload)) {
-            $this->assertNestedProfileGroupsAllowed(
-                $profileType,
-                $payload['nested_profile_groups']
-            );
-            $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
-                $payload['nested_profile_groups']
-            );
         }
 
         $payload = [
@@ -287,15 +286,11 @@ class AccountProfileManagementService
             unset($attributes['aggregate_revision']);
         }
 
-        if (array_key_exists('nested_profile_groups', $attributes)) {
-            $this->assertNestedProfileGroupsAllowed(
-                $profileType,
-                $attributes['nested_profile_groups']
-            );
-            $attributes['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
-                $attributes['nested_profile_groups']
-            );
-        }
+        $normalizedNestedProfileGroups = $this->prepareNestedProfileGroupsForWrite(
+            $profileType,
+            $attributes,
+            (string) $profile->getKey(),
+        );
 
         $attributes = [
             ...$attributes,
@@ -308,9 +303,12 @@ class AccountProfileManagementService
 
         $profileId = (string) $profile->getKey();
         $commandId = $this->normalizeCommandId($commandId);
+        $relationAttributes = array_key_exists('nested_profile_groups', $attributes)
+            ? [...$attributes, 'nested_profile_groups' => $normalizedNestedProfileGroups ?? []]
+            : $attributes;
         $fingerprint = $this->outboxPublisher->fingerprintForUpdate(
             $profileId,
-            $attributes,
+            $relationAttributes,
             $fingerprintSupplement,
         );
 
@@ -320,6 +318,8 @@ class AccountProfileManagementService
                 function (AccountProfileTransactionContext $context) use (
                     $profileId,
                     $attributes,
+                    $relationAttributes,
+                    $normalizedNestedProfileGroups,
                     $commandId,
                     $fingerprint,
                     $mutateWithinTransaction,
@@ -339,18 +339,22 @@ class AccountProfileManagementService
                             $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persistedProfile),
                         );
                     }
-                    if (! $persistedProfile->isDirty() && $mutateWithinTransaction === null) {
+                    if (
+                        ! $persistedProfile->isDirty()
+                        && ! array_key_exists('nested_profile_groups', $attributes)
+                        && $mutateWithinTransaction === null
+                    ) {
                         $admittedTargets = $this->relationAdmissionService->admit(
                             $context,
                             $profileId,
-                            $attributes,
+                            $relationAttributes,
                             touchTargets: false,
                         );
-                        $contactSourceId = trim((string) ($attributes['contact_source_account_profile_id'] ?? ''));
+                        $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
                         if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
                             $this->contactChannelsService->assertMirroredAdmissionStillValid(
                                 $admittedTargets[$contactSourceId],
-                                $attributes,
+                                $relationAttributes,
                             );
                         }
 
@@ -363,13 +367,13 @@ class AccountProfileManagementService
                     $admittedTargets = $this->relationAdmissionService->admit(
                         $context,
                         $profileId,
-                        $attributes,
+                        $relationAttributes,
                     );
-                    $contactSourceId = trim((string) ($attributes['contact_source_account_profile_id'] ?? ''));
+                    $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
                     if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
                         $this->contactChannelsService->assertMirroredAdmissionStillValid(
                             $admittedTargets[$contactSourceId],
-                            $attributes,
+                            $relationAttributes,
                         );
                     }
 
@@ -383,9 +387,18 @@ class AccountProfileManagementService
                             $persistedProfile,
                             $expectedAggregateRevision,
                         );
-                        $this->nestedGroupMemberStore->materializeLegacyIfNeededWithinContext($context, $persistedProfile);
                         if (array_key_exists('nested_profile_groups', $attributes)) {
-                            $this->nestedGroupMemberStore->syncGroupsWithinContext($context, $persistedProfile);
+                            $this->nestedGroupMemberStore->replaceAllGroupsWithinContext(
+                                $context,
+                                $persistedProfile,
+                                $normalizedNestedProfileGroups ?? [],
+                                $admittedTargets,
+                            );
+                        } else {
+                            $this->nestedGroupMemberStore->materializeLegacyIfNeededWithinContext(
+                                $context,
+                                $persistedProfile,
+                            );
                         }
                         $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
                     } catch (BulkWriteException $exception) {
@@ -534,32 +547,16 @@ class AccountProfileManagementService
             $seen[$profileId] = true;
         }
 
-        $patchedGroups = array_map(
-            function (array $candidateGroup) use ($group, $nextIds): array {
-                if ((string) ($candidateGroup['id'] ?? '') !== (string) $group['id']) {
-                    return $candidateGroup;
-                }
-
-                return [
-                    'id' => (string) $candidateGroup['id'],
-                    'label' => (string) $candidateGroup['label'],
-                    'order' => (int) ($candidateGroup['order'] ?? 0),
-                    'member_count' => count($nextIds),
-                ];
-            },
-            $groups,
-        );
-
         $updatedProfile = $this->update(
             $profile,
             [
                 'aggregate_revision' => $aggregateRevision,
-                'nested_profile_groups' => $patchedGroups,
             ],
             $commandId,
             function (AccountProfile $persistedProfile, AccountProfileTransactionContext $context) use ($group, $addIds, $nextIds): void {
+                $admittedTargets = [];
                 if ($addIds !== []) {
-                    $this->relationAdmissionService->admit(
+                    $admittedTargets = $this->relationAdmissionService->admit(
                         $context,
                         (string) $persistedProfile->getKey(),
                         [
@@ -575,6 +572,8 @@ class AccountProfileManagementService
                     $persistedProfile,
                     (string) $group['id'],
                     $nextIds,
+                    $admittedTargets,
+                    $group,
                 );
             },
         );
@@ -623,6 +622,34 @@ class AccountProfileManagementService
         }
 
         return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, array<string, mixed>>|null
+     */
+    private function prepareNestedProfileGroupsForWrite(
+        string $profileType,
+        array &$payload,
+        ?string $parentProfileId = null,
+    ): ?array {
+        if (! array_key_exists('nested_profile_groups', $payload)) {
+            return null;
+        }
+
+        $this->assertNestedProfileGroupsAllowed(
+            $profileType,
+            $payload['nested_profile_groups']
+        );
+        $normalizedGroups = $this->nestedGroupService->normalizeForWrite(
+            $payload['nested_profile_groups'],
+            $parentProfileId,
+        );
+        $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
+            $normalizedGroups,
+        );
+
+        return $normalizedGroups;
     }
 
     private function persistWithAggregateRevisionCas(

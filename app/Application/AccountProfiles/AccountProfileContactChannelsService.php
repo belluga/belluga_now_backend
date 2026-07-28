@@ -136,6 +136,7 @@ final class AccountProfileContactChannelsService
             : null;
         $effectiveSource = $this->resolveEffectiveContactSourceProfile($profile);
         $effectiveChannels = $this->resolveEffectiveContactChannels($profile);
+        $effectiveBubbleChannelId = $this->resolveEffectiveBubbleChannelId($profile, $stored, $effectiveSource);
 
         return [
             'contact_mode' => $mode,
@@ -149,7 +150,7 @@ final class AccountProfileContactChannelsService
             'effective_contact_source' => $this->profileSummary($effectiveSource),
             'effective_contact_channels' => $effectiveChannels,
             'effective_contact_bubble_channel' => $this->resolveBubbleChannel(
-                $stored['contact_bubble_channel_id'],
+                $effectiveBubbleChannelId,
                 $effectiveChannels,
             ),
         ];
@@ -167,16 +168,16 @@ final class AccountProfileContactChannelsService
         }
 
         $stored = $this->readStoredContactState($profile);
+        $effectiveSource = $this->resolveEffectiveContactSourceProfile($profile);
         $effectiveChannels = $this->resolveEffectiveContactChannels($profile);
+        $effectiveBubbleChannelId = $this->resolveEffectiveBubbleChannelId($profile, $stored, $effectiveSource);
 
         return [
             'contact_mode' => $this->normalizeMode($stored['contact_mode']),
-            'effective_contact_source' => $this->profileSummary(
-                $this->resolveEffectiveContactSourceProfile($profile),
-            ),
+            'effective_contact_source' => $this->profileSummary($effectiveSource),
             'effective_contact_channels' => $effectiveChannels,
             'effective_contact_bubble_channel' => $this->resolveBubbleChannel(
-                $stored['contact_bubble_channel_id'],
+                $effectiveBubbleChannelId,
                 $effectiveChannels,
             ),
         ];
@@ -465,6 +466,29 @@ final class AccountProfileContactChannelsService
             'is_queryable_candidate' => false,
             'is_contact_capable_candidate' => false,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $stored
+     */
+    private function resolveEffectiveBubbleChannelId(
+        AccountProfile $profile,
+        array $stored,
+        ?AccountProfile $effectiveSource,
+    ): ?string {
+        if ($this->normalizeMode($stored['contact_mode']) !== self::CONTACT_MODE_MIRRORED_ACCOUNT_PROFILE) {
+            return $stored['contact_bubble_channel_id'];
+        }
+
+        if ($stored['contact_bubble_channel_id'] !== null) {
+            return $stored['contact_bubble_channel_id'];
+        }
+
+        if ($effectiveSource instanceof AccountProfile && (string) $effectiveSource->getKey() !== (string) $profile->getKey()) {
+            return $this->readStoredContactState($effectiveSource)['contact_bubble_channel_id'];
+        }
+
+        return null;
     }
 
     /** @param array<int, array<string, mixed>> $channels @return array<string, mixed>|null */

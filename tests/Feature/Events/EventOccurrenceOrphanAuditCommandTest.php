@@ -75,8 +75,9 @@ class EventOccurrenceOrphanAuditCommandTest extends TestCaseTenant
         $this->assertSame(0, $exitCode);
 
         $payload = json_decode(Artisan::output(), true, 512, JSON_THROW_ON_ERROR);
+        $currentTenant = Tenant::current();
 
-        $this->assertSame($this->tenant->slug, $payload['tenant_slug']);
+        $this->assertSame((string) ($currentTenant?->slug ?? ''), $payload['tenant_slug']);
         $this->assertSame(3, $payload['totals']['scanned_occurrences']);
         $this->assertSame(2, $payload['totals']['orphan_occurrences']);
         $this->assertSame(1, $payload['totals']['active_bypass']);

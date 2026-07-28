@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Profile;
 
+use App\Application\Profiles\CurrentTenantAccountDeletionService;
 use App\Jobs\Push\UnsubscribePushTokensFromAllTopicsJob;
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
@@ -283,6 +284,48 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'Personal-account discovery reads must remain cardinality-invariant. '
                 .'The complete mutation-operation budget belongs to the separate PCV Mongo command-monitoring artifact.',
         );
+    }
+
+    public function test_direct_delete_removes_phone_otp_challenges_even_when_phone_hash_projection_is_missing(): void
+    {
+        $phone = '+5527999990203';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Legacy Hashless Target',
+            'phones' => [$phone],
+        ]);
+        $targetId = (string) $target->_id;
+        $phoneHash = (string) $target->phone_hashes[0];
+
+        PhoneOtpChallenge::create([
+            'phone' => $phone,
+            'phone_hash' => $phoneHash,
+            'code_hash' => 'hash',
+            'status' => PhoneOtpChallenge::STATUS_PENDING,
+        ]);
+
+        $accountUsers = DB::connection('tenant')
+            ->getMongoDB()
+            ->selectCollection('account_users');
+        $mongoId = new \MongoDB\BSON\ObjectId($targetId);
+        $accountUsers->updateOne(['_id' => $mongoId], ['$unset' => ['phone_hashes' => true]]);
+
+        $rawDocument = $accountUsers->findOne(['_id' => $mongoId]);
+        $this->assertIsObject($rawDocument);
+        $this->assertFalse(isset($rawDocument->phone_hashes));
+
+        /** @var AccountUser $reloaded */
+        $reloaded = AccountUser::query()->findOrFail($targetId);
+
+        $this->assertSame([], array_values(array_filter(
+            (array) ($reloaded->phone_hashes ?? []),
+            static fn (mixed $value): bool => trim((string) $value) !== '',
+        )));
+
+        app(CurrentTenantAccountDeletionService::class)->delete(Tenant::query()->firstOrFail(), $reloaded);
+
+        $this->assertFalse(PhoneOtpChallenge::query()->where('phone_hash', $phoneHash)->exists());
+        $this->assertNull(AccountUser::withTrashed()->find($targetId));
     }
 
     /**
