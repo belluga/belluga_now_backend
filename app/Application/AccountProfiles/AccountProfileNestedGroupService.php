@@ -351,29 +351,10 @@ class AccountProfileNestedGroupService
             return [];
         }
 
-        $orderedMemberIds = [];
-        foreach ($groups as $group) {
-            foreach ($group['account_profile_ids'] as $memberId) {
-                $orderedMemberIds[$memberId] = true;
-            }
-        }
-
-        $profilesById = $this->publicProfilesById(
-            array_keys($orderedMemberIds),
-            $publicCatalogPolicy,
-        );
         $publicGroups = [];
         foreach ($groups as $group) {
-            $profiles = [];
-            foreach ($group['account_profile_ids'] as $memberId) {
-                $profile = $profilesById[$memberId] ?? null;
-                if (! $profile) {
-                    continue;
-                }
-                $profiles[] = $this->formatLinkedProfile($profile, $baseUrl, $publicCatalogPolicy);
-            }
-
-            if ($profiles === []) {
+            $memberCount = max(0, (int) ($group['member_count'] ?? count($group['account_profile_ids'] ?? [])));
+            if ($memberCount === 0) {
                 continue;
             }
 
@@ -381,7 +362,7 @@ class AccountProfileNestedGroupService
                 'id' => $group['id'],
                 'label' => $group['label'],
                 'order' => $group['order'],
-                'profiles' => $profiles,
+                'member_count' => $memberCount,
             ];
         }
 
@@ -455,29 +436,6 @@ class AccountProfileNestedGroupService
         return $memberIds;
     }
 
-    /**
-     * @param  array<int, string>  $memberIds
-     * @return array<string, AccountProfile>
-     */
-    private function publicProfilesById(
-        array $memberIds,
-        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
-    ): array {
-        if ($memberIds === []) {
-            return [];
-        }
-
-        $profiles = $publicCatalogPolicy->applyCatalogConstraint(
-            AccountProfile::query()->whereIn('_id', $memberIds),
-        )->get();
-        $byId = [];
-        foreach ($profiles as $profile) {
-            $byId[(string) $profile->getKey()] = $profile;
-        }
-
-        return $byId;
-    }
-
     private function findProfileById(string $profileId): ?AccountProfile
     {
         $profile = AccountProfile::query()->find($profileId);
@@ -534,40 +492,4 @@ class AccountProfileNestedGroupService
         return $decoded;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function formatLinkedProfile(
-        AccountProfile $profile,
-        string $baseUrl,
-        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
-    ): array {
-        $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
-
-        return [
-            'id' => (string) $profile->_id,
-            'account_id' => (string) $profile->account_id,
-            'profile_type' => $profile->profile_type,
-            'display_name' => $profile->display_name,
-            'slug' => $slug !== '' ? $slug : null,
-            'avatar_url' => $this->mediaService->normalizePublicUrl(
-                $baseUrl,
-                $profile,
-                'avatar',
-                is_string($profile->avatar_url) ? $profile->avatar_url : null
-            ),
-            'cover_url' => $this->mediaService->normalizePublicUrl(
-                $baseUrl,
-                $profile,
-                'cover',
-                is_string($profile->cover_url) ? $profile->cover_url : null
-            ),
-            'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
-                is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
-            ),
-            'can_open_public_detail' => $canOpenPublicDetail,
-            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
-        ];
-    }
 }

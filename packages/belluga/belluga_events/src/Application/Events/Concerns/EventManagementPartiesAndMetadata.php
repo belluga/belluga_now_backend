@@ -134,12 +134,6 @@ trait EventManagementPartiesAndMetadata
             }
 
             $validationIndex = (int) ($overridesByRefId[$partyRefId]['index'] ?? $position);
-            if ($profileType === 'venue') {
-                throw ValidationException::withMessages([
-                    "event_parties.{$validationIndex}.party_ref_id" => ['Venue account profiles must stay on place_ref and cannot be persisted in event_parties.'],
-                ]);
-            }
-
             $resolved[] = $this->buildEventPartyRow(
                 $profileType,
                 $partyRefId,

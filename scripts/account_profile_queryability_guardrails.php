@@ -440,15 +440,6 @@ function defaultAccountProfileQueryabilityAllowlist(): array
             'rationale' => 'Canonical follow-up ordered-id hydration for public near discovery results.',
         ],
         [
-            'key' => 'app/Application/AccountProfiles/AccountProfileNestedGroupService.php::publicProfilesById::query',
-            'path' => 'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
-            'method' => 'publicProfilesById',
-            'source_kind' => 'query',
-            'category' => 'canonical_gateway',
-            'owner' => $owner,
-            'rationale' => 'Canonical nested-group public projection suppressing non-queryable and non-public members.',
-        ],
-        [
             'key' => 'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php::update::query',
             'path' => 'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php',
             'method' => 'update',

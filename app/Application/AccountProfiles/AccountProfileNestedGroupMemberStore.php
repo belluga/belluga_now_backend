@@ -19,7 +19,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 final class AccountProfileNestedGroupMemberStore
 {
-    public const COLLECTION = 'account_profile_nested_group_members';
+    public const COLLECTION = 'accounts_nested';
+
+    public const PARENT_TYPE = 'account_profile';
 
     private const DOC_TYPE_HEAD = 'group_head';
 
@@ -89,7 +91,7 @@ final class AccountProfileNestedGroupMemberStore
             $payload = $this->decodeAdminCursor($cursor);
             if (($payload['scope'] ?? null) !== self::ADMIN_CURSOR_SCOPE
                 || ($payload['parent_profile_id'] ?? null) !== $parentProfileId
-                || ($payload['group_id'] ?? null) !== (string) ($group['group_id'] ?? '')) {
+                || ($payload['group_id'] ?? null) !== (string) ($group['group_key'] ?? '')) {
                 throw ValidationException::withMessages([
                     'cursor' => ['Nested profile member cursor is invalid for this parent or group.'],
                 ]);
@@ -109,12 +111,13 @@ final class AccountProfileNestedGroupMemberStore
         $rows = iterator_to_array($this->collection()->find(
             [
                 'tenant_id' => $this->tenantId(),
-                'parent_profile_id' => $parentProfileId,
-                'group_id' => (string) ($group['group_id'] ?? ''),
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
+                'group_key' => (string) ($group['group_key'] ?? ''),
                 'doc_type' => self::DOC_TYPE_MEMBER,
             ],
             [
-                'sort' => ['raw_position' => 1, '_id' => 1],
+                'sort' => ['item_order' => 1, '_id' => 1],
                 'skip' => $offset,
                 'limit' => $perPage + 1,
             ],
@@ -123,7 +126,7 @@ final class AccountProfileNestedGroupMemberStore
         $memberIds = array_values(array_filter(array_map(function (array|object $row): string {
             $document = $this->documentToArray($row) ?? [];
 
-            return trim((string) ($document['member_profile_id'] ?? ''));
+            return trim((string) (($document['nested_profile']['id'] ?? null) ?: ''));
         }, $rows)));
 
         $pageIds = array_slice($memberIds, 0, $perPage);
@@ -144,7 +147,7 @@ final class AccountProfileNestedGroupMemberStore
                 'version' => self::ADMIN_CURSOR_VERSION,
                 'scope' => self::ADMIN_CURSOR_SCOPE,
                 'parent_profile_id' => $parentProfileId,
-                'group_id' => (string) ($group['group_id'] ?? ''),
+                'group_id' => (string) ($group['group_key'] ?? ''),
                 'per_page' => $perPage,
                 'offset' => $offset + $perPage,
                 'expires_at' => now()->addMinutes(15)->toIso8601String(),
@@ -185,12 +188,13 @@ final class AccountProfileNestedGroupMemberStore
         $rows = iterator_to_array($context->collection(self::COLLECTION)->find(
             [
                 'tenant_id' => $this->tenantId(),
-                'parent_profile_id' => (string) $profile->getKey(),
-                'group_id' => $groupId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => (string) $profile->getKey(),
+                'group_key' => $groupId,
                 'doc_type' => self::DOC_TYPE_MEMBER,
             ],
             [
-                'sort' => ['raw_position' => 1, '_id' => 1],
+                'sort' => ['item_order' => 1, '_id' => 1],
                 ...$context->rawOptions(),
             ],
         ));
@@ -198,61 +202,99 @@ final class AccountProfileNestedGroupMemberStore
         return array_values(array_filter(array_map(function (array|object $row): string {
             $document = $this->documentToArray($row) ?? [];
 
-            return trim((string) ($document['member_profile_id'] ?? ''));
+            return trim((string) (($document['nested_profile']['id'] ?? null) ?: ''));
         }, $rows)));
     }
 
-    public function syncGroupsWithinContext(
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<string, AccountProfile>  $profilesById
+     */
+    public function replaceAllGroupsWithinContext(
         AccountProfileTransactionContext $context,
         AccountProfile $profile,
+        array $groups,
+        array $profilesById = [],
     ): void {
-        $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
         $tenantId = $this->tenantId();
         $parentProfileId = (string) $profile->getKey();
-        $now = new UTCDateTime((int) now()->getTimestampMs());
+        $normalizedGroups = $this->nestedGroupService->formatForRead($groups);
         $groupIds = [];
+        $allMemberIds = [];
 
-        foreach ($groups as $group) {
+        foreach ($normalizedGroups as $group) {
             $groupId = trim((string) ($group['id'] ?? ''));
             if ($groupId === '') {
                 continue;
             }
 
             $groupIds[] = $groupId;
-            $context->collection(self::COLLECTION)->updateOne(
+            foreach ((array) ($group['account_profile_ids'] ?? []) as $memberId) {
+                $memberId = trim((string) $memberId);
+                if ($memberId !== '') {
+                    $allMemberIds[$memberId] = $memberId;
+                }
+            }
+        }
+
+        if ($groupIds === []) {
+            $context->collection(self::COLLECTION)->deleteMany(
                 [
-                    '_id' => $this->headId($parentProfileId, $groupId),
+                    'tenant_id' => $tenantId,
+                    'parent_type' => self::PARENT_TYPE,
+                    'parent_id' => $parentProfileId,
                 ],
+                $context->rawOptions(),
+            );
+
+            return;
+        }
+
+        $profilesById = $this->profilesByIdForIds(array_values($allMemberIds), $profilesById);
+        $now = new UTCDateTime((int) now()->getTimestampMs());
+
+        foreach ($normalizedGroups as $group) {
+            $groupId = trim((string) ($group['id'] ?? ''));
+            if ($groupId === '') {
+                continue;
+            }
+
+            $groupLabel = trim((string) ($group['label'] ?? ''));
+            $groupOrder = (int) ($group['order'] ?? 0);
+
+            $context->collection(self::COLLECTION)->updateOne(
+                ['_id' => $this->headId($parentProfileId, $groupId)],
                 [
                     '$set' => [
                         'tenant_id' => $tenantId,
-                        'parent_profile_id' => $parentProfileId,
-                        'group_id' => $groupId,
-                        'group_label' => (string) ($group['label'] ?? ''),
-                        'group_order' => (int) ($group['order'] ?? 0),
+                        'parent_type' => self::PARENT_TYPE,
+                        'parent_id' => $parentProfileId,
+                        'group_key' => $groupId,
+                        'group_label' => $groupLabel,
+                        'group_order' => $groupOrder,
                         'doc_type' => self::DOC_TYPE_HEAD,
                         'updated_at' => $now,
                     ],
                 ],
                 [...$context->rawOptions(), 'upsert' => true],
             );
-        }
 
-        $filter = [
-            'tenant_id' => $tenantId,
-            'parent_profile_id' => $parentProfileId,
-        ];
-
-        if ($groupIds === []) {
-            $context->collection(self::COLLECTION)->deleteMany($filter, $context->rawOptions());
-
-            return;
+            $this->replaceGroupMembersWithinContext(
+                $context,
+                $profile,
+                $groupId,
+                array_values((array) ($group['account_profile_ids'] ?? [])),
+                $profilesById,
+                $group,
+            );
         }
 
         $context->collection(self::COLLECTION)->deleteMany(
             [
-                ...$filter,
-                'group_id' => ['$nin' => $groupIds],
+                'tenant_id' => $tenantId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
+                'group_key' => ['$nin' => array_values(array_unique($groupIds))],
             ],
             $context->rawOptions(),
         );
@@ -260,22 +302,54 @@ final class AccountProfileNestedGroupMemberStore
 
     /**
      * @param  array<int, string>  $memberIds
+     * @param  array<string, AccountProfile>  $profilesById
+     * @param  array<string, mixed>|null  $group
      */
     public function replaceGroupMembersWithinContext(
         AccountProfileTransactionContext $context,
         AccountProfile $profile,
         string $groupId,
         array $memberIds,
+        array $profilesById = [],
+        ?array $group = null,
     ): void {
         $tenantId = $this->tenantId();
         $parentProfileId = (string) $profile->getKey();
+        $groupId = trim($groupId);
+        if ($groupId === '') {
+            return;
+        }
+
+        $profilesById = $this->profilesByIdForIds($memberIds, $profilesById);
+        $groupLabel = trim((string) ($group['label'] ?? ''));
+        $groupOrder = (int) ($group['order'] ?? 0);
         $now = new UTCDateTime((int) now()->getTimestampMs());
+
+        $context->collection(self::COLLECTION)->updateOne(
+            ['_id' => $this->headId($parentProfileId, $groupId)],
+            [
+                '$setOnInsert' => [
+                    'tenant_id' => $tenantId,
+                    'parent_type' => self::PARENT_TYPE,
+                    'parent_id' => $parentProfileId,
+                    'group_key' => $groupId,
+                    'group_label' => $groupLabel,
+                    'group_order' => $groupOrder,
+                    'doc_type' => self::DOC_TYPE_HEAD,
+                ],
+                '$set' => [
+                    'updated_at' => $now,
+                ],
+            ],
+            [...$context->rawOptions(), 'upsert' => true],
+        );
 
         $context->collection(self::COLLECTION)->deleteMany(
             [
                 'tenant_id' => $tenantId,
-                'parent_profile_id' => $parentProfileId,
-                'group_id' => $groupId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
+                'group_key' => $groupId,
                 'doc_type' => self::DOC_TYPE_MEMBER,
             ],
             $context->rawOptions(),
@@ -295,11 +369,17 @@ final class AccountProfileNestedGroupMemberStore
             $rows[] = [
                 '_id' => $this->memberId($parentProfileId, $groupId, $memberId),
                 'tenant_id' => $tenantId,
-                'parent_profile_id' => $parentProfileId,
-                'group_id' => $groupId,
-                'member_profile_id' => $memberId,
-                'raw_position' => $position,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
+                'group_key' => $groupId,
+                'group_label' => $groupLabel,
+                'group_order' => $groupOrder,
+                'item_order' => $position,
                 'doc_type' => self::DOC_TYPE_MEMBER,
+                'nested_profile' => $this->nestedProfileDocument(
+                    $memberId,
+                    $profilesById[$memberId] ?? null,
+                ),
                 'updated_at' => $now,
             ];
         }
@@ -326,7 +406,8 @@ final class AccountProfileNestedGroupMemberStore
         $existing = $context->collection(self::COLLECTION)->countDocuments(
             [
                 'tenant_id' => $this->tenantId(),
-                'parent_profile_id' => $profileId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $profileId,
             ],
             $context->rawOptions(),
         );
@@ -334,47 +415,22 @@ final class AccountProfileNestedGroupMemberStore
             return null;
         }
 
-        $now = new UTCDateTime((int) now()->getTimestampMs());
-        $rows = [];
+        $memberIds = [];
         foreach ($groups as $group) {
-            $groupId = trim((string) ($group['id'] ?? ''));
-            if ($groupId === '') {
-                continue;
-            }
-
-            $rows[] = [
-                '_id' => $this->headId($profileId, $groupId),
-                'tenant_id' => $this->tenantId(),
-                'parent_profile_id' => $profileId,
-                'group_id' => $groupId,
-                'group_label' => (string) ($group['label'] ?? ''),
-                'group_order' => (int) ($group['order'] ?? 0),
-                'doc_type' => self::DOC_TYPE_HEAD,
-                'updated_at' => $now,
-            ];
-
-            foreach (array_values($group['account_profile_ids'] ?? []) as $position => $memberId) {
+            foreach ((array) ($group['account_profile_ids'] ?? []) as $memberId) {
                 $memberId = trim((string) $memberId);
-                if ($memberId === '') {
-                    continue;
+                if ($memberId !== '') {
+                    $memberIds[$memberId] = $memberId;
                 }
-
-                $rows[] = [
-                    '_id' => $this->memberId($profileId, $groupId, $memberId),
-                    'tenant_id' => $this->tenantId(),
-                    'parent_profile_id' => $profileId,
-                    'group_id' => $groupId,
-                    'member_profile_id' => $memberId,
-                    'raw_position' => $position,
-                    'doc_type' => self::DOC_TYPE_MEMBER,
-                    'updated_at' => $now,
-                ];
             }
         }
 
-        if ($rows !== []) {
-            $context->collection(self::COLLECTION)->insertMany($rows, $context->rawOptions());
-        }
+        $this->replaceAllGroupsWithinContext(
+            $context,
+            $profile,
+            $groups,
+            $this->profilesByIdForIds(array_values($memberIds)),
+        );
 
         return null;
     }
@@ -386,8 +442,9 @@ final class AccountProfileNestedGroupMemberStore
     {
         $row = $this->documentToArray($this->collection()->findOne([
             'tenant_id' => $this->tenantId(),
-            'parent_profile_id' => $parentProfileId,
-            'group_id' => $groupId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $parentProfileId,
+            'group_key' => $groupId,
             'doc_type' => self::DOC_TYPE_HEAD,
         ]));
 
@@ -404,18 +461,18 @@ final class AccountProfileNestedGroupMemberStore
     private function memberCountsByGroup(
         string $parentProfileId,
         ?AccountProfileTransactionContext $context = null,
-    ): array
-    {
+    ): array {
         $collection = $context?->collection(self::COLLECTION) ?? $this->collection();
         $options = $context?->rawOptions() ?? [];
         $rows = iterator_to_array($collection->find(
             [
                 'tenant_id' => $this->tenantId(),
-                'parent_profile_id' => $parentProfileId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
                 'doc_type' => self::DOC_TYPE_MEMBER,
             ],
             [
-                'projection' => ['group_id' => 1],
+                'projection' => ['group_key' => 1],
                 ...$options,
             ],
         ));
@@ -423,7 +480,7 @@ final class AccountProfileNestedGroupMemberStore
         $counts = [];
         foreach ($rows as $row) {
             $document = $this->documentToArray($row) ?? [];
-            $groupId = trim((string) ($document['group_id'] ?? ''));
+            $groupId = trim((string) ($document['group_key'] ?? ''));
             if ($groupId === '') {
                 continue;
             }
@@ -446,7 +503,8 @@ final class AccountProfileNestedGroupMemberStore
         $rows = iterator_to_array($collection->find(
             [
                 'tenant_id' => $this->tenantId(),
-                'parent_profile_id' => $parentProfileId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
                 'doc_type' => self::DOC_TYPE_HEAD,
             ],
             [
@@ -459,7 +517,7 @@ final class AccountProfileNestedGroupMemberStore
 
         return array_values(array_map(function (array|object $row) use ($counts): array {
             $document = $this->documentToArray($row) ?? [];
-            $groupId = trim((string) ($document['group_id'] ?? ''));
+            $groupId = trim((string) ($document['group_key'] ?? ''));
 
             return [
                 'id' => $groupId,
@@ -472,12 +530,106 @@ final class AccountProfileNestedGroupMemberStore
 
     private function headId(string $parentProfileId, string $groupId): string
     {
-        return 'group-head:'.$parentProfileId.':'.$groupId;
+        return 'accounts-nested:head:'.self::PARENT_TYPE.':'.$parentProfileId.':'.$groupId;
     }
 
     private function memberId(string $parentProfileId, string $groupId, string $memberProfileId): string
     {
-        return 'group-member:'.$parentProfileId.':'.$groupId.':'.$memberProfileId;
+        return 'accounts-nested:member:'.self::PARENT_TYPE.':'.$parentProfileId.':'.$groupId.':'.$memberProfileId;
+    }
+
+    /**
+     * @param  array<int, string>  $memberIds
+     * @param  array<string, AccountProfile>  $seedProfilesById
+     * @return array<string, AccountProfile>
+     */
+    private function profilesByIdForIds(array $memberIds, array $seedProfilesById = []): array
+    {
+        $profilesById = [];
+        foreach ($seedProfilesById as $profileId => $profile) {
+            if ($profile instanceof AccountProfile) {
+                $normalizedId = trim((string) $profileId);
+                if ($normalizedId === '') {
+                    $normalizedId = trim((string) $profile->getKey());
+                }
+                if ($normalizedId !== '') {
+                    $profilesById[$normalizedId] = $profile;
+                }
+            }
+        }
+
+        $normalizedMemberIds = $this->normalizedStrings($memberIds);
+        $missingIds = array_values(array_diff($normalizedMemberIds, array_keys($profilesById)));
+        if ($missingIds === []) {
+            return $profilesById;
+        }
+
+        foreach (
+            AccountProfile::withTrashed()
+                ->whereIn('_id', $missingIds)
+                ->get([
+                    '_id',
+                    'display_name',
+                    'name_search_key',
+                    'profile_type',
+                    'slug',
+                    'avatar_url',
+                    'cover_url',
+                    'taxonomy_terms_flat',
+                ]) as $profile
+        ) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $profileId = trim((string) $profile->getKey());
+            if ($profileId !== '') {
+                $profilesById[$profileId] = $profile;
+            }
+        }
+
+        return $profilesById;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function nestedProfileDocument(string $memberProfileId, ?AccountProfile $profile): array
+    {
+        $memberProfileId = trim($memberProfileId);
+        $profileType = trim((string) ($profile?->profile_type ?? ''));
+        $label = trim((string) ($profile?->display_name ?? ''));
+        $searchKey = trim((string) ($profile?->getAttribute('name_search_key') ?? ''));
+        $slug = trim((string) ($profile?->slug ?? ''));
+
+        return [
+            'id' => $memberProfileId,
+            'label' => $label === '' ? null : $label,
+            'search_key' => $searchKey === '' ? null : $searchKey,
+            'profile_type' => $profileType === '' ? null : $profileType,
+            'category' => $profileType === '' ? null : $profileType,
+            'taxonomy_terms_flat' => $this->normalizedStrings((array) ($profile?->getAttribute('taxonomy_terms_flat') ?? [])),
+            'slug' => $slug === '' ? null : $slug,
+            'avatar_url' => is_string($profile?->avatar_url ?? null) ? $profile->avatar_url : null,
+            'cover_url' => is_string($profile?->cover_url ?? null) ? $profile->cover_url : null,
+        ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $values
+     * @return array<int, string>
+     */
+    private function normalizedStrings(array $values): array
+    {
+        $normalized = [];
+        foreach ($values as $value) {
+            $candidate = trim((string) $value);
+            if ($candidate !== '' && ! isset($normalized[$candidate])) {
+                $normalized[$candidate] = $candidate;
+            }
+        }
+
+        return array_values($normalized);
     }
 
     private function tenantId(): string

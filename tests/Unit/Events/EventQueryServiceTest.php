@@ -6,6 +6,7 @@ namespace Tests\Unit\Events;
 
 use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
 use Belluga\Events\Application\Events\EventHeroImageResolver;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
@@ -61,6 +62,9 @@ class EventQueryServiceTest extends TestCase
 
     private function makeService(): EventQueryService
     {
+        $tenantContext = Mockery::mock(EventTenantContextContract::class);
+        $legacyProfileGroupMemberStore = new EventProfileGroupMemberStore($tenantContext);
+
         return new EventQueryService(
             Mockery::mock(EventProfileResolverContract::class),
             Mockery::mock(EventRadiusSettingsContract::class),
@@ -68,8 +72,11 @@ class EventQueryServiceTest extends TestCase
             Mockery::mock(EventAttendanceReadContract::class),
             Mockery::mock(EventTaxonomySnapshotResolverContract::class),
             new EventHeroImageResolver(new AccountProfileHeroImageResolver),
-            new EventProfileGroupMemberStore(
-                Mockery::mock(EventTenantContextContract::class)
+            $legacyProfileGroupMemberStore,
+            new EventOccurrenceNestedAccountStore(
+                $tenantContext,
+                Mockery::mock(EventProfileResolverContract::class),
+                $legacyProfileGroupMemberStore,
             ),
         );
     }

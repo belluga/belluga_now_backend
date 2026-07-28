@@ -75,18 +75,19 @@ class TenantLifecycleServiceTest extends TestCase
         );
     }
 
-    public function test_paginate_ignores_legacy_persisted_landlord_fallback_domains(): void
+    public function test_paginate_ignores_explicit_legacy_persisted_landlord_fallback_domains(): void
     {
         $tenant = $this->service->create([
             ...$this->makeTenantPayload('Guarapari Tenant'),
             'subdomain' => 'guarappari',
         ], $this->operator)['tenant'];
         $rootHost = $this->rootHost();
+        $legacyFallbackDomain = "{$tenant->subdomain}-legacy.$rootHost";
 
         $tenant->domains()->delete();
         $tenant->domains()->create([
             'type' => 'web',
-            'path' => "guarapari.$rootHost",
+            'path' => $legacyFallbackDomain,
         ]);
 
         $paginator = $this->service->paginate($this->operator, false, 50);

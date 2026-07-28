@@ -225,12 +225,6 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
                 'type' => 'account_profile',
                 'id' => (string) $this->venue->_id,
             ],
-            'event_parties' => [
-                [
-                    'party_ref_id' => (string) $this->artist->_id,
-                    'permissions' => ['can_edit' => true],
-                ],
-            ],
             'type' => [
                 'id' => (string) $this->eventType->_id,
                 'name' => (string) $this->eventType->name,
@@ -240,6 +234,12 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
             'occurrences' => [[
                 'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
                 'date_time_end' => $now->copy()->addDay()->setHour(22)->setMinute(0)->setSecond(0)->toISOString(),
+                'profile_groups' => [[
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $this->artist->_id],
+                ]],
             ]],
             'publication' => [
                 'status' => 'published',

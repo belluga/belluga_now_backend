@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfileNameSearchKey;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileNestedGroupService;
 use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
@@ -41,10 +42,47 @@ class AccountProfilesController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $perPage = (int) $request->get('per_page', $request->get('page_size', 15)) ?: 15;
+        $validated = $request->validate([
+            'account_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
+            'profile_type' => ['sometimes', 'string', 'max:255'],
+            'contact_mode' => ['sometimes', 'string', 'in:own,mirrored_account_profile'],
+            'contact_channels_enabled_only' => ['sometimes', 'boolean'],
+            'queryable_only' => ['sometimes', 'boolean'],
+            'exclude_account_profile_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
+            'search' => [
+                'bail',
+                'sometimes',
+                'nullable',
+                'string',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    $rawSearch = trim((string) $value);
+                    if ($rawSearch === '') {
+                        return;
+                    }
+
+                    if (AccountProfileNameSearchKey::normalizeRequestSearch($value) === null) {
+                        $fail('The search must contain 2 to 400 UTF-8 characters and normalize to 2 to 100 ASCII characters.');
+                    }
+                },
+            ],
+            'page' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'page_size' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'archived' => ['sometimes', 'boolean'],
+        ]);
+
+        $rawSearch = trim((string) ($validated['search'] ?? ''));
+        if ($rawSearch !== '') {
+            $normalizedSearch = AccountProfileNameSearchKey::normalizeRequestSearch($validated['search']);
+            if ($normalizedSearch !== null) {
+                $validated['search'] = $normalizedSearch;
+            }
+        }
+
+        $perPage = (int) ($validated['per_page'] ?? $validated['page_size'] ?? 15) ?: 15;
 
         $paginator = $this->profileQueryService->paginate(
-            $request->query(),
+            $validated,
             $request->boolean('archived'),
             $perPage
         );
@@ -59,23 +97,6 @@ class AccountProfilesController extends Controller
         return response()->json($this->candidateDiscoveryService->page(
             $validated['scope'],
             $request->normalizedSearch(),
-            (int) ($validated['page'] ?? 1),
-            (int) ($validated['per_page'] ?? 20),
-            $validated['exclude_account_profile_id'] ?? null,
-        ));
-    }
-
-    public function contactSourceCandidates(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'page' => ['sometimes', 'integer', 'min:1', 'max:50'],
-            'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
-            'exclude_account_profile_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
-        ]);
-
-        return response()->json($this->candidateDiscoveryService->page(
-            AccountProfileCandidateDiscoveryService::SCOPE_CONTACT_CAPABLE,
-            '',
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 20),
             $validated['exclude_account_profile_id'] ?? null,

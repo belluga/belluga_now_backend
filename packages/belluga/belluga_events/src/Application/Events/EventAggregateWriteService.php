@@ -32,10 +32,6 @@ class EventAggregateWriteService
             );
 
             $created = Event::query()->create($canonicalPayload);
-            $this->profileGroupMemberStore->syncEventGroups(
-                $created,
-                $payload['profile_groups'] ?? []
-            );
             $this->occurrenceSyncService->syncFromEvent($created, $occurrences);
 
             return $created->fresh() ?? $created;
@@ -52,22 +48,17 @@ class EventAggregateWriteService
     {
         /** @var Event $updated */
         $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
-            $this->profileGroupMemberStore->materializeLegacyIfNeeded($event);
-
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = $this->profileGroupMemberStore->metadataOnly(
                 $payload['profile_groups'] ?? []
             );
 
             $event->unset('tags');
+            $event->unset('artists');
             $event->fill($canonicalPayload);
             $event->save();
 
             $fresh = $event->fresh() ?? $event;
-            $this->profileGroupMemberStore->syncEventGroups(
-                $fresh,
-                $payload['profile_groups'] ?? []
-            );
             $this->occurrenceSyncService->syncFromEvent($fresh, $occurrences);
 
             return $fresh;

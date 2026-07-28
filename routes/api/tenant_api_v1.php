@@ -204,9 +204,6 @@ Route::prefix('account_profiles')
         Route::get('/candidates', [AccountProfilesController::class, 'candidates'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
-        Route::get('/contact_sources', [AccountProfilesController::class, 'contactSourceCandidates'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
         Route::post('/', [AccountProfilesController::class, 'store'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
 
