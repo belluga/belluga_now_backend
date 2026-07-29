@@ -287,6 +287,7 @@ final class EventProfileGroupMemberStore
     {
         $rows = $this->normalizeArray($rawGroups);
         $groups = [];
+        $indexById = [];
 
         foreach ($rows as $index => $row) {
             $payload = $this->normalizeArray($row);
@@ -308,13 +309,31 @@ final class EventProfileGroupMemberStore
                 }
             }
 
-            $groups[] = [
-                '_source_index' => $index,
-                'id' => $id,
-                'label' => $label,
-                'order' => isset($payload['order']) ? (int) ($payload['order']) : $index,
-                'account_profile_ids' => $memberIds,
-            ];
+            if (! isset($indexById[$id])) {
+                $indexById[$id] = count($groups);
+                $groups[] = [
+                    '_source_index' => $index,
+                    'id' => $id,
+                    'label' => $label,
+                    'order' => isset($payload['order']) ? (int) ($payload['order']) : $index,
+                    'account_profile_ids' => $memberIds,
+                ];
+
+                continue;
+            }
+
+            $groupIndex = $indexById[$id];
+            $groups[$groupIndex]['_source_index'] = $index;
+            $groups[$groupIndex]['label'] = $label;
+            $groups[$groupIndex]['order'] = isset($payload['order'])
+                ? (int) ($payload['order'])
+                : $groups[$groupIndex]['order'];
+
+            foreach ($memberIds as $memberId) {
+                if (! in_array($memberId, $groups[$groupIndex]['account_profile_ids'], true)) {
+                    $groups[$groupIndex]['account_profile_ids'][] = $memberId;
+                }
+            }
         }
 
         usort(

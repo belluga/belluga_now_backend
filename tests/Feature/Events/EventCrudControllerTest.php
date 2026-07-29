@@ -1726,6 +1726,81 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNull($canonical->fresh()->artists);
     }
 
+    public function test_tenant_admin_legacy_event_parties_summary_ignores_soft_deleted_related_profiles_instead_of_failing(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $deletedArtist = $this->createAccountProfile('artist', 'Deleted Legacy Artist');
+        $deletedArtistId = (string) $deletedArtist->_id;
+        $deletedArtist->delete();
+
+        $legacy = $this->createEvent([
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'rock'],
+                    ],
+                ],
+                [
+                    'id' => $deletedArtistId,
+                    'display_name' => 'Deleted Legacy Artist',
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => [],
+                    'taxonomy_terms' => [],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => $this->artist->display_name,
+                        'slug' => (string) $this->artist->slug,
+                        'profile_type' => 'artist',
+                    ],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => $deletedArtistId,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Deleted Legacy Artist',
+                        'slug' => 'deleted-legacy-artist',
+                        'profile_type' => 'artist',
+                    ],
+                ],
+            ],
+        ]);
+
+        $beforeParties = $legacy->fresh()->event_parties;
+        $beforeArtists = $legacy->fresh()->artists;
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 1);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 0);
+
+        $this->assertSame($beforeParties, $legacy->fresh()->event_parties);
+        $this->assertSame($beforeArtists, $legacy->fresh()->artists);
+    }
+
     public function test_tenant_admin_legacy_event_parties_repair_is_safe_and_idempotent(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
@@ -1803,6 +1878,217 @@ class EventCrudControllerTest extends TestCaseTenant
         $secondRun->assertJsonPath('data.repaired', 0);
         $secondRun->assertJsonPath('data.failed', 0);
         $secondRun->assertJsonPath('data.unchanged', 2);
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_drops_soft_deleted_related_profiles_and_preserves_existing_profiles(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $deletedArtist = $this->createAccountProfile('artist', 'Deleted Repair Artist');
+        $deletedArtistId = (string) $deletedArtist->_id;
+        $deletedArtist->delete();
+
+        $legacy = $this->createEvent([
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [
+                        ['type' => 'music_genre', 'value' => 'rock'],
+                    ],
+                ],
+                [
+                    'id' => $deletedArtistId,
+                    'display_name' => 'Deleted Repair Artist',
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => [],
+                    'taxonomy_terms' => [],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => (string) $this->artist->_id,
+                    'permissions' => ['can_edit' => false],
+                    'metadata' => [
+                        'display_name' => $this->artist->display_name,
+                        'slug' => (string) $this->artist->slug,
+                        'profile_type' => 'artist',
+                    ],
+                ],
+                [
+                    'party_type' => 'artist',
+                    'party_ref_id' => $deletedArtistId,
+                    'permissions' => ['can_edit' => true],
+                    'metadata' => [
+                        'display_name' => 'Deleted Repair Artist',
+                        'slug' => 'deleted-repair-artist',
+                        'profile_type' => 'artist',
+                    ],
+                ],
+            ],
+        ]);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $legacy = $legacy->fresh();
+        $this->assertCount(1, $legacy->event_parties ?? []);
+        $this->assertSame('artist', data_get($legacy->event_parties, '0.party_type'));
+        $this->assertSame((string) $this->artist->_id, data_get($legacy->event_parties, '0.party_ref_id'));
+        $this->assertSame((string) $this->artist->slug, data_get($legacy->event_parties, '0.metadata.slug'));
+        $this->assertNull($legacy->artists);
+
+        $syncedOccurrence = $this->occurrenceDocumentAtOrderOrNull((string) $legacy->_id, 0);
+        $this->assertNotNull($syncedOccurrence);
+        $this->assertCount(1, $syncedOccurrence->event_parties ?? []);
+        $this->assertSame((string) $this->artist->_id, data_get($syncedOccurrence->event_parties, '0.party_ref_id'));
+        $this->assertSame((string) $this->artist->slug, data_get($syncedOccurrence->event_parties, '0.metadata.slug'));
+    }
+
+    public function test_tenant_admin_legacy_event_parties_summary_skips_past_events_and_scans_only_live_or_future(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $now = Carbon::now();
+
+        $this->createEvent([
+            'title' => 'Past Legacy Event',
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
+            'date_time_start' => $now->copy()->subDays(3),
+            'date_time_end' => $now->copy()->subDays(2),
+        ]);
+
+        $this->createEvent([
+            'title' => 'Future Legacy Event',
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
+        ]);
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+
+        $summary->assertStatus(200);
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 1);
+        $summary->assertJsonPath('data.repaired', 0);
+        $summary->assertJsonPath('data.failed', 0);
+        $summary->assertJsonPath('data.unchanged', 0);
+    }
+
+    public function test_tenant_admin_legacy_event_parties_repair_skips_past_events_and_repairs_only_live_or_future(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $now = Carbon::now();
+
+        $pastLegacy = $this->createEvent([
+            'title' => 'Past Legacy Repair Event',
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
+            'date_time_start' => $now->copy()->subDays(3),
+            'date_time_end' => $now->copy()->subDays(2),
+        ]);
+
+        $futureLegacy = $this->createEvent([
+            'title' => 'Future Legacy Repair Event',
+            'artists' => [
+                [
+                    'id' => (string) $this->artist->_id,
+                    'display_name' => $this->artist->display_name,
+                    'avatar_url' => null,
+                    'highlight' => false,
+                    'genres' => ['rock'],
+                    'taxonomy_terms' => [],
+                ],
+            ],
+            'event_parties' => [
+                [
+                    'party_type' => 'venue',
+                    'party_ref_id' => (string) $this->venue->_id,
+                    'permissions' => ['can_edit' => true],
+                ],
+            ],
+        ]);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+
+        $repair->assertStatus(200);
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+        $repair->assertJsonPath('data.unchanged', 0);
+
+        $this->assertCount(1, $pastLegacy->fresh()->event_parties ?? []);
+        $this->assertSame('venue', data_get($pastLegacy->fresh()->event_parties, '0.party_type'));
+
+        $this->assertCount(1, $futureLegacy->fresh()->event_parties ?? []);
+        $this->assertSame('artist', data_get($futureLegacy->fresh()->event_parties, '0.party_type'));
+        $this->assertNull($futureLegacy->fresh()->artists);
     }
 
     public function test_tenant_admin_legacy_event_parties_repair_clears_legacy_artists_projection_when_event_parties_are_already_canonical(): void
@@ -5803,6 +6089,104 @@ class EventCrudControllerTest extends TestCaseTenant
             ->values()
             ->all();
         $this->assertSame($expectedProfileIds, $nestedProfileIds);
+    }
+
+    public function test_legacy_event_parties_repair_deduplicates_occurrence_group_ids_before_materializing_member_rows(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read', 'events:update']);
+
+        $legacy = $this->createEvent([
+            'artists' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+        ]);
+        $eventId = (string) $legacy->_id;
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $occurrenceParties = [
+            [
+                'party_type' => 'artist',
+                'party_ref_id' => (string) $this->artist->_id,
+                'permissions' => ['can_edit' => true],
+                'metadata' => [
+                    'display_name' => $this->artist->display_name,
+                    'slug' => (string) $this->artist->slug,
+                    'profile_type' => (string) $this->artist->profile_type,
+                ],
+            ],
+            [
+                'party_type' => 'band',
+                'party_ref_id' => (string) $this->band->_id,
+                'permissions' => ['can_edit' => false],
+                'metadata' => [
+                    'display_name' => $this->band->display_name,
+                    'slug' => (string) $this->band->slug,
+                    'profile_type' => (string) $this->band->profile_type,
+                ],
+            ],
+        ];
+        $occurrence->own_event_parties = $occurrenceParties;
+        $occurrence->event_parties = $occurrenceParties;
+        $occurrence->own_profile_groups = [
+            [
+                'id' => 'guests',
+                'label' => 'Guest',
+                'order' => 0,
+            ],
+            [
+                'id' => 'guests',
+                'label' => 'Guests',
+                'order' => 0,
+            ],
+        ];
+        $occurrence->profile_groups = [
+            [
+                'id' => 'guests',
+                'label' => 'Guests',
+                'order' => 0,
+                'account_profile_ids' => [
+                    (string) $this->artist->_id,
+                    (string) $this->band->_id,
+                ],
+            ],
+        ];
+        $occurrence->linked_account_profiles = [];
+        $occurrence->own_linked_account_profiles = [];
+        $occurrence->save();
+
+        $summary = $this->getJson("{$this->tenantAdminEventsBase}/legacy_event_parties/summary");
+        $summary->assertOk();
+        $summary->assertJsonPath('data.scanned', 1);
+        $summary->assertJsonPath('data.invalid', 1);
+
+        $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
+        $repair->assertOk();
+        $repair->assertJsonPath('data.scanned', 1);
+        $repair->assertJsonPath('data.invalid', 1);
+        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.failed', 0);
+
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertCount(1, $freshOccurrence->own_profile_groups ?? []);
+        $this->assertSame('guests', data_get($freshOccurrence, 'own_profile_groups.0.id'));
+        $this->assertArrayNotHasKey('account_profile_ids', data_get($freshOccurrence, 'own_profile_groups.0', []));
+
+        $memberRows = $this->eventProfileGroupRows([
+            'event_id' => $eventId,
+            'owner_type' => 'occurrence',
+            'owner_id' => (string) $freshOccurrence->_id,
+            'doc_type' => 'member_row',
+        ]);
+        $memberProfileIds = collect($memberRows)
+            ->map(static fn (array $row): string => (string) ($row['member_profile_id'] ?? ''))
+            ->filter(static fn (string $profileId): bool => $profileId !== '')
+            ->sort()
+            ->values()
+            ->all();
+        $expectedProfileIds = [(string) $this->artist->_id, (string) $this->band->_id];
+        sort($expectedProfileIds);
+        $this->assertSame($expectedProfileIds, $memberProfileIds);
     }
 
     public function test_local_diagnostic_append_profile_group_member_mirrors_canonical_event_party_and_repairs_occurrence_projections(): void
