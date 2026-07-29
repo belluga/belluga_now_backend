@@ -208,6 +208,9 @@ class AccountProfileManagementService
             }
             $payload['account_id'] = (string) $payload['account_id'];
             $payload['location'] = $this->formatLocation($payload['location'] ?? null);
+            $payload['name_search_key'] = AccountProfileNameSearchKey::fromDisplayName(
+                (string) ($payload['display_name'] ?? '')
+            );
 
             $profile = AccountProfile::create($payload)->fresh();
         } catch (BulkWriteException $exception) {

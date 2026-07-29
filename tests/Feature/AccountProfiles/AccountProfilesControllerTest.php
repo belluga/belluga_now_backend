@@ -3967,6 +3967,24 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.account_profile.taxonomy_terms.0.label', 'Italian');
     }
 
+    public function test_account_profile_create_sets_name_search_key_immediately(): void
+    {
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Search Key Test Profile',
+        ]);
+
+        $this->assertNotEmpty(
+            $profile->getAttribute('name_search_key'),
+            'name_search_key must be populated at profile creation time, not deferred to first update',
+        );
+        $this->assertSame(
+            'search key test profile',
+            $profile->getAttribute('name_search_key'),
+        );
+    }
+
     public function test_account_profile_update_replaces_avatar_upload(): void
     {
         Storage::fake('public');
