@@ -7,6 +7,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -200,6 +201,15 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return response()->json(['message' => $e->getMessage()], 401);
+        });
+        $exceptions->renderable(function (ConcurrencyConflictException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'A concurrency conflict occurred. Please try again.',
+            ], 409);
         });
         $exceptions->renderable(function (NotFoundHttpException $e) {
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
