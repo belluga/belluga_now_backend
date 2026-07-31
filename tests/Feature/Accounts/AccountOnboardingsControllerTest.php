@@ -258,6 +258,7 @@ class AccountOnboardingsControllerTest extends TestCase
             ->where('type', 'venue')
             ->update([
                 'capabilities' => [
+                    'is_queryable' => true,
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'has_nested_profile_groups' => true,
