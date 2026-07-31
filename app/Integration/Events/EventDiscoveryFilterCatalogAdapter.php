@@ -24,4 +24,12 @@ class EventDiscoveryFilterCatalogAdapter implements EventDiscoveryFilterCatalogC
             $baseUrl,
         );
     }
+
+    public function repairSelectionAgainstCanonicalCatalog(
+        array $selection,
+        array $catalog,
+    ): array {
+        return $this->runtimeDiscoveryFilterCatalogService
+            ->repairSelectionAgainstCanonicalCatalog($selection, $catalog);
+    }
 }

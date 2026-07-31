@@ -12,10 +12,6 @@ class LandlordValidation
     {
         $user = auth()->guard('sanctum')->user();
 
-        if (! $user) {
-            return $next($request);
-        }
-
         if (! $user instanceof LandlordUser) {
             throw new AuthenticationException('Unauthenticated.', ['sanctum']);
         }

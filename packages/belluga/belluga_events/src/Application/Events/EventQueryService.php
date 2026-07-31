@@ -6,6 +6,7 @@ namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
+use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
@@ -48,6 +49,7 @@ class EventQueryService
         private readonly EventHeroImageResolver $eventHeroImages,
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
+        private readonly EventDiscoveryFilterCatalogContract $eventDiscoveryFilterCatalog,
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
@@ -70,6 +72,27 @@ class EventQueryService
         $filters = $this->normalizeFilters($queryParams);
         $useGeo = $filters['use_geo'] && ! $filters['confirmed_only'];
         $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $useGeo);
+
+        $runtimeCatalog = $this->eventDiscoveryFilterCatalog->buildCanonicalCatalog(
+            'home.events',
+            is_array($raw['discovery_filter_facets'] ?? null)
+                ? $raw['discovery_filter_facets']
+                : null,
+            request()->getSchemeAndHttpHost()
+        );
+        $repairedSelection = $this->eventDiscoveryFilterCatalog
+            ->repairSelectionAgainstCanonicalCatalog([
+                'primary' => $filters['categories'],
+                'taxonomy' => $this->groupTaxonomySelectionsByType($filters['taxonomy']),
+            ], $runtimeCatalog);
+
+        if ($repairedSelection['changed']) {
+            $filters['categories'] = $repairedSelection['primary'];
+            $filters['taxonomy'] = $this->flattenTaxonomySelectionMap(
+                $repairedSelection['taxonomy']
+            );
+            $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $useGeo);
+        }
 
         $pageRows = $raw['page_rows'] ?? [];
         $hasMore = count($pageRows) > $pageSize;
@@ -1470,6 +1493,33 @@ class EventQueryService
         }
 
         return $grouped;
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $taxonomy
+     * @return array<int, array{type: string, value: string}>
+     */
+    private function flattenTaxonomySelectionMap(array $taxonomy): array
+    {
+        $flattened = [];
+        foreach ($taxonomy as $type => $values) {
+            $normalizedType = trim((string) $type);
+            if ($normalizedType === '') {
+                continue;
+            }
+            foreach ($values as $value) {
+                $normalizedValue = trim((string) $value);
+                if ($normalizedValue === '') {
+                    continue;
+                }
+                $flattened[] = [
+                    'type' => $normalizedType,
+                    'value' => $normalizedValue,
+                ];
+            }
+        }
+
+        return $flattened;
     }
 
     /**

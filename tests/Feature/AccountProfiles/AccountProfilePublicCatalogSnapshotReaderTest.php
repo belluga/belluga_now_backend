@@ -17,17 +17,12 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;
 
-    private static bool $bootstrapped = false;
-
     protected function setUp(): void
     {
         parent::setUp();
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
-        }
+        $this->refreshLandlordAndTenantDatabases();
+        $this->initializeSystem();
 
         Tenant::query()->firstOrFail()->makeCurrent();
         TenantProfileType::query()->delete();

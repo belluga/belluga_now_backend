@@ -25,7 +25,7 @@ final class TenantContextExecutionGuardrailTest extends TestCase
         $this->repositoryRoot = dirname(__DIR__, 3);
     }
 
-    public function test_canonical_tenant_context_owners_use_explicit_try_finally_instead_of_vendor_execute_helpers(): void
+    public function test_canonical_tenant_context_owners_do_not_delegate_to_vendor_execute_helpers(): void
     {
         foreach ($this->tenantContextOwnerPaths as $relativePath) {
             $source = $this->readSource($relativePath);
@@ -39,6 +39,16 @@ final class TenantContextExecutionGuardrailTest extends TestCase
                 'finally',
                 $source,
                 "{$relativePath} must restore tenant context with explicit finally semantics."
+            );
+            $this->assertStringContainsString(
+                'DB::setDefaultConnection',
+                $source,
+                "{$relativePath} must explicitly restore the selected default connection."
+            );
+            $this->assertStringContainsString(
+                'previousTenant',
+                $source,
+                "{$relativePath} must keep an explicit previous-tenant restoration path."
             );
             $this->assertStringNotContainsString(
                 '->execute(',

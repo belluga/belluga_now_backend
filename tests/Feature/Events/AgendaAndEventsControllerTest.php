@@ -844,6 +844,46 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_agenda_repairs_stale_type_filter_in_same_response(): void
+    {
+        EventType::query()->updateOrCreate(['slug' => 'show'], [
+            'name' => 'Show',
+            'allowed_taxonomies' => [],
+        ]);
+        EventType::query()->updateOrCreate(['slug' => 'stale-fair'], [
+            'name' => 'Stale Fair',
+            'allowed_taxonomies' => [],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Runtime Show Event',
+            'type' => [
+                'id' => 'type-show',
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Show desc',
+            ],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?categories[0]=stale-fair&page=1&page_size=15"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'items');
+        $response->assertJsonPath('items.0.title', 'Runtime Show Event');
+
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+
+        $this->assertContains('show', $catalogFilterKeys);
+        $this->assertNotContains('stale-fair', $catalogFilterKeys);
+    }
+
     public function test_agenda_supports_text_search_query_param(): void
     {
         $this->createEvent([

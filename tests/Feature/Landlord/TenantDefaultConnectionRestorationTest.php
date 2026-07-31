@@ -6,7 +6,9 @@ namespace Tests\Feature\Landlord;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Push\PushTenantContextAdapter;
+use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
@@ -19,18 +21,16 @@ class TenantDefaultConnectionRestorationTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;
 
-    private static bool $bootstrapped = false;
+    private string $defaultConnectionAtRest;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
-        }
+        $this->refreshLandlordAndTenantDatabases();
+        $this->initializeSystem();
 
+        $this->defaultConnectionAtRest = (string) config('database.default', 'mongodb');
         $this->normalizeTenantRuntimeState();
     }
 
@@ -105,6 +105,312 @@ class TenantDefaultConnectionRestorationTest extends TestCase
         $this->assertTenantRuntimeReset();
     }
 
+    public function test_push_tenant_context_adapter_restores_exact_previous_default_connection(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+        DB::setDefaultConnection('landlord');
+
+        $result = $this->app->make(PushTenantContextAdapter::class)
+            ->runForTenantSlug($secondaryTenant->slug, static fn (): string => 'push-success');
+
+        $this->assertSame('push-success', $result);
+        $this->assertTenantContextWithExpectedDefaultConnection($primaryTenant, 'landlord');
+
+        $this->normalizeTenantRuntimeState();
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_push_tenant_context_adapter_rebinds_same_tenant_runtime_before_callback(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+
+        $primaryTenant->makeCurrent();
+        DB::setDefaultConnection('landlord');
+
+        $result = $this->app->make(PushTenantContextAdapter::class)
+            ->runForTenantSlug($primaryTenant->slug, function () use ($primaryTenant): string {
+                $this->assertTenantRuntimeBoundTo($primaryTenant);
+
+                return 'push-same-tenant-success';
+            });
+
+        $this->assertSame('push-same-tenant-success', $result);
+        $this->assertTenantContextWithExpectedDefaultConnection($primaryTenant, 'landlord');
+
+        $this->normalizeTenantRuntimeState();
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_settings_tenant_scope_adapter_restores_previous_tenant_runtime_after_success(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+
+        $result = $this->app->make(TenantScopeContextAdapter::class)
+            ->runForTenantSlug($secondaryTenant->slug, function () use ($secondaryTenant): string {
+                $this->assertTenantRuntimeBoundTo($secondaryTenant);
+
+                return 'scoped-success';
+            });
+
+        $this->assertSame('scoped-success', $result);
+        $this->assertTenantRuntimeBoundTo($primaryTenant);
+
+        $primaryTenant->forgetCurrent();
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_settings_tenant_scope_adapter_restores_previous_tenant_runtime_after_exception(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+
+        try {
+            $this->app->make(TenantScopeContextAdapter::class)
+                ->runForTenantSlug($secondaryTenant->slug, function () use ($secondaryTenant): void {
+                    $this->assertTenantRuntimeBoundTo($secondaryTenant);
+                    throw new \RuntimeException('forced settings failure');
+                });
+
+            $this->fail('The tenant scope callback must rethrow the forced failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced settings failure', $exception->getMessage());
+        }
+
+        $this->assertTenantRuntimeBoundTo($primaryTenant);
+
+        $primaryTenant->forgetCurrent();
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_settings_tenant_scope_adapter_restores_exact_previous_default_connection(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+        DB::setDefaultConnection('landlord');
+
+        $result = $this->app->make(TenantScopeContextAdapter::class)
+            ->runForTenantSlug($secondaryTenant->slug, static fn (): string => 'settings-success');
+
+        $this->assertSame('settings-success', $result);
+        $this->assertTenantContextWithExpectedDefaultConnection($primaryTenant, 'landlord');
+
+        $this->normalizeTenantRuntimeState();
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_settings_tenant_scope_adapter_rebinds_same_tenant_runtime_before_callback(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+
+        $primaryTenant->makeCurrent();
+        DB::setDefaultConnection('landlord');
+
+        $result = $this->app->make(TenantScopeContextAdapter::class)
+            ->runForTenantSlug($primaryTenant->slug, function () use ($primaryTenant): string {
+                $this->assertTenantRuntimeBoundTo($primaryTenant);
+
+                return 'settings-same-tenant-success';
+            });
+
+        $this->assertSame('settings-same-tenant-success', $result);
+        $this->assertTenantContextWithExpectedDefaultConnection($primaryTenant, 'landlord');
+
+        $this->normalizeTenantRuntimeState();
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_settings_tenant_scope_adapter_resets_runtime_when_no_previous_tenant_exists(): void
+    {
+        $secondaryTenant = $this->secondaryTenant();
+
+        $result = $this->app->make(TenantScopeContextAdapter::class)
+            ->runForTenantSlug($secondaryTenant->slug, function () use ($secondaryTenant): string {
+                $this->assertTenantRuntimeBoundTo($secondaryTenant);
+
+                return 'no-previous-tenant';
+            });
+
+        $this->assertSame('no-previous-tenant', $result);
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_settings_tenant_scope_adapter_resets_runtime_after_exception_when_no_previous_tenant_exists(): void
+    {
+        $secondaryTenant = $this->secondaryTenant();
+
+        try {
+            $this->app->make(TenantScopeContextAdapter::class)
+                ->runForTenantSlug($secondaryTenant->slug, function () use ($secondaryTenant): void {
+                    $this->assertTenantRuntimeBoundTo($secondaryTenant);
+                    throw new \RuntimeException('forced settings failure without previous tenant');
+                });
+
+            $this->fail('The tenant scope callback must rethrow the forced failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced settings failure without previous tenant', $exception->getMessage());
+        }
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_event_tenant_execution_adapter_restores_previous_tenant_runtime_after_iteration(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+
+        $visitedTenantIds = [];
+        $this->app->make(TenantExecutionContextAdapter::class)
+            ->runForEachTenant(function () use (&$visitedTenantIds): void {
+                $currentTenant = Tenant::current();
+                $this->assertInstanceOf(Tenant::class, $currentTenant);
+                $this->assertTenantRuntimeBoundTo($currentTenant);
+                $visitedTenantIds[] = (string) $currentTenant->getKey();
+            });
+
+        $this->assertEqualsCanonicalizing(
+            [
+                (string) $primaryTenant->getKey(),
+                (string) $secondaryTenant->getKey(),
+            ],
+            $visitedTenantIds,
+        );
+        $this->assertTenantRuntimeBoundTo($primaryTenant);
+
+        $primaryTenant->forgetCurrent();
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_event_tenant_execution_adapter_restores_previous_tenant_runtime_after_exception(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+
+        $visitedTenantIds = [];
+
+        try {
+            $this->app->make(TenantExecutionContextAdapter::class)
+                ->runForEachTenant(function () use (&$visitedTenantIds, $secondaryTenant): void {
+                    $currentTenant = Tenant::current();
+                    $this->assertInstanceOf(Tenant::class, $currentTenant);
+                    $this->assertTenantRuntimeBoundTo($currentTenant);
+                    $visitedTenantIds[] = (string) $currentTenant->getKey();
+
+                    if ((string) $currentTenant->getKey() === (string) $secondaryTenant->getKey()) {
+                        throw new \RuntimeException('forced events failure');
+                    }
+                });
+
+            $this->fail('The tenant iteration callback must rethrow the forced failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced events failure', $exception->getMessage());
+        }
+
+        $this->assertContains((string) $secondaryTenant->getKey(), $visitedTenantIds);
+        $this->assertTenantRuntimeBoundTo($primaryTenant);
+
+        $primaryTenant->forgetCurrent();
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_event_tenant_execution_adapter_restores_exact_previous_default_connection(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $primaryTenant->makeCurrent();
+        DB::setDefaultConnection('landlord');
+
+        $visitedTenantIds = [];
+        $this->app->make(TenantExecutionContextAdapter::class)
+            ->runForEachTenant(function () use (&$visitedTenantIds): void {
+                $currentTenant = Tenant::current();
+                $this->assertInstanceOf(Tenant::class, $currentTenant);
+                $this->assertTenantRuntimeBoundTo($currentTenant);
+                $visitedTenantIds[] = (string) $currentTenant->getKey();
+            });
+
+        $this->assertEqualsCanonicalizing(
+            [
+                (string) $primaryTenant->getKey(),
+                (string) $secondaryTenant->getKey(),
+            ],
+            $visitedTenantIds,
+        );
+        $this->assertTenantContextWithExpectedDefaultConnection($primaryTenant, 'landlord');
+
+        $this->normalizeTenantRuntimeState();
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_event_tenant_execution_adapter_resets_runtime_after_iteration_when_no_previous_tenant_exists(): void
+    {
+        $primaryTenant = $this->primaryTenant();
+        $secondaryTenant = $this->secondaryTenant();
+
+        $visitedTenantIds = [];
+        $this->app->make(TenantExecutionContextAdapter::class)
+            ->runForEachTenant(function () use (&$visitedTenantIds): void {
+                $currentTenant = Tenant::current();
+                $this->assertInstanceOf(Tenant::class, $currentTenant);
+                $this->assertTenantRuntimeBoundTo($currentTenant);
+                $visitedTenantIds[] = (string) $currentTenant->getKey();
+            });
+
+        $this->assertEqualsCanonicalizing(
+            [
+                (string) $primaryTenant->getKey(),
+                (string) $secondaryTenant->getKey(),
+            ],
+            $visitedTenantIds,
+        );
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_event_tenant_execution_adapter_resets_runtime_after_exception_when_no_previous_tenant_exists(): void
+    {
+        $secondaryTenant = $this->secondaryTenant();
+        $visitedTenantIds = [];
+
+        try {
+            $this->app->make(TenantExecutionContextAdapter::class)
+                ->runForEachTenant(function () use (&$visitedTenantIds, $secondaryTenant): void {
+                    $currentTenant = Tenant::current();
+                    $this->assertInstanceOf(Tenant::class, $currentTenant);
+                    $this->assertTenantRuntimeBoundTo($currentTenant);
+                    $visitedTenantIds[] = (string) $currentTenant->getKey();
+
+                    if ((string) $currentTenant->getKey() === (string) $secondaryTenant->getKey()) {
+                        throw new \RuntimeException('forced events failure without previous tenant');
+                    }
+                });
+
+            $this->fail('The tenant iteration callback must rethrow the forced failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced events failure without previous tenant', $exception->getMessage());
+        }
+
+        $this->assertContains((string) $secondaryTenant->getKey(), $visitedTenantIds);
+        $this->assertTenantRuntimeReset();
+    }
+
     public function test_same_process_success_failure_and_retry_cycles_do_not_leak_default_connection_state(): void
     {
         $primaryTenant = $this->primaryTenant();
@@ -167,6 +473,20 @@ class TenantDefaultConnectionRestorationTest extends TestCase
         $this->assertNull(config("database.connections.{$tenantConnectionName}.database"));
     }
 
+    private function assertTenantContextWithExpectedDefaultConnection(
+        Tenant $tenant,
+        string $expectedDefaultConnection,
+    ): void {
+        $tenantConnectionName = $this->tenantConnectionName();
+
+        $this->assertSame($expectedDefaultConnection, DB::getDefaultConnection());
+        $this->assertSame((string) $tenant->getKey(), (string) Tenant::current()?->getKey());
+        $this->assertSame(
+            $tenant->database,
+            (string) config("database.connections.{$tenantConnectionName}.database")
+        );
+    }
+
     private function normalizeTenantRuntimeState(): void
     {
         Tenant::current()?->forgetCurrent();
@@ -220,7 +540,7 @@ class TenantDefaultConnectionRestorationTest extends TestCase
 
     private function expectedDefaultConnection(): string
     {
-        return (string) env('DB_CONNECTION', 'mongodb');
+        return $this->defaultConnectionAtRest;
     }
 
     private function initializeSystem(): void

@@ -146,7 +146,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
-            return route('login');
+            return Route::has('login') ? route('login') : url('/');
         });
 
         // Platform-wide API security baseline (L1/L2/L3 + idempotency + edge/origin controls).

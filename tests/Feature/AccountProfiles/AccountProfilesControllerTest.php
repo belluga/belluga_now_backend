@@ -62,8 +62,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
-    private static bool $bootstrapped = false;
-
     private Account $account;
 
     private AccountRoleTemplate $accountRoleTemplate;
@@ -72,11 +70,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         parent::setUp();
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
-        }
+        $this->refreshLandlordAndTenantDatabases();
+        $this->initializeSystem();
 
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -1265,7 +1260,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_public_account_profile_index_excludes_personal_profiles_even_when_inviteable_and_favoritable(): void
+    public function test_public_account_profile_index_repairs_unsupported_personal_filter_without_exposing_personal_profiles(): void
     {
         $this->createAccountUser([]);
 
@@ -1325,7 +1320,21 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $filteredResponse->assertStatus(200);
-        $this->assertSame([], $filteredResponse->json('data'));
+        $this->assertSame(
+            ['Public Catalog Guard'],
+            collect($filteredResponse->json('data'))->pluck('display_name')->values()->all()
+        );
+        $this->assertFalse(
+            collect($filteredResponse->json('data'))->contains(
+                fn (array $item): bool => ($item['slug'] ?? null) === $personal->slug
+            )
+        );
+
+        $catalogFilterKeys = collect($filteredResponse->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertNotContains('personal', $catalogFilterKeys);
 
         $detailResponse = $this->getJson(
             "{$this->base_api_tenant}account_profiles/{$personal->slug}"
@@ -1498,6 +1507,57 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Italian Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_repairs_unsupported_taxonomy_filter_in_same_response(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Italian Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:italian'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Japanese Repair Account',
+            'document' => 'DOC-JAPANESE-REPAIR',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Japanese Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'japanese'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:japanese'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?taxonomy[0][type]=cuisine&taxonomy[0][value]=martian"
+        );
+
+        $response->assertStatus(200);
+        $this->assertEqualsCanonicalizing(
+            ['Italian Venue', 'Japanese Venue'],
+            collect($response->json('data'))->pluck('display_name')->values()->all(),
+        );
+
+        $catalogCuisineTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $catalogCuisineTerms);
+        $this->assertNotContains('martian', $catalogCuisineTerms);
     }
 
     public function test_public_account_profile_index_uses_name_search_key_prefix_only(): void
@@ -1736,6 +1796,64 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotContains('hidden_runtime_type', $catalogFilterKeys);
     }
 
+    public function test_public_account_profile_index_repairs_stale_type_filter_in_same_response(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'artist_public',
+            'label' => 'Artist Public',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'stale_hidden',
+            'label' => 'Stale Hidden',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist_public',
+            'display_name' => 'Runtime Artist',
+            'taxonomy_terms' => [],
+            'taxonomy_terms_flat' => [],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=stale_hidden&page=1&per_page=15"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.display_name', 'Runtime Artist');
+
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+
+        $this->assertContains('artist_public', $catalogFilterKeys);
+        $this->assertNotContains('stale_hidden', $catalogFilterKeys);
+    }
+
     public function test_public_account_profile_index_runtime_facets_are_self_excluding_for_selected_filters(): void
     {
         $this->createAccountUser([]);
@@ -1964,7 +2082,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['profile_type']);
     }
 
-    public function test_public_account_profile_index_returns_empty_when_top_level_profile_type_is_non_favoritable(): void
+    public function test_public_account_profile_index_returns_empty_when_repaired_public_catalog_has_no_eligible_profiles(): void
     {
         $this->createAccountUser([]);
 
@@ -2504,14 +2622,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $index = $this->getJson("{$this->base_api_tenant}account_profiles");
         $index->assertStatus(200);
         $index->assertJsonPath('data.0.slug', 'route-disabled-venue');
-        $index->assertJsonPath('data.0.can_open_public_detail', true);
-        $index->assertJsonPath('data.0.public_detail_path', '/parceiro/route-disabled-venue');
+        $index->assertJsonPath('data.0.can_open_public_detail', false);
+        $index->assertJsonPath('data.0.public_detail_path', null);
 
         $detail = $this->getJson(
             "{$this->base_api_tenant}account_profiles/route-disabled-venue"
         );
 
-        $detail->assertStatus(200);
+        $detail->assertNotFound();
     }
 
     public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_venue_occurrences(): void
@@ -6416,6 +6534,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+
+        $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
+        $this->landlord->tenant_primary->id = (string) $tenant->_id;
+        $this->landlord->tenant_primary->slug = $tenant->slug;
+        $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
     }
 
     private function createAccountUser(array $permissions): AccountUser
