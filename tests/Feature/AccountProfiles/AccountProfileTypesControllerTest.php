@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\UploadedFile;
@@ -148,6 +150,52 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
         $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
+    }
+
+    public function test_profile_type_admin_creation_allows_artist_venue_and_custom_types(): void
+    {
+        TenantProfileType::query()->delete();
+
+        foreach (['artist' => 'Artist', 'venue' => 'Venue', 'gallery' => 'Gallery'] as $type => $label) {
+            $this->postJson(
+                "{$this->base_tenant_api_admin}account_profile_types",
+                [
+                    'type' => $type,
+                    'label' => $label,
+                    'capabilities' => [
+                        'is_favoritable' => true,
+                        'is_poi_enabled' => false,
+                    ],
+                ],
+                $this->getHeaders(),
+            )->assertCreated()->assertJsonPath('data.type', $type);
+        }
+
+        $this->assertSame(
+            ['artist', 'gallery', 'venue'],
+            TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
+        );
+    }
+
+    public function test_personal_account_bootstrap_seeds_only_the_personal_profile_type_when_the_registry_is_empty(): void
+    {
+        TenantProfileType::query()->delete();
+        $user = AccountUser::query()->create([
+            'identity_state' => 'registered',
+            'name' => 'Personal Bootstrap '.fake()->uuid(),
+            'emails' => [],
+            'phones' => [],
+            'fingerprints' => [],
+            'credentials' => [],
+            'consents' => [],
+        ]);
+
+        app(AccountProfileBootstrapService::class)->ensurePersonalAccount($user);
+
+        $this->assertSame(
+            ['personal'],
+            TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
+        );
     }
 
     public function test_profile_type_create_repairs_public_environment_snapshot_synchronously(): void

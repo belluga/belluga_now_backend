@@ -102,6 +102,24 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
     }
 
+    public function test_onboarding_seeds_only_the_personal_profile_type_when_the_registry_is_empty(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        TenantProfileType::query()->delete();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Personal Onboarding '.Str::random(8),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(
+            ['personal'],
+            TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
+        );
+    }
+
     public function test_onboarding_accepts_three_character_public_display_name(): void
     {
         $this->actingAsAdmin(['account-users:create']);
