@@ -62,7 +62,7 @@ final class AccountProfilePublicCatalogSnapshotReader
             static fn (array $record): string => $record['type'],
             $records,
         ));
-        $publicDetailTypeKeys = $catalogTypeKeys;
+        $publicDetailTypeKeys = $this->publicDetailTypeKeys();
         $nestedParentTypeKeys = array_values(array_map(
             static fn (array $record): string => $record['type'],
             array_filter(
@@ -112,6 +112,25 @@ final class AccountProfilePublicCatalogSnapshotReader
             $this->publicPoiTypeKeys(),
             [],
         );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function publicDetailTypeKeys(): array
+    {
+        $keys = [];
+        foreach (TenantProfileType::query()->publiclyNavigable()->get(['type']) as $profileType) {
+            $type = trim((string) $profileType->getAttribute('type'));
+            if ($type !== '') {
+                $keys[$type] = $type;
+            }
+        }
+
+        $detailTypeKeys = array_values($keys);
+        sort($detailTypeKeys, SORT_STRING);
+
+        return $detailTypeKeys;
     }
 
     /**
