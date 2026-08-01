@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Operation\FindOneAndUpdate;
 
 class AccountProfileManagementService
@@ -213,8 +214,8 @@ class AccountProfileManagementService
             );
 
             $profile = AccountProfile::create($payload)->fresh();
-        } catch (BulkWriteException $exception) {
-            if (str_contains($exception->getMessage(), 'E11000')) {
+        } catch (BulkWriteException|CommandException $exception) {
+            if ($this->isDuplicateKeyException($exception)) {
                 throw ValidationException::withMessages([
                     'account_profile' => ['Account profile already exists.'],
                 ]);
@@ -404,8 +405,8 @@ class AccountProfileManagementService
                             );
                         }
                         $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
-                    } catch (BulkWriteException $exception) {
-                        if (str_contains($exception->getMessage(), 'E11000')) {
+                    } catch (BulkWriteException|CommandException $exception) {
+                        if ($this->isDuplicateKeyException($exception)) {
                             throw ValidationException::withMessages([
                                 'slug' => ['Account profile slug already exists.'],
                             ]);
@@ -733,6 +734,11 @@ class AccountProfileManagementService
             'type' => 'Point',
             'coordinates' => [(float) $lng, (float) $lat],
         ];
+    }
+
+    private function isDuplicateKeyException(\Throwable $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'E11000');
     }
 
     /**
