@@ -177,7 +177,10 @@ class TenantPublicShellController extends Controller
         string $targetPath,
         bool $suppressDirectHandoff = false,
     ): ?RedirectResponse {
-        if ($suppressDirectHandoff) {
+        if (
+            $suppressDirectHandoff
+            || $this->shouldSkipDirectAndroidHandoffForKnownInAppBrowser($request)
+        ) {
             return null;
         }
 
@@ -198,6 +201,27 @@ class TenantPublicShellController extends Controller
             'platform_target' => 'android',
             'fallback' => 'target',
         ]));
+    }
+
+    private function shouldSkipDirectAndroidHandoffForKnownInAppBrowser(
+        Request $request,
+    ): bool {
+        if ($this->promotionService->detectPlatformTarget($request->userAgent()) !== 'android') {
+            return false;
+        }
+
+        $userAgent = strtolower(trim((string) $request->userAgent()));
+        if ($userAgent === '') {
+            return false;
+        }
+
+        foreach (['instagram', 'fban', 'fbav', 'fb_iab', 'messenger'] as $marker) {
+            if (str_contains($userAgent, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function shouldConsumeDirectFallbackBypass(

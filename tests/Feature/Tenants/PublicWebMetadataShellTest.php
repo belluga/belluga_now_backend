@@ -193,6 +193,94 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         );
     }
 
+    public function test_instagram_android_public_root_renders_shell_without_auto_open_app_redirect(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $this->applyPublicWebMetadata([
+            'default_title' => 'Instagram-safe tenant title',
+            'default_description' => 'Instagram-safe tenant description.',
+            'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenant->app_domains = array_merge($tenant->app_domains ?? [], [
+            [
+                'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+                'domain' => 'com.guarappari.direct',
+            ],
+        ]);
+        $tenant->save();
+
+        $response = $this->withHeader(
+            'User-Agent',
+            'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.122 Mobile Safari/537.36 Instagram 340.0.0.32.109 Android'
+        )->get($tenantOrigin.'/');
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $response->assertDontSee('/open-app?', false);
+        $response->assertSee('Instagram-safe tenant title', false);
+    }
+
+    public function test_instagram_android_public_profile_route_renders_shell_without_auto_open_app_redirect(): void
+    {
+        $tenantOrigin = rtrim($this->base_tenant_url, '/');
+        $this->applyPublicWebMetadata([
+            'default_title' => 'Fallback tenant title',
+            'default_description' => 'Fallback tenant description.',
+            'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'restaurant',
+            'label' => 'Restaurante',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $account = Account::create([
+            'name' => 'Casa Marracini',
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'restaurant',
+            'display_name' => 'Casa Marracini',
+            'slug' => 'casa-marracini',
+            'visibility' => 'public',
+            'bio' => 'Cozinha italiana perto do mar.',
+            'content' => '<p>Massa fresca e carta de vinhos curada.</p>',
+            'cover_url' => 'https://tenant.example/media/casa-cover.png',
+            'avatar_url' => 'https://tenant.example/media/casa-avatar.png',
+            'is_active' => true,
+        ]);
+
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenant->app_domains = array_merge($tenant->app_domains ?? [], [
+            [
+                'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+                'domain' => 'com.guarappari.direct',
+            ],
+        ]);
+        $tenant->save();
+
+        $response = $this->withHeader(
+            'User-Agent',
+            'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.122 Mobile Safari/537.36 Instagram 340.0.0.32.109 Android'
+        )->get("{$tenantOrigin}/parceiro/{$profile->slug}");
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+        $response->assertDontSee('/open-app?', false);
+        $response->assertSee('Casa Marracini | '.$this->resolvedSiteName, false);
+    }
+
     public function test_event_public_route_injects_event_metadata_with_event_party_profile_cover_fallback(): void
     {
         $tenantOrigin = rtrim($this->base_tenant_url, '/');
