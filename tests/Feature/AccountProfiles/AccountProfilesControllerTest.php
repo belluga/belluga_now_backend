@@ -453,23 +453,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_profile_delete_persists_and_dispatches_a_tombstone_outbox_event(): void
     {
         $commandId = 'u07a-profile-delete-'.uniqid('', true);
-        $createResponse = $this->postJson(
-            "{$this->base_tenant_api_admin}account_onboardings",
-            [
-                'name' => 'Outbox Delete Venue',
-                'ownership_state' => 'tenant_owned',
-                'profile_type' => 'venue',
-                'location' => [
-                    'lat' => -20.0,
-                    'lng' => -40.0,
-                ],
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Delete Venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
             ],
-            $this->getHeaders(),
-        );
-
-        $createResponse->assertCreated();
-        $profileId = (string) $createResponse->json('data.account_profile.id');
-        $profile = AccountProfile::query()->findOrFail($profileId);
+        ]);
+        $profileId = (string) $profile->_id;
         $profile->is_active = false;
         $profile->save();
         $this->assertNotNull(
@@ -512,23 +505,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $deleteCommandId = 'u07a-profile-delete-before-restore-'.uniqid('', true);
         $restoreCommandId = 'u07a-profile-restore-'.uniqid('', true);
-        $createResponse = $this->postJson(
-            "{$this->base_tenant_api_admin}account_onboardings",
-            [
-                'name' => 'Outbox Restore Venue',
-                'ownership_state' => 'tenant_owned',
-                'profile_type' => 'venue',
-                'location' => [
-                    'lat' => -20.0,
-                    'lng' => -40.0,
-                ],
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Restore Venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
             ],
-            $this->getHeaders(),
-        );
-
-        $createResponse->assertCreated();
-        $profileId = (string) $createResponse->json('data.account_profile.id');
-        $profile = AccountProfile::query()->findOrFail($profileId);
+        ]);
+        $profileId = (string) $profile->_id;
         $profile->is_active = false;
         $profile->save();
 
@@ -566,23 +552,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $deleteCommandId = 'u07a-profile-delete-before-force-'.uniqid('', true);
         $commandId = 'u07a-profile-force-delete-'.uniqid('', true);
-        $createResponse = $this->postJson(
-            "{$this->base_tenant_api_admin}account_onboardings",
-            [
-                'name' => 'Outbox Force Delete Venue',
-                'ownership_state' => 'tenant_owned',
-                'profile_type' => 'venue',
-                'location' => [
-                    'lat' => -20.0,
-                    'lng' => -40.0,
-                ],
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Force Delete Venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
             ],
-            $this->getHeaders(),
-        );
-
-        $createResponse->assertCreated();
-        $profileId = (string) $createResponse->json('data.account_profile.id');
-        $profile = AccountProfile::query()->findOrFail($profileId);
+        ]);
+        $profileId = (string) $profile->_id;
         $profile->is_active = false;
         $profile->save();
         $this->assertNotNull(
@@ -1115,6 +1094,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'profile_type' => 'personal',
             'display_name' => 'Noop Receipt Source',
         ]);
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profiles')
+            ->updateOne(
+                ['_id' => $profile->_id],
+                ['$unset' => ['aggregate_revision' => true]],
+            );
 
         $commandId = 'u07a-profile-noop-replay-'.uniqid('', true);
         $noopHeaders = [...$this->getHeaders(), 'X-Request-Id' => $commandId];
@@ -1133,6 +1119,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->findOne(['_id' => $commandId]);
         $this->assertNotNull($receipt);
         $this->assertNull($receipt['outbox_event_id'] ?? null);
+        $this->assertSame(1, (int) ($receipt['aggregate_revision'] ?? 0));
         $this->assertSame(
             0,
             DB::connection('tenant')
@@ -1140,6 +1127,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ->selectCollection('account_profile_outbox')
                 ->countDocuments(['command_id' => $commandId]),
         );
+        $this->assertSame(1, (int) ($profile->fresh()->aggregate_revision ?? 0));
 
         $this->patchJson(
             $url,
@@ -2682,6 +2670,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'profile_type' => 'venue',
             'display_name' => 'Agenda Detail Venue',
             'slug' => 'agenda-detail-venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
             'is_active' => true,
             'visibility' => 'public',
         ]);
@@ -2694,6 +2686,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $eventCoverUrl = 'https://example.org/account-profile-agenda-event-cover.jpg';
         $venueCoverUrl = 'https://example.org/account-profile-agenda-venue-cover.jpg';
+        $profile->forceFill([
+            'cover_url' => $venueCoverUrl,
+        ])->save();
         $futureEvent->forceFill([
             'thumb' => [
                 'type' => 'image',

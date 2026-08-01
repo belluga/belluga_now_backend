@@ -208,6 +208,29 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         return $resolved;
     }
 
+    public function resolveExistingEventPartyDisplayProfilesByIds(array $profileIds): array
+    {
+        $requestedIds = $this->normalizeProfileIds($profileIds);
+        if ($requestedIds === []) {
+            return [];
+        }
+
+        $profiles = AccountProfile::query()
+            ->whereIn('_id', $requestedIds)
+            ->get();
+
+        $resolved = [];
+        foreach ($profiles as $profile) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $resolved[(string) $profile->_id] = $this->formatEventPartyProfile($profile);
+        }
+
+        return $resolved;
+    }
+
     public function resolveNestedAccountProfileSnapshotsByIds(array $profileIds): array
     {
         $requestedIds = $this->normalizeProfileIds($profileIds);

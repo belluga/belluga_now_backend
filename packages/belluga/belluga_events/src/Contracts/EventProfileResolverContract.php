@@ -74,6 +74,17 @@ interface EventProfileResolverContract
     public function resolveExistingPublicEventPartyProfilesByIds(array $profileIds): array;
 
     /**
+     * Public member-tab helper: return the current card projection for every
+     * still-existing selected related profile, keyed by profile id, without
+     * reapplying catalog/discovery admission rules. Navigation remains governed
+     * only by `can_open_public_detail` / `public_detail_path`.
+     *
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array<string, mixed>>
+     */
+    public function resolveExistingEventPartyDisplayProfilesByIds(array $profileIds): array;
+
+    /**
      * @param  array<int, string>  $profileIds
      * @return array<string, array{
      *   id: string,

@@ -7,6 +7,7 @@ namespace App\Application\AccountProfiles;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Model\BSONDocument;
 use RuntimeException;
@@ -193,7 +194,7 @@ final class AccountProfileOutboxPublisher
         string $fingerprint,
     ): void {
         $profileId = trim((string) $profile->getKey());
-        $aggregateRevision = (int) $profile->getAttribute('aggregate_revision');
+        $aggregateRevision = $this->ensurePersistedAggregateRevision($context, $profile);
         if ($profileId === '' || $aggregateRevision < 1) {
             throw new RuntimeException('Account Profile receipt requires a persisted aggregate revision.');
         }
@@ -207,6 +208,57 @@ final class AccountProfileOutboxPublisher
             new UTCDateTime((int) now()->getTimestampMs()),
             null,
         );
+    }
+
+    private function ensurePersistedAggregateRevision(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+    ): int {
+        $profileId = trim((string) $profile->getKey());
+        if ($profileId === '') {
+            return 0;
+        }
+
+        $aggregateRevision = (int) $profile->getAttribute('aggregate_revision');
+        if ($aggregateRevision >= 1) {
+            return $aggregateRevision;
+        }
+
+        try {
+            $objectId = new ObjectId($profileId);
+        } catch (\Throwable) {
+            return 0;
+        }
+
+        $options = $context->rawOptions();
+        $updated = $context->collection('account_profiles')->findOneAndUpdate(
+            [
+                '_id' => $objectId,
+                '$or' => [
+                    ['aggregate_revision' => 0],
+                    ['aggregate_revision' => null],
+                    ['aggregate_revision' => ['$exists' => false]],
+                ],
+            ],
+            ['$set' => ['aggregate_revision' => 1]],
+            [...$options, 'returnDocument' => \MongoDB\Operation\FindOneAndUpdate::RETURN_DOCUMENT_AFTER],
+        );
+
+        if ($updated !== null) {
+            $profile->setAttribute('aggregate_revision', 1);
+
+            return 1;
+        }
+
+        $current = $this->documentToArray(
+            $context->collection('account_profiles')->findOne(['_id' => $objectId], $options)
+        );
+        $aggregateRevision = (int) ($current['aggregate_revision'] ?? 0);
+        if ($aggregateRevision >= 1) {
+            $profile->setAttribute('aggregate_revision', $aggregateRevision);
+        }
+
+        return $aggregateRevision;
     }
 
     /** @return array<string, mixed> */

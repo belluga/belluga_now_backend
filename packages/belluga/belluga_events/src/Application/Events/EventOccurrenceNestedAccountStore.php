@@ -528,7 +528,7 @@ final class EventOccurrenceNestedAccountStore
             throw new NotFoundHttpException;
         }
 
-        $currentProfilesById = $this->eventProfileResolver->resolveExistingPublicEventPartyProfilesByIds(
+        $currentProfilesById = $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds(
             array_values(array_filter(array_map(
                 function (array $row): string {
                     $nestedProfile = $this->normalizeArray($row['nested_profile'] ?? []);
@@ -612,13 +612,8 @@ final class EventOccurrenceNestedAccountStore
             }
 
             $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
-            $profileType = trim((string) ($nestedProfile['profile_type'] ?? ''));
             $profileId = trim((string) ($nestedProfile['id'] ?? ''));
-            if (
-                $profileId === ''
-                || $profileType === ''
-                || ! $this->eventProfileResolver->isProfileTypeQueryable($profileType)
-            ) {
+            if ($profileId === '') {
                 continue;
             }
 
