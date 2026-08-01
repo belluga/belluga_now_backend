@@ -337,14 +337,8 @@ class AccountProfileManagementService
                     $persistedProfile = AccountProfile::query()->findOrFail($profileId);
                     $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
                     $persistedProfile->fill($attributes);
-                    if (! array_key_exists('nested_profile_groups', $attributes)) {
-                        $persistedProfile->setAttribute(
-                            'nested_profile_groups',
-                            $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persistedProfile),
-                        );
-                    }
                     if (
-                        ! $persistedProfile->isDirty()
+                        ! $this->hasSemanticMutation($persistedProfile)
                         && ! array_key_exists('nested_profile_groups', $attributes)
                         && $mutateWithinTransaction === null
                     ) {
@@ -361,6 +355,13 @@ class AccountProfileManagementService
                                 $relationAttributes,
                             );
                         }
+
+                        $this->outboxPublisher->recordReceiptOnly(
+                            $context,
+                            $persistedProfile,
+                            $commandId,
+                            $fingerprint,
+                        );
 
                         return [
                             'profile' => $persistedProfile,
@@ -712,6 +713,18 @@ class AccountProfileManagementService
         }
 
         return AccountProfile::query()->findOrFail($profileId);
+    }
+
+    private function hasSemanticMutation(AccountProfile $profile): bool
+    {
+        $dirty = $profile->getDirty();
+        unset(
+            $dirty['_id'],
+            $dirty['updated_by'],
+            $dirty['updated_by_type'],
+        );
+
+        return $dirty !== [];
     }
 
     /**

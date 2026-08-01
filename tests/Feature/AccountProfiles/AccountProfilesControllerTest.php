@@ -340,10 +340,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_gallery_update_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         Storage::fake('public');
 
         $profile = AccountProfile::create([
@@ -1041,10 +1037,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_onboarding_persists_and_dispatches_its_profile_outbox_event(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         MapPoi::query()->delete();
 
         $commandId = 'u07a-profile-create-'.uniqid('', true);
@@ -1088,10 +1080,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_onboarding_replays_the_same_request_id_without_a_second_account_or_outbox_event(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         $commandId = 'u07a-profile-onboarding-replay-'.uniqid('', true);
         $payload = [
             'name' => 'Outbox Onboarding Replay',
@@ -1118,6 +1106,56 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ->selectCollection('account_profile_outbox')
                 ->countDocuments(['command_id' => $commandId]),
         );
+    }
+
+    public function test_account_profile_noop_update_persists_a_receipt_without_outbox_and_replay_does_not_overwrite_newer_state(): void
+    {
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Noop Receipt Source',
+        ]);
+
+        $commandId = 'u07a-profile-noop-replay-'.uniqid('', true);
+        $noopHeaders = [...$this->getHeaders(), 'X-Request-Id' => $commandId];
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}";
+
+        $first = $this->patchJson(
+            $url,
+            ['display_name' => 'Noop Receipt Source'],
+            $noopHeaders,
+        );
+
+        $first->assertOk();
+        $receipt = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+        $this->assertNotNull($receipt);
+        $this->assertNull($receipt['outbox_event_id'] ?? null);
+        $this->assertSame(
+            0,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_outbox')
+                ->countDocuments(['command_id' => $commandId]),
+        );
+
+        $this->patchJson(
+            $url,
+            ['display_name' => 'Noop Receipt Newer State'],
+            [...$this->getHeaders(), 'X-Request-Id' => 'u07a-profile-newer-state-'.uniqid('', true)],
+        )->assertOk();
+
+        $replay = $this->patchJson(
+            $url,
+            ['display_name' => 'Noop Receipt Source'],
+            $noopHeaders,
+        );
+
+        $replay->assertOk();
+        $this->assertSame('Noop Receipt Newer State', (string) $profile->fresh()->display_name);
+        $replay->assertJsonPath('data.display_name', 'Noop Receipt Newer State');
     }
 
     public function test_public_account_profile_index_forbids_landlord_user_without_tenant_access(): void
@@ -4357,10 +4395,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_profile_update_media_removals_refresh_map_poi_projection_urls(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         Storage::fake('public');
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(

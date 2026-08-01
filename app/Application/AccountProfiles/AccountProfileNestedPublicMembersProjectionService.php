@@ -57,33 +57,6 @@ final class AccountProfileNestedPublicMembersProjectionService
         $this->refreshMemberEdges($context, $profile);
     }
 
-    /** @param array<string, mixed> $event */
-    public function refreshImpactedByAccountProfileOutboxEvent(
-        AccountProfileTransactionContext $context,
-        array $event,
-    ): void {
-        $profileId = trim((string) ($event['profile_id'] ?? ''));
-        if ($profileId === '') {
-            throw new RuntimeException('Nested public members projection requires a profile id.');
-        }
-
-        if ((string) ($event['operation'] ?? '') === 'tombstone') {
-            $this->deleteByProfileId($context, $profileId);
-
-            return;
-        }
-
-        $profile = $this->findProfileById($profileId);
-        if (! $profile instanceof AccountProfile) {
-            $this->deleteByProfileId($context, $profileId);
-
-            return;
-        }
-
-        $this->rebuildParentProjection($context, $profile);
-        $this->refreshMemberEdges($context, $profile);
-    }
-
     /**
      * @return array{data: array<int, array<string, mixed>>, next_cursor: ?string}
      */

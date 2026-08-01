@@ -36,21 +36,34 @@ class AccountOnboardingService
      * @param  array<string, mixed>  $payload
      * @return array{account: Account, account_profile: AccountProfile, role: AccountRoleTemplate}
      */
-    public function create(array $payload, Request $request): array
+    public function create(
+        array $payload,
+        Request $request,
+        ?string $commandId = null,
+    ): array
     {
         $this->registrySeeder->ensureDefaults();
-        $commandId = 'account-onboarding:'.Str::uuid()->toString();
-        $fingerprint = hash(
-            'sha256',
-            json_encode([
-                'payload' => $this->normalizeFingerprintValue($payload),
-            ], JSON_THROW_ON_ERROR),
-        );
+        $commandId = $this->normalizeCommandId($commandId);
+        $mediaFingerprint = $this->mediaService->mutationFingerprint($request);
+        $fingerprint = $this->fingerprint($payload, $mediaFingerprint);
+        $uploadedProfile = null;
 
         try {
             $result = $this->transactionRunner->run(function (
                 AccountProfileTransactionContext $context,
-            ) use ($payload, $request, $commandId, $fingerprint): array {
+            ) use ($payload, $request, $commandId, $fingerprint, $mediaFingerprint, &$uploadedProfile): array {
+                $existing = $this->profileService->resultForCommand(
+                    $context,
+                    $commandId,
+                    $fingerprint,
+                );
+                if ($existing !== null) {
+                    return $this->replayResult(
+                        $existing['profile'],
+                        $existing['outbox_event_id'],
+                    );
+                }
+
                 $accountResult = $this->accountService->createWithinCurrentTransaction([
                     'name' => $payload['name'],
                     'ownership_state' => $payload['ownership_state'],
@@ -97,10 +110,14 @@ class AccountOnboardingService
                     $context,
                     $commandId,
                     $fingerprint,
+                    $mediaFingerprint === []
+                        ? null
+                        : function (AccountProfile $persistedProfile) use ($request, &$uploadedProfile): void {
+                            $uploadedProfile = $persistedProfile;
+                            $this->mediaService->applyUploads($request, $persistedProfile);
+                        },
                 );
                 $profile = $profileResult['profile'];
-
-                $this->mediaService->applyUploads($request, $profile);
 
                 return [
                     'account' => $account->fresh(),
@@ -108,7 +125,8 @@ class AccountOnboardingService
                     'role' => $role->fresh(),
                     'outbox_event_id' => $profileResult['outbox_event_id'],
                 ];
-            });
+            }, fn (): ?array => $this->reconcileCommittedResult($commandId, $fingerprint));
+            $uploadedProfile = null;
 
             if (($result['outbox_event_id'] ?? null) !== null) {
                 $this->outboxDispatcher->dispatchEvent($result['outbox_event_id']);
@@ -118,8 +136,10 @@ class AccountOnboardingService
 
             return $result;
         } catch (ValidationException $exception) {
+            $this->cleanupUploadedProfileMedia($uploadedProfile);
             throw $this->normalizeValidationException($exception);
         } catch (Throwable $exception) {
+            $this->cleanupUploadedProfileMedia($uploadedProfile);
             report($exception);
             throw ValidationException::withMessages([
                 'account' => ['Account onboarding could not be completed.'],
@@ -205,5 +225,68 @@ class AccountOnboardingService
         }
 
         return $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $mediaFingerprint
+     */
+    private function fingerprint(array $payload, array $mediaFingerprint): string
+    {
+        return hash(
+            'sha256',
+            json_encode([
+                'payload' => $this->normalizeFingerprintValue($payload),
+                'media' => $this->normalizeFingerprintValue($mediaFingerprint),
+            ], JSON_THROW_ON_ERROR),
+        );
+    }
+
+    private function normalizeCommandId(?string $commandId): string
+    {
+        $normalized = trim((string) $commandId);
+
+        return $normalized === ''
+            ? 'account-onboarding:'.Str::uuid()->toString()
+            : $normalized;
+    }
+
+    /**
+     * @return array{account: Account, account_profile: AccountProfile, role: AccountRoleTemplate, outbox_event_id:?string}
+     */
+    private function replayResult(AccountProfile $profile, ?string $outboxEventId): array
+    {
+        $account = Account::query()->findOrFail((string) $profile->account_id);
+        $role = $account->roleTemplates()->orderBy('created_at')->firstOrFail();
+
+        return [
+            'account' => $account->fresh(),
+            'account_profile' => $profile->fresh(),
+            'role' => $role->fresh(),
+            'outbox_event_id' => $outboxEventId,
+        ];
+    }
+
+    /** @return array{account: Account, account_profile: AccountProfile, role: AccountRoleTemplate, outbox_event_id:?string}|null */
+    private function reconcileCommittedResult(string $commandId, string $fingerprint): ?array
+    {
+        $existing = $this->profileService->resultForCommittedCommand($commandId, $fingerprint);
+
+        return $existing === null
+            ? null
+            : $this->replayResult($existing['profile'], $existing['outbox_event_id']);
+    }
+
+    private function cleanupUploadedProfileMedia(?AccountProfile $profile): void
+    {
+        if (! $profile instanceof AccountProfile) {
+            return;
+        }
+
+        try {
+            $this->mediaService->removeAllUploads($profile);
+        } catch (Throwable $cleanupException) {
+            report($cleanupException);
+        }
     }
 }

@@ -118,15 +118,15 @@ final class AccountProfileOutboxPublisher
             'created_at' => $timestamp,
         ], $options);
 
-        $context->collection(self::RECEIPTS_COLLECTION)->insertOne([
-            '_id' => $commandId,
-            'command_id' => $commandId,
-            'payload_fingerprint' => $fingerprint,
-            'profile_id' => $profileId,
-            'aggregate_revision' => $aggregateRevision,
-            'outbox_event_id' => $eventId,
-            'created_at' => $timestamp,
-        ], $options);
+        $this->insertReceipt(
+            $context,
+            $commandId,
+            $fingerprint,
+            $profileId,
+            $aggregateRevision,
+            $timestamp,
+            $eventId,
+        );
 
         return $eventId;
     }
@@ -173,17 +173,40 @@ final class AccountProfileOutboxPublisher
             throw new RuntimeException('Account Profile tombstone tuple conflicts with an existing outbox event.');
         }
 
-        $context->collection(self::RECEIPTS_COLLECTION)->insertOne([
-            '_id' => $commandId,
-            'command_id' => $commandId,
-            'payload_fingerprint' => $fingerprint,
-            'profile_id' => $profileId,
-            'aggregate_revision' => $aggregateRevision,
-            'outbox_event_id' => $eventId,
-            'created_at' => $timestamp,
-        ], $options);
+        $this->insertReceipt(
+            $context,
+            $commandId,
+            $fingerprint,
+            $profileId,
+            $aggregateRevision,
+            $timestamp,
+            $eventId,
+        );
 
         return $eventId;
+    }
+
+    public function recordReceiptOnly(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        string $commandId,
+        string $fingerprint,
+    ): void {
+        $profileId = trim((string) $profile->getKey());
+        $aggregateRevision = (int) $profile->getAttribute('aggregate_revision');
+        if ($profileId === '' || $aggregateRevision < 1) {
+            throw new RuntimeException('Account Profile receipt requires a persisted aggregate revision.');
+        }
+
+        $this->insertReceipt(
+            $context,
+            $commandId,
+            $fingerprint,
+            $profileId,
+            $aggregateRevision,
+            new UTCDateTime((int) now()->getTimestampMs()),
+            null,
+        );
     }
 
     /** @return array<string, mixed> */
@@ -225,6 +248,26 @@ final class AccountProfileOutboxPublisher
             'created_by_type' => $profile->created_by_type,
             'profile_type' => (string) ($profile->profile_type ?? ''),
         ];
+    }
+
+    private function insertReceipt(
+        AccountProfileTransactionContext $context,
+        string $commandId,
+        string $fingerprint,
+        string $profileId,
+        int $aggregateRevision,
+        UTCDateTime $timestamp,
+        ?string $outboxEventId,
+    ): void {
+        $context->collection(self::RECEIPTS_COLLECTION)->insertOne([
+            '_id' => $commandId,
+            'command_id' => $commandId,
+            'payload_fingerprint' => $fingerprint,
+            'profile_id' => $profileId,
+            'aggregate_revision' => $aggregateRevision,
+            'outbox_event_id' => $outboxEventId,
+            'created_at' => $timestamp,
+        ], $context->rawOptions());
     }
 
     /** @return array<string, mixed>|null */
