@@ -7001,10 +7001,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertJsonMissingPath('data.occurrences.1.profile_groups');
     }
 
-    public function test_public_event_detail_keeps_blank_snapshot_media_without_live_profile_repair(): void
+    public function test_public_event_detail_member_rows_use_live_profile_media_when_nested_snapshot_is_blank(): void
     {
-        $this->artist->avatar_url = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=211";
-        $this->artist->cover_url = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=212";
+        $liveAvatarUrl = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=211";
+        $liveCoverUrl = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=212";
+        $this->artist->avatar_url = $liveAvatarUrl;
+        $this->artist->cover_url = $liveCoverUrl;
         $this->artist->save();
 
         $occurrences = $this->makeOccurrences(1);
@@ -7038,12 +7040,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->artist->_id, $rows[0]['id'] ?? null);
         $this->assertArrayHasKey('avatar_url', $rows[0]);
         $this->assertArrayHasKey('cover_url', $rows[0]);
-        $this->assertNull($rows[0]['avatar_url']);
-        $this->assertNull($rows[0]['cover_url']);
+        $this->assertSame($liveAvatarUrl, $rows[0]['avatar_url']);
+        $this->assertSame($liveCoverUrl, $rows[0]['cover_url']);
         $public->assertJsonMissingPath('data.linked_account_profiles');
     }
 
-    public function test_event_detail_and_management_readback_preserve_relative_snapshot_media_when_live_profile_is_blank(): void
+    public function test_event_detail_and_management_readback_drop_snapshot_media_when_live_profile_is_blank(): void
     {
         $relativeAvatarUrl = "/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=411";
         $relativeCoverUrl = "/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=412";
@@ -7080,24 +7082,21 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->artist->cover_url = null;
         $this->artist->save();
 
-        $expectedAvatarUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=411";
-        $expectedCoverUrl = "{$this->base_tenant_url}api/v1/media/account-profiles/{$this->artist->_id}/cover?v=412";
-
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$firstOccurrence->_id}");
         $public->assertStatus(200);
         $tabId = $this->assertPublicEventProfileGroupMetadata($public, 0, 'Artistas', 1);
         $rows = $this->publicEventRelatedProfileMemberRows((string) $public->json('data.slug'), $tabId);
-        $this->assertSame($relativeAvatarUrl, $rows[0]['avatar_url'] ?? null);
-        $this->assertSame($relativeCoverUrl, $rows[0]['cover_url'] ?? null);
+        $this->assertNull($rows[0]['avatar_url'] ?? null);
+        $this->assertNull($rows[0]['cover_url'] ?? null);
         $public->assertJsonMissingPath('data.linked_account_profiles');
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);
-        $management->assertJsonPath('data.linked_account_profiles.0.avatar_url', $expectedAvatarUrl);
-        $management->assertJsonPath('data.linked_account_profiles.0.cover_url', $expectedCoverUrl);
+        $management->assertJsonPath('data.linked_account_profiles.0.avatar_url', null);
+        $management->assertJsonPath('data.linked_account_profiles.0.cover_url', null);
     }
 
-    public function test_public_event_detail_keeps_partial_occurrence_linked_profiles_snapshot_only_when_aggregating_groups(): void
+    public function test_public_event_detail_member_rows_use_live_profile_media_when_aggregating_groups(): void
     {
         $secondArtist = $this->createAccountProfile('artist', 'DJ Aggregate Two');
         $secondArtist->slug = 'dj-aggregate-two-'.Str::lower(Str::random(6));
@@ -7174,10 +7173,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertArrayHasKey('cover_url', $rows[0]);
         $this->assertArrayHasKey('avatar_url', $rows[1]);
         $this->assertArrayHasKey('cover_url', $rows[1]);
-        $this->assertNull($rows[0]['avatar_url']);
-        $this->assertNull($rows[0]['cover_url']);
-        $this->assertNull($rows[1]['avatar_url']);
-        $this->assertNull($rows[1]['cover_url']);
+        $this->assertSame("/api/v1/media/account-profiles/{$this->artist->_id}/avatar?v=301", $rows[0]['avatar_url'] ?? null);
+        $this->assertSame("/api/v1/media/account-profiles/{$this->artist->_id}/cover?v=302", $rows[0]['cover_url'] ?? null);
+        $this->assertSame("/api/v1/media/account-profiles/{$this->band->_id}/avatar?v=307", $rows[1]['avatar_url'] ?? null);
+        $this->assertSame("/api/v1/media/account-profiles/{$this->band->_id}/cover?v=308", $rows[1]['cover_url'] ?? null);
         $this->assertSame("/api/v1/media/account-profiles/{$secondArtist->_id}/avatar?v=303", $rows[2]['avatar_url'] ?? null);
         $this->assertSame("/api/v1/media/account-profiles/{$secondArtist->_id}/cover?v=304", $rows[2]['cover_url'] ?? null);
         $this->assertSame("/api/v1/media/account-profiles/{$guestArtist->_id}/avatar?v=305", $rows[3]['avatar_url'] ?? null);

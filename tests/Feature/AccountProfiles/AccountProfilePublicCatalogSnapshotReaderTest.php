@@ -146,6 +146,43 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
         ));
     }
 
+    public function test_it_refreshes_cached_catalog_and_public_poi_policies_after_profile_type_update_without_recreating_reader(): void
+    {
+        $this->createType('venue', 'Venue', [
+            'is_queryable' => true,
+            'is_publicly_navigable' => true,
+            'is_publicly_discoverable' => true,
+            'is_favoritable' => true,
+            'is_poi_enabled' => true,
+        ]);
+
+        $reader = new AccountProfilePublicCatalogSnapshotReader(
+            new AccountProfileTypeCapabilityCatalog,
+        );
+        $profile = new \App\Models\Tenants\AccountProfile([
+            'profile_type' => 'venue',
+            'is_active' => true,
+            'visibility' => 'public',
+            'slug' => 'venue-detail',
+        ]);
+
+        $this->assertTrue($reader->catalogSnapshot()->policy()->canOpenPublicDetail($profile));
+        $this->assertTrue($reader->publicPoiEligibilityPolicy()->canOpenPublicDetail($profile));
+
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $venueType->capabilities = [
+            'is_queryable' => true,
+            'is_publicly_navigable' => false,
+            'is_publicly_discoverable' => true,
+            'is_favoritable' => true,
+            'is_poi_enabled' => true,
+        ];
+        $venueType->save();
+
+        $this->assertFalse($reader->catalogSnapshot()->policy()->canOpenPublicDetail($profile));
+        $this->assertFalse($reader->publicPoiEligibilityPolicy()->canOpenPublicDetail($profile));
+    }
+
     public function test_the_container_scopes_the_reader_to_one_request_lifecycle(): void
     {
         $first = $this->app->make(AccountProfilePublicCatalogSnapshotReader::class);

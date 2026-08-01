@@ -20,12 +20,16 @@ final class AccountProfilePublicCatalogSnapshotReader
 
     private ?AccountProfilePublicCatalogEligibilityPolicy $publicPoiEligibilityPolicy = null;
 
+    private int $cacheRevision = -1;
+
     public function __construct(
         private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
     ) {}
 
     public function catalogSnapshot(): AccountProfilePublicCatalogSnapshot
     {
+        $this->refreshIfStale();
+
         if ($this->catalogSnapshot instanceof AccountProfilePublicCatalogSnapshot) {
             return $this->catalogSnapshot;
         }
@@ -84,6 +88,8 @@ final class AccountProfilePublicCatalogSnapshotReader
      */
     public function publicPoiTypeKeys(): array
     {
+        $this->refreshIfStale();
+
         if ($this->publicPoiTypeKeys !== null) {
             return $this->publicPoiTypeKeys;
         }
@@ -103,15 +109,36 @@ final class AccountProfilePublicCatalogSnapshotReader
 
     public function publicPoiEligibilityPolicy(): AccountProfilePublicCatalogEligibilityPolicy
     {
+        $this->refreshIfStale();
+
         if ($this->publicPoiEligibilityPolicy instanceof AccountProfilePublicCatalogEligibilityPolicy) {
             return $this->publicPoiEligibilityPolicy;
         }
 
+        $publicPoiTypeKeys = $this->publicPoiTypeKeys();
+        $publicDetailPoiTypeKeys = array_values(array_intersect(
+            $publicPoiTypeKeys,
+            $this->publicDetailTypeKeys(),
+        ));
+
         return $this->publicPoiEligibilityPolicy = new AccountProfilePublicCatalogEligibilityPolicy(
-            $this->publicPoiTypeKeys(),
-            $this->publicPoiTypeKeys(),
+            $publicPoiTypeKeys,
+            $publicDetailPoiTypeKeys,
             [],
         );
+    }
+
+    private function refreshIfStale(): void
+    {
+        $currentRevision = AccountProfileTypeSetProvider::currentRevision();
+        if ($this->cacheRevision === $currentRevision) {
+            return;
+        }
+
+        $this->catalogSnapshot = null;
+        $this->publicPoiTypeKeys = null;
+        $this->publicPoiEligibilityPolicy = null;
+        $this->cacheRevision = $currentRevision;
     }
 
     /**

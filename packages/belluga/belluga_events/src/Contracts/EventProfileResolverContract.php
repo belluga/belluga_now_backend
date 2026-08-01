@@ -26,6 +26,32 @@ interface EventProfileResolverContract
     public function resolvePhysicalHostsByProfileIds(array $profileIds): array;
 
     /**
+     * Read-model helper: return current physical-host projections for the ids
+     * that still resolve as eligible hosts, keyed by profile id, without
+     * throwing for missing or ineligible rows.
+     *
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array{
+     *   venue: array<string, mixed>,
+     *   location: array<string, mixed>
+     * }>
+     */
+    public function resolveExistingPhysicalHostsByProfileIds(array $profileIds): array;
+
+    /**
+     * Public read-model helper: return only currently publicly exposed host
+     * projections, keyed by profile id, without throwing for missing or
+     * ineligible rows.
+     *
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array{
+     *   venue: array<string, mixed>,
+     *   location: array<string, mixed>
+     * }>
+     */
+    public function resolveExistingPublicPhysicalHostsByProfileIds(array $profileIds): array;
+
+    /**
      * @param  array<int, string>  $profileIds
      * @return array<int, array<string, mixed>>
      */
@@ -36,6 +62,16 @@ interface EventProfileResolverContract
      * @return array<string, array<string, mixed>>
      */
     public function resolveExistingEventPartyProfilesByIds(array $profileIds): array;
+
+    /**
+     * Public read-model helper: return only currently publicly exposed related
+     * profiles, keyed by profile id, without throwing for missing or ineligible
+     * rows.
+     *
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array<string, mixed>>
+     */
+    public function resolveExistingPublicEventPartyProfilesByIds(array $profileIds): array;
 
     /**
      * @param  array<int, string>  $profileIds

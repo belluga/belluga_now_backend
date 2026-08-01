@@ -76,7 +76,7 @@ class EventHeroImageResolverTest extends TestCase
                 'payload' => $this->eventPayload(),
                 'expected' => null,
             ],
-            'IMG-10 event party metadata excludes venue party and uses non-venue party cover' => [
+            'IMG-10 venue wins when linked account profile summary is absent' => [
                 'payload' => [
                     'event_parties' => [
                         [
@@ -98,7 +98,7 @@ class EventHeroImageResolverTest extends TestCase
                         'cover_url' => 'https://example.org/img-10-venue-cover.jpg',
                     ],
                 ],
-                'expected' => 'https://example.org/img-10-party-profile-cover.jpg',
+                'expected' => 'https://example.org/img-10-venue-cover.jpg',
             ],
         ];
 
@@ -152,11 +152,11 @@ class EventHeroImageResolverTest extends TestCase
         ]));
     }
 
-    public function test_resolves_event_party_metadata_before_venue_media_when_linked_profiles_are_absent(): void
+    public function test_resolves_venue_media_when_linked_profiles_are_absent_even_if_event_parties_exist(): void
     {
         $resolver = new EventHeroImageResolver(new AccountProfileHeroImageResolver);
 
-        $this->assertSame('https://example.org/party-cover.jpg', $resolver->resolveFromPayload([
+        $this->assertSame('https://example.org/venue-cover.jpg', $resolver->resolveFromPayload([
             'event_parties' => [[
                 'party_type' => 'venue',
                 'metadata' => [

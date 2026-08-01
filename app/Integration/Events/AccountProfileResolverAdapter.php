@@ -7,6 +7,7 @@ namespace App\Integration\Events;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\AccountProfiles\AccountProfileGalleryService;
+use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
@@ -25,6 +26,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
         private readonly AccountProfileMediaService $accountProfileMediaService,
         private readonly AccountProfileGalleryService $galleryService,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -73,6 +75,16 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         return $resolved;
     }
 
+    public function resolveExistingPhysicalHostsByProfileIds(array $profileIds): array
+    {
+        return $this->resolveExistingPhysicalHostProfiles($profileIds, publicOnly: false);
+    }
+
+    public function resolveExistingPublicPhysicalHostsByProfileIds(array $profileIds): array
+    {
+        return $this->resolveExistingPhysicalHostProfiles($profileIds, publicOnly: true);
+    }
+
     /**
      * @return array{
      *   venue: array<string, mixed>,
@@ -82,32 +94,9 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     private function formatPhysicalHostProfile(AccountProfile $profile): array
     {
         $profileType = trim((string) ($profile->profile_type ?? ''));
-        if (! $this->isProfileTypeQueryable($profileType)) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile type is not queryable.'],
-            ]);
-        }
-        if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
-            ]);
-        }
-
-        $location = $profile->location ?? null;
-        if (! is_array($location) || ! isset($location['type'], $location['coordinates'])) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile must include a location.'],
-            ]);
-        }
-        if (! is_array($location['coordinates']) || count($location['coordinates']) < 2) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile must include valid coordinates.'],
-            ]);
-        }
-
+        $location = $this->validatedPhysicalHostLocation($profile);
         $slug = $this->normalizeSlug($profile->slug ?? null);
-        $supportsPublicNavigation = $this->typeSetProvider->isPubliclyNavigable($profileType);
-        $canOpenPublicDetail = $slug !== null && $supportsPublicNavigation;
+        $canOpenPublicDetail = $this->canOpenPublicDetail($profile);
         $baseUrl = request()->getSchemeAndHttpHost();
         $avatarUrl = $this->accountProfileMediaService->normalizePublicUrl(
             $baseUrl,
@@ -132,7 +121,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                     ? '/parceiro/'.$slug
                     : null,
                 'profile_type' => (string) ($profile->profile_type ?? ''),
-                'supports_public_navigation' => $supportsPublicNavigation,
+                'supports_public_navigation' => $canOpenPublicDetail,
                 'tagline' => null,
                 'hero_image_url' => $coverUrl,
                 'logo_url' => $avatarUrl,
@@ -180,6 +169,31 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $profiles = AccountProfile::query()
             ->whereIn('_id', $requestedIds)
             ->whereIn('profile_type', $eligibleTypes)
+            ->get();
+
+        $resolved = [];
+        foreach ($profiles as $profile) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $resolved[(string) $profile->_id] = $this->formatEventPartyProfile($profile);
+        }
+
+        return $resolved;
+    }
+
+    public function resolveExistingPublicEventPartyProfilesByIds(array $profileIds): array
+    {
+        $requestedIds = $this->normalizeProfileIds($profileIds);
+        if ($requestedIds === []) {
+            return [];
+        }
+
+        $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $profiles = AccountProfile::query()
+            ->whereIn('_id', $requestedIds)
+            ->whereRaw($policy->catalogMatchExpression())
             ->get();
 
         $resolved = [];
@@ -548,10 +562,13 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             }
         }
 
+        $slug = $this->normalizeSlug($profile->slug ?? null);
+        $canOpenPublicDetail = $this->canOpenPublicDetail($profile);
+
         return [
             'id' => (string) $profile->_id,
             'display_name' => $profile->display_name,
-            'slug' => $this->normalizeSlug($profile->slug ?? null),
+            'slug' => $slug,
             'profile_type' => (string) ($profile->profile_type ?? ''),
             'avatar_url' => $profile->avatar_url ?? null,
             'cover_url' => $profile->cover_url ?? null,
@@ -560,6 +577,10 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),
+            'can_open_public_detail' => $canOpenPublicDetail,
+            'public_detail_path' => $canOpenPublicDetail && $slug !== null
+                ? '/parceiro/'.$slug
+                : null,
         ];
     }
 
@@ -659,5 +680,85 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $normalized = trim((string) $slug);
 
         return $normalized !== '' ? $normalized : null;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, array{venue: array<string, mixed>, location: array<string, mixed>}>
+     */
+    private function resolveExistingPhysicalHostProfiles(array $profileIds, bool $publicOnly): array
+    {
+        $ids = $this->normalizeProfileIds($profileIds);
+        if ($ids === []) {
+            return [];
+        }
+
+        $query = AccountProfile::query()
+            ->whereIn('_id', $ids);
+
+        if ($publicOnly) {
+            $query->whereRaw(
+                $this->publicCatalogSnapshotReader
+                    ->publicPoiEligibilityPolicy()
+                    ->catalogMatchExpression()
+            );
+        } else {
+            $query->whereIn('profile_type', $this->typeSetProvider->queryablePoiEnabledTypes());
+        }
+
+        $resolved = [];
+        foreach ($query->get() as $profile) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            try {
+                $resolved[(string) $profile->_id] = $this->formatPhysicalHostProfile($profile);
+            } catch (ValidationException) {
+                continue;
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatedPhysicalHostLocation(AccountProfile $profile): array
+    {
+        $profileType = trim((string) ($profile->profile_type ?? ''));
+        if (! $this->isProfileTypeQueryable($profileType)) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile type is not queryable.'],
+            ]);
+        }
+        if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
+            ]);
+        }
+
+        $location = $profile->location ?? null;
+        if (! is_array($location) || ! isset($location['type'], $location['coordinates'])) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile must include a location.'],
+            ]);
+        }
+        if (! is_array($location['coordinates']) || count($location['coordinates']) < 2) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile must include valid coordinates.'],
+            ]);
+        }
+
+        return $location;
+    }
+
+    private function canOpenPublicDetail(AccountProfile $profile): bool
+    {
+        return $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy()
+            ->canOpenPublicDetail($profile);
     }
 }
