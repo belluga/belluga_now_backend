@@ -763,7 +763,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.projection_count', 2);
     }
 
-    public function test_profile_type_update_allows_type_rename_and_propagates_dependents(): void
+    public function test_profile_type_update_rejects_type_rename_when_profiles_reference_current_type(): void
     {
         TenantProfileType::query()->delete();
         AccountProfile::query()->delete();
@@ -814,18 +814,17 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(200);
-        $response->assertJsonPath('data.type', 'creator');
-        $response->assertJsonPath('data.label', 'Creator');
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type']);
 
-        $this->assertTrue(TenantProfileType::query()->where('type', 'creator')->exists());
-        $this->assertFalse(TenantProfileType::query()->where('type', 'personal')->exists());
+        $this->assertTrue(TenantProfileType::query()->where('type', 'personal')->exists());
+        $this->assertFalse(TenantProfileType::query()->where('type', 'creator')->exists());
         $this->assertSame(
-            'creator',
+            'personal',
             (string) (AccountProfile::query()->findOrFail($profile->_id)->profile_type ?? '')
         );
         $this->assertSame(
-            'creator',
+            'personal',
             (string) (
                 MapPoi::query()
                     ->where('ref_type', 'account_profile')
@@ -844,6 +843,144 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     ->category ?? ''
             )
         );
+    }
+
+    public function test_profile_type_update_rejects_type_rename_when_a_soft_deleted_profile_references_current_type(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'soft-reference',
+            'label' => 'Soft Reference',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-soft-reference',
+            'profile_type' => 'soft-reference',
+            'display_name' => 'Soft Reference Profile',
+            'is_active' => true,
+        ]);
+        $profile->delete();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/soft-reference",
+            ['type' => 'soft-reference-renamed'],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type']);
+        $this->assertTrue(TenantProfileType::query()->where('type', 'soft-reference')->exists());
+        $this->assertFalse(TenantProfileType::query()->where('type', 'soft-reference-renamed')->exists());
+        $this->assertTrue(
+            AccountProfile::withTrashed()
+                ->whereKey($profile->getKey())
+                ->where('profile_type', 'soft-reference')
+                ->exists()
+        );
+    }
+
+    public function test_profile_type_delete_rejects_when_profiles_reference_current_type(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'delete-reference',
+            'label' => 'Delete Reference',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-delete-reference',
+            'profile_type' => 'delete-reference',
+            'display_name' => 'Delete Reference Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profile_types/delete-reference",
+            [],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['type']);
+        $this->assertTrue(TenantProfileType::query()->where('type', 'delete-reference')->exists());
+        $this->assertTrue(AccountProfile::query()->whereKey($profile->getKey())->exists());
+    }
+
+    public function test_profile_type_update_allows_metadata_when_profiles_reference_current_type(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'metadata-reference',
+            'label' => 'Metadata Reference',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $profile = AccountProfile::create([
+            'account_id' => 'account-metadata-reference',
+            'profile_type' => 'metadata-reference',
+            'display_name' => 'Metadata Reference Profile',
+            'is_active' => true,
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/metadata-reference",
+            ['label' => 'Updated Metadata Reference'],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.type', 'metadata-reference');
+        $response->assertJsonPath('data.label', 'Updated Metadata Reference');
+        $this->assertTrue(
+            AccountProfile::query()
+                ->whereKey($profile->getKey())
+                ->where('profile_type', 'metadata-reference')
+                ->exists()
+        );
+    }
+
+    public function test_profile_type_update_and_delete_allow_an_unreferenced_type(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'unreferenced-type',
+            'label' => 'Unreferenced Type',
+            'allowed_taxonomies' => [],
+            'capabilities' => [],
+        ]);
+
+        $renameResponse = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/unreferenced-type",
+            ['type' => 'unreferenced-type-renamed'],
+            $this->getHeaders()
+        );
+
+        $renameResponse->assertStatus(200);
+        $renameResponse->assertJsonPath('data.type', 'unreferenced-type-renamed');
+        $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-type')->exists());
+        $this->assertTrue(TenantProfileType::query()->where('type', 'unreferenced-type-renamed')->exists());
+
+        $deleteResponse = $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profile_types/unreferenced-type-renamed",
+            [],
+            $this->getHeaders()
+        );
+
+        $deleteResponse->assertStatus(200);
+        $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-type-renamed')->exists());
     }
 
     public function test_profile_type_update_disables_poi_and_hard_deletes_related_projections(): void
@@ -1231,8 +1368,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
-            'type' => 'artist',
-            'label' => 'Artist',
+            'type' => 'deletable',
+            'label' => 'Deletable',
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'is_favoritable' => true,
@@ -1241,7 +1378,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         ]);
 
         $this->deleteJson(
-            "{$this->base_tenant_api_admin}account_profile_types/artist",
+            "{$this->base_tenant_api_admin}account_profile_types/deletable",
             [],
             $this->getHeaders()
         )->assertStatus(200);
