@@ -279,7 +279,6 @@ class EventQueryService
         ]);
     }
 
-
     /**
      * @param  array<string, mixed>  $venue
      * @return array<string, mixed>|null
@@ -905,8 +904,7 @@ class EventQueryService
         Event $event,
         ?array $occurrencesByEventId = null,
         array $hydrationContext = [],
-    ): array
-    {
+    ): array {
         return $this->formatEventListPayload($event, $occurrencesByEventId, false, $hydrationContext);
     }
 
@@ -918,8 +916,7 @@ class EventQueryService
         Event $event,
         ?array $occurrencesByEventId = null,
         array $hydrationContext = [],
-    ): array
-    {
+    ): array {
         return $this->formatEventListPayload($event, $occurrencesByEventId, true, $hydrationContext);
     }
 
@@ -932,8 +929,7 @@ class EventQueryService
         ?array $occurrencesByEventId = null,
         bool $includeTaxonomyTerms = false,
         array $hydrationContext = [],
-    ): array
-    {
+    ): array {
         $eventId = isset($event->_id) ? (string) $event->_id : '';
         $preloadedOccurrences = $eventId !== '' && $occurrencesByEventId !== null
             ? ($occurrencesByEventId[$eventId] ?? [])
@@ -3032,8 +3028,7 @@ class EventQueryService
         array $linkedProfiles = [],
         string $ownerType = 'event',
         string $ownerId = '',
-    ): array
-    {
+    ): array {
         $groups = $this->normalizeProfileGroups($rawGroups, $ownerType, $ownerId);
         if ($groups !== []) {
             $allowedProfileIds = $this->managementLinkedProfileIdLookup($linkedProfiles);
@@ -4180,8 +4175,7 @@ class EventQueryService
         mixed $rawGroups,
         string $ownerType = 'event',
         string $ownerId = '',
-    ): array
-    {
+    ): array {
         return $this->profileGroupMemberStore->inflateGroupsWithMembers(
             $rawGroups,
             $ownerType,
