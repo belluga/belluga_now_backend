@@ -20,6 +20,10 @@ final class AccountProfileCandidateDiscoveryService
 
     private const MAX_BROWSE_ROWS = 2500;
 
+    public function __construct(
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
+    ) {}
+
     /**
      * @return array<int, string>
      */
@@ -38,21 +42,14 @@ final class AccountProfileCandidateDiscoveryService
         int $perPage,
         ?string $excludedProfileId = null,
     ): array {
-        $eligibleTypes = $this->eligibleTypes($scope);
-        if ($eligibleTypes === []) {
+        $query = AccountProfile::query()
+            ->where('name_search_key', new Regex('^'.preg_quote($normalizedSearch, '/')));
+
+        if (! $this->applyScopeConstraint($query, $scope)) {
             return $this->terminalEnvelope($page, $perPage);
         }
 
         $skip = ($page - 1) * $perPage;
-        $query = AccountProfile::query()
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->whereIn('profile_type', $eligibleTypes)
-            ->where('name_search_key', new Regex('^'.preg_quote($normalizedSearch, '/')));
-
-        if ($scope === self::SCOPE_CONTACT_CAPABLE) {
-            $query->where('contact_mode', AccountProfileContactChannelsService::CONTACT_MODE_OWN);
-        }
 
         if ($excludedProfileId !== null) {
             $query->where('_id', '!=', $excludedProfileId);
@@ -107,18 +104,10 @@ final class AccountProfileCandidateDiscoveryService
             return collect();
         }
 
-        $eligibleTypes = $this->eligibleTypes($scope);
-        if ($eligibleTypes === []) {
-            return collect();
-        }
-
         $query = AccountProfile::query()
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->whereIn('profile_type', $eligibleTypes)
             ->whereIn('_id', $profileIds);
-        if ($scope === self::SCOPE_CONTACT_CAPABLE) {
-            $query->where('contact_mode', AccountProfileContactChannelsService::CONTACT_MODE_OWN);
+        if (! $this->applyScopeConstraint($query, $scope)) {
+            return collect();
         }
         if ($excludedProfileId !== null) {
             $query->where('_id', '!=', $excludedProfileId);
@@ -150,13 +139,13 @@ final class AccountProfileCandidateDiscoveryService
             return [];
         }
 
-        $queryableTypes = array_flip($this->eligibleTypes(self::SCOPE_QUERYABLE));
+        $queryablePolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
         $contactCapableTypes = array_flip($this->eligibleTypes(self::SCOPE_CONTACT_CAPABLE));
 
         /** @var Collection<int, AccountProfile> $profiles */
         $profiles = AccountProfile::withTrashed()
             ->whereIn('_id', $profileIds)
-            ->get(['_id', 'display_name', 'profile_type', 'is_active', 'contact_mode', 'deleted_at']);
+            ->get(['_id', 'display_name', 'profile_type', 'is_active', 'visibility', 'contact_mode', 'deleted_at']);
         $profilesById = $profiles->keyBy(static fn (AccountProfile $profile): string => (string) $profile->getKey());
 
         $summaries = [];
@@ -175,7 +164,7 @@ final class AccountProfileCandidateDiscoveryService
             $summaries[$profileId] = [
                 'id' => $profileId,
                 'display_name' => $displayName === '' ? null : $displayName,
-                'is_queryable_candidate' => $isActive && isset($queryableTypes[$profileType]),
+                'is_queryable_candidate' => $queryablePolicy->isPubliclyExposed($profile),
                 'is_contact_capable_candidate' => $isActive
                     && isset($contactCapableTypes[$profileType])
                     && trim((string) $profile->contact_mode) === AccountProfileContactChannelsService::CONTACT_MODE_OWN,
@@ -204,6 +193,39 @@ final class AccountProfileCandidateDiscoveryService
             ->unique()
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  Collection<int, AccountProfile>|\Illuminate\Database\Eloquent\Builder<AccountProfile>  $query
+     */
+    private function applyScopeConstraint($query, string $scope): bool
+    {
+        if ($scope === self::SCOPE_QUERYABLE) {
+            $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+            if ($policy->catalogTypeKeys() === []) {
+                return false;
+            }
+
+            $policy->applyCatalogConstraint($query);
+
+            return true;
+        }
+
+        $eligibleTypes = $this->eligibleTypes($scope);
+        if ($eligibleTypes === []) {
+            return false;
+        }
+
+        $query
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->whereIn('profile_type', $eligibleTypes);
+
+        if ($scope === self::SCOPE_CONTACT_CAPABLE) {
+            $query->where('contact_mode', AccountProfileContactChannelsService::CONTACT_MODE_OWN);
+        }
+
+        return true;
     }
 
     /**

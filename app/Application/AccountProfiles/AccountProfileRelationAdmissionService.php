@@ -19,6 +19,7 @@ final class AccountProfileRelationAdmissionService
     public function __construct(
         private readonly AccountProfileLifecycleService $lifecycleService,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
+        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
     ) {}
 
     /**
@@ -92,11 +93,14 @@ final class AccountProfileRelationAdmissionService
     /** @param array{queryable:bool,contact_capable:bool} $requirement */
     private function assertEligibility(AccountProfile $profile, array $requirement): void
     {
-        $profileType = trim((string) $profile->profile_type);
-        if ($requirement['queryable'] && ! $this->typeSetProvider->isQueryable($profileType)) {
+        if (
+            $requirement['queryable']
+            && ! $this->publicCatalogSnapshotReader->catalogSnapshot()->policy()->isPubliclyExposed($profile)
+        ) {
             throw $this->validationFailure($requirement);
         }
 
+        $profileType = trim((string) $profile->profile_type);
         if (
             $requirement['contact_capable']
             && (! $this->typeSetProvider->hasContactChannelsEnabled($profileType)
@@ -153,7 +157,7 @@ final class AccountProfileRelationAdmissionService
         }
 
         return ValidationException::withMessages([
-            'nested_profile_groups' => ['Nested profile group includes unavailable or non-queryable profiles.'],
+            'nested_profile_groups' => ['Nested profile group includes unavailable or ineligible profiles.'],
         ]);
     }
 }

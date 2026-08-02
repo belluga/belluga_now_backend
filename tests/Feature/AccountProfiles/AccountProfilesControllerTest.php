@@ -3845,6 +3845,45 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_admin_account_profile_index_filters_by_nested_ownership_state(): void
+    {
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Managed Profile',
+            'is_active' => true,
+        ]);
+
+        $unmanagedAccount = Account::create([
+            'name' => 'Nested Unmanaged Account',
+            'document' => 'DOC-NESTED-UNMANAGED',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $unmanagedAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Nested Unmanaged Profile',
+            'is_active' => true,
+        ]);
+
+        $query = http_build_query([
+            'filter' => [
+                'ownership_state' => 'unmanaged',
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?{$query}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertTrue(
+            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
+        );
+    }
+
     public function test_account_profile_types_returns_registry(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}account_profile_types", $this->getHeaders());
@@ -5962,7 +6001,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $membersResponse->assertJsonPath('data.0', [
             'id' => (string) $queryable->_id,
             'display_name' => 'Queryable Linked Profile',
-            'is_queryable_candidate' => true,
+            'is_queryable_candidate' => false,
             'is_contact_capable_candidate' => false,
         ]);
         $membersResponse->assertJsonPath('data.1', [
@@ -6075,6 +6114,41 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [
                 'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $hiddenMember->_id],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+    }
+
+    public function test_account_profile_update_rejects_private_nested_profile_group_members(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Parent Private Admission',
+            'slug' => 'nested-parent-private-admission',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $privateMember = $this->createNestedProfileFixture(
+            'Private Member',
+            'private-member-admission',
+            ['visibility' => 'private']
+        );
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [(string) $privateMember->_id],
+                    ],
+                ],
             ],
             $this->getHeaders()
         );
@@ -6462,10 +6536,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'name_search_key' => 'hidden candidate',
             ]
         );
+        $private = $this->createNestedProfileFixture(
+            'Private Candidate',
+            'private-candidate',
+            [
+                'visibility' => 'private',
+                'name_search_key' => 'private candidate',
+            ]
+        );
         $queryable->forceFill(['name_search_key' => 'queryable candidate'])->save();
 
         $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable&exclude_account_profile_id=".(string) $hidden->_id
+            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable",
+            $this->getHeaders()
         );
 
         $response->assertOk();
@@ -6474,6 +6557,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [(string) $queryable->_id],
             collect($response->json('data'))->pluck('id')->all(),
         );
+        $this->assertNotSame((string) $hidden->_id, (string) ($response->json('data.0.id') ?? ''));
+        $this->assertNotSame((string) $private->_id, (string) ($response->json('data.0.id') ?? ''));
     }
 
     public function test_account_profile_index_supports_contact_eligible_filters_on_the_generic_endpoint(): void
