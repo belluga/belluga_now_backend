@@ -6221,7 +6221,9 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $event->_id;
         $beforeOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $this->assertSame([], data_get($beforeOccurrence, 'profile_groups', []));
+        $this->assertSame([
+            ['label' => 'Atrações', 'order' => 0, 'id' => 'atracoes'],
+        ], data_get($beforeOccurrence, 'profile_groups', []));
         $this->assertNull(
             collect($beforeOccurrence->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id)
         );
@@ -6243,7 +6245,9 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame('atracoes', data_get($freshEvent, 'profile_groups.0.id'));
         $this->assertArrayNotHasKey('account_profile_ids', data_get($freshEvent, 'profile_groups.0', []));
-        $this->assertSame([], data_get($freshOccurrence, 'profile_groups', []));
+        $this->assertSame([
+            ['label' => 'Atrações', 'order' => 0, 'id' => 'atracoes'],
+        ], data_get($freshOccurrence, 'profile_groups', []));
 
         $memberRows = $this->eventProfileGroupRows([
             'event_id' => $eventId,
@@ -6269,7 +6273,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('band', data_get($bandParty, 'metadata.profile_type'));
 
         $occurrenceBandParty = collect($freshOccurrence->event_parties ?? [])->firstWhere('party_ref_id', (string) $this->band->_id);
-        $this->assertNull($occurrenceBandParty);
+        $this->assertIsArray($occurrenceBandParty);
+        $this->assertSame('band', data_get($occurrenceBandParty, 'party_type'));
+        $this->assertFalse((bool) data_get($occurrenceBandParty, 'permissions.can_edit'));
+        $this->assertSame($this->band->display_name, data_get($occurrenceBandParty, 'metadata.display_name'));
+        $this->assertSame((string) $this->band->slug, data_get($occurrenceBandParty, 'metadata.slug'));
+        $this->assertSame('band', data_get($occurrenceBandParty, 'metadata.profile_type'));
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
         $public->assertStatus(200);
@@ -6388,8 +6397,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $eventId = (string) $created->json('data.event_id');
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
         $this->assertSame('convidados', data_get($secondOccurrence, 'own_profile_groups.0.id'));
-        $this->assertSame('convidados', data_get($secondOccurrence, 'profile_groups.0.id'));
-        $this->assertCount(1, data_get($secondOccurrence, 'profile_groups', []));
+        $this->assertSame('atracoes', data_get($secondOccurrence, 'profile_groups.0.id'));
+        $this->assertSame('convidados', data_get($secondOccurrence, 'profile_groups.1.id'));
+        $this->assertCount(2, data_get($secondOccurrence, 'profile_groups', []));
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);
