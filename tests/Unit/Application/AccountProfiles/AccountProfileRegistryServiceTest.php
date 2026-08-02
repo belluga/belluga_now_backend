@@ -69,7 +69,7 @@ class AccountProfileRegistryServiceTest extends TestCase
         $this->assertTrue((bool) data_get($venue, 'capabilities.is_reference_location_enabled'));
     }
 
-    public function test_ensure_defaults_preserves_existing_artist_and_venue_rows(): void
+    public function test_ensure_defaults_repairs_gallery_capability_for_canonical_public_types(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -104,14 +104,14 @@ class AccountProfileRegistryServiceTest extends TestCase
         $this->app->make(AccountProfileRegistrySeeder::class)->ensureDefaults();
 
         $this->assertFalse($this->service->hasGallery('personal'));
-        $this->assertFalse($this->service->hasGallery('artist'));
-        $this->assertFalse($this->service->hasGallery('venue'));
+        $this->assertTrue($this->service->hasGallery('artist'));
+        $this->assertTrue($this->service->hasGallery('venue'));
 
         $artist = TenantProfileType::query()->where('type', 'artist')->firstOrFail();
         $venue = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
 
-        $this->assertFalse((bool) data_get($artist->capabilities, 'has_gallery', false));
-        $this->assertFalse((bool) data_get($venue->capabilities, 'has_gallery', false));
+        $this->assertTrue((bool) data_get($artist->capabilities, 'has_gallery', false));
+        $this->assertTrue((bool) data_get($venue->capabilities, 'has_gallery', false));
     }
 
     public function test_type_definition_is_memoized_across_capability_helpers_within_one_request(): void

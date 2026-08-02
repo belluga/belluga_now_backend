@@ -37,6 +37,42 @@ class AccountProfileRegistrySeeder
                     'has_gallery' => false,
                 ],
             ],
+            [
+                'type' => 'artist',
+                'label' => 'Artist',
+                'allowed_taxonomies' => [],
+                'poi_visual' => null,
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_inviteable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                    'has_content' => false,
+                    'has_gallery' => true,
+                ],
+            ],
+            [
+                'type' => 'venue',
+                'label' => 'Venue',
+                'allowed_taxonomies' => [],
+                'poi_visual' => [
+                    'mode' => 'icon',
+                    'icon' => 'place',
+                    'color' => '#E53935',
+                ],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_inviteable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => true,
+                    'has_content' => false,
+                    'has_gallery' => true,
+                ],
+            ],
         ];
     }
 
