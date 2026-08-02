@@ -5625,7 +5625,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame('participantes', data_get($storedEvent, 'profile_groups.0.id'));
         $this->assertArrayNotHasKey('account_profile_ids', data_get($storedEvent, 'profile_groups.0', []));
         $this->assertSame([], data_get($storedOccurrence, 'own_profile_groups', []));
-        $this->assertSame([], data_get($storedOccurrence, 'profile_groups', []));
+        $this->assertSame([
+            ['label' => 'Participantes', 'order' => 0, 'id' => 'participantes'],
+        ], data_get($storedOccurrence, 'profile_groups', []));
 
         $memberRows = $this->eventProfileGroupRows([
             'event_id' => $eventId,
