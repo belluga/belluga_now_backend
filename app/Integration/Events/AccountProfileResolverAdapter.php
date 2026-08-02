@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
-use App\Application\AccountProfiles\AccountProfileMediaService;
-use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\AccountProfiles\AccountProfileGalleryService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
+use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
@@ -27,6 +28,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         private readonly AccountProfileMediaService $accountProfileMediaService,
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
+        private readonly AccountProfileQueryService $accountProfileQueryService,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -190,14 +192,8 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [];
         }
 
-        $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', $requestedIds)
-            ->whereRaw($policy->catalogMatchExpression())
-            ->get();
-
         $resolved = [];
-        foreach ($profiles as $profile) {
+        foreach ($this->accountProfileQueryService->findExistingPublicCatalogProfilesByIds($requestedIds) as $profile) {
             if (! $profile instanceof AccountProfile) {
                 continue;
             }
@@ -416,8 +412,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         ?string $likePattern,
         ?string $accountId,
         ?string $profileType = null,
-    ): Builder
-    {
+    ): Builder {
         $allowedTypes = $this->resolveQueryableProfileTypes();
         if ($allowedTypes === []) {
             return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);

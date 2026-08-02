@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\Profiles;
 
-use App\Application\Auth\PasswordResetTokenService;
 use App\Application\Auth\PasswordResetFlowService;
+use App\Application\Auth\PasswordResetTokenService;
 use App\Application\Profiles\LandlordProfileService;
-use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\PersonalAccessToken;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -113,10 +113,8 @@ class LandlordProfileServiceTest extends TestCase
             broker: PasswordResetTokenService::LANDLORD_USERS_BROKER,
         );
 
-        $service = new class(
-            $this->app->make(\App\Application\LandlordUsers\LandlordUserAccessService::class),
-            $this->app->make(PasswordResetFlowService::class),
-        ) extends LandlordProfileService {
+        $service = new class($this->app->make(\App\Application\LandlordUsers\LandlordUserAccessService::class), $this->app->make(PasswordResetFlowService::class)) extends LandlordProfileService
+        {
             protected function applyResetPassword(LandlordUser $user, string $password): void
             {
                 throw new RuntimeException('Simulated landlord password persistence failure.');
@@ -151,10 +149,8 @@ class LandlordProfileServiceTest extends TestCase
             broker: PasswordResetTokenService::LANDLORD_USERS_BROKER,
         );
 
-        $service = new class(
-            $this->app->make(\App\Application\LandlordUsers\LandlordUserAccessService::class),
-            $this->app->make(PasswordResetFlowService::class),
-        ) extends LandlordProfileService {
+        $service = new class($this->app->make(\App\Application\LandlordUsers\LandlordUserAccessService::class), $this->app->make(PasswordResetFlowService::class)) extends LandlordProfileService
+        {
             protected function applyResetPassword(LandlordUser $user, string $password): void
             {
                 throw new RuntimeException('Simulated landlord password persistence failure.');

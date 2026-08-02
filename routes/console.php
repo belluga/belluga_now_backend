@@ -1,10 +1,9 @@
 <?php
 
+use App\Application\AccountProfiles\AccountProfileNameSearchKeyRepairService;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
-use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
-use App\Application\AccountProfiles\AccountProfileNameSearchKeyRepairService;
 use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -18,9 +17,8 @@ use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
-use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
+use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;

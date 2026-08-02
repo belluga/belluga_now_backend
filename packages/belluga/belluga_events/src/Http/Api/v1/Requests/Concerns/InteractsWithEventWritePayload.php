@@ -56,7 +56,6 @@ trait InteractsWithEventWritePayload
     }
 
     /**
-     * @param  mixed  $occurrences
      * @return array<int|string, mixed>|null
      */
     private function decodeOccurrenceProfileGroupFields(mixed $occurrences): ?array

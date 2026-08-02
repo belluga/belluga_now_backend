@@ -134,6 +134,7 @@ final class DiscoveryFilterMapUiBackfillService
         foreach ($this->normalizeStringList($raw) as $token) {
             if (! str_contains($token, ':')) {
                 $mapped['legacy'][] = $token;
+
                 continue;
             }
 

@@ -850,6 +850,38 @@ class AccountProfileQueryService extends AbstractQueryService
         return $profile;
     }
 
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, AccountProfile>
+     */
+    public function findExistingPublicCatalogProfilesByIds(array $profileIds): array
+    {
+        $normalizedIds = $this->normalizeProfileIds($profileIds);
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy();
+
+        $resolved = [];
+        foreach (
+            AccountProfile::query()
+                ->whereIn('_id', $normalizedIds)
+                ->whereRaw($publicCatalogPolicy->catalogMatchExpression())
+                ->get() as $profile
+        ) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $resolved[(string) $profile->getKey()] = $profile;
+        }
+
+        return $resolved;
+    }
+
     public function isPubliclyExposed(AccountProfile $profile): bool
     {
         return $this->publicCatalogSnapshotReader
@@ -1069,6 +1101,18 @@ class AccountProfileQueryService extends AbstractQueryService
             'name_search_key',
             new Regex('^'.preg_quote($search, '/'), 'i'),
         );
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string>
+     */
+    private function normalizeProfileIds(array $profileIds): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds,
+        ), static fn (string $profileId): bool => $profileId !== '')));
     }
 
     /**

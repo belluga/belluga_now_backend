@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Support\Validation\InputConstraints;
+
 class ResetPasswordRequest extends ResetPasswordRequestContract
 {
     /**

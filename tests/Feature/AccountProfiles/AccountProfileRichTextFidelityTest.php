@@ -14,8 +14,8 @@ use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
 use App\Support\RichText\SafeRichTextHtmlSanitizer;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -239,7 +239,7 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
                 'display_name' => 'Raw Oversized Store '.Str::random(6),
                 'bio' => $raw,
             ],
-            (new AccountProfileStoreRequest())->rules()
+            (new AccountProfileStoreRequest)->rules()
         );
 
         $this->assertTrue($storeValidator->fails());

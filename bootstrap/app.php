@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -7,7 +8,6 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;

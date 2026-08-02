@@ -133,6 +133,7 @@ final class EventPayloadFanoutGuard
 
         return $errors;
     }
+
     /**
      * @return array<int, mixed>
      */

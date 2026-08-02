@@ -22,8 +22,11 @@ use Tests\TestCaseTenant;
 abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
 {
     private Tenant $tenantModel;
+
     private static int $registrationRequestCounter = 0;
+
     private static int $anonymousIdentityRequestCounter = 0;
+
     private static int $anonymousPushRegisterRequestCounter = 0;
 
     protected function setUp(): void

@@ -13,9 +13,13 @@ use App\Models\Tenants\TenantProfileType;
 class ProximityPreferenceService
 {
     private const REFERENCE_STATUS_ACTIVE = 'active';
+
     private const REFERENCE_STATUS_DISABLED = 'disabled';
+
     private const REFERENCE_REASON_ELIGIBLE = 'eligible';
+
     private const REFERENCE_REASON_MANUAL_COORDINATE = 'manual_coordinate';
+
     private const REFERENCE_REASON_SOURCE_CAPABILITY_DISABLED = 'source_capability_disabled';
 
     public function __construct(
@@ -152,7 +156,6 @@ class ProximityPreferenceService
     }
 
     /**
-     * @param  mixed  $fixedReference
      * @return array{
      *     source_kind:string,
      *     coordinate:array{lat:float,lng:float},

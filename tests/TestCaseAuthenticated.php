@@ -22,9 +22,7 @@ abstract class TestCaseAuthenticated extends TestCase
         $this->ensureSystemInitialized();
     }
 
-    protected function prepareAuthenticatedHarnessState(): void
-    {
-    }
+    protected function prepareAuthenticatedHarnessState(): void {}
 
     protected function ensureCanonicalTenantExists(?TenantLabels $labels = null): Tenant
     {

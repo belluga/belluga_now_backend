@@ -123,7 +123,7 @@ class PushUserGatewayAdapter implements PushUserGatewayContract
             ->first();
 
         if (! $device instanceof PushDevice) {
-            $device = new PushDevice();
+            $device = new PushDevice;
             $device->account_user_id = $userId;
             $device->device_id = $deviceId;
         }

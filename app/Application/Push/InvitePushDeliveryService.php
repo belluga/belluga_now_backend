@@ -8,11 +8,11 @@ use Belluga\Invites\Application\Preview\InvitePreviewPayloadFactory;
 use Belluga\Invites\Contracts\InviteIdentityGatewayContract;
 use Belluga\Invites\Contracts\InvitePushDeliveryContract;
 use Belluga\Invites\Models\Tenants\InviteEdge;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Belluga\PushHandler\Services\PushCredentialService;
 use Belluga\PushHandler\Services\PushMessageService;
 use Belluga\PushHandler\Services\PushSettingsKernelBridge;
-use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Contracts\Auth\Authenticatable;
 
 class InvitePushDeliveryService implements InvitePushDeliveryContract

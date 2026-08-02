@@ -11,7 +11,6 @@ use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
-use Throwable;
 
 class LandlordProfileService
 {

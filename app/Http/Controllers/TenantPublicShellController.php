@@ -128,8 +128,7 @@ class TenantPublicShellController extends Controller
     private function renderShell(
         array $metadata,
         bool $forgetDirectFallbackBypass = false,
-    ): Response
-    {
+    ): Response {
         $response = response(
             $this->shellRenderer->render($metadata),
             200,

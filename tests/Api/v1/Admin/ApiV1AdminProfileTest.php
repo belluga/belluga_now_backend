@@ -4,8 +4,8 @@ namespace Tests\Api\v1\Admin;
 
 use App\Application\Auth\PasswordResetTokenService;
 use App\Events\Auth\PasswordResetTokenIssued;
-use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\PersonalAccessToken;
 use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;

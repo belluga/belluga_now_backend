@@ -40,8 +40,7 @@ class AccountOnboardingService
         array $payload,
         Request $request,
         ?string $commandId = null,
-    ): array
-    {
+    ): array {
         $this->registrySeeder->ensureDefaults();
         $commandId = $this->normalizeCommandId($commandId);
         $mediaFingerprint = $this->mediaService->mutationFingerprint($request);

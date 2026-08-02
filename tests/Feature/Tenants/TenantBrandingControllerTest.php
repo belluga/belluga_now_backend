@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Tenants;
 
 use App\Application\Environment\TenantEnvironmentSnapshotService;
-use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
