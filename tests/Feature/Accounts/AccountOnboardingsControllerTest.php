@@ -259,6 +259,7 @@ class AccountOnboardingsControllerTest extends TestCase
             ->update([
                 'capabilities' => [
                     'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'has_nested_profile_groups' => true,
@@ -361,6 +362,16 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $mediaMock = Mockery::mock(AccountProfileMediaService::class);
+        $mediaMock->shouldReceive('mutationFingerprint')
+            ->once()
+            ->andReturn([
+                'avatar' => [
+                    'action' => 'upload',
+                    'sha256' => str_repeat('a', 64),
+                    'size' => 123,
+                    'mime' => 'image/png',
+                ],
+            ]);
         $mediaMock->shouldReceive('applyUploads')
             ->once()
             ->andThrow(new \RuntimeException('Simulated media write failure'));
@@ -386,6 +397,9 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $profileMock = Mockery::mock(AccountProfileManagementService::class);
+        $profileMock->shouldReceive('resultForCommand')
+            ->once()
+            ->andReturnNull();
         $profileMock->shouldReceive('createWithinTransactionContext')
             ->once()
             ->andThrow(new \RuntimeException('Simulated profile write failure'));
