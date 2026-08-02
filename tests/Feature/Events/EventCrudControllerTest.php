@@ -5578,8 +5578,18 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertArrayNotHasKey('account_profile_ids', data_get($event, 'profile_groups.0', []));
         $this->assertSame((string) $this->artist->_id, data_get($event, 'event_parties.0.party_ref_id'));
         $this->assertSame([], data_get($occurrence, 'own_profile_groups', []));
-        $this->assertSame([], data_get($occurrence, 'profile_groups', []));
-        $this->assertSame([], data_get($occurrence, 'event_parties', []));
+        $this->assertSame([
+            ['label' => 'Atrações', 'order' => 0, 'id' => 'atracoes'],
+            ['label' => 'Expositores', 'order' => 1, 'id' => 'expositores'],
+        ], data_get($occurrence, 'profile_groups', []));
+        $this->assertEqualsCanonicalizing(
+            [(string) $this->artist->_id, (string) $this->band->_id],
+            collect(data_get($occurrence, 'event_parties', []))
+                ->pluck('party_ref_id')
+                ->filter()
+                ->values()
+                ->all()
+        );
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);

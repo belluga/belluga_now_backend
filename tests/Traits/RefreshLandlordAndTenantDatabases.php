@@ -56,16 +56,9 @@ trait RefreshLandlordAndTenantDatabases
 
         $this->resetRuntimeState();
 
-        $tenantDatabaseNames = Tenant::query()
-            ->withTrashed()
-            ->pluck('database')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
         $landlordDatabase = DB::connection('landlord')->getDatabase();
         $tenantDatabase = DB::connection('tenant')->getDatabase();
+        $tenantDatabaseNames = $this->tenantDatabaseNamesForRefresh();
         $landlordDsn = (string) env('DB_URI_LANDLORD', '');
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
@@ -182,6 +175,33 @@ trait RefreshLandlordAndTenantDatabases
 
             $database->dropCollection($collectionName);
         }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function tenantDatabaseNamesForRefresh(): array
+    {
+        $tenantClient = DB::connection('tenant')->getMongoClient();
+        $tenantPrefix = Tenant::tenantDatabasePrefix();
+
+        $names = Tenant::query()
+            ->withTrashed()
+            ->pluck('database')
+            ->filter()
+            ->map(static fn ($name): string => (string) $name)
+            ->values()
+            ->all();
+
+        foreach ($tenantClient->listDatabases() as $databaseInfo) {
+            $databaseName = (string) $databaseInfo->getName();
+
+            if (str_starts_with($databaseName, $tenantPrefix)) {
+                $names[] = $databaseName;
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 
     protected function tenantMigrationPathArgs(): string
