@@ -223,7 +223,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame('', (string) ($upcomingItem['occurrence_id'] ?? ''));
     }
 
-    public function test_agenda_single_occurrence_stale_thumb_returns_parent_event_cover_as_canonical_image(): void
+    public function test_agenda_single_occurrence_uses_parent_event_cover_without_persisted_occurrence_thumb(): void
     {
         $eventCoverUrl = 'https://example.org/single-event-cover.jpg';
         $venueCoverUrl = 'https://example.org/single-venue-cover.jpg';
@@ -237,7 +237,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $occurrence = EventOccurrence::query()
             ->where('event_id', (string) $event->_id)
             ->firstOrFail();
-        $occurrence->forceFill(['thumb' => null])->save();
+        $this->assertNull(data_get($occurrence, 'thumb'));
 
         $response = $this->getJson(
             "{$this->base_api_tenant}agenda?occurrence_ids[]={$occurrence->_id}&page=1&page_size=10"
@@ -252,7 +252,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_multi_occurrence_stale_thumb_returns_parent_event_cover_as_canonical_image(): void
+    public function test_agenda_multi_occurrence_uses_parent_event_cover_without_persisted_occurrence_thumb(): void
     {
         $now = Carbon::now();
         $eventCoverUrl = 'https://example.org/multi-event-cover.jpg';
@@ -282,7 +282,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->get()
             ->last();
         $this->assertNotNull($selectedOccurrence);
-        $selectedOccurrence->forceFill(['thumb' => null])->save();
+        $this->assertNull(data_get($selectedOccurrence, 'thumb'));
 
         $response = $this->getJson(
             "{$this->base_api_tenant}agenda?occurrence_ids[]={$selectedOccurrence->_id}&page=1&page_size=10"

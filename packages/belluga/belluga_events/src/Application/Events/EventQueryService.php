@@ -3740,7 +3740,7 @@ class EventQueryService
         }
 
         return $publicOnly
-            ? $this->eventProfileResolver->resolveExistingPublicEventPartyProfilesByIds($ids)
+            ? $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds($ids)
             : $this->eventProfileResolver->resolveExistingEventPartyProfilesByIds($ids);
     }
 

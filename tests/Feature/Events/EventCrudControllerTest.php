@@ -359,7 +359,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotSame($detail->json('data.venue.cover_url'), $thumbUrl);
     }
 
-    public function test_public_event_detail_occurrence_uses_parent_event_cover_when_occurrence_thumb_is_stale(): void
+    public function test_public_event_detail_occurrence_uses_parent_event_cover_without_persisted_occurrence_thumb(): void
     {
         Storage::fake('public');
 
@@ -372,7 +372,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
         $eventId = (string) $created->json('data.event_id');
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $occurrence->forceFill(['thumb' => null])->save();
+        $this->assertNull(data_get($occurrence, 'thumb'));
 
         $detail = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$occurrence->_id}");
 
@@ -400,6 +400,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $thumbUrl = (string) $response->json('data.thumb.data.url');
         $this->assertNotSame('', $thumbUrl);
         $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertNull(data_get($freshOccurrence, 'thumb'));
 
         $coverPaths = collect(Storage::disk('public')->allFiles())
             ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
@@ -432,7 +434,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertTrue($coverPaths->isEmpty());
     }
 
-    public function test_event_update_remove_cover_clears_occurrence_detail_thumb(): void
+    public function test_event_update_remove_cover_keeps_occurrence_rows_without_thumb_and_detail_thumb_null(): void
     {
         Storage::fake('public');
 
@@ -445,7 +447,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
         $eventId = (string) $created->json('data.event_id');
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $occurrence->forceFill(['thumb' => $created->json('data.thumb')])->save();
+        $this->assertNull(data_get($occurrence, 'thumb'));
 
         $response = $this->patchJson(
             "{$this->accountEventsBase}/{$eventId}",
