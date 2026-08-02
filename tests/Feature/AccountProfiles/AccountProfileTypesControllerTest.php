@@ -177,7 +177,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_personal_account_bootstrap_seeds_only_the_personal_profile_type_when_the_registry_is_empty(): void
+    public function test_personal_account_bootstrap_seeds_the_canonical_bootstrap_profile_types_when_the_registry_is_empty(): void
     {
         TenantProfileType::query()->delete();
         $user = AccountUser::query()->create([
@@ -193,7 +193,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         app(AccountProfileBootstrapService::class)->ensurePersonalAccount($user);
 
         $this->assertSame(
-            ['personal'],
+            ['artist', 'personal', 'venue'],
             TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
         );
     }

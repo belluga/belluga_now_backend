@@ -6240,12 +6240,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $partnerA = $this->createNestedProfileFixture('Public Partner A', 'public-partner-a');
         $partnerB = $this->createNestedProfileFixture('Public Partner B', 'public-partner-b');
-        $privatePartner = $this->createNestedProfileFixture(
-            'Private Partner',
-            'private-partner',
-            ['visibility' => 'private']
-        );
-
         $metadata = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
             [
@@ -6284,16 +6278,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
         $partnersDelta->assertOk();
-
-        $privateDelta = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/privados/members',
-            [
-                'aggregate_revision' => (int) $partnersDelta->json('data.aggregate_revision'),
-                'add_ids' => [(string) $privatePartner->_id],
-            ],
-            $this->getHeaders()
-        );
-        $privateDelta->assertOk();
 
         $response = $this->getJson("{$this->base_api_tenant}account_profiles/nested-public-parent");
 

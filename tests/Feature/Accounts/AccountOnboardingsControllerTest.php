@@ -102,7 +102,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
     }
 
-    public function test_onboarding_seeds_only_the_personal_profile_type_when_the_registry_is_empty(): void
+    public function test_onboarding_seeds_the_canonical_bootstrap_profile_types_when_the_registry_is_empty(): void
     {
         $this->actingAsAdmin(['account-users:create']);
         TenantProfileType::query()->delete();
@@ -115,7 +115,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertCreated();
         $this->assertSame(
-            ['personal'],
+            ['artist', 'personal', 'venue'],
             TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
         );
     }
