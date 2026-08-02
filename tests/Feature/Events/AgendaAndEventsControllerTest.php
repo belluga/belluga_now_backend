@@ -1622,7 +1622,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             "{$this->base_api_tenant}agenda?taxonomy[0][type]=legacy_tag&taxonomy[0][value]=legacy-music&page=1&page_size=10"
         );
         $filtered->assertStatus(200);
-        $filtered->assertJsonCount(0, 'items');
+        $filtered->assertJsonCount(1, 'items');
+        $filtered->assertJsonPath('items.0.title', 'Legacy Facet Event');
     }
 
     public function test_agenda_runtime_facets_do_not_include_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
@@ -1652,7 +1653,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             "{$this->base_api_tenant}agenda?taxonomy[0][type]=legacy_tag&taxonomy[0][value]=legacy-parent-music&page=1&page_size=10"
         );
         $filtered->assertStatus(200);
-        $filtered->assertJsonCount(0, 'items');
+        $filtered->assertJsonCount(1, 'items');
+        $filtered->assertJsonPath('items.0.title', 'Parent Legacy Facet Event');
     }
 
     public function test_agenda_search_does_not_match_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
@@ -1753,7 +1755,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.artists.0.id', (string) $profile->_id);
         $response->assertJsonPath('data.artists.0.profile_type', 'band');
         $response->assertJsonPath('data.artists.0.slug', (string) $profile->slug);
-        $response->assertJsonPath('data.artists.0.taxonomy_terms', []);
+        $response->assertJsonPath('data.artists.0.taxonomy_terms.0.type', 'event_style');
+        $response->assertJsonPath('data.artists.0.taxonomy_terms.0.value', 'showcase');
 
         $groupId = (string) $response->json('data.profile_groups.0.id');
         $this->assertNotSame('', $groupId);
