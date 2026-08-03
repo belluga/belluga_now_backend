@@ -65,12 +65,20 @@ class EventOccurrenceSyncService
             );
             $ownTaxonomyTerms = $this->ensureTaxonomySnapshots($occurrence['taxonomy_terms'] ?? []);
             $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
+            $eventProfileGroups = $this->normalizeProfileGroups($event->profile_groups ?? []);
             $ownProfileGroups = $this->normalizeProfileGroups($occurrence['profile_groups'] ?? []);
+            $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
             $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
-            $effectiveProfileGroups = $ownProfileGroups;
-            $effectiveEventParties = $ownEventParties;
-            $linkedAccountProfiles = $this->resolveLinkedAccountProfilesFromGroups($effectiveProfileGroups);
-            $ownLinkedAccountProfiles = $this->resolveLinkedAccountProfilesFromGroups($ownProfileGroups);
+            $effectiveProfileGroups = $this->mergeProfileGroups($eventProfileGroups, $ownProfileGroups);
+            $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
+            $linkedAccountProfiles = $this->resolveLinkedAccountProfiles(
+                $effectiveProfileGroups,
+                $effectiveEventParties,
+            );
+            $ownLinkedAccountProfiles = $this->resolveLinkedAccountProfiles(
+                $ownProfileGroups,
+                $ownEventParties,
+            );
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
             $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
             $document = $resolvedDocuments[$index] ?? null;
@@ -82,7 +90,6 @@ class EventOccurrenceSyncService
                 'title' => (string) ($event->title ?? ''),
                 'content' => (string) ($event->content ?? ''),
                 'type' => $this->normalizeArray($event->type ?? []),
-                'thumb' => $this->normalizeArray($event->thumb ?? null),
                 'location' => $effectiveLocation['location'],
                 'place_ref' => $effectiveLocation['place_ref'],
                 'venue' => $effectiveLocation['venue'],
@@ -464,22 +471,6 @@ class EventOccurrenceSyncService
         ]);
     }
 
-    public function mirrorThumbFromEvent(Event $event, ?Carbon $now = null): int
-    {
-        $eventId = (string) $event->_id;
-        if (trim($eventId) === '') {
-            return 0;
-        }
-
-        $now ??= Carbon::now();
-
-        return EventOccurrence::query()->where('event_id', $eventId)->update([
-            'thumb' => $this->normalizeArray($event->thumb ?? null),
-            'updated_from_event_at' => $now,
-            'updated_at' => $now,
-        ]);
-    }
-
     public function softDeleteByEventId(string $eventId, mixed $deletedAt = null): void
     {
         $now = $this->toCarbon($deletedAt) ?? Carbon::now();
@@ -678,7 +669,7 @@ class EventOccurrenceSyncService
      * @param  array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>  $profileGroups
      * @return array<int, array<string, mixed>>
      */
-    private function resolveLinkedAccountProfilesFromGroups(array $profileGroups): array
+    private function resolveLinkedAccountProfiles(array $profileGroups, array $eventParties): array
     {
         $orderedProfileIds = [];
         foreach ($profileGroups as $group) {
@@ -688,6 +679,21 @@ class EventOccurrenceSyncService
                     $orderedProfileIds[] = $profileId;
                 }
             }
+        }
+
+        foreach ($eventParties as $party) {
+            $partyType = trim((string) ($party['party_type'] ?? ''));
+            $profileId = trim((string) ($party['party_ref_id'] ?? ''));
+            if (
+                $partyType === ''
+                || $partyType === 'venue'
+                || $profileId === ''
+                || in_array($profileId, $orderedProfileIds, true)
+            ) {
+                continue;
+            }
+
+            $orderedProfileIds[] = $profileId;
         }
 
         if ($orderedProfileIds === []) {
@@ -732,6 +738,37 @@ class EventOccurrenceSyncService
         }
 
         return $profiles;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventParties
+     * @param  array<int, array<string, mixed>>  $ownEventParties
+     * @return array<int, array<string, mixed>>
+     */
+    private function mergeEventParties(array $eventParties, array $ownEventParties): array
+    {
+        $merged = [];
+        $seen = [];
+
+        foreach ([$eventParties, $ownEventParties] as $rows) {
+            foreach ($rows as $row) {
+                $partyType = trim((string) ($row['party_type'] ?? ''));
+                $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
+                if ($partyType === '' || $partyRefId === '') {
+                    continue;
+                }
+
+                $key = "{$partyType}:{$partyRefId}";
+                if (isset($seen[$key])) {
+                    continue;
+                }
+
+                $merged[] = $row;
+                $seen[$key] = true;
+            }
+        }
+
+        return $merged;
     }
 
     /**

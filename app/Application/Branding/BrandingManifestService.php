@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Application\Branding;
 
 use App\Application\Media\CanonicalImageMediaService;
+use App\Application\Tenants\TenantDomainResolverService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
-use App\Application\Tenants\TenantDomainResolverService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 

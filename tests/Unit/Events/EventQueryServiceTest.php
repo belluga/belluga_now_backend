@@ -11,10 +11,11 @@ use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
+use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
-use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
 use Carbon\Carbon;
@@ -78,6 +79,7 @@ class EventQueryServiceTest extends TestCase
                 Mockery::mock(EventProfileResolverContract::class),
                 $legacyProfileGroupMemberStore,
             ),
+            Mockery::mock(EventDiscoveryFilterCatalogContract::class),
         );
     }
 }

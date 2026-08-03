@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\Profiles;
 
-use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\Auth\PhoneIdentityCoordinationStore;
 use App\Application\Push\PushTopicMembershipService;
 use App\Models\Landlord\Tenant;

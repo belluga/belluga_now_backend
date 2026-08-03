@@ -10,6 +10,7 @@ use MongoDB\Collection;
 return new class extends Migration
 {
     private const string INDEX_NAME = 'idx_invite_edges_sent_status_inviter_occurrence';
+
     private const array REBUILT_INDEX_KEYS = [
         'issued_by_user_id' => 1,
         'event_id' => 1,
@@ -17,6 +18,7 @@ return new class extends Migration
         'created_at' => -1,
         '_id' => -1,
     ];
+
     private const array PREVIOUS_INDEX_KEYS = [
         'issued_by_user_id' => 1,
         'event_id' => 1,

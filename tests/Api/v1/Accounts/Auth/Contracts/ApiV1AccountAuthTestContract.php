@@ -2,7 +2,6 @@
 
 namespace Tests\Api\v1\Accounts\Auth\Contracts;
 
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use Illuminate\Support\Str;
 use Tests\Api\Traits\AccountAuthFunctions;

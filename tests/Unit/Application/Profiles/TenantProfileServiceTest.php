@@ -274,12 +274,8 @@ class TenantProfileServiceTest extends TestCase
             scope: (string) Tenant::current()?->getKey(),
         );
 
-        $service = new class(
-            $this->app->make(AccountProfileBootstrapService::class),
-            $this->app->make(AccountProfileManagementService::class),
-            $this->app->make(AccountProfileMediaService::class),
-            $this->app->make(PasswordResetFlowService::class),
-        ) extends TenantProfileService {
+        $service = new class($this->app->make(AccountProfileBootstrapService::class), $this->app->make(AccountProfileManagementService::class), $this->app->make(AccountProfileMediaService::class), $this->app->make(PasswordResetFlowService::class)) extends TenantProfileService
+        {
             protected function applyResetPassword(AccountUser $user, string $password): void
             {
                 throw new RuntimeException('Simulated tenant password persistence failure.');
@@ -316,12 +312,8 @@ class TenantProfileServiceTest extends TestCase
             scope: $tenantScope,
         );
 
-        $service = new class(
-            $this->app->make(AccountProfileBootstrapService::class),
-            $this->app->make(AccountProfileManagementService::class),
-            $this->app->make(AccountProfileMediaService::class),
-            $this->app->make(PasswordResetFlowService::class),
-        ) extends TenantProfileService {
+        $service = new class($this->app->make(AccountProfileBootstrapService::class), $this->app->make(AccountProfileManagementService::class), $this->app->make(AccountProfileMediaService::class), $this->app->make(PasswordResetFlowService::class)) extends TenantProfileService
+        {
             protected function applyResetPassword(AccountUser $user, string $password): void
             {
                 throw new RuntimeException('Simulated tenant password persistence failure.');

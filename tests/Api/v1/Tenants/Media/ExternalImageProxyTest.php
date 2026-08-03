@@ -7,7 +7,6 @@ namespace Tests\Api\v1\Tenants\Media;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Models\Tenants\Account;
-use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Facades\Http;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;

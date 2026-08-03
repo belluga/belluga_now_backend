@@ -18,7 +18,8 @@ class ContactChannelCollectionNormalizerTest extends TestCase
     {
         $normalizer = new ContactChannelCollectionNormalizer(
             ContactChannelDefinitionRegistry::withFirstDeliveryDefinitions(),
-            new class implements ContactChannelIdentifierGeneratorContract {
+            new class implements ContactChannelIdentifierGeneratorContract
+            {
                 private int $sequence = 0;
 
                 public function generate(): string
@@ -184,7 +185,8 @@ class ContactChannelCollectionNormalizerTest extends TestCase
     {
         return new ContactChannelCollectionNormalizer(
             ContactChannelDefinitionRegistry::withFirstDeliveryDefinitions(),
-            new class implements ContactChannelIdentifierGeneratorContract {
+            new class implements ContactChannelIdentifierGeneratorContract
+            {
                 public function generate(): string
                 {
                     return 'contact_generated';

@@ -2,9 +2,9 @@
 
 namespace Tests\Traits;
 
-use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Application\LandlordUsers\LandlordUserAccessService;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Tenants;
 
+use App\Application\Auth\PasswordResetTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Application\Auth\PasswordResetTokenService;
 use App\Events\Auth\PasswordResetTokenIssued;
 use App\Jobs\Telemetry\DeliverTelemetryEventJob;
 use App\Models\Landlord\Tenant;
@@ -551,7 +551,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'password' => 'Secret!234',
                 'password_confirmation' => 'Secret!234',
                 'reset_token' => 'not-a-valid-token',
-        ]);
+            ]);
         $passwordReset->assertHeader('X-Api-Security-Domain', 'tenant_public_password_reset');
     }
 
@@ -709,7 +709,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 return ($envelope['event'] ?? null) === 'auth_password_token_generated'
                     && ($envelope['actor']['type'] ?? null) === 'pre_auth'
                     && ! array_key_exists('user_id', $envelope['metadata'] ?? []);
-                    }
+            }
         );
     }
 

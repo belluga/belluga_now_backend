@@ -7,8 +7,8 @@ namespace Belluga\PushHandler\Services;
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
 use Belluga\PushHandler\Exceptions\MultiplePushCredentialsException;
 use Illuminate\Support\Facades\Log;
-use Kreait\Firebase\Factory;
 use Kreait\Firebase\Contract\Messaging;
+use Kreait\Firebase\Factory;
 use Throwable;
 
 class KreaitTopicTransportClient implements PushTopicTransportContract
@@ -114,7 +114,7 @@ class KreaitTopicTransportClient implements PushTopicTransportContract
         }
 
         try {
-            $factory = (new Factory())->withServiceAccount([
+            $factory = (new Factory)->withServiceAccount([
                 'type' => 'service_account',
                 'project_id' => (string) $credentials->project_id,
                 'client_email' => (string) $credentials->client_email,

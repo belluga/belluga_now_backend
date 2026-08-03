@@ -27,7 +27,7 @@ class AccountProfileBootstrapService
         AccountUser $user,
         ?AccountProfileTransactionContext $context = null,
     ): ?string {
-        $this->registrySeeder->ensureDefaults();
+        $this->registrySeeder->ensurePersonalDefault();
 
         $userId = $this->userId($user);
         $commandId = "account-profile-bootstrap:{$userId}:personal";

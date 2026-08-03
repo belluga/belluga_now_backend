@@ -13,6 +13,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -72,6 +73,19 @@ class AccountControllerTest extends TestCase
         ]);
 
         $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
+        $tenant->makeCurrent();
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'venue'],
+            [
+                'label' => 'Venue',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ],
+        );
         $tenantHost = "{$tenant->subdomain}.{$this->host}";
         $this->tenantAccountsAdminUrl = "http://{$tenantHost}/admin/api/v1/accounts";
         $this->tenantAccountOnboardingsAdminUrl = "http://{$tenantHost}/admin/api/v1/account_onboardings";

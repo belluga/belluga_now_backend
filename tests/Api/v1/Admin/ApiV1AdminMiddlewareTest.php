@@ -6,11 +6,27 @@ use Illuminate\Testing\TestResponse;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AdminAuthFunctions;
 use Tests\Api\Traits\AdminRoleFunctions;
-use Tests\TestCase;
+use Tests\Api\Traits\TenantAdminMiddlewareFixtureSeeder;
+use Tests\TestCaseAuthenticated;
 
-class ApiV1AdminMiddlewareTest extends TestCase
+class ApiV1AdminMiddlewareTest extends TestCaseAuthenticated
 {
-    use AccountAuthFunctions, AdminAuthFunctions, AdminRoleFunctions;
+    use AccountAuthFunctions, AdminAuthFunctions, AdminRoleFunctions, TenantAdminMiddlewareFixtureSeeder;
+
+    protected static bool $accountFixtureSeeded = false;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if (static::$accountFixtureSeeded) {
+            return;
+        }
+
+        $tenant = $this->ensureCanonicalTenantExists($this->landlord->tenant_primary);
+        $this->seedAccountFixtures($tenant, $this->landlord->tenant_primary->account_primary);
+        static::$accountFixtureSeeded = true;
+    }
 
     public function test_login_all_admin_users(): void
     {

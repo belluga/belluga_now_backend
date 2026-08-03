@@ -11,9 +11,9 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
-use Belluga\Invites\Models\Tenants\InviteablePeopleProjection;
 use Illuminate\Support\Collection;
 
 class AccountMissingProfileRepairService

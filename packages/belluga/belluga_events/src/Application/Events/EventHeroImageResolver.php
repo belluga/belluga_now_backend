@@ -46,9 +46,6 @@ class EventHeroImageResolver
     private function linkedAccountProfileHeroImageCandidates(array $eventPayload): array
     {
         $linkedProfiles = $this->normalizeArray($eventPayload['linked_account_profiles'] ?? []);
-        if ($linkedProfiles === []) {
-            $linkedProfiles = $this->linkedProfilesFromEventParties($eventPayload['event_parties'] ?? []);
-        }
 
         $candidates = [];
         foreach ($linkedProfiles as $profile) {
@@ -64,32 +61,6 @@ class EventHeroImageResolver
         }
 
         return $candidates;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function linkedProfilesFromEventParties(mixed $eventParties): array
-    {
-        $profiles = [];
-        foreach ($this->normalizeArray($eventParties) as $party) {
-            $partyPayload = $this->normalizeArray($party);
-            if (trim((string) ($partyPayload['party_type'] ?? '')) === 'venue') {
-                continue;
-            }
-
-            $metadata = $this->normalizeArray($partyPayload['metadata'] ?? []);
-            if ($metadata === []) {
-                continue;
-            }
-
-            $profiles[] = [
-                'cover_url' => $metadata['cover_url'] ?? null,
-                'avatar_url' => $metadata['avatar_url'] ?? null,
-            ];
-        }
-
-        return $profiles;
     }
 
     /**

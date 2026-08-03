@@ -222,5 +222,4 @@ class PasswordResetTokenService
     {
         return DB::connection('landlord')->getMongoDB()->selectCollection('password_reset_tokens');
     }
-
 }

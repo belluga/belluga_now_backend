@@ -58,7 +58,6 @@ class EventMediaService
             $event->fill($updates);
             $event->save();
             $event->refresh();
-            $this->occurrenceSyncService->mirrorThumbFromEvent($event);
         }
 
         return $updates;

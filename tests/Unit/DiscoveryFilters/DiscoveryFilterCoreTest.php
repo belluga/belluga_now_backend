@@ -16,7 +16,7 @@ final class DiscoveryFilterCoreTest extends TestCase
 {
     public function test_registry_resolves_entity_qualified_type_options(): void
     {
-        $registry = new DiscoveryFilterEntityRegistry();
+        $registry = new DiscoveryFilterEntityRegistry;
         $registry->register(new class implements DiscoveryFilterEntityProviderContract
         {
             public function entity(): string
@@ -115,7 +115,7 @@ final class DiscoveryFilterCoreTest extends TestCase
             ),
         ];
 
-        $repair = (new DiscoveryFilterSelectionRepairService())->repair(
+        $repair = (new DiscoveryFilterSelectionRepairService)->repair(
             $catalog,
             [
                 'primary' => ['events', 'stale'],

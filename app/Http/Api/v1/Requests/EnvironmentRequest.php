@@ -52,6 +52,7 @@ class EnvironmentRequest extends FormRequest
             $tenant = $resolver->findTenantByIdentifier($appDomain);
             if ($tenant !== null) {
                 $this->resolvedAppDomainTenant = $tenant;
+
                 return;
             }
 

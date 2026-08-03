@@ -11,6 +11,7 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Accounts\AccountOwnershipStateService;
+use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use MongoDB\BSON\ObjectId;
 use ReflectionClass;
@@ -24,6 +25,7 @@ class AccountProfileQueryServiceTest extends TestCase
         $contactChannelsService = (new ReflectionClass(
             AccountProfileContactChannelsService::class
         ))->newInstanceWithoutConstructor();
+        $runtimeCatalogService = $this->app->make(RuntimeDiscoveryFilterCatalogService::class);
 
         $service = new AccountProfileQueryService(
             $this->createMock(AccountOwnershipStateService::class),
@@ -32,6 +34,7 @@ class AccountProfileQueryServiceTest extends TestCase
             new AccountProfileTypeSetProvider,
             new AccountProfilePublicCatalogSnapshotReader(new AccountProfileTypeCapabilityCatalog),
             $contactChannelsService,
+            $runtimeCatalogService,
         );
 
         $resolver = new ReflectionMethod($service, 'resolveAggregateRowId');

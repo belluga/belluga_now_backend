@@ -6,8 +6,8 @@ namespace Belluga\MapPois\Application;
 
 use Belluga\MapPois\Application\Concerns\MapPoiQueryFormatting;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
-use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
+use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\UTCDateTime;

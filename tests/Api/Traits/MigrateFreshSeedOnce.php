@@ -64,16 +64,9 @@ trait MigrateFreshSeedOnce
 
     protected function wipeMongoCollections(): void
     {
-        $tenantDatabaseNames = Tenant::query()
-            ->withTrashed()
-            ->pluck('database')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
         $landlordDatabase = DB::connection('landlord')->getDatabase();
         $tenantDatabase = DB::connection('tenant')->getDatabase();
+        $tenantDatabaseNames = $this->tenantDatabaseNamesForRefresh();
 
         foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
             $landlordDatabase->dropCollection($collectionName);
@@ -110,5 +103,32 @@ trait MigrateFreshSeedOnce
                 $tenantClient->selectDatabase($databaseName)->drop();
             }
         }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function tenantDatabaseNamesForRefresh(): array
+    {
+        $tenantClient = DB::connection('tenant')->getMongoClient();
+        $tenantPrefix = Tenant::tenantDatabasePrefix();
+
+        $names = Tenant::query()
+            ->withTrashed()
+            ->pluck('database')
+            ->filter()
+            ->map(static fn ($name): string => (string) $name)
+            ->values()
+            ->all();
+
+        foreach ($tenantClient->listDatabases() as $databaseInfo) {
+            $databaseName = (string) $databaseInfo->getName();
+
+            if (str_starts_with($databaseName, $tenantPrefix)) {
+                $names[] = $databaseName;
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 }

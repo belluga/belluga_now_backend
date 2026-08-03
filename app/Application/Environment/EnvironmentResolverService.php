@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Auth\TenantPublicAuthMethodResolver;
 use App\Application\Branding\BrandingManifestService;
-use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
 use App\Application\Tenants\TenantAppDomainResolverService;
@@ -164,8 +164,7 @@ class EnvironmentResolverService
         Tenant|Landlord $brandable,
         array $branding,
         ?string $requestRoot,
-    ): array
-    {
+    ): array {
         $metadata = $branding['public_web_metadata'] ?? [];
 
         if (! is_array($metadata)) {
