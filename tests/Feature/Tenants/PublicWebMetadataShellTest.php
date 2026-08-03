@@ -281,13 +281,35 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('Casa Marracini | '.$this->resolvedSiteName, false);
     }
 
-    public function test_event_public_route_injects_event_metadata_with_event_party_profile_cover_fallback(): void
+    public function test_event_public_route_injects_event_metadata_with_linked_account_profile_cover_fallback(): void
     {
         $tenantOrigin = rtrim($this->base_tenant_url, '/');
         $this->applyPublicWebMetadata([
             'default_title' => 'Fallback tenant title',
             'default_description' => 'Fallback tenant description.',
             'default_image' => 'https://tenant.example/media/fallback-cover.png',
+        ]);
+        TenantProfileType::create([
+            'type' => 'artist',
+            'label' => 'Artista',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+            ],
+        ]);
+        $account = Account::create([
+            'name' => 'Ananda Torres Account',
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Ananda Torres',
+            'slug' => 'ananda-torres',
+            'cover_url' => 'https://tenant.example/media/ananda-cover.png',
+            'avatar_url' => 'https://tenant.example/media/ananda-avatar.png',
+            'is_active' => true,
         ]);
         $event = Event::create([
             'slug' => 'festival-na-orla',
@@ -305,14 +327,14 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'event_parties' => [
                 [
                     'party_type' => 'artist',
-                    'party_ref_id' => 'artist-1',
+                    'party_ref_id' => (string) $profile->_id,
                     'permissions' => ['can_edit' => false],
                     'metadata' => [
-                        'display_name' => 'Ananda Torres',
-                        'slug' => 'ananda-torres',
+                        'display_name' => (string) $profile->display_name,
+                        'slug' => (string) $profile->slug,
                         'profile_type' => 'artist',
-                        'cover_url' => 'https://tenant.example/media/ananda-cover.png',
-                        'avatar_url' => 'https://tenant.example/media/ananda-avatar.png',
+                        'cover_url' => (string) $profile->cover_url,
+                        'avatar_url' => (string) $profile->avatar_url,
                     ],
                 ],
             ],

@@ -579,9 +579,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
         $this->assertCount(
-            0,
+            1,
             $detailAccountProfileQueries,
-            'Public event detail must stay snapshot-only and avoid live account profile queries during read formatting.'
+            'Public event detail must use a single bounded live account profile hydration query during read formatting.'
         );
 
         $connection->flushQueryLog();
@@ -598,9 +598,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
         $this->assertCount(
-            0,
+            1,
             $managementAccountProfileQueries,
-            'Management event readback must stay snapshot-only and avoid live account profile queries during read formatting.'
+            'Management event readback must use a single bounded live account profile hydration query during read formatting.'
         );
         $managementOccurrenceQueries = $managementQueries->filter(
             static fn (array $query): bool => str_contains(
@@ -652,9 +652,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
         $this->assertCount(
-            0,
+            1,
             $agendaAccountProfileQueries,
-            'Public agenda list formatting must stay snapshot-only and avoid live account profile queries.'
+            'Public agenda list formatting must use a single bounded live account profile hydration query.'
         );
 
         $connection->flushQueryLog();
@@ -676,9 +676,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
         $this->assertCount(
-            0,
+            1,
             $managementAccountProfileQueries,
-            'Management event list formatting must stay snapshot-only and avoid live account profile queries.'
+            'Management event list formatting must use a single bounded live account profile hydration query.'
         );
     }
 

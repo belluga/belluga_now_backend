@@ -545,13 +545,6 @@ class EventQueryService
             $event,
             $preloadedOccurrences
         );
-        if (array_key_exists('artists', $payload)) {
-            $payload['artists'] = $this->publicDetailArtistProjection(
-                $selectedOccurrence,
-                $event,
-                $payload['occurrences'],
-            );
-        }
 
         return $this->withCanonicalHeroImage($payload);
     }
