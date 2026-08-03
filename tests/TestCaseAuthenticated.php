@@ -3,9 +3,11 @@
 namespace Tests;
 
 use App\Application\LandlordTenants\TenantLifecycleService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Support\Auth\AbilityCatalog;
+use Illuminate\Support\Facades\Queue;
 use Tests\Helpers\TenantLabels;
 use Tests\Traits\EnsuresSystemInitialization;
 
@@ -41,10 +43,17 @@ abstract class TestCaseAuthenticated extends TestCase
                 throw new \RuntimeException('Unable to provision canonical tenant without a landlord operator.');
             }
 
-            $created = $lifecycle->create([
-                'name' => $labels->name,
-                'subdomain' => $labels->subdomain,
-            ], $operator);
+            $originalQueue = Queue::getFacadeRoot();
+            Queue::fake([RebuildTenantEnvironmentSnapshotJob::class]);
+
+            try {
+                $created = $lifecycle->create([
+                    'name' => $labels->name,
+                    'subdomain' => $labels->subdomain,
+                ], $operator);
+            } finally {
+                Queue::swap($originalQueue);
+            }
 
             /** @var Tenant $tenant */
             $tenant = $created['tenant'];

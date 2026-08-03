@@ -37,10 +37,14 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
     {
         parent::setUp();
 
+        $tenant = $this->resolveOrCreateTenant($this->tenant);
+
         if (! array_key_exists(static::class, static::$seededFixtures)) {
             $this->seedMiddlewareFixtures();
             static::$seededFixtures[static::class] = true;
         }
+
+        $tenant->makeCurrent();
     }
 
     public function testLoginAllAdminUsers(): void

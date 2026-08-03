@@ -25,18 +25,19 @@ abstract class ApiV1TenantsMiddlewareTestContract extends TestCaseTenant
     {
         parent::setUp();
 
+        $tenant = $this->resolveOrCreateTenant($this->tenant);
+
         if (! array_key_exists(static::class, static::$seededFixtures)) {
-            $tenant = $this->resolveOrCreateTenant($this->tenant);
             $crossTenant = $this->resolveOrCreateTenant($this->tenant_cross);
 
             $this->seedTenantUsers($tenant, $this->tenant);
             $this->seedTenantUsers($crossTenant, $this->tenant_cross);
             $this->seedAccountFixtures($tenant, $this->tenant->account_primary);
             $this->seedAccountFixtures($crossTenant, $this->tenant_cross->account_primary);
-
-            $tenant->makeCurrent();
             static::$seededFixtures[static::class] = true;
         }
+
+        $tenant->makeCurrent();
     }
 
     public function testLoginAllAdminUsers(): void

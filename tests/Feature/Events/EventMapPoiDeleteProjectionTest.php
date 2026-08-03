@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Events;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
@@ -63,6 +64,7 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
 
         $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
         $tenant->makeCurrent();
+        $this->app->make(AccountProfileRegistrySeeder::class)->ensureDefaults();
 
         MapPoi::query()->delete();
         Event::withTrashed()->forceDelete();
