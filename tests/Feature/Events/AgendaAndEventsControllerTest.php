@@ -1749,14 +1749,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.profile_groups');
         $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonMissingPath('data.artists');
         $response->assertJsonPath('data.profile_groups.0.label', 'Bands');
         $response->assertJsonPath('data.profile_groups.0.member_count', 1);
         $response->assertJsonMissingPath('data.profile_groups.0.profiles');
-        $response->assertJsonPath('data.artists.0.id', (string) $profile->_id);
-        $response->assertJsonPath('data.artists.0.profile_type', 'band');
-        $response->assertJsonPath('data.artists.0.slug', (string) $profile->slug);
-        $response->assertJsonPath('data.artists.0.taxonomy_terms.0.type', 'event_style');
-        $response->assertJsonPath('data.artists.0.taxonomy_terms.0.value', 'showcase');
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $profile->_id);
+        $response->assertJsonPath('data.counterpart_preview.0.profile_type', 'band');
+        $response->assertJsonPath('data.counterpart_preview.0.slug', (string) $profile->slug);
+        $response->assertJsonPath('data.counterpart_count', 1);
 
         $groupId = (string) $response->json('data.profile_groups.0.id');
         $this->assertNotSame('', $groupId);

@@ -510,6 +510,28 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
 
     public function test_event_detail_and_management_readback_stay_snapshot_only_without_live_account_profiles_queries(): void
     {
+        TenantProfileType::query()->whereIn('type', ['artist', 'band'])->delete();
+        foreach ([
+            ['type' => 'artist', 'label' => 'Artist'],
+            ['type' => 'band', 'label' => 'Band'],
+        ] as $type) {
+            TenantProfileType::query()->create([
+                'type' => $type['type'],
+                'label' => $type['label'],
+                'allowed_taxonomies' => [],
+                'visual' => ['mode' => 'icon', 'icon' => 'store'],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_inviteable' => false,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                    'has_content' => false,
+                ],
+            ]);
+        }
+
         $profiles = collect([
             $this->createAccountProfileFixture('artist', 'Performance Linked Artist 01', 511),
             $this->createAccountProfileFixture('band', 'Performance Linked Band 02', 521),
@@ -572,6 +594,12 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $connection->disableQueryLog();
 
         $this->assertSame((string) $event->_id, $detailPayload['event_id'] ?? null);
+        $this->assertSame(2, $detailPayload['counterpart_count'] ?? null);
+        $this->assertCount(1, $detailPayload['counterpart_preview'] ?? []);
+        $this->assertSame(
+            (string) $profiles->get(0)?->_id,
+            data_get($detailPayload, 'counterpart_preview.0.id')
+        );
         $detailAccountProfileQueries = $detailQueries->filter(
             static fn (array $query): bool => str_contains(
                 json_encode($query, JSON_UNESCAPED_SLASHES),
@@ -579,9 +607,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
         $this->assertCount(
-            1,
+            0,
             $detailAccountProfileQueries,
-            'Public event detail must use a single bounded live account profile hydration query during read formatting.'
+            'Public event detail must not hydrate broad account profile reads during formatting; counterpart preview must come from stored summaries.'
         );
 
         $connection->flushQueryLog();

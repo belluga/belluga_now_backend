@@ -289,8 +289,10 @@ class EventCrudControllerTest extends TestCaseTenant
             'data.venue.public_detail_path',
             '/parceiro/'.(string) $this->venue->slug
         );
-        $publicResponse->assertJsonPath('data.artists.0.profile_type', (string) $this->band->profile_type);
-        $publicResponse->assertJsonPath('data.artists.0.slug', (string) $this->band->slug);
+        $publicResponse->assertJsonMissingPath('data.artists');
+        $publicResponse->assertJsonPath('data.counterpart_preview.0.profile_type', (string) $this->band->profile_type);
+        $publicResponse->assertJsonPath('data.counterpart_preview.0.slug', (string) $this->band->slug);
+        $publicResponse->assertJsonPath('data.counterpart_count', 1);
 
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -1640,7 +1642,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $public->assertStatus(200);
         $tabId = $this->assertPublicEventProfileGroupMetadata($public, 0, 'Artists', 1);
         $public->assertJsonMissingPath('data.linked_account_profiles');
-        $public->assertJsonPath('data.artists.0.slug', '0');
+        $public->assertJsonMissingPath('data.artists');
+        $public->assertJsonPath('data.counterpart_preview.0.slug', '0');
+        $public->assertJsonPath('data.counterpart_count', 1);
 
         $member = $this->publicEventRelatedProfileMemberRows((string) $public->json('data.slug'), $tabId)[0] ?? null;
         $this->assertIsArray($member);
