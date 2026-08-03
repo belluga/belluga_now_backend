@@ -41,7 +41,9 @@ class AccountOnboardingService
         Request $request,
         ?string $commandId = null,
     ): array {
-        $this->registrySeeder->ensureDefaults();
+        if ((string) ($payload['profile_type'] ?? '') === 'personal') {
+            $this->registrySeeder->ensurePersonalDefault();
+        }
         $commandId = $this->normalizeCommandId($commandId);
         $mediaFingerprint = $this->mediaService->mutationFingerprint($request);
         $fingerprint = $this->fingerprint($payload, $mediaFingerprint);

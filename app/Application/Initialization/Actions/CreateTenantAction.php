@@ -45,7 +45,7 @@ class CreateTenantAction
         }
 
         $tenant->makeCurrent();
-        $this->registrySeeder->ensureDefaults();
+        $this->registrySeeder->ensurePersonalDefault();
         $this->staticProfileSeeder->ensureDefaults();
         $this->ensureTenantOrganization($tenant);
         $tenant->forgetCurrent();
