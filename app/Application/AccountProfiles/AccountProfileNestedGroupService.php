@@ -491,5 +491,4 @@ class AccountProfileNestedGroupService
 
         return $decoded;
     }
-
 }

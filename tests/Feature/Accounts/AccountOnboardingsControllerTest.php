@@ -102,6 +102,24 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
     }
 
+    public function test_personal_onboarding_only_bootstraps_the_personal_profile_type_when_the_registry_is_empty(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        TenantProfileType::query()->delete();
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => 'Personal Onboarding '.Str::random(8),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(
+            ['personal'],
+            TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
+        );
+    }
+
     public function test_onboarding_accepts_three_character_public_display_name(): void
     {
         $this->actingAsAdmin(['account-users:create']);
@@ -240,6 +258,8 @@ class AccountOnboardingsControllerTest extends TestCase
             ->where('type', 'venue')
             ->update([
                 'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'has_nested_profile_groups' => true,
@@ -342,6 +362,16 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $mediaMock = Mockery::mock(AccountProfileMediaService::class);
+        $mediaMock->shouldReceive('mutationFingerprint')
+            ->once()
+            ->andReturn([
+                'avatar' => [
+                    'action' => 'upload',
+                    'sha256' => str_repeat('a', 64),
+                    'size' => 123,
+                    'mime' => 'image/png',
+                ],
+            ]);
         $mediaMock->shouldReceive('applyUploads')
             ->once()
             ->andThrow(new \RuntimeException('Simulated media write failure'));
@@ -367,6 +397,9 @@ class AccountOnboardingsControllerTest extends TestCase
         $rolesBefore = AccountRoleTemplate::query()->count();
 
         $profileMock = Mockery::mock(AccountProfileManagementService::class);
+        $profileMock->shouldReceive('resultForCommand')
+            ->once()
+            ->andReturnNull();
         $profileMock->shouldReceive('createWithinTransactionContext')
             ->once()
             ->andThrow(new \RuntimeException('Simulated profile write failure'));

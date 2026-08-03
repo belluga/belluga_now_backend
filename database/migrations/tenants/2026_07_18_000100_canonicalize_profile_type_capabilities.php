@@ -31,9 +31,7 @@ return new class extends Migration
         $this->ensureCanonicalIndexes($collection);
     }
 
-    public function down(): void
-    {
-    }
+    public function down(): void {}
 
     /**
      * @param  Collection<array<string, mixed>>  $collection

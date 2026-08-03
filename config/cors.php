@@ -5,7 +5,7 @@ $appUrlParts = parse_url($appUrl) ?: [];
 
 $appHost = strtolower((string) ($appUrlParts['host'] ?? 'nginx'));
 $appScheme = strtolower((string) ($appUrlParts['scheme'] ?? 'http'));
-$appPort = isset($appUrlParts['port']) ? ':' . $appUrlParts['port'] : '';
+$appPort = isset($appUrlParts['port']) ? ':'.$appUrlParts['port'] : '';
 
 $escapedHost = preg_quote($appHost, '#');
 $escapedPort = preg_quote($appPort, '#');

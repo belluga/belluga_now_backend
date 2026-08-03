@@ -35,7 +35,7 @@ class FlutterWebShellRendererTest extends TestCase
     {
         $firstShell = $this->createShellFile('FIRST-SHELL');
         $secondShell = $this->createShellFile('SECOND-SHELL');
-        $renderer = new FlutterWebShellRenderer();
+        $renderer = new FlutterWebShellRenderer;
 
         $this->setShellPath($firstShell);
         $firstHtml = $renderer->render($this->metadata());
@@ -54,7 +54,7 @@ class FlutterWebShellRendererTest extends TestCase
     {
         $shell = $this->createShellFile('STRUCTURED-SHELL');
         $this->setShellPath($shell);
-        $renderer = new FlutterWebShellRenderer();
+        $renderer = new FlutterWebShellRenderer;
 
         $html = $renderer->render(array_merge($this->metadata(), [
             'image_secure_url' => 'https://tenant.example/media/teste.png',

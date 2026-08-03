@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\LandlordUsers;
 
-use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
+use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;

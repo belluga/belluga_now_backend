@@ -13,9 +13,9 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\AttendanceCommitment;
 use App\Models\Tenants\EventType;
-use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Application\Events\EventQueryService;
@@ -223,7 +223,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame('', (string) ($upcomingItem['occurrence_id'] ?? ''));
     }
 
-    public function test_agenda_single_occurrence_stale_thumb_returns_parent_event_cover_as_canonical_image(): void
+    public function test_agenda_single_occurrence_uses_parent_event_cover_without_persisted_occurrence_thumb(): void
     {
         $eventCoverUrl = 'https://example.org/single-event-cover.jpg';
         $venueCoverUrl = 'https://example.org/single-venue-cover.jpg';
@@ -237,7 +237,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $occurrence = EventOccurrence::query()
             ->where('event_id', (string) $event->_id)
             ->firstOrFail();
-        $occurrence->forceFill(['thumb' => null])->save();
+        $this->assertNull(data_get($occurrence, 'thumb'));
 
         $response = $this->getJson(
             "{$this->base_api_tenant}agenda?occurrence_ids[]={$occurrence->_id}&page=1&page_size=10"
@@ -252,7 +252,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_multi_occurrence_stale_thumb_returns_parent_event_cover_as_canonical_image(): void
+    public function test_agenda_multi_occurrence_uses_parent_event_cover_without_persisted_occurrence_thumb(): void
     {
         $now = Carbon::now();
         $eventCoverUrl = 'https://example.org/multi-event-cover.jpg';
@@ -282,7 +282,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->get()
             ->last();
         $this->assertNotNull($selectedOccurrence);
-        $selectedOccurrence->forceFill(['thumb' => null])->save();
+        $this->assertNull(data_get($selectedOccurrence, 'thumb'));
 
         $response = $this->getJson(
             "{$this->base_api_tenant}agenda?occurrence_ids[]={$selectedOccurrence->_id}&page=1&page_size=10"
@@ -842,6 +842,46 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ),
             'Public agenda runtime facets must be computed through a single $facet aggregate.'
         );
+    }
+
+    public function test_agenda_repairs_stale_type_filter_in_same_response(): void
+    {
+        EventType::query()->updateOrCreate(['slug' => 'show'], [
+            'name' => 'Show',
+            'allowed_taxonomies' => [],
+        ]);
+        EventType::query()->updateOrCreate(['slug' => 'stale-fair'], [
+            'name' => 'Stale Fair',
+            'allowed_taxonomies' => [],
+        ]);
+
+        $this->createEvent([
+            'title' => 'Runtime Show Event',
+            'type' => [
+                'id' => 'type-show',
+                'name' => 'Show',
+                'slug' => 'show',
+                'description' => 'Show desc',
+            ],
+            'date_time_start' => Carbon::now()->addDays(1),
+            'date_time_end' => Carbon::now()->addDays(1)->addHours(2),
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}agenda?categories[0]=stale-fair&page=1&page_size=15"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'items');
+        $response->assertJsonPath('items.0.title', 'Runtime Show Event');
+
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+
+        $this->assertContains('show', $catalogFilterKeys);
+        $this->assertNotContains('stale-fair', $catalogFilterKeys);
     }
 
     public function test_agenda_supports_text_search_query_param(): void
@@ -1582,7 +1622,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             "{$this->base_api_tenant}agenda?taxonomy[0][type]=legacy_tag&taxonomy[0][value]=legacy-music&page=1&page_size=10"
         );
         $filtered->assertStatus(200);
-        $filtered->assertJsonCount(0, 'items');
+        $filtered->assertJsonCount(1, 'items');
+        $filtered->assertJsonPath('items.0.title', 'Legacy Facet Event');
     }
 
     public function test_agenda_runtime_facets_do_not_include_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
@@ -1612,7 +1653,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             "{$this->base_api_tenant}agenda?taxonomy[0][type]=legacy_tag&taxonomy[0][value]=legacy-parent-music&page=1&page_size=10"
         );
         $filtered->assertStatus(200);
-        $filtered->assertJsonCount(0, 'items');
+        $filtered->assertJsonCount(1, 'items');
+        $filtered->assertJsonPath('items.0.title', 'Parent Legacy Facet Event');
     }
 
     public function test_agenda_search_does_not_match_parent_legacy_tags_when_occurrence_snapshots_are_missing(): void
@@ -1707,13 +1749,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.profile_groups');
         $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonMissingPath('data.artists');
         $response->assertJsonPath('data.profile_groups.0.label', 'Bands');
         $response->assertJsonPath('data.profile_groups.0.member_count', 1);
         $response->assertJsonMissingPath('data.profile_groups.0.profiles');
-        $response->assertJsonPath('data.artists.0.id', (string) $profile->_id);
-        $response->assertJsonPath('data.artists.0.profile_type', 'band');
-        $response->assertJsonPath('data.artists.0.slug', (string) $profile->slug);
-        $response->assertJsonPath('data.artists.0.taxonomy_terms', []);
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $profile->_id);
+        $response->assertJsonPath('data.counterpart_preview.0.profile_type', 'band');
+        $response->assertJsonPath('data.counterpart_preview.0.slug', (string) $profile->slug);
+        $response->assertJsonPath('data.counterpart_count', 1);
 
         $groupId = (string) $response->json('data.profile_groups.0.id');
         $this->assertNotSame('', $groupId);

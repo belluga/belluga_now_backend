@@ -2,13 +2,26 @@
 
 namespace Tests\Api\v1\Accounts\Validation\Contracts;
 
+use App\Application\Accounts\AccountUserService;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountRoleTemplate;
+use Illuminate\Support\Str;
+use Tests\Api\Traits\AccountAuthFunctions;
 use Illuminate\Testing\TestResponse;
 use Tests\Api\Traits\AccountProfileFunctions;
+use Tests\Helpers\UserLabels;
 use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
 {
-    use AccountProfileFunctions;
+    use AccountAuthFunctions, AccountProfileFunctions;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureValidationFixtures();
+        $this->accountLogin($this->account->user_visitor);
+    }
 
     protected string $base_api_url {
         get{
@@ -180,5 +193,76 @@ abstract class ApiV1AccountApiValidationTestContract extends TestCaseAccount
             data: $data,
             headers: $this->getHeaders(),
         );
+    }
+
+    private function ensureValidationFixtures(): void
+    {
+        $account = Account::query()->where('slug', $this->account->slug)->first();
+        if (! $account instanceof Account) {
+            return;
+        }
+
+        $role = $account->roleTemplates()
+            ->withTrashed()
+            ->where('name', 'Visitor')
+            ->first();
+
+        if (! $role instanceof AccountRoleTemplate) {
+            $role = $account->roleTemplates()->create([
+                'name' => 'Visitor',
+                'permissions' => [],
+            ]);
+        } else {
+            if ($role->trashed()) {
+                $role->restore();
+            }
+
+            $role->permissions = [];
+            $role->save();
+        }
+
+        $this->account->role_visitor->name = $role->name;
+        $this->account->role_visitor->id = (string) $role->_id;
+
+        $this->seedAccountUserFixture(
+            $account,
+            $this->account->user_visitor,
+            $role,
+            'Visitor',
+            'visitor+'.Str::slug($account->slug).'.validation@example.org',
+            'Secret!234',
+        );
+    }
+
+    private function seedAccountUserFixture(
+        Account $account,
+        UserLabels $label,
+        AccountRoleTemplate $role,
+        string $name,
+        string $email,
+        string $password,
+    ): void {
+        /** @var AccountUserService $service */
+        $service = app(AccountUserService::class);
+        $user = $service->create(
+            $account,
+            [
+                'name' => $name,
+                'email' => $email,
+                'password' => $password,
+            ],
+            (string) $role->_id,
+        );
+
+        $secondaryEmail = $label->email_2;
+        if ($secondaryEmail === '') {
+            $secondaryEmail = 'secondary+'.Str::uuid()->toString().'@example.org';
+        }
+
+        $label->name = $name;
+        $label->email_1 = $email;
+        $label->email_2 = $secondaryEmail;
+        $label->password = $password;
+        $label->user_id = (string) $user->_id;
     }
 }

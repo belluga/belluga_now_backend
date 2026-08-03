@@ -2,6 +2,10 @@
 
 namespace Tests\Api\v1\Accounts\Profile\Contracts;
 
+use App\Application\Accounts\AccountUserService;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountRoleTemplate;
+use Illuminate\Support\Str;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AccountProfileFunctions;
 use Tests\Helpers\UserLabels;
@@ -18,6 +22,12 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
     private string $temporary_phone_1 = '5531996419823';
 
     private string $temporary_phone_2 = '5533999999999';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureAccountProfileFixtures();
+    }
 
     protected string $base_api_url {
         get{
@@ -235,5 +245,109 @@ abstract class ApiV1AccountUserProfile extends TestCaseAccount
         }
 
         $response->assertStatus(422);
+    }
+
+    private function ensureAccountProfileFixtures(): void
+    {
+        $account = Account::query()->where('slug', $this->account->slug)->first();
+        if (! $account instanceof Account) {
+            return;
+        }
+
+        $roles = [
+            'role_user_manager' => $this->ensureAccountRole(
+                $account,
+                'Users Manager',
+                ['account-users:view', 'account-users:create']
+            ),
+            'role_visitor' => $this->ensureAccountRole(
+                $account,
+                'Visitor',
+                []
+            ),
+        ];
+
+        $this->account->role_user_manager->name = $roles['role_user_manager']->name;
+        $this->account->role_user_manager->id = (string) $roles['role_user_manager']->_id;
+        $this->account->role_visitor->name = $roles['role_visitor']->name;
+        $this->account->role_visitor->id = (string) $roles['role_visitor']->_id;
+
+        $this->seedAccountUserFixture(
+            $account,
+            $this->account->user_users_manager,
+            $roles['role_user_manager'],
+            'Users Manager',
+            'users-manager+'.$account->slug.'@example.org',
+            'Secret!234',
+        );
+
+        $this->seedAccountUserFixture(
+            $account,
+            $this->account->user_visitor,
+            $roles['role_visitor'],
+            'Visitor',
+            'visitor+'.$account->slug.'@example.org',
+            'Secret!234',
+        );
+    }
+
+    private function ensureAccountRole(Account $account, string $name, array $permissions): AccountRoleTemplate
+    {
+        /** @var AccountRoleTemplate|null $role */
+        $role = $account->roleTemplates()
+            ->withTrashed()
+            ->where('name', $name)
+            ->first();
+
+        if (! $role instanceof AccountRoleTemplate) {
+            /** @var AccountRoleTemplate $created */
+            $created = $account->roleTemplates()->create([
+                'name' => $name,
+                'permissions' => $permissions,
+            ]);
+
+            return $created;
+        }
+
+        if ($role->trashed()) {
+            $role->restore();
+        }
+
+        $role->permissions = $permissions;
+        $role->save();
+
+        return $role;
+    }
+
+    private function seedAccountUserFixture(
+        Account $account,
+        UserLabels $label,
+        AccountRoleTemplate $role,
+        string $name,
+        string $email,
+        string $password,
+    ): void {
+        /** @var AccountUserService $service */
+        $service = app(AccountUserService::class);
+        $user = $service->create(
+            $account,
+            [
+                'name' => $name,
+                'email' => $email,
+                'password' => $password,
+            ],
+            (string) $role->_id,
+        );
+
+        $secondaryEmail = $label->email_2;
+        if ($secondaryEmail === '') {
+            $secondaryEmail = 'secondary+'.Str::uuid()->toString().'@example.org';
+        }
+
+        $label->name = $name;
+        $label->email_1 = $email;
+        $label->email_2 = $secondaryEmail;
+        $label->password = $password;
+        $label->user_id = (string) $user->_id;
     }
 }

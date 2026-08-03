@@ -40,6 +40,7 @@ class AccountProfile extends Model
         'content',
         'avatar_url',
         'cover_url',
+        'name_search_key',
         'is_active',
         'is_verified',
         'created_by',

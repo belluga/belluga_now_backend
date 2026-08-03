@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Support\Validation\InputConstraints;
 use App\Support\RichText\SafeRichTextHtmlSanitizer;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Validation\ValidationException;
 
 final class AccountProfileRichTextSanitizer

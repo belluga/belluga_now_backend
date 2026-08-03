@@ -440,6 +440,24 @@ function defaultAccountProfileQueryabilityAllowlist(): array
             'rationale' => 'Canonical follow-up ordered-id hydration for public near discovery results.',
         ],
         [
+            'key' => 'app/Application/AccountProfiles/AccountProfileQueryService.php::findExistingPublicCatalogProfilesByIds::query',
+            'path' => 'app/Application/AccountProfiles/AccountProfileQueryService.php',
+            'method' => 'findExistingPublicCatalogProfilesByIds',
+            'source_kind' => 'query',
+            'category' => 'canonical_gateway',
+            'owner' => $owner,
+            'rationale' => 'Canonical explicit-id public catalog exposure gateway reused by event public related-profile hydration.',
+        ],
+        [
+            'key' => 'app/Application/AccountProfiles/AccountProfileQueryService.php::publicFindBySlugOrFail::query',
+            'path' => 'app/Application/AccountProfiles/AccountProfileQueryService.php',
+            'method' => 'publicFindBySlugOrFail',
+            'source_kind' => 'query',
+            'category' => 'canonical_gateway',
+            'owner' => $owner,
+            'rationale' => 'Canonical public profile detail gateway resolving a slug against the reviewed public catalog policy.',
+        ],
+        [
             'key' => 'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php::update::query',
             'path' => 'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php',
             'method' => 'update',
@@ -490,11 +508,13 @@ function resolveAccountProfileQueryabilityGuardOptions(array $argv): array
     foreach (array_slice($argv, 1) as $argument) {
         if (str_starts_with($argument, '--root=')) {
             $root = substr($argument, strlen('--root='));
+
             continue;
         }
 
         if (str_starts_with($argument, '--allowlist=')) {
             $allowlistPath = substr($argument, strlen('--allowlist='));
+
             continue;
         }
 

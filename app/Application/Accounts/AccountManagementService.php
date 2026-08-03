@@ -12,8 +12,8 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
-use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -288,8 +288,7 @@ class AccountManagementService
         Account $account,
         AccountProfileTransactionContext $context,
         string $baseCommandId,
-    ): array
-    {
+    ): array {
         return $this->deleteProfilesUsingLifecyclePath(
             AccountProfile::query()
                 ->where('account_id', (string) $account->_id)
@@ -308,8 +307,7 @@ class AccountManagementService
         Account $account,
         AccountProfileTransactionContext $context,
         string $baseCommandId,
-    ): array
-    {
+    ): array {
         return $this->deleteProfilesUsingLifecyclePath(
             AccountProfile::withTrashed()
                 ->where('account_id', (string) $account->_id)

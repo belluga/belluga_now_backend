@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
-use App\Integration\DiscoveryFilters\TenantDiscoveryFilterSettingsAdapter;
 use App\Integration\DiscoveryFilters\AccountProfileDiscoveryFilterEntityProvider;
 use App\Integration\DiscoveryFilters\EventDiscoveryFilterEntityProvider;
 use App\Integration\DiscoveryFilters\StaticAssetDiscoveryFilterEntityProvider;
+use App\Integration\DiscoveryFilters\TenantDiscoveryFilterSettingsAdapter;
 use Belluga\DiscoveryFilters\Contracts\DiscoveryFilterSettingsContract;
 use Belluga\DiscoveryFilters\Registry\DiscoveryFilterEntityRegistry;
 use Belluga\Settings\Contracts\SettingsRegistryContract;

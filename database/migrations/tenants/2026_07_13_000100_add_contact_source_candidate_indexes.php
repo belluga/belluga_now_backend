@@ -3,12 +3,12 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use MongoDB\Collection;
+use MongoDB\Laravel\Schema\Blueprint;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
-use MongoDB\Laravel\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {

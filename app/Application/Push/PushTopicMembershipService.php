@@ -76,6 +76,7 @@ class PushTopicMembershipService
 
         $this->unsubscribeUserTokensFromTopic($userId, $topic);
     }
+
     public function syncUserConfirmedEventMembership(string $userId, string $eventId): void
     {
         $topic = $this->naming->confirmedEventTopic($eventId);
@@ -91,6 +92,7 @@ class PushTopicMembershipService
 
         $this->unsubscribeUserTokensFromTopic($userId, $topic);
     }
+
     /**
      * @return array<int, string>
      */

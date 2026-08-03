@@ -147,8 +147,7 @@ final class AccountProfileReferenceCleanupService
         AccountProfile $profile,
         array $deletedProfileIds,
         AccountProfileTransactionContext $context,
-    ): array
-    {
+    ): array {
         $attributes = [];
         $sourceProfileId = trim((string) ($profile->contact_source_account_profile_id ?? ''));
         if (in_array($sourceProfileId, $deletedProfileIds, true)) {

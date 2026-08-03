@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileTypeMediaService;
-use App\Models\Tenants\TenantProfileType;
 use App\Http\Controllers\Controller;
+use App\Models\Tenants\TenantProfileType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;

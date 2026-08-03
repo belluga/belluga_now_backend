@@ -92,6 +92,80 @@ final class RuntimeDiscoveryFilterCatalogService
     }
 
     /**
+     * @param  array{primary?: mixed, taxonomy?: mixed}  $selection
+     * @param  array<string, mixed>  $catalog
+     * @return array{primary: array<int, string>, taxonomy: array<string, array<int, string>>, changed: bool}
+     */
+    public function repairSelectionAgainstCanonicalCatalog(array $selection, array $catalog): array
+    {
+        $allowedPrimaryKeys = [];
+        foreach ($this->normalizeList($catalog['filters'] ?? []) as $filter) {
+            $key = strtolower(trim((string) ($filter['key'] ?? '')));
+            if ($key === '') {
+                continue;
+            }
+            $allowedPrimaryKeys[$key] = $key;
+        }
+
+        $rawPrimary = $this->normalizeStringList($selection['primary'] ?? []);
+        $primary = [];
+        foreach ($rawPrimary as $key) {
+            if (! isset($allowedPrimaryKeys[$key])) {
+                continue;
+            }
+            $primary[] = $key;
+        }
+        $taxonomyOptionsByKey = [];
+        foreach ($this->normalizeMap($catalog['taxonomy_options'] ?? []) as $key => $option) {
+            $normalizedKey = strtolower(trim((string) $key));
+            if ($normalizedKey === '') {
+                continue;
+            }
+            $taxonomyOptionsByKey[$normalizedKey] = $this->normalizeMap($option);
+        }
+
+        $rawTaxonomy = $this->normalizeStringListMap($selection['taxonomy'] ?? []);
+        $taxonomy = [];
+        foreach ($rawTaxonomy as $group => $values) {
+            if (! isset($taxonomyOptionsByKey[$group])) {
+                continue;
+            }
+
+            $option = $taxonomyOptionsByKey[$group];
+            $allowedTerms = null;
+            if (! ((bool) ($option['terms_truncated'] ?? false))) {
+                $allowedTerms = [];
+                foreach ($this->normalizeList($option['terms'] ?? []) as $term) {
+                    $value = strtolower(trim((string) ($term['value'] ?? '')));
+                    if ($value === '') {
+                        continue;
+                    }
+                    $allowedTerms[$value] = $value;
+                }
+            }
+
+            $nextValues = [];
+            foreach ($values as $value) {
+                if ($allowedTerms !== null && ! isset($allowedTerms[$value])) {
+                    continue;
+                }
+                $nextValues[] = $value;
+            }
+
+            if ($nextValues !== []) {
+                $taxonomy[$group] = $nextValues;
+            }
+        }
+
+        return [
+            'primary' => $primary,
+            'taxonomy' => $taxonomy,
+            'changed' => $rawPrimary !== $primary
+                || ! $this->sameStringListMap($rawTaxonomy, $taxonomy),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function normalizeMap(mixed $value): array
@@ -153,5 +227,67 @@ final class RuntimeDiscoveryFilterCatalogService
         }
 
         return array_values($values);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeStringList(mixed $value): array
+    {
+        $raw = is_array($value) ? $value : [$value];
+        $normalized = [];
+        foreach ($raw as $item) {
+            $value = strtolower(trim((string) $item));
+            if ($value === '' || in_array($value, $normalized, true)) {
+                continue;
+            }
+            $normalized[] = $value;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    private function normalizeStringListMap(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($value as $key => $items) {
+            $normalizedKey = strtolower(trim((string) $key));
+            if ($normalizedKey === '') {
+                continue;
+            }
+            $normalizedValues = $this->normalizeStringList($items);
+            if ($normalizedValues === []) {
+                continue;
+            }
+            $normalized[$normalizedKey] = $normalizedValues;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, array<int, string>>  $left
+     * @param  array<string, array<int, string>>  $right
+     */
+    private function sameStringListMap(array $left, array $right): bool
+    {
+        if (array_keys($left) !== array_keys($right)) {
+            return false;
+        }
+
+        foreach ($left as $key => $values) {
+            if (($right[$key] ?? []) !== $values) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

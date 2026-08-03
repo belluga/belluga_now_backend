@@ -10,6 +10,7 @@ use MongoDB\BSON\ObjectId;
 return new class extends Migration
 {
     private const EVENT_INDEX = 'idx_events_account_context_management_v1';
+
     private const OCCURRENCE_INDEX = 'idx_event_occurrences_account_context_management_v1';
 
     public function up(): void

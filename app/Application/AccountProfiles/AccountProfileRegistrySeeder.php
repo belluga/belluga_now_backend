@@ -78,12 +78,29 @@ class AccountProfileRegistrySeeder
 
     public function ensureDefaults(): void
     {
+        $this->ensureDefaultTypes(['personal', 'artist', 'venue']);
+    }
+
+    public function ensurePersonalDefault(): void
+    {
+        $this->ensureDefaultTypes(['personal']);
+    }
+
+    /**
+     * @param  array<int, string>  $types
+     */
+    private function ensureDefaultTypes(array $types): void
+    {
         $upserter = $this->defaultUpserter ?? new AccountProfileRegistryDefaultUpserter;
         $now = new UTCDateTime((int) (microtime(true) * 1000));
+        $requestedTypes = array_values(array_filter(array_map(
+            static fn (mixed $type): string => trim((string) $type),
+            $types
+        )));
 
         foreach ($this->defaults() as $entry) {
             $type = trim((string) ($entry['type'] ?? ''));
-            if ($type === '') {
+            if ($type === '' || ! in_array($type, $requestedTypes, true)) {
                 continue;
             }
 

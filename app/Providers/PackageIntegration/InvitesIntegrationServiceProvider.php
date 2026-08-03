@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers\PackageIntegration;
 
-use App\Application\Social\InviteablePeopleProjectionService;
 use App\Application\Push\InvitePushDeliveryService;
+use App\Application\Social\InviteablePeopleProjectionService;
 use App\Integration\Invites\InviteAttendanceGatewayAdapter;
 use App\Integration\Invites\InviteIdentityGatewayAdapter;
 use App\Integration\Invites\InviteRecipientProfileProjectionAdapter;

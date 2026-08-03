@@ -13,6 +13,7 @@ use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileNestedGroupService;
 use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
@@ -25,6 +26,7 @@ use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AccountProfilesController extends Controller
 {
@@ -42,9 +44,14 @@ class AccountProfilesController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $ownershipStates = AccountOwnershipStateService::allowedStates();
+
         $validated = $request->validate([
             'account_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
             'profile_type' => ['sometimes', 'string', 'max:255'],
+            'ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
+            'filter' => ['sometimes', 'array'],
+            'filter.ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
             'contact_mode' => ['sometimes', 'string', 'in:own,mirrored_account_profile'],
             'contact_channels_enabled_only' => ['sometimes', 'boolean'],
             'queryable_only' => ['sometimes', 'boolean'],

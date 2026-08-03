@@ -830,7 +830,7 @@ class LegacyEventPartiesCanonicalizationService
     }
 
     /**
-     * @param  array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}> ...$groupSets
+     * @param  array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>  ...$groupSets
      * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
      */
     private function mergeProfileGroups(array ...$groupSets): array
@@ -976,7 +976,6 @@ class LegacyEventPartiesCanonicalizationService
     }
 
     /**
-     * @param  mixed ...$sources
      * @return array<int, array{id:string,profile_type:string}>
      */
     private function mergeLinkedProfileSummaries(mixed ...$sources): array
@@ -1087,7 +1086,7 @@ class LegacyEventPartiesCanonicalizationService
     }
 
     /**
-     * @param  array<int, array<string, mixed>> ...$partySets
+     * @param  array<int, array<string, mixed>>  ...$partySets
      * @return array<int, array<string, mixed>>
      */
     private function mergeEventPartyRows(array ...$partySets): array
@@ -1294,7 +1293,6 @@ class LegacyEventPartiesCanonicalizationService
             $eventParties,
         ));
     }
-
 
     /**
      * @param  array<string, mixed>  $artist

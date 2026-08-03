@@ -10,8 +10,8 @@ use Belluga\MapPois\Console\Commands\RebuildMapPoisCommand;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
-use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
+use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 

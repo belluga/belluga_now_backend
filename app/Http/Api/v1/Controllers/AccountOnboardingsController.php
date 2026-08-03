@@ -33,7 +33,11 @@ class AccountOnboardingsController extends Controller
             $validated['updated_by_type'] = $validated['created_by_type'];
         }
 
-        $result = $this->onboardingService->create($validated, $request);
+        $result = $this->onboardingService->create(
+            $validated,
+            $request,
+            $request->header('X-Request-Id'),
+        );
 
         return response()->json([
             'data' => [

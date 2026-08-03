@@ -2,7 +2,6 @@
 
 namespace Tests\Api\v1\Accounts\Middleware\Contracts;
 
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use Illuminate\Testing\TestResponse;
 use Tests\Api\Traits\AccountAuthFunctions;
@@ -38,10 +37,14 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
     {
         parent::setUp();
 
+        $tenant = $this->resolveOrCreateTenant($this->tenant);
+
         if (! array_key_exists(static::class, static::$seededFixtures)) {
             $this->seedMiddlewareFixtures();
             static::$seededFixtures[static::class] = true;
         }
+
+        $tenant->makeCurrent();
     }
 
     public function testLoginAllAdminUsers(): void
@@ -313,5 +316,4 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         Account::current()?->forget();
         $tenant->makeCurrent();
     }
-
 }

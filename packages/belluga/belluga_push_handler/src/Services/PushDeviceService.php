@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Services;
 
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Belluga\PushHandler\Domain\Events\PushDeviceRegistered;
 use Belluga\PushHandler\Domain\Events\PushDeviceUnregistered;
 use Belluga\PushHandler\Domain\Events\PushTokensInvalidated;
-use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Contracts\Auth\Authenticatable;
 
 class PushDeviceService

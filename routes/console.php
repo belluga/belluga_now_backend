@@ -1,9 +1,9 @@
 <?php
 
+use App\Application\AccountProfiles\AccountProfileNameSearchKeyRepairService;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
-use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\Accounts\AccountMissingProfileRepairService;
 use App\Application\DiscoveryFilters\DiscoveryFilterMapUiBackfillService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
@@ -17,9 +17,8 @@ use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
-use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
+use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
@@ -30,6 +29,7 @@ use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -61,6 +61,87 @@ Artisan::command('tenant:profile-registry:sync-v1 {tenant_slug}', function () {
         Tenant::forgetCurrent();
     }
 })->purpose('Additive repair for the tenant profile_type_registry V1 defaults without overwriting tenant-owned entries.');
+
+Artisan::command('account-profiles:name-search-keys:repair {tenant_slug?} {--all} {--execute} {--confirm=} {--chunk=200}', function (AccountProfileNameSearchKeyRepairService $repairService) {
+    $tenantSlug = trim((string) $this->argument('tenant_slug'));
+    $allTenants = (bool) $this->option('all');
+
+    if (($tenantSlug === '') === (! $allTenants)) {
+        $this->error('Provide either {tenant_slug} or --all.');
+
+        return 1;
+    }
+
+    $execute = (bool) $this->option('execute');
+    $confirmationTarget = $allTenants ? 'all' : $tenantSlug;
+    $expectedConfirmation = "repair-account-profile-name-search-keys:{$confirmationTarget}";
+    if ($execute && trim((string) $this->option('confirm')) !== $expectedConfirmation) {
+        $this->error("Execute mode requires --confirm={$expectedConfirmation}.");
+
+        return 1;
+    }
+
+    $chunkSize = max(1, min((int) $this->option('chunk'), 1000));
+    $tenants = $allTenants
+        ? Tenant::query()->orderBy('slug')->get()
+        : Tenant::query()->where('slug', $tenantSlug)->get();
+    $previousTenant = Tenant::current();
+    $previousDefaultConnection = DB::getDefaultConnection();
+
+    if ($tenants->isEmpty()) {
+        $this->error($allTenants ? 'No tenants found.' : "Tenant not found for slug [{$tenantSlug}].");
+
+        return 1;
+    }
+
+    $summaries = [];
+    try {
+        foreach ($tenants as $tenant) {
+            $tenant->makeCurrent();
+
+            try {
+                $summary = $repairService->run($execute, $chunkSize);
+                $summaries[] = $summary;
+                $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            } finally {
+                Tenant::forgetCurrent();
+            }
+        }
+
+        if ($allTenants) {
+            $this->line(json_encode([
+                'tenant_count' => count($summaries),
+                'dry_run' => ! $execute,
+                'missing_name_search_keys' => array_sum(array_map(
+                    static fn (array $summary): int => (int) ($summary['missing_name_search_keys'] ?? 0),
+                    $summaries,
+                )),
+                'repairable_profiles' => array_sum(array_map(
+                    static fn (array $summary): int => (int) ($summary['repairable_profiles'] ?? 0),
+                    $summaries,
+                )),
+                'updated_profiles' => array_sum(array_map(
+                    static fn (array $summary): int => (int) ($summary['updated_profiles'] ?? 0),
+                    $summaries,
+                )),
+                'skipped_profiles' => array_sum(array_map(
+                    static fn (array $summary): int => (int) ($summary['skipped_profiles'] ?? 0),
+                    $summaries,
+                )),
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        }
+    } finally {
+        if ($previousTenant instanceof Tenant) {
+            $previousTenant->makeCurrent();
+        } else {
+            Tenant::forgetCurrent();
+        }
+
+        DB::setDefaultConnection($previousDefaultConnection);
+    }
+
+    return 0;
+})->purpose('Dry-run or repair missing account_profile.name_search_key values for one tenant or all tenants.');
 
 Artisan::command('accounts:missing-profiles:repair {tenant_slug} {--execute} {--confirm=} {--chunk=100}', function () {
     if (! app()->environment(['local', 'testing'])) {
