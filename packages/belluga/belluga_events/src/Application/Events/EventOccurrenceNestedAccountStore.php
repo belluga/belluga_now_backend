@@ -528,7 +528,33 @@ final class EventOccurrenceNestedAccountStore
             throw new NotFoundHttpException;
         }
 
-        $pageRows = array_slice($bucket, $offset, $perPage + 1);
+        $currentProfilesById = $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds(
+            array_values(array_filter(array_map(
+                function (array $row): string {
+                    $nestedProfile = $this->normalizeArray($row['nested_profile'] ?? []);
+
+                    return trim((string) ($nestedProfile['id'] ?? ''));
+                },
+                $bucket,
+            )))
+        );
+
+        $visibleBucket = array_values(array_filter(array_map(
+            function (array $row) use ($currentProfilesById): ?array {
+                $nestedProfile = $this->normalizeArray($row['nested_profile'] ?? []);
+                $profileId = trim((string) ($nestedProfile['id'] ?? ''));
+                if ($profileId === '') {
+                    return null;
+                }
+
+                $profile = $currentProfilesById[$profileId] ?? null;
+
+                return is_array($profile) ? $profile : null;
+            },
+            $bucket,
+        )));
+
+        $pageRows = array_slice($visibleBucket, $offset, $perPage + 1);
         $visibleRows = array_slice($pageRows, 0, $perPage);
 
         $nextCursor = null;
@@ -586,13 +612,8 @@ final class EventOccurrenceNestedAccountStore
             }
 
             $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
-            $profileType = trim((string) ($nestedProfile['profile_type'] ?? ''));
             $profileId = trim((string) ($nestedProfile['id'] ?? ''));
-            if (
-                $profileId === ''
-                || $profileType === ''
-                || ! $this->eventProfileResolver->isProfileTypeQueryable($profileType)
-            ) {
+            if ($profileId === '') {
                 continue;
             }
 
@@ -749,23 +770,21 @@ final class EventOccurrenceNestedAccountStore
      */
     private function formatPublicMemberRow(array $row): array
     {
-        $nestedProfile = $this->normalizeArray($row['nested_profile'] ?? []);
-        $slug = trim((string) ($nestedProfile['slug'] ?? ''));
-        $profileType = trim((string) ($nestedProfile['profile_type'] ?? ''));
-        $canOpenPublicDetail = $slug !== ''
-            && $profileType !== ''
-            && $this->eventProfileResolver->isProfileTypePubliclyNavigable($profileType);
+        $profile = $this->normalizeArray($row);
+        $slug = trim((string) ($profile['slug'] ?? ''));
 
         return [
-            'id' => trim((string) ($nestedProfile['id'] ?? '')),
-            'display_name' => trim((string) ($nestedProfile['label'] ?? '')),
-            'profile_type' => $profileType,
+            'id' => trim((string) ($profile['id'] ?? '')),
+            'display_name' => trim((string) ($profile['display_name'] ?? '')),
+            'profile_type' => trim((string) ($profile['profile_type'] ?? '')),
             'slug' => $slug === '' ? null : $slug,
-            'avatar_url' => is_string($nestedProfile['avatar_url'] ?? null) ? $nestedProfile['avatar_url'] : null,
-            'cover_url' => is_string($nestedProfile['cover_url'] ?? null) ? $nestedProfile['cover_url'] : null,
-            'taxonomy_terms' => [],
-            'can_open_public_detail' => $canOpenPublicDetail,
-            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
+            'avatar_url' => is_string($profile['avatar_url'] ?? null) ? $profile['avatar_url'] : null,
+            'cover_url' => is_string($profile['cover_url'] ?? null) ? $profile['cover_url'] : null,
+            'taxonomy_terms' => is_array($profile['taxonomy_terms'] ?? null) ? array_values($profile['taxonomy_terms']) : [],
+            'can_open_public_detail' => (bool) ($profile['can_open_public_detail'] ?? false),
+            'public_detail_path' => is_string($profile['public_detail_path'] ?? null)
+                ? $profile['public_detail_path']
+                : null,
         ];
     }
 

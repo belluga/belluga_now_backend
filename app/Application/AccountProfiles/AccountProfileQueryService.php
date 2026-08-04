@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Application\Accounts\AccountOwnershipStateService;
+use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
@@ -33,6 +34,7 @@ class AccountProfileQueryService extends AbstractQueryService
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
+        private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
@@ -164,8 +166,12 @@ class AccountProfileQueryService extends AbstractQueryService
             ->catalogSnapshot()
             ->policy();
         $allowedTypes = $publicCatalogPolicy->catalogTypeKeys();
-        $selectedTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
-        $hasExplicitTypeFilter = $this->hasExplicitPublicTypeFilter($queryParams);
+        $requestedTypes = $this->requestedPublicProfileTypes($queryParams);
+        $selectedTypes = $this->resolveEffectivePublicProfileTypesFromRequested(
+            $requestedTypes,
+            $allowedTypes,
+        );
+        $hasExplicitTypeFilter = $requestedTypes !== [];
         $selectedTypesForItems = $hasExplicitTypeFilter && $selectedTypes === []
             ? ['__no_public_profile_match__']
             : $selectedTypes;
@@ -192,6 +198,39 @@ class AccountProfileQueryService extends AbstractQueryService
             page: $page,
             perPage: $perPage,
         );
+
+        $runtimeCatalog = $this->runtimeDiscoveryFilterCatalogService->buildCanonicalCatalog(
+            'discovery.account_profiles',
+            is_array($aggregate['discovery_filter_facets'] ?? null)
+                ? $aggregate['discovery_filter_facets']
+                : null,
+            request()->getSchemeAndHttpHost()
+        );
+        $repairedSelection = $this->runtimeDiscoveryFilterCatalogService
+            ->repairSelectionAgainstCanonicalCatalog([
+                'primary' => $requestedTypes,
+                'taxonomy' => $taxonomyFilters,
+            ], $runtimeCatalog);
+
+        if ($repairedSelection['changed']) {
+            $repairedRequestedTypes = $repairedSelection['primary'];
+            $repairedSelectedTypes = $this->resolveEffectivePublicProfileTypesFromRequested(
+                $repairedRequestedTypes,
+                $allowedTypes,
+            );
+            $repairedSelectedTypesForItems = $repairedRequestedTypes !== []
+                && $repairedSelectedTypes === []
+                ? ['__no_public_profile_match__']
+                : $repairedSelectedTypes;
+            $aggregate = $this->runPublicDiscoveryAggregate(
+                publicCatalogPolicy: $publicCatalogPolicy,
+                selectedTypes: $repairedSelectedTypesForItems,
+                taxonomyFilters: $repairedSelection['taxonomy'],
+                search: $search,
+                page: $page,
+                perPage: $perPage,
+            );
+        }
 
         $orderedIds = [];
         foreach ($aggregate['page_rows'] as $row) {
@@ -811,6 +850,38 @@ class AccountProfileQueryService extends AbstractQueryService
         return $profile;
     }
 
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, AccountProfile>
+     */
+    public function findExistingPublicCatalogProfilesByIds(array $profileIds): array
+    {
+        $normalizedIds = $this->normalizeProfileIds($profileIds);
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy();
+
+        $resolved = [];
+        foreach (
+            AccountProfile::query()
+                ->whereIn('_id', $normalizedIds)
+                ->whereRaw($publicCatalogPolicy->catalogMatchExpression())
+                ->get() as $profile
+        ) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $resolved[(string) $profile->getKey()] = $profile;
+        }
+
+        return $resolved;
+    }
+
     public function isPubliclyExposed(AccountProfile $profile): bool
     {
         return $this->publicCatalogSnapshotReader
@@ -1033,6 +1104,18 @@ class AccountProfileQueryService extends AbstractQueryService
     }
 
     /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string>
+     */
+    private function normalizeProfileIds(array $profileIds): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds,
+        ), static fn (string $profileId): bool => $profileId !== '')));
+    }
+
+    /**
      * @param  array<string, array<int, string>>  $taxonomyFilters
      */
     private function applyPublicTaxonomyFilter(Builder $query, array $taxonomyFilters): void
@@ -1051,10 +1134,42 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     private function resolveEffectivePublicProfileTypes(array $queryParams, array $allowedTypes): array
     {
+        return $this->resolveEffectivePublicProfileTypesFromRequested(
+            $this->requestedPublicProfileTypes($queryParams),
+            $allowedTypes,
+        );
+    }
+
+    /**
+     * @param  array<int, string>  $requestedTypes
+     * @param  array<int, string>  $allowedTypes
+     * @return array<int, string>
+     */
+    private function resolveEffectivePublicProfileTypesFromRequested(
+        array $requestedTypes,
+        array $allowedTypes,
+    ): array {
         if ($allowedTypes === []) {
             return [];
         }
 
+        if ($requestedTypes === []) {
+            return $allowedTypes;
+        }
+
+        return array_values(array_intersect($allowedTypes, $requestedTypes));
+    }
+
+    private function hasExplicitPublicTypeFilter(array $queryParams): bool
+    {
+        return $this->requestedPublicProfileTypes($queryParams) !== [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function requestedPublicProfileTypes(array $queryParams): array
+    {
         $topLevelRequested = $this->normalizeProfileTypeList($queryParams['profile_type'] ?? null);
         $filterPayload = $queryParams['filter'] ?? null;
         $filterRequested = is_array($filterPayload)
@@ -1062,33 +1177,14 @@ class AccountProfileQueryService extends AbstractQueryService
             : [];
 
         if ($topLevelRequested !== [] && $filterRequested !== []) {
-            $requested = array_values(array_intersect($topLevelRequested, $filterRequested));
-        } elseif ($topLevelRequested !== []) {
-            $requested = $topLevelRequested;
-        } else {
-            $requested = $filterRequested;
+            return array_values(array_intersect($topLevelRequested, $filterRequested));
         }
 
-        if ($requested === []) {
-            return $allowedTypes;
-        }
-
-        return array_values(array_intersect($allowedTypes, $requested));
-    }
-
-    private function hasExplicitPublicTypeFilter(array $queryParams): bool
-    {
-        $topLevelRequested = $this->normalizeProfileTypeList($queryParams['profile_type'] ?? null);
         if ($topLevelRequested !== []) {
-            return true;
+            return $topLevelRequested;
         }
 
-        $filterPayload = $queryParams['filter'] ?? null;
-        if (! is_array($filterPayload)) {
-            return false;
-        }
-
-        return $this->normalizeProfileTypeList($filterPayload['profile_type'] ?? null) !== [];
+        return $filterRequested;
     }
 
     /**

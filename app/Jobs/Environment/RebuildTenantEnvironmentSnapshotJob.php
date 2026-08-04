@@ -13,7 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Spatie\Multitenancy\Jobs\NotTenantAware;
 
-class RebuildTenantEnvironmentSnapshotJob implements ShouldQueue, NotTenantAware
+class RebuildTenantEnvironmentSnapshotJob implements NotTenantAware, ShouldQueue
 {
     use Dispatchable;
     use InteractsWithQueue;

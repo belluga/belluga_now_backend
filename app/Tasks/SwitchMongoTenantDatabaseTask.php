@@ -10,6 +10,8 @@ use Spatie\Multitenancy\Tasks\SwitchTenantTask;
 
 class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
 {
+    private ?string $originalDefaultConnection = null;
+
     public function makeCurrent(IsTenant $tenant): void
     {
         if (is_null($tenant->getDatabaseName())) {
@@ -20,6 +22,10 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
 
         if (! $connectionName) {
             return;
+        }
+
+        if ($this->originalDefaultConnection === null) {
+            $this->originalDefaultConnection = DB::getDefaultConnection();
         }
 
         // Atualiza a configuração com o banco de dados do tenant atual
@@ -47,8 +53,13 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
             "database.connections.$connectionName.database" => null,
         ]);
 
-        DB::purge($connectionName);
-        DB::setDefaultConnection(config('database.default'));
+        $originalDefaultConnection = $this->originalDefaultConnection;
+        $this->originalDefaultConnection = null;
 
+        DB::purge($connectionName);
+
+        if ($originalDefaultConnection !== null) {
+            DB::setDefaultConnection($originalDefaultConnection);
+        }
     }
 }

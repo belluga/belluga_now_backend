@@ -1,5 +1,7 @@
 <?php
 
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -9,6 +11,10 @@ use Illuminate\Support\Facades\Route;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+
+$isApiRequest = static function (Request $request): bool {
+    return $request->is('api/*') || $request->is('admin/api/*');
+};
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -124,7 +130,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 });
         }
     )
-    ->withMiddleware(function (Middleware $middleware) {
+    ->withMiddleware(function (Middleware $middleware) use ($isApiRequest) {
         // Cloudflare terminates TLS at the edge and forwards traffic through trusted proxies.
         // We trust forwarding headers only from configured proxy ranges.
         $middleware->trustProxies(
@@ -134,6 +140,14 @@ return Application::configure(basePath: dirname(__DIR__))
                 | Request::HEADER_X_FORWARDED_PORT
                 | Request::HEADER_X_FORWARDED_PROTO
         );
+
+        $middleware->redirectGuestsTo(function (Request $request) use ($isApiRequest): ?string {
+            if ($isApiRequest($request)) {
+                return null;
+            }
+
+            return Route::has('login') ? route('login') : url('/');
+        });
 
         // Platform-wide API security baseline (L1/L2/L3 + idempotency + edge/origin controls).
         $middleware->prepend(\App\Http\Middleware\PublicTenantMediaCors::class);
@@ -180,7 +194,23 @@ return Application::configure(basePath: dirname(__DIR__))
             'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
         ]);
     })
-    ->withExceptions(function (Exceptions $exceptions) {
+    ->withExceptions(function (Exceptions $exceptions) use ($isApiRequest) {
+        $exceptions->renderable(function (AuthenticationException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json(['message' => $e->getMessage()], 401);
+        });
+        $exceptions->renderable(function (ConcurrencyConflictException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'A concurrency conflict occurred. Please try again.',
+            ], 409);
+        });
         $exceptions->renderable(function (NotFoundHttpException $e) {
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
         });

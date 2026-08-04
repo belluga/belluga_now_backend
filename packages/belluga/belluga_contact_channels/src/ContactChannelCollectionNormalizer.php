@@ -17,8 +17,8 @@ final class ContactChannelCollectionNormalizer
     ) {}
 
     /**
-     * @param array<int, mixed> $incomingChannels
-     * @param array<int, array<string, mixed>> $storedChannels
+     * @param  array<int, mixed>  $incomingChannels
+     * @param  array<int, array<string, mixed>>  $storedChannels
      */
     public function normalizeForWrite(array $incomingChannels, array $storedChannels): ContactChannelNormalizationResult
     {

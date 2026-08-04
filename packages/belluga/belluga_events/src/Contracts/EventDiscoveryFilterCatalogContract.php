@@ -15,4 +15,14 @@ interface EventDiscoveryFilterCatalogContract
         ?array $runtimeFacets,
         ?string $baseUrl = null,
     ): array;
+
+    /**
+     * @param  array{primary?: mixed, taxonomy?: mixed}  $selection
+     * @param  array<string, mixed>  $catalog
+     * @return array{primary: array<int, string>, taxonomy: array<string, array<int, string>>, changed: bool}
+     */
+    public function repairSelectionAgainstCanonicalCatalog(
+        array $selection,
+        array $catalog,
+    ): array;
 }

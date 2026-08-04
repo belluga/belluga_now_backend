@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Operation\FindOneAndUpdate;
 
 class AccountProfileManagementService
@@ -208,10 +209,13 @@ class AccountProfileManagementService
             }
             $payload['account_id'] = (string) $payload['account_id'];
             $payload['location'] = $this->formatLocation($payload['location'] ?? null);
+            $payload['name_search_key'] = AccountProfileNameSearchKey::fromDisplayName(
+                (string) ($payload['display_name'] ?? '')
+            );
 
             $profile = AccountProfile::create($payload)->fresh();
-        } catch (BulkWriteException $exception) {
-            if (str_contains($exception->getMessage(), 'E11000')) {
+        } catch (BulkWriteException|CommandException $exception) {
+            if ($this->isDuplicateKeyException($exception)) {
                 throw ValidationException::withMessages([
                     'account_profile' => ['Account profile already exists.'],
                 ]);
@@ -333,14 +337,8 @@ class AccountProfileManagementService
                     $persistedProfile = AccountProfile::query()->findOrFail($profileId);
                     $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
                     $persistedProfile->fill($attributes);
-                    if (! array_key_exists('nested_profile_groups', $attributes)) {
-                        $persistedProfile->setAttribute(
-                            'nested_profile_groups',
-                            $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persistedProfile),
-                        );
-                    }
                     if (
-                        ! $persistedProfile->isDirty()
+                        ! $this->hasSemanticMutation($persistedProfile)
                         && ! array_key_exists('nested_profile_groups', $attributes)
                         && $mutateWithinTransaction === null
                     ) {
@@ -357,6 +355,13 @@ class AccountProfileManagementService
                                 $relationAttributes,
                             );
                         }
+
+                        $this->outboxPublisher->recordReceiptOnly(
+                            $context,
+                            $persistedProfile,
+                            $commandId,
+                            $fingerprint,
+                        );
 
                         return [
                             'profile' => $persistedProfile,
@@ -401,8 +406,8 @@ class AccountProfileManagementService
                             );
                         }
                         $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
-                    } catch (BulkWriteException $exception) {
-                        if (str_contains($exception->getMessage(), 'E11000')) {
+                    } catch (BulkWriteException|CommandException $exception) {
+                        if ($this->isDuplicateKeyException($exception)) {
                             throw ValidationException::withMessages([
                                 'slug' => ['Account profile slug already exists.'],
                             ]);
@@ -710,6 +715,18 @@ class AccountProfileManagementService
         return AccountProfile::query()->findOrFail($profileId);
     }
 
+    private function hasSemanticMutation(AccountProfile $profile): bool
+    {
+        $dirty = $profile->getDirty();
+        unset(
+            $dirty['_id'],
+            $dirty['updated_by'],
+            $dirty['updated_by_type'],
+        );
+
+        return $dirty !== [];
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -730,6 +747,11 @@ class AccountProfileManagementService
             'type' => 'Point',
             'coordinates' => [(float) $lng, (float) $lat],
         ];
+    }
+
+    private function isDuplicateKeyException(\Throwable $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'E11000');
     }
 
     /**

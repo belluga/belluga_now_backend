@@ -16,6 +16,12 @@ abstract class ApiV1BrandingTenantTestContract extends TestCaseTenant
 {
     private bool $tenantBrandingMutated = false;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureCanonicalTenantExists($this->tenant);
+    }
+
     protected function tearDown(): void
     {
         if ($this->tenantBrandingMutated) {

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Belluga\PushHandler\Http\Controllers\Account;
 
+use Belluga\PushHandler\Contracts\PushChannelAuthorizationContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
 use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
-use Belluga\PushHandler\Contracts\PushChannelAuthorizationContract;
 use Belluga\PushHandler\Http\Controllers\Account\Concerns\ResolvesAccountContext;
 use Belluga\PushHandler\Http\Requests\PushQuotaCheckRequest;
 use Belluga\PushHandler\Http\Support\PushAccountScopeResolver;

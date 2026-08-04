@@ -44,6 +44,7 @@ class LandlordPasswordCredentialBackfillService
 
             if ($inspection['status'] === 'clean') {
                 $summary['totals']['clean']++;
+
                 continue;
             }
 

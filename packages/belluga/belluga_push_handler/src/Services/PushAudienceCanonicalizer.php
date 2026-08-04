@@ -41,7 +41,6 @@ class PushAudienceCanonicalizer
     }
 
     /**
-     * @param  mixed  $value
      * @return array<int, string>
      */
     private function normalizedUserIds(mixed $value): array

@@ -23,7 +23,7 @@ interface ContactChannelDefinitionContract
     public function normalizeValue(string $value): ?string;
 
     /**
-     * @param array<string, mixed> $metadata
+     * @param  array<string, mixed>  $metadata
      * @return array<string, mixed>
      */
     public function normalizeMetadata(array $metadata, string $field): array;

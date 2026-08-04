@@ -138,7 +138,7 @@ class ApiCorsOwnershipTest extends TestCaseAuthenticated
     {
         $appUrlParts = parse_url((string) config('app.url')) ?: [];
         $scheme = strtolower((string) ($appUrlParts['scheme'] ?? 'http'));
-        $port = isset($appUrlParts['port']) ? ':' . $appUrlParts['port'] : '';
+        $port = isset($appUrlParts['port']) ? ':'.$appUrlParts['port'] : '';
 
         return sprintf('%s://%s%s', $scheme, $host, $port);
     }

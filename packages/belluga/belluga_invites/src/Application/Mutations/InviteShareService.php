@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Belluga\Invites\Application\Mutations;
 
 use Belluga\Invites\Application\Feed\InviteProjectionService;
-use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
 use Belluga\Invites\Application\Preview\InvitePreviewPayloadFactory;
+use Belluga\Invites\Application\Quotas\InviteQuotaCounterService;
 use Belluga\Invites\Application\Settings\InviteRuntimeSettingsService;
 use Belluga\Invites\Application\Targets\InviteTargetResolverService;
 use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;

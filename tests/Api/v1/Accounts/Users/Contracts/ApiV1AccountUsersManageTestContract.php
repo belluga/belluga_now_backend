@@ -2,6 +2,8 @@
 
 namespace Tests\Api\v1\Accounts\Users\Contracts;
 
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Testing\TestResponse;
 use Tests\Helpers\RoleLabels;
 use Tests\Helpers\UserLabels;
@@ -9,6 +11,12 @@ use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureAccountSupportRoles();
+    }
+
     protected string $base_api_url {
         get{
             return $this->base_api_account.'users/';
@@ -296,5 +304,46 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
             uri: "{$this->base_api_url}$user_id/force_delete",
             headers: $this->getHeaders(),
         );
+    }
+
+    private function ensureAccountSupportRoles(): void
+    {
+        $account = Account::query()->where('slug', $this->account->slug)->first();
+        if (! $account instanceof Account) {
+            return;
+        }
+
+        $defaults = [
+            'role_user_manager' => [
+                'name' => 'Users Manager',
+                'permissions' => ['account-users:view', 'account-users:create'],
+            ],
+            'role_visitor' => [
+                'name' => 'Visitor',
+                'permissions' => ['account-users:view', 'account-users:create'],
+            ],
+        ];
+
+        foreach ($defaults as $property => $definition) {
+            /** @var AccountRoleTemplate|null $role */
+            $role = $account->roleTemplates()
+                ->withTrashed()
+                ->where('name', $definition['name'])
+                ->first();
+
+            if (! $role instanceof AccountRoleTemplate) {
+                $role = $account->roleTemplates()->create($definition);
+            } else {
+                if ($role->trashed()) {
+                    $role->restore();
+                }
+
+                $role->permissions = $definition['permissions'];
+                $role->save();
+            }
+
+            $this->account->{$property}->name = $role->name;
+            $this->account->{$property}->id = (string) $role->_id;
+        }
     }
 }

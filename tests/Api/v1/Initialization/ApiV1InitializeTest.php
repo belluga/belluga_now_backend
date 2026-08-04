@@ -2,6 +2,8 @@
 
 namespace Tests\Api\v1\Initialization;
 
+use App\Application\Initialization\Actions\CreateTenantAction;
+use App\Models\Tenants\TenantProfileType;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -80,6 +82,17 @@ class ApiV1InitializeTest extends TestCase
         $this->landlord->tenant_primary->role_admin->id = $response->json()['data']['tenant']['role_admin_id'];
 
         $this->landlord->role_superadmin->id = $response->json()['data']['role']['id'];
+
+        $tenant = app(CreateTenantAction::class)->execute([
+            'name' => 'Bootstrap Defaults Tenant',
+            'subdomain' => 'bootstrap-defaults-tenant',
+        ]);
+        $tenant->makeCurrent();
+
+        $this->assertSame(
+            ['personal'],
+            TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
+        );
     }
 
     // public function testInitiateAgain(): void {

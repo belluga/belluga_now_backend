@@ -4,24 +4,16 @@ namespace App\Http\Middleware;
 
 use App\Models\Landlord\LandlordUser;
 use Closure;
+use Illuminate\Auth\AuthenticationException;
 
 class LandlordValidation
 {
     public function handle($request, Closure $next)
     {
-
         $user = auth()->guard('sanctum')->user();
 
-        if (! $user) {
-            abort(401, 'Unauthorized');
-        }
-
-        $class = get_class($user);
-
-        $current_user_is_landlord = $class == LandlordUser::class;
-
-        if (! $current_user_is_landlord) {
-            abort(401, 'Unauthorized');
+        if (! $user instanceof LandlordUser) {
+            throw new AuthenticationException('Unauthenticated.', ['sanctum']);
         }
 
         return $next($request);

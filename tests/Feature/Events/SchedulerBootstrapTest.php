@@ -7,8 +7,8 @@ namespace Tests\Feature\Events;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
-use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Console\Kernel;
 use Tests\TestCase;
 
 class SchedulerBootstrapTest extends TestCase

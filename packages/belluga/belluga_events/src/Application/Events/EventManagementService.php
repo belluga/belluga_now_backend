@@ -765,7 +765,7 @@ class EventManagementService
     }
 
     /**
-     * @param  array<int, array<string, mixed>> ...$rowSets
+     * @param  array<int, array<string, mixed>>  ...$rowSets
      * @return array<int, array<string, mixed>>
      */
     private function mergeLegacyEventPartyRows(array ...$rowSets): array

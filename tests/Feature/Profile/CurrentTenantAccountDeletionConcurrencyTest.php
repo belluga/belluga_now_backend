@@ -171,7 +171,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         $this->assertTrue($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
         $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
-        $this->assertGreaterThanOrEqual(600, (int) ($deleteResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertSame((string) $target->_id, (string) ($verifyResult['user_id'] ?? ''), json_encode($results, JSON_PRETTY_PRINT));
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
 

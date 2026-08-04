@@ -29,6 +29,7 @@ final class DiscoveryFilterSelectionRepairService
             $normalizedKey = strtolower(trim((string) $key));
             if ($normalizedKey === '' || ! isset($catalogByKey[$normalizedKey])) {
                 $repaired = true;
+
                 continue;
             }
             if (! in_array($normalizedKey, $nextPrimary, true)) {
@@ -59,6 +60,7 @@ final class DiscoveryFilterSelectionRepairService
             $groupKey = strtolower(trim((string) $group));
             if ($groupKey === '' || ! isset($allowedTaxonomy[$groupKey])) {
                 $repaired = true;
+
                 continue;
             }
             $valueList = is_array($values) ? $values : [$values];
@@ -66,6 +68,7 @@ final class DiscoveryFilterSelectionRepairService
                 $normalizedValue = strtolower(trim((string) $value));
                 if ($normalizedValue === '' || ! in_array($normalizedValue, $allowedTaxonomy[$groupKey], true)) {
                     $repaired = true;
+
                     continue;
                 }
                 $nextTaxonomy[$groupKey] ??= [];

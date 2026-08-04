@@ -65,13 +65,13 @@ class EnvironmentResolverServiceTest extends TestCase
         $landlord = LandlordSettings::current();
         $originalLandlord = $landlord?->getAttribute('tenant_public_auth');
         if ($landlord === null) {
-            $landlord = new LandlordSettings();
+            $landlord = new LandlordSettings;
             $landlord->setAttribute('_id', 'settings_root');
         }
         $tenantSettings = TenantSettings::current();
         $originalTenant = $tenantSettings?->getAttribute('tenant_public_auth');
         if ($tenantSettings === null) {
-            $tenantSettings = new TenantSettings();
+            $tenantSettings = new TenantSettings;
             $tenantSettings->setAttribute('_id', 'settings_root');
         }
 
@@ -121,7 +121,7 @@ class EnvironmentResolverServiceTest extends TestCase
         $landlord = LandlordSettings::current();
         $originalLandlord = $landlord?->getAttribute('tenant_public_auth');
         if ($landlord === null) {
-            $landlord = new LandlordSettings();
+            $landlord = new LandlordSettings;
             $landlord->setAttribute('_id', 'settings_root');
         }
 
@@ -197,7 +197,7 @@ class EnvironmentResolverServiceTest extends TestCase
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
 
-        $type = new TenantProfileType();
+        $type = new TenantProfileType;
         $type->forceFill([
             'type' => 'restaurant',
             'label' => 'Restaurant',

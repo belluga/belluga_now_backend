@@ -56,8 +56,8 @@ abstract class ApiV1AnonymousIdentityTestContract extends TestCaseTenant
     private function throttleTestRemoteAddr(): string
     {
         $seed = crc32(static::class);
-        $thirdOctet = (($seed >> 8) & 0xff) ?: 1;
-        $fourthOctet = ($seed & 0xff) ?: 1;
+        $thirdOctet = (($seed >> 8) & 0xFF) ?: 1;
+        $fourthOctet = ($seed & 0xFF) ?: 1;
 
         return sprintf('127.0.%d.%d', $thirdOctet, $fourthOctet);
     }

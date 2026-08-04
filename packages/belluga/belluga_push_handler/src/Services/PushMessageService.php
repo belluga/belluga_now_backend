@@ -116,7 +116,7 @@ class PushMessageService
             $this->channelAuthorization->assertCanPersist($scope, $accountId, $payload['audience']);
         }
 
-        $candidate = $existing ? clone $existing : new PushMessage();
+        $candidate = $existing ? clone $existing : new PushMessage;
         $candidate->forceFill($payload);
         $this->audienceTopology->assertDispatchable($candidate);
 

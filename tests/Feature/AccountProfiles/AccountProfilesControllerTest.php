@@ -62,8 +62,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
-    private static bool $bootstrapped = false;
-
     private Account $account;
 
     private AccountRoleTemplate $accountRoleTemplate;
@@ -72,11 +70,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         parent::setUp();
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
-        }
+        $this->refreshLandlordAndTenantDatabases();
+        $this->initializeSystem();
 
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -345,10 +340,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_gallery_update_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         Storage::fake('public');
 
         $profile = AccountProfile::create([
@@ -462,23 +453,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_profile_delete_persists_and_dispatches_a_tombstone_outbox_event(): void
     {
         $commandId = 'u07a-profile-delete-'.uniqid('', true);
-        $createResponse = $this->postJson(
-            "{$this->base_tenant_api_admin}account_onboardings",
-            [
-                'name' => 'Outbox Delete Venue',
-                'ownership_state' => 'tenant_owned',
-                'profile_type' => 'venue',
-                'location' => [
-                    'lat' => -20.0,
-                    'lng' => -40.0,
-                ],
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Delete Venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
             ],
-            $this->getHeaders(),
-        );
-
-        $createResponse->assertCreated();
-        $profileId = (string) $createResponse->json('data.account_profile.id');
-        $profile = AccountProfile::query()->findOrFail($profileId);
+        ]);
+        $profileId = (string) $profile->_id;
         $profile->is_active = false;
         $profile->save();
         $this->assertNotNull(
@@ -521,23 +505,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $deleteCommandId = 'u07a-profile-delete-before-restore-'.uniqid('', true);
         $restoreCommandId = 'u07a-profile-restore-'.uniqid('', true);
-        $createResponse = $this->postJson(
-            "{$this->base_tenant_api_admin}account_onboardings",
-            [
-                'name' => 'Outbox Restore Venue',
-                'ownership_state' => 'tenant_owned',
-                'profile_type' => 'venue',
-                'location' => [
-                    'lat' => -20.0,
-                    'lng' => -40.0,
-                ],
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Restore Venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
             ],
-            $this->getHeaders(),
-        );
-
-        $createResponse->assertCreated();
-        $profileId = (string) $createResponse->json('data.account_profile.id');
-        $profile = AccountProfile::query()->findOrFail($profileId);
+        ]);
+        $profileId = (string) $profile->_id;
         $profile->is_active = false;
         $profile->save();
 
@@ -575,23 +552,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $deleteCommandId = 'u07a-profile-delete-before-force-'.uniqid('', true);
         $commandId = 'u07a-profile-force-delete-'.uniqid('', true);
-        $createResponse = $this->postJson(
-            "{$this->base_tenant_api_admin}account_onboardings",
-            [
-                'name' => 'Outbox Force Delete Venue',
-                'ownership_state' => 'tenant_owned',
-                'profile_type' => 'venue',
-                'location' => [
-                    'lat' => -20.0,
-                    'lng' => -40.0,
-                ],
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Outbox Force Delete Venue',
+            'location' => [
+                'lat' => -20.0,
+                'lng' => -40.0,
             ],
-            $this->getHeaders(),
-        );
-
-        $createResponse->assertCreated();
-        $profileId = (string) $createResponse->json('data.account_profile.id');
-        $profile = AccountProfile::query()->findOrFail($profileId);
+        ]);
+        $profileId = (string) $profile->_id;
         $profile->is_active = false;
         $profile->save();
         $this->assertNotNull(
@@ -1046,10 +1016,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_onboarding_persists_and_dispatches_its_profile_outbox_event(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         MapPoi::query()->delete();
 
         $commandId = 'u07a-profile-create-'.uniqid('', true);
@@ -1093,10 +1059,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_onboarding_replays_the_same_request_id_without_a_second_account_or_outbox_event(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         $commandId = 'u07a-profile-onboarding-replay-'.uniqid('', true);
         $payload = [
             'name' => 'Outbox Onboarding Replay',
@@ -1123,6 +1085,65 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ->selectCollection('account_profile_outbox')
                 ->countDocuments(['command_id' => $commandId]),
         );
+    }
+
+    public function test_account_profile_noop_update_persists_a_receipt_without_outbox_and_replay_does_not_overwrite_newer_state(): void
+    {
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Noop Receipt Source',
+        ]);
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profiles')
+            ->updateOne(
+                ['_id' => $profile->_id],
+                ['$unset' => ['aggregate_revision' => true]],
+            );
+
+        $commandId = 'u07a-profile-noop-replay-'.uniqid('', true);
+        $noopHeaders = [...$this->getHeaders(), 'X-Request-Id' => $commandId];
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}";
+
+        $first = $this->patchJson(
+            $url,
+            ['display_name' => 'Noop Receipt Source'],
+            $noopHeaders,
+        );
+
+        $first->assertOk();
+        $receipt = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+        $this->assertNotNull($receipt);
+        $this->assertNull($receipt['outbox_event_id'] ?? null);
+        $this->assertSame(1, (int) ($receipt['aggregate_revision'] ?? 0));
+        $this->assertSame(
+            0,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection('account_profile_outbox')
+                ->countDocuments(['command_id' => $commandId]),
+        );
+        $this->assertSame(1, (int) ($profile->fresh()->aggregate_revision ?? 0));
+
+        $this->patchJson(
+            $url,
+            ['display_name' => 'Noop Receipt Newer State'],
+            [...$this->getHeaders(), 'X-Request-Id' => 'u07a-profile-newer-state-'.uniqid('', true)],
+        )->assertOk();
+
+        $replay = $this->patchJson(
+            $url,
+            ['display_name' => 'Noop Receipt Source'],
+            $noopHeaders,
+        );
+
+        $replay->assertOk();
+        $this->assertSame('Noop Receipt Newer State', (string) $profile->fresh()->display_name);
+        $replay->assertJsonPath('data.display_name', 'Noop Receipt Newer State');
     }
 
     public function test_public_account_profile_index_forbids_landlord_user_without_tenant_access(): void
@@ -1265,7 +1286,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_public_account_profile_index_excludes_personal_profiles_even_when_inviteable_and_favoritable(): void
+    public function test_public_account_profile_index_repairs_unsupported_personal_filter_without_exposing_personal_profiles(): void
     {
         $this->createAccountUser([]);
 
@@ -1325,7 +1346,21 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $filteredResponse->assertStatus(200);
-        $this->assertSame([], $filteredResponse->json('data'));
+        $this->assertSame(
+            ['Public Catalog Guard'],
+            collect($filteredResponse->json('data'))->pluck('display_name')->values()->all()
+        );
+        $this->assertFalse(
+            collect($filteredResponse->json('data'))->contains(
+                fn (array $item): bool => ($item['slug'] ?? null) === $personal->slug
+            )
+        );
+
+        $catalogFilterKeys = collect($filteredResponse->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+        $this->assertNotContains('personal', $catalogFilterKeys);
 
         $detailResponse = $this->getJson(
             "{$this->base_api_tenant}account_profiles/{$personal->slug}"
@@ -1498,6 +1533,57 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $items = collect($response->json('data'));
         $this->assertCount(1, $items);
         $this->assertSame('Italian Venue', $items->first()['display_name'] ?? null);
+    }
+
+    public function test_public_account_profile_index_repairs_unsupported_taxonomy_filter_in_same_response(): void
+    {
+        $this->createAccountUser([]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Italian Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'italian'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:italian'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $secondary = Account::create([
+            'name' => 'Japanese Repair Account',
+            'document' => 'DOC-JAPANESE-REPAIR',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $secondary->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Japanese Venue',
+            'taxonomy_terms' => [
+                ['type' => 'cuisine', 'value' => 'japanese'],
+            ],
+            'taxonomy_terms_flat' => ['cuisine:japanese'],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?taxonomy[0][type]=cuisine&taxonomy[0][value]=martian"
+        );
+
+        $response->assertStatus(200);
+        $this->assertEqualsCanonicalizing(
+            ['Italian Venue', 'Japanese Venue'],
+            collect($response->json('data'))->pluck('display_name')->values()->all(),
+        );
+
+        $catalogCuisineTerms = collect($response->json('discovery_filter_catalog.taxonomy_options.cuisine.terms') ?? [])
+            ->pluck('value')
+            ->values()
+            ->all();
+        $this->assertSame(['italian', 'japanese'], $catalogCuisineTerms);
+        $this->assertNotContains('martian', $catalogCuisineTerms);
     }
 
     public function test_public_account_profile_index_uses_name_search_key_prefix_only(): void
@@ -1736,6 +1822,64 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotContains('hidden_runtime_type', $catalogFilterKeys);
     }
 
+    public function test_public_account_profile_index_repairs_stale_type_filter_in_same_response(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'artist_public',
+            'label' => 'Artist Public',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+        TenantProfileType::create([
+            'type' => 'stale_hidden',
+            'label' => 'Stale Hidden',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_favoritable' => true,
+                'is_publicly_discoverable' => true,
+                'is_poi_enabled' => false,
+                'has_events' => false,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist_public',
+            'display_name' => 'Runtime Artist',
+            'taxonomy_terms' => [],
+            'taxonomy_terms_flat' => [],
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=stale_hidden&page=1&per_page=15"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.display_name', 'Runtime Artist');
+
+        $catalogFilterKeys = collect($response->json('discovery_filter_catalog.filters') ?? [])
+            ->pluck('key')
+            ->values()
+            ->all();
+
+        $this->assertContains('artist_public', $catalogFilterKeys);
+        $this->assertNotContains('stale_hidden', $catalogFilterKeys);
+    }
+
     public function test_public_account_profile_index_runtime_facets_are_self_excluding_for_selected_filters(): void
     {
         $this->createAccountUser([]);
@@ -1964,7 +2108,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['profile_type']);
     }
 
-    public function test_public_account_profile_index_returns_empty_when_top_level_profile_type_is_non_favoritable(): void
+    public function test_public_account_profile_index_returns_empty_when_repaired_public_catalog_has_no_eligible_profiles(): void
     {
         $this->createAccountUser([]);
 
@@ -2504,14 +2648,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $index = $this->getJson("{$this->base_api_tenant}account_profiles");
         $index->assertStatus(200);
         $index->assertJsonPath('data.0.slug', 'route-disabled-venue');
-        $index->assertJsonPath('data.0.can_open_public_detail', true);
-        $index->assertJsonPath('data.0.public_detail_path', '/parceiro/route-disabled-venue');
+        $index->assertJsonPath('data.0.can_open_public_detail', false);
+        $index->assertJsonPath('data.0.public_detail_path', null);
 
         $detail = $this->getJson(
             "{$this->base_api_tenant}account_profiles/route-disabled-venue"
         );
 
-        $detail->assertStatus(200);
+        $detail->assertNotFound();
     }
 
     public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_future_venue_occurrences(): void
@@ -2526,6 +2670,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'profile_type' => 'venue',
             'display_name' => 'Agenda Detail Venue',
             'slug' => 'agenda-detail-venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
             'is_active' => true,
             'visibility' => 'public',
         ]);
@@ -2538,6 +2686,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $eventCoverUrl = 'https://example.org/account-profile-agenda-event-cover.jpg';
         $venueCoverUrl = 'https://example.org/account-profile-agenda-venue-cover.jpg';
+        $profile->forceFill([
+            'cover_url' => $venueCoverUrl,
+        ])->save();
         $futureEvent->forceFill([
             'thumb' => [
                 'type' => 'image',
@@ -3694,6 +3845,45 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_admin_account_profile_index_filters_by_nested_ownership_state(): void
+    {
+        AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Managed Profile',
+            'is_active' => true,
+        ]);
+
+        $unmanagedAccount = Account::create([
+            'name' => 'Nested Unmanaged Account',
+            'document' => 'DOC-NESTED-UNMANAGED',
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $unmanagedAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Nested Unmanaged Profile',
+            'is_active' => true,
+        ]);
+
+        $query = http_build_query([
+            'filter' => [
+                'ownership_state' => 'unmanaged',
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?{$query}",
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertTrue(
+            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
+        );
+    }
+
     public function test_account_profile_types_returns_registry(): void
     {
         $response = $this->getJson("{$this->base_tenant_api_admin}account_profile_types", $this->getHeaders());
@@ -3967,6 +4157,24 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.account_profile.taxonomy_terms.0.label', 'Italian');
     }
 
+    public function test_account_profile_create_sets_name_search_key_immediately(): void
+    {
+        $profile = app(AccountProfileManagementService::class)->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Search Key Test Profile',
+        ]);
+
+        $this->assertNotEmpty(
+            $profile->getAttribute('name_search_key'),
+            'name_search_key must be populated at profile creation time, not deferred to first update',
+        );
+        $this->assertSame(
+            'search key test profile',
+            $profile->getAttribute('name_search_key'),
+        );
+    }
+
     public function test_account_profile_update_replaces_avatar_upload(): void
     {
         Storage::fake('public');
@@ -4221,10 +4429,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_profile_update_media_removals_refresh_map_poi_projection_urls(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-gallery-outbox-durability.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         Storage::fake('public');
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
@@ -5163,7 +5367,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadataRevision = (int) $response->json('data.aggregate_revision');
 
         $partnersDelta = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
                 'aggregate_revision' => $metadataRevision,
                 'add_ids' => [
@@ -5177,7 +5381,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $partnersDelta->assertJsonPath('data.member_count', 2);
 
         $sponsorsDelta = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/patrocinadores/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/patrocinadores/members',
             [
                 'aggregate_revision' => (int) $partnersDelta->json('data.aggregate_revision'),
                 'add_ids' => [(string) $sponsor->_id],
@@ -5200,7 +5404,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.1.member_count', 1);
 
         $partnersPage = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             $this->getHeaders()
         );
         $partnersPage->assertOk();
@@ -5209,7 +5413,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $partnersPage->assertJsonPath('data.1.id', (string) $partnerA->_id);
 
         $sponsorsPage = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/patrocinadores/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/patrocinadores/members',
             $this->getHeaders()
         );
         $sponsorsPage->assertOk();
@@ -5264,7 +5468,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
 
         $membersPage = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             $this->getHeaders()
         );
         $membersPage->assertOk();
@@ -5512,7 +5716,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadataResponse->assertOk();
 
         $memberResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/cascade-members/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/cascade-members/members',
             [
                 'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $target->_id, (string) $surviving->_id],
@@ -5537,7 +5741,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
 
         $membersPage = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/cascade-members/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/cascade-members/members',
             $this->getHeaders(),
         );
         $membersPage->assertOk();
@@ -5595,7 +5799,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadataResponse->assertOk();
 
         $memberResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/direct-members/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/direct-members/members',
             [
                 'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $target->_id],
@@ -5622,7 +5826,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 0);
 
         $membersPage = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/direct-members/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/direct-members/members',
             $this->getHeaders(),
         );
         $membersPage->assertOk();
@@ -5788,7 +5992,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
 
         $membersResponse = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/linked/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/linked/members',
             $this->getHeaders(),
         );
 
@@ -5797,7 +6001,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $membersResponse->assertJsonPath('data.0', [
             'id' => (string) $queryable->_id,
             'display_name' => 'Queryable Linked Profile',
-            'is_queryable_candidate' => true,
+            'is_queryable_candidate' => false,
             'is_contact_capable_candidate' => false,
         ]);
         $membersResponse->assertJsonPath('data.1', [
@@ -5906,10 +6110,45 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadataResponse->assertOk();
 
         $response = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
                 'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $hiddenMember->_id],
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+    }
+
+    public function test_account_profile_update_rejects_private_nested_profile_group_members(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Parent Private Admission',
+            'slug' => 'nested-parent-private-admission',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $privateMember = $this->createNestedProfileFixture(
+            'Private Member',
+            'private-member-admission',
+            ['visibility' => 'private']
+        );
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            [
+                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
+                'nested_profile_groups' => [
+                    [
+                        'id' => 'parceiros',
+                        'label' => 'Parceiros',
+                        'account_profile_ids' => [(string) $privateMember->_id],
+                    ],
+                ],
             ],
             $this->getHeaders()
         );
@@ -6001,12 +6240,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $partnerA = $this->createNestedProfileFixture('Public Partner A', 'public-partner-a');
         $partnerB = $this->createNestedProfileFixture('Public Partner B', 'public-partner-b');
-        $privatePartner = $this->createNestedProfileFixture(
-            'Private Partner',
-            'private-partner',
-            ['visibility' => 'private']
-        );
-
         $metadata = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
             [
@@ -6034,7 +6267,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadata->assertStatus(200);
 
         $partnersDelta = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
                 'aggregate_revision' => (int) $metadata->json('data.aggregate_revision'),
                 'add_ids' => [
@@ -6045,16 +6278,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
         $partnersDelta->assertOk();
-
-        $privateDelta = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/privados/members",
-            [
-                'aggregate_revision' => (int) $partnersDelta->json('data.aggregate_revision'),
-                'add_ids' => [(string) $privatePartner->_id],
-            ],
-            $this->getHeaders()
-        );
-        $privateDelta->assertOk();
 
         $response = $this->getJson("{$this->base_api_tenant}account_profiles/nested-public-parent");
 
@@ -6140,7 +6363,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $metadata->assertOk();
 
         $delta = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/parceiros/members",
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
                 'aggregate_revision' => (int) $metadata->json('data.aggregate_revision'),
                 'add_ids' => [(string) $navigableMember->_id],
@@ -6297,10 +6520,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'name_search_key' => 'hidden candidate',
             ]
         );
+        $private = $this->createNestedProfileFixture(
+            'Private Candidate',
+            'private-candidate',
+            [
+                'visibility' => 'private',
+                'name_search_key' => 'private candidate',
+            ]
+        );
         $queryable->forceFill(['name_search_key' => 'queryable candidate'])->save();
 
         $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable&exclude_account_profile_id=".(string) $hidden->_id
+            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable",
+            $this->getHeaders()
         );
 
         $response->assertOk();
@@ -6309,6 +6541,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [(string) $queryable->_id],
             collect($response->json('data'))->pluck('id')->all(),
         );
+        $this->assertNotSame((string) $hidden->_id, (string) ($response->json('data.0.id') ?? ''));
+        $this->assertNotSame((string) $private->_id, (string) ($response->json('data.0.id') ?? ''));
     }
 
     public function test_account_profile_index_supports_contact_eligible_filters_on_the_generic_endpoint(): void
@@ -6398,6 +6632,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $service->initialize($payload);
+
+        $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
+        $this->landlord->tenant_primary->id = (string) $tenant->_id;
+        $this->landlord->tenant_primary->slug = $tenant->slug;
+        $this->landlord->tenant_primary->subdomain = $tenant->subdomain;
     }
 
     private function createAccountUser(array $permissions): AccountUser

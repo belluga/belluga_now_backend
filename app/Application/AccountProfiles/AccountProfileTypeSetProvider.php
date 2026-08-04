@@ -21,6 +21,11 @@ final class AccountProfileTypeSetProvider
         self::$revision++;
     }
 
+    public static function currentRevision(): int
+    {
+        return self::$revision;
+    }
+
     /**
      * @return array<int, string>
      */
