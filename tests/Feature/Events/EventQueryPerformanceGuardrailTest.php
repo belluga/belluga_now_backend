@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Events;
 
+use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
@@ -152,7 +153,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $this->assertStringNotContainsString('resolveManagementOccurrenceEventIds', $source);
         $this->assertStringNotContainsString("->pluck('event_id')", $source.$occurrenceQuerySource);
         $this->assertStringNotContainsString('listProfileIdsForAccount($accountContextId)', $occurrenceQuerySource);
-        $this->assertStringContainsString("'account_context_ids' => \$accountContextId", $occurrenceQuerySource);
+        $this->assertStringNotContainsString("'account_context_ids' => \$accountContextId", $occurrenceQuerySource);
+        $this->assertStringContainsString('event.created_by.id', $occurrenceQuerySource);
+        $this->assertStringContainsString('event.created_by._id', $occurrenceQuerySource);
         $this->assertStringNotContainsString('formatManagementEvent($event));', $source);
     }
 
@@ -236,7 +239,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             ['temporal' => 'future', 'page' => 1, 'page_size' => 10],
             false,
             10,
-            false,
+            true,
             (string) $account->_id
         );
 
@@ -373,93 +376,95 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
     }
 
-    public function test_account_context_backfill_migration_populates_legacy_events_occurrences_and_indexes_hot_queries(): void
+    public function test_account_scoped_management_queries_use_owner_account_authority_without_legacy_account_context_fields(): void
     {
-        $account = Account::query()->create([
-            'name' => 'Legacy Context Account',
-            'document' => 'DOC-LEGACY-CONTEXT',
-        ]);
-        $profile = AccountProfile::query()->create([
-            'account_id' => (string) $account->_id,
-            'profile_type' => 'artist',
-            'display_name' => 'Legacy Context Artist',
-            'is_active' => true,
-        ]);
-        $party = $this->eventPartyForProfile($profile);
         $start = Carbon::now()->startOfDay()->addDays(3)->setHour(10);
-
-        $event = Event::query()->create([
-            'title' => 'Legacy Account Context Event',
-            'content' => 'Legacy account context content',
-            'location' => ['mode' => 'physical'],
-            'type' => [
-                'id' => (string) $this->eventType->_id,
-                'name' => (string) $this->eventType->name,
-                'slug' => (string) $this->eventType->slug,
-            ],
-            'date_time_start' => $start,
-            'date_time_end' => $start->copy()->addHours(2),
-            'tags' => [],
-            'categories' => [],
-            'taxonomy_terms' => [],
-            'event_parties' => [$party],
-            'publication' => [
-                'status' => 'published',
-                'publish_at' => Carbon::now()->subMinute(),
-            ],
-            'is_active' => true,
+        $account = Account::query()->create([
+            'name' => 'Owner Scoped Account',
+            'document' => 'DOC-OWNER-SCOPED',
         ]);
-
-        EventOccurrence::query()->create([
-            'event_id' => (string) $event->_id,
-            'slug' => (string) $event->slug,
-            'occurrence_slug' => 'legacy-account-context-event-0',
-            'title' => (string) $event->title,
-            'type' => $event->type,
-            'event_parties' => [$party],
-            'programming_items' => [[
-                'time' => '10:30',
-                'account_profile_ids' => [(string) $profile->_id],
-            ]],
-            'publication' => $event->publication,
-            'is_event_published' => true,
-            'is_active' => true,
-            'starts_at' => $start,
-            'ends_at' => $start->copy()->addHours(2),
-            'effective_ends_at' => $start->copy()->addHours(2),
+        $role = $account->roleTemplates()->create([
+            'name' => 'Owner Scoped Events Role',
+            'permissions' => ['*'],
         ]);
+        $user = app(AccountUserService::class)->create($account, [
+            'name' => 'Owner Scoped Events User',
+            'email' => uniqid('owner-scoped-events-user', true).'@example.org',
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
+
+        Sanctum::actingAs($user, ['events:create', 'events:read']);
+        $createResponse = $this->postJson(
+            "{$this->base_api_tenant}accounts/{$account->slug}/events",
+            [
+                'title' => 'Owner Scoped Online Event',
+                'content' => 'Owner scoped online content',
+                'location' => [
+                    'mode' => 'online',
+                    'online' => [
+                        'url' => 'https://meet.example.org/owner-scope',
+                        'platform' => 'jitsi',
+                    ],
+                ],
+                'place_ref' => null,
+                'type' => [
+                    'id' => (string) $this->eventType->_id,
+                    'name' => (string) $this->eventType->name,
+                    'slug' => (string) $this->eventType->slug,
+                    'description' => (string) $this->eventType->description,
+                    'icon' => (string) $this->eventType->icon,
+                    'color' => (string) $this->eventType->color,
+                ],
+                'occurrences' => [[
+                    'date_time_start' => $start->copy()->toISOString(),
+                    'date_time_end' => $start->copy()->addHours(2)->toISOString(),
+                    'profile_groups' => [],
+                ]],
+                'categories' => [],
+                'taxonomy_terms' => [],
+                'publication' => [
+                    'status' => 'published',
+                    'publish_at' => Carbon::now()->subMinute()->toISOString(),
+                ],
+            ]
+        );
+        $createResponse->assertStatus(201);
+
+        $eventId = (string) $createResponse->json('data.event_id');
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->firstOrFail();
 
         $this->assertEmpty($event->fresh()->account_context_ids ?? []);
-        $this->assertEmpty(EventOccurrence::query()->firstOrFail()->account_context_ids ?? []);
-
-        $migration = require base_path(
-            'packages/belluga/belluga_events/database/migrations/2026_04_25_000600_backfill_event_account_context_ids.php'
+        $this->assertEmpty($occurrence->account_context_ids ?? []);
+        $aggregateCalls = [];
+        EventBus::listen(
+            'belluga.events.management_occurrence_aggregate',
+            static function (string $purpose, array $pipeline) use (&$aggregateCalls): void {
+                $aggregateCalls[] = [
+                    'purpose' => $purpose,
+                    'pipeline' => $pipeline,
+                ];
+            }
         );
-        $migration->up();
 
-        $this->assertContains((string) $account->_id, $event->fresh()->account_context_ids ?? []);
+        Sanctum::actingAs($user, ['events:read']);
+        $listResponse = $this->getJson(
+            "{$this->base_api_tenant}accounts/{$account->slug}/events?temporal=future&page=1&page_size=10"
+        );
+
+        $listResponse->assertStatus(200);
         $this->assertContains(
-            (string) $account->_id,
-            EventOccurrence::query()->where('event_id', (string) $event->_id)->firstOrFail()->account_context_ids ?? []
+            $eventId,
+            collect($listResponse->json('data') ?? [])
+                ->pluck('event_id')
+                ->map(static fn ($id): string => (string) $id)
+                ->values()
+                ->all()
         );
-
-        $paginator = app(EventQueryService::class)->paginateManagement(
-            ['temporal' => 'future', 'page' => 1, 'page_size' => 10],
-            false,
-            10,
-            false,
-            (string) $account->_id
-        );
-        $this->assertSame(1, $paginator->total());
-
-        $this->assertContains(
-            'idx_events_account_context_management_v1',
-            $this->indexNames('events')
-        );
-        $this->assertContains(
-            'idx_event_occurrences_account_context_management_v1',
-            $this->indexNames('event_occurrences')
-        );
+        $this->assertCount(1, $aggregateCalls);
+        $this->assertSame('management_occurrence_page_with_count', $aggregateCalls[0]['purpose']);
     }
 
     public function test_event_management_programming_resolution_uses_bulk_resolvers(): void

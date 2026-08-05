@@ -492,7 +492,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_agenda_live_now_only_returns_only_current_occurrences_with_artists(): void
+    public function test_agenda_live_now_only_returns_only_current_occurrences_with_counterpart_preview(): void
     {
         $now = Carbon::now();
 
@@ -595,8 +595,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $items = $response->json('items');
         $this->assertCount(1, $items);
         $this->assertSame('Live Discovery Slot', (string) ($items[0]['title'] ?? ''));
-        $this->assertSame('Live Artist One', (string) ($items[0]['artists'][0]['display_name'] ?? ''));
-        $this->assertSame((string) $liveArtistOne->_id, (string) ($items[0]['artists'][0]['id'] ?? ''));
+        $this->assertArrayNotHasKey(
+            'artists',
+            $items[0],
+            'Public agenda cards must expose canonical counterpart_preview instead of legacy artists payload.'
+        );
+        $this->assertSame('Live Artist One', (string) ($items[0]['counterpart_preview'][0]['display_name'] ?? ''));
+        $this->assertSame((string) $liveArtistOne->_id, (string) ($items[0]['counterpart_preview'][0]['id'] ?? ''));
+        $this->assertSame(2, (int) ($items[0]['counterpart_count'] ?? 0));
     }
 
     public function test_agenda_public_endpoint_shows_only_effectively_published_items(): void
