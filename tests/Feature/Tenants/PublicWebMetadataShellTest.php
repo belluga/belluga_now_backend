@@ -519,7 +519,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
                 ],
                 'invite' => [
                     'event_name' => 'Festival na Orla',
-                    'event_image_url' => 'https://tenant.example/media/invite-cover.png',
+                    'hero_image_url' => 'https://tenant.example/media/invite-cover.png',
                     'location' => 'Praia do Morro',
                     'host_name' => 'Palco Principal',
                     'event_date' => now()->toIso8601String(),

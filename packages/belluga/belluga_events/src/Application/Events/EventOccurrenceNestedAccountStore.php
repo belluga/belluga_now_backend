@@ -232,6 +232,72 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
+     * Return the only related-account data needed by public event cards: a
+     * count and the first non-venue member per occurrence. Member rows remain
+     * lazy and are never expanded into the Event/Occurrence transport.
+     *
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array<string, array{first_profile_id: ?string, counterpart_count: int}>
+     */
+    public function publicCounterpartSummariesByOccurrence(iterable $occurrences): array
+    {
+        $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
+        if ($occurrenceOrderById === []) {
+            return [];
+        }
+
+        $rows = $this->collection()->aggregate([
+            ['$match' => [
+                'tenant_id' => $this->tenantId(),
+                'parent_type' => self::PARENT_TYPE,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+                'parent_id' => ['$in' => array_keys($occurrenceOrderById)],
+                'nested_profile.id' => ['$nin' => [null, '']],
+                'nested_profile.profile_type' => ['$ne' => 'venue'],
+            ]],
+            ['$sort' => ['parent_id' => 1, 'group_order' => 1, 'item_order' => 1, '_id' => 1]],
+            ['$group' => [
+                '_id' => [
+                    'parent_id' => '$parent_id',
+                    'profile_id' => '$nested_profile.id',
+                ],
+                'group_order' => ['$first' => '$group_order'],
+                'item_order' => ['$first' => '$item_order'],
+                'row_id' => ['$first' => '$_id'],
+            ]],
+            ['$sort' => [
+                '_id.parent_id' => 1,
+                'group_order' => 1,
+                'item_order' => 1,
+                'row_id' => 1,
+            ]],
+            ['$group' => [
+                '_id' => '$_id.parent_id',
+                'first_profile_id' => ['$first' => '$_id.profile_id'],
+                'counterpart_count' => ['$sum' => 1],
+            ]],
+        ]);
+
+        $summaries = [];
+        foreach ($rows as $row) {
+            $document = $this->documentToArray($row);
+            $occurrenceId = trim((string) ($document['_id'] ?? ''));
+            if ($occurrenceId === '' || ! array_key_exists($occurrenceId, $occurrenceOrderById)) {
+                continue;
+            }
+
+            $summaries[$occurrenceId] = [
+                'first_profile_id' => ($profileId = trim((string) ($document['first_profile_id'] ?? ''))) === ''
+                    ? null
+                    : $profileId,
+                'counterpart_count' => max(0, (int) ($document['counterpart_count'] ?? 0)),
+            ];
+        }
+
+        return $summaries;
+    }
+
+    /**
      * Repair-only compatibility reader for legacy nested-account rows.
      *
      * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>

@@ -261,6 +261,11 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_create_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
     {
+        $this->band->avatar_url = 'https://example.org/public-band-avatar.jpg';
+        $this->band->save();
+        $this->venue->cover_url = 'https://example.org/public-venue-cover.jpg';
+        $this->venue->save();
+
         $payload = $this->makeEventPayload();
         $payload['occurrences'][0]['profile_groups'] = [[
             'id' => 'bandas',
@@ -272,14 +277,20 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $payload);
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.event_parties.0.party_type', (string) $this->band->profile_type);
-        $response->assertJsonPath('data.event_parties.0.metadata.profile_type', (string) $this->band->profile_type);
-        $response->assertJsonPath('data.linked_account_profiles.0.profile_type', (string) $this->band->profile_type);
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', (string) $this->band->slug);
         $this->assertNull(data_get($response->json(), 'data.artists'));
 
         $stored = Event::query()->findOrFail((string) $response->json('data.event_id'));
         $this->assertNull(data_get($stored->getAttributes(), 'artists'));
+        $this->assertCanonicalRelatedAccountStorage(
+            $stored->getAttributes(),
+            'persisted Event aggregate after canonical create'
+        );
+
+        $storedOccurrence = $this->occurrenceDocumentAtOrder((string) $stored->_id, 0);
+        $this->assertCanonicalRelatedAccountStorage(
+            $storedOccurrence->getAttributes(),
+            'persisted EventOccurrence after canonical create'
+        );
 
         $publicResponse = $this->getJson("{$this->base_api_tenant}events/{$stored->_id}");
         $publicResponse->assertStatus(200);
@@ -293,18 +304,60 @@ class EventCrudControllerTest extends TestCaseTenant
         $publicResponse->assertJsonPath('data.counterpart_preview.0.profile_type', (string) $this->band->profile_type);
         $publicResponse->assertJsonPath('data.counterpart_preview.0.slug', (string) $this->band->slug);
         $publicResponse->assertJsonPath('data.counterpart_count', 1);
+        $publicResponse->assertJsonPath('data.hero_image_url', 'https://example.org/public-band-avatar.jpg');
+        $publicResponse->assertJsonMissingPath('data.linked_account_profiles');
+        $publicResponse->assertJsonMissingPath('data.event_parties');
 
-        $landlord = LandlordUser::query()->firstOrFail();
-        Sanctum::actingAs($landlord, ['events:read']);
+    }
 
-        $adminResponse = $this->getJson($this->tenantAdminEventsBase);
-        $adminResponse->assertStatus(200);
-        $adminEvent = collect($adminResponse->json('data') ?? [])
-            ->firstWhere('event_id', (string) $stored->_id);
-        $this->assertIsArray($adminEvent);
-        $this->assertArrayNotHasKey('artists', $adminEvent);
-        $this->assertSame((string) $this->band->profile_type, data_get($adminEvent, 'linked_account_profiles.0.profile_type'));
-        $this->assertSame((string) $this->band->slug, data_get($adminEvent, 'linked_account_profiles.0.slug'));
+    public function test_event_update_without_occurrence_payload_keeps_canonical_related_account_storage(): void
+    {
+        $this->band->avatar_url = 'https://example.org/update-band-avatar.jpg';
+        $this->band->save();
+        $this->venue->cover_url = 'https://example.org/update-venue-cover.jpg';
+        $this->venue->save();
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => [[
+                ...$this->makeOccurrences(1)[0],
+                'profile_groups' => [[
+                    'id' => 'bandas',
+                    'label' => 'Bandas',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $this->band->_id],
+                ]],
+            ]],
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'title' => 'Updated Canonical Event',
+            'content' => 'Updated canonical content',
+        ]);
+
+        $updated->assertStatus(200);
+        $updated->assertJsonPath('data.title', 'Updated Canonical Event');
+
+        $storedEvent = Event::query()->findOrFail($eventId);
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->assertCanonicalRelatedAccountStorage(
+            $storedEvent->getAttributes(),
+            'persisted Event aggregate after canonical update without occurrences payload'
+        );
+        $this->assertCanonicalRelatedAccountStorage(
+            $storedOccurrence->getAttributes(),
+            'persisted EventOccurrence after canonical update without occurrences payload'
+        );
+
+        $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$storedOccurrence->_id}");
+        $public->assertStatus(200);
+        $public->assertJsonPath('data.counterpart_preview.0.id', (string) $this->band->_id);
+        $public->assertJsonPath('data.hero_image_url', 'https://example.org/update-band-avatar.jpg');
+        $public->assertJsonMissingPath('data.linked_account_profiles');
+        $public->assertJsonMissingPath('data.event_parties');
     }
 
     public function test_event_create_stores_cover_upload_and_exposes_media_url(): void
@@ -1575,7 +1628,11 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.venue.slug', $venueSlug);
         $response->assertJsonPath('data.venue.can_open_public_detail', true);
         $response->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', $artistSlug);
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.counterpart_preview.0.slug', $artistSlug);
+        $response->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.counterpart_preview.0.public_detail_path', '/parceiro/'.$artistSlug);
+        $response->assertJsonPath('data.counterpart_count', 1);
 
         $parties = collect($response->json('data.event_parties') ?? []);
         $artistParty = $parties->firstWhere('party_type', 'artist');
@@ -1631,9 +1688,11 @@ class EventCrudControllerTest extends TestCaseTenant
         ]));
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', '0');
-        $response->assertJsonPath('data.linked_account_profiles.0.can_open_public_detail', true);
-        $response->assertJsonPath('data.linked_account_profiles.0.public_detail_path', '/parceiro/0');
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.counterpart_preview.0.slug', '0');
+        $response->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
+        $response->assertJsonPath('data.counterpart_preview.0.public_detail_path', '/parceiro/0');
+        $response->assertJsonPath('data.counterpart_count', 1);
         $response->assertJsonPath('data.event_parties.0.metadata.slug', '0');
 
         $eventId = (string) $response->json('data.event_id');
@@ -1855,31 +1914,30 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $repair->assertStatus(200);
         $repair->assertJsonPath('data.scanned', 2);
-        $repair->assertJsonPath('data.invalid', 1);
-        $repair->assertJsonPath('data.repaired', 1);
+        $repair->assertJsonPath('data.invalid', 2);
+        $repair->assertJsonPath('data.repaired', 2);
         $repair->assertJsonPath('data.failed', 0);
-        $repair->assertJsonPath('data.unchanged', 1);
+        $repair->assertJsonPath('data.unchanged', 0);
 
         $legacy = $legacy->fresh();
-        $this->assertCount(1, $legacy->event_parties);
-        $this->assertSame('artist', data_get($legacy->event_parties, '0.party_type'));
-        $this->assertSame((string) $this->artist->_id, data_get($legacy->event_parties, '0.party_ref_id'));
-        $this->assertFalse((bool) data_get($legacy->event_parties, '0.permissions.can_edit'));
-        $this->assertSame((string) $this->artist->slug, data_get($legacy->event_parties, '0.metadata.slug'));
-        $this->assertSame('artist', data_get($legacy->event_parties, '0.metadata.profile_type'));
-        $this->assertNull($legacy->artists);
+        $this->assertCanonicalRelatedAccountStorage(
+            $legacy->getAttributes(),
+            'Legacy event aggregate after legacy repair',
+        );
+        $this->assertSame([], $legacy->profile_groups ?? []);
 
         $syncedOccurrence = $this->occurrenceDocumentAtOrderOrNull((string) $legacy->_id, 0);
         $this->assertNotNull($syncedOccurrence);
-        $this->assertCount(1, $syncedOccurrence->event_parties ?? []);
-        $this->assertSame('artist', data_get($syncedOccurrence->event_parties, '0.party_type'));
-        $this->assertSame((string) $this->artist->slug, data_get($syncedOccurrence->event_parties, '0.metadata.slug'));
-        $this->assertSame('DJ Test', data_get($syncedOccurrence->artists, '0.display_name'));
-        $this->assertSame((string) $this->artist->slug, data_get($syncedOccurrence->artists, '0.slug'));
+        $this->assertCanonicalRelatedAccountStorage(
+            $syncedOccurrence->getAttributes(),
+            'Legacy repaired occurrence',
+        );
 
         $canonicalAfter = $canonical->fresh();
-        $this->assertSame([], $canonicalAfter->event_parties ?? []);
-        $this->assertNull($canonicalAfter->artists);
+        $this->assertCanonicalRelatedAccountStorage(
+            $canonicalAfter->getAttributes(),
+            'Already canonical aggregate after legacy repair',
+        );
 
         $secondRun = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
         $secondRun->assertStatus(200);
@@ -1959,17 +2017,17 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.unchanged', 0);
 
         $legacy = $legacy->fresh();
-        $this->assertCount(1, $legacy->event_parties ?? []);
-        $this->assertSame('artist', data_get($legacy->event_parties, '0.party_type'));
-        $this->assertSame((string) $this->artist->_id, data_get($legacy->event_parties, '0.party_ref_id'));
-        $this->assertSame((string) $this->artist->slug, data_get($legacy->event_parties, '0.metadata.slug'));
-        $this->assertNull($legacy->artists);
+        $this->assertCanonicalRelatedAccountStorage(
+            $legacy->getAttributes(),
+            'Legacy event aggregate after dropping deleted related profiles',
+        );
 
         $syncedOccurrence = $this->occurrenceDocumentAtOrderOrNull((string) $legacy->_id, 0);
         $this->assertNotNull($syncedOccurrence);
-        $this->assertCount(1, $syncedOccurrence->event_parties ?? []);
-        $this->assertSame((string) $this->artist->_id, data_get($syncedOccurrence->event_parties, '0.party_ref_id'));
-        $this->assertSame((string) $this->artist->slug, data_get($syncedOccurrence->event_parties, '0.metadata.slug'));
+        $this->assertCanonicalRelatedAccountStorage(
+            $syncedOccurrence->getAttributes(),
+            'Legacy repaired occurrence after dropping deleted related profiles',
+        );
     }
 
     public function test_tenant_admin_legacy_event_parties_summary_skips_past_events_and_scans_only_live_or_future(): void
@@ -2239,7 +2297,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $summary->assertJsonPath('data.unchanged', 1);
     }
 
-    public function test_event_update_migrates_legacy_event_parties_into_occurrence_profile_groups_before_clearing_legacy_gap(): void
+    public function test_event_update_does_not_derive_occurrence_profile_groups_from_legacy_event_parties(): void
     {
         $legacy = $this->createEvent([
             'artists' => [
@@ -2273,26 +2331,28 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ]);
 
-        $beforeParties = $legacy->event_parties;
-
         $updated = $this->patchJson("{$this->accountEventsBase}/{$legacy->_id}", [
             'title' => 'Updated But Still Legacy',
         ]);
 
         $updated->assertStatus(200);
         $updated->assertJsonPath('data.title', 'Updated But Still Legacy');
-        $updated->assertJsonPath('data.occurrences.0.profile_groups.0.id', 'artist');
-        $updated->assertJsonPath('data.occurrences.0.profile_groups.0.account_profile_ids.0', (string) $this->artist->_id);
-        $updated->assertJsonCount(1, 'data.event_parties');
-        $updated->assertJsonPath('data.event_parties.0.party_ref_id', (string) $this->artist->_id);
+        $updated->assertJsonCount(0, 'data.event_parties');
+        $updated->assertJsonCount(0, 'data.linked_account_profiles');
+        $updated->assertJsonCount(0, 'data.occurrences.0.profile_groups');
 
         $legacy = $legacy->fresh();
         $occurrence = $this->occurrenceDocumentAtOrder((string) $legacy->_id, 0);
-        $this->assertNotSame($beforeParties, $legacy->event_parties);
-        $this->assertSame([], $legacy->artists ?? []);
-        $this->assertSame((string) $this->artist->_id, data_get($legacy, 'event_parties.0.party_ref_id'));
-        $this->assertSame($this->profileTypePluralLabel('artist'), data_get($occurrence, 'own_profile_groups.0.label'));
-        $this->assertSame((string) $this->artist->_id, data_get($occurrence, 'own_event_parties.0.party_ref_id'));
+        $this->assertCanonicalRelatedAccountStorage(
+            $legacy->getAttributes(),
+            'Legacy aggregate after update without canonical related-account groups',
+        );
+        $this->assertCanonicalRelatedAccountStorage(
+            $occurrence->getAttributes(),
+            'Legacy occurrence after update without canonical related-account groups',
+        );
+        $this->assertSame([], $legacy->profile_groups ?? []);
+        $this->assertSame([], $occurrence->own_profile_groups ?? []);
 
         $nestedRows = $this->eventNestedAccountRows([
             'event_id' => (string) $legacy->_id,
@@ -2300,8 +2360,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'parent_id' => (string) $occurrence->_id,
             'doc_type' => 'member_row',
         ]);
-        $this->assertCount(1, $nestedRows);
-        $this->assertSame((string) $this->artist->_id, data_get($nestedRows, '0.nested_profile.id'));
+        $this->assertSame([], $nestedRows);
 
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read', 'events:update']);
@@ -2558,9 +2617,12 @@ class EventCrudControllerTest extends TestCaseTenant
         }
 
         $this->assertArrayHasKey('occurrences', $matching);
-        $this->assertArrayHasKey('linked_account_profiles', $matching);
+        $this->assertArrayNotHasKey('linked_account_profiles', $matching);
+        $this->assertArrayHasKey('counterpart_preview', $matching);
+        $this->assertArrayHasKey('counterpart_count', $matching);
         $this->assertCount(1, $matching['occurrences'] ?? []);
-        $this->assertCount(1, $matching['linked_account_profiles'] ?? []);
+        $this->assertCount(1, $matching['counterpart_preview'] ?? []);
+        $this->assertSame(1, (int) ($matching['counterpart_count'] ?? 0));
     }
 
     public function test_event_create_persists_programming_item_end_time_in_admin_and_public_payloads(): void
@@ -4662,7 +4724,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.title', 'Updated Title');
         $response->assertJsonPath('data.publication.status', 'ended');
         $response->assertJsonPath('data.venue.slug', $venueSlug);
-        $response->assertJsonPath('data.linked_account_profiles.0.slug', $artistSlug);
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.counterpart_preview.0.slug', $artistSlug);
+        $response->assertJsonPath('data.counterpart_count', 1);
         $response->assertJsonCount(1, 'data.event_parties');
         $response->assertJsonPath('data.event_parties.0.metadata.slug', $artistSlug);
     }
@@ -5648,29 +5712,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertStatus(200);
         $freshEventAfterUpdate = Event::query()->findOrFail($eventId);
         $this->assertSame([], $freshEventAfterUpdate->profile_groups ?? []);
-        $updated->assertJsonCount(2, 'data.event_parties');
-        $this->assertSame(
-            [
-                [
-                    'id' => (string) $this->artist->profile_type,
-                    'account_profile_ids' => [(string) $this->artist->_id],
-                ],
-                [
-                    'id' => (string) $this->band->profile_type,
-                    'account_profile_ids' => [(string) $this->band->_id],
-                ],
-            ],
-            collect($updated->json('data.profile_groups') ?? [])
-                ->map(static fn (array $group): array => [
-                    'id' => (string) ($group['id'] ?? ''),
-                    'account_profile_ids' => array_values(array_map(
-                        static fn (mixed $id): string => (string) $id,
-                        $group['account_profile_ids'] ?? []
-                    )),
-                ])
-                ->values()
-                ->all()
-        );
+        $updated->assertJsonCount(0, 'data.event_parties');
+        $updated->assertJsonCount(0, 'data.profile_groups');
         $this->assertSame(
             [],
             $this->eventProfileGroupRows([
@@ -5683,9 +5726,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
         $public->assertStatus(200);
-        $public->assertJsonCount(2, 'data.profile_groups');
-        $this->publicEventProfileGroupAt($public, 0, 'Artists', 1);
-        $this->publicEventProfileGroupAt($public, 1, 'Bandas', 1);
+        $public->assertJsonCount(0, 'data.profile_groups');
     }
 
     public function test_legacy_event_parties_repair_materializes_profile_group_member_rows_and_strips_embedded_members(): void
@@ -5710,9 +5751,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $freshEvent = $legacy->fresh();
         $freshOccurrence = $this->occurrenceDocumentAtOrder((string) $legacy->_id, 0);
 
-        $this->assertSame('atracoes', data_get($freshEvent, 'profile_groups.0.id'));
+        $this->assertSame(
+            'Atrações',
+            data_get($freshEvent, 'profile_groups.0.label'),
+        );
         $this->assertArrayNotHasKey('account_profile_ids', data_get($freshEvent, 'profile_groups.0', []));
-        $this->assertSame('atracoes', data_get($freshOccurrence, 'own_profile_groups.0.id'));
+        $this->assertSame('Atrações', data_get($freshOccurrence, 'own_profile_groups.0.label'));
         $this->assertArrayNotHasKey('account_profile_ids', data_get($freshOccurrence, 'own_profile_groups.0', []));
 
         $memberRows = $this->eventProfileGroupRows([
@@ -5734,7 +5778,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame((string) $this->artist->_id, data_get($nestedRows, '0.nested_profile.id'));
     }
 
-    public function test_legacy_event_parties_repair_derives_occurrence_groups_from_plural_profile_type_labels_when_groups_are_missing(): void
+    public function test_legacy_event_parties_repair_does_not_derive_occurrence_groups_from_event_parties_when_groups_are_missing(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read', 'events:update']);
@@ -5780,19 +5824,8 @@ class EventCrudControllerTest extends TestCaseTenant
         $eventId = (string) $legacy->_id;
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
-        $labels = collect($occurrence->own_profile_groups ?? [])
-            ->pluck('label')
-            ->filter(static fn (mixed $label): bool => is_string($label) && trim($label) !== '')
-            ->map(static fn (string $label): string => trim($label))
-            ->sort()
-            ->values()
-            ->all();
-        $expectedLabels = [
-            $this->profileTypePluralLabel('artist'),
-            $this->profileTypePluralLabel('band'),
-        ];
-        sort($expectedLabels);
-        $this->assertSame($expectedLabels, $labels);
+        $this->assertSame([], $occurrence->own_profile_groups ?? []);
+        $this->assertSame([], $legacy->fresh()->profile_groups ?? []);
 
         $nestedRows = $this->eventNestedAccountRows([
             'event_id' => $eventId,
@@ -5800,15 +5833,16 @@ class EventCrudControllerTest extends TestCaseTenant
             'parent_id' => (string) $occurrence->_id,
             'doc_type' => 'member_row',
         ]);
-        $nestedProfileIds = collect($nestedRows)
-            ->map(static fn (array $row): string => (string) data_get($row, 'nested_profile.id'))
-            ->filter(static fn (string $profileId): bool => $profileId !== '')
-            ->sort()
-            ->values()
-            ->all();
-        $expectedProfileIds = [(string) $this->artist->_id, (string) $this->band->_id];
-        sort($expectedProfileIds);
-        $this->assertSame($expectedProfileIds, $nestedProfileIds);
+        $this->assertSame([], $nestedRows);
+
+        $this->assertCanonicalRelatedAccountStorage(
+            $occurrence->getAttributes(),
+            'Occurrence repaired from event legacy parties without canonical groups',
+        );
+        $this->assertCanonicalRelatedAccountStorage(
+            $legacy->fresh()->getAttributes(),
+            'Event repaired from event legacy parties without canonical groups',
+        );
     }
 
     public function test_legacy_event_parties_repair_recovers_occurrence_groups_from_legacy_event_and_occurrence_accounts_nested_rows(): void
@@ -5908,16 +5942,13 @@ class EventCrudControllerTest extends TestCaseTenant
         sort($expectedProfileIds);
         $this->assertSame($expectedProfileIds, $nestedProfileIds);
 
-        $ownPartyIds = collect($freshOccurrence->own_event_parties ?? [])
-            ->map(static fn (array $party): string => trim((string) ($party['party_ref_id'] ?? '')))
-            ->filter(static fn (string $profileId): bool => $profileId !== '')
-            ->sort()
-            ->values()
-            ->all();
-        $this->assertSame($expectedProfileIds, $ownPartyIds);
+        $this->assertCanonicalRelatedAccountStorage(
+            $freshOccurrence->getAttributes(),
+            'Occurrence repaired from legacy event and occurrence nested rows',
+        );
     }
 
-    public function test_legacy_event_parties_repair_derives_occurrence_groups_from_occurrence_own_event_parties_when_groups_are_missing(): void
+    public function test_legacy_event_parties_repair_does_not_derive_occurrence_groups_from_occurrence_own_event_parties_when_groups_are_missing(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read', 'events:update']);
@@ -5972,19 +6003,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.repaired', 1);
 
         $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $labels = collect($freshOccurrence->own_profile_groups ?? [])
-            ->pluck('label')
-            ->filter(static fn (mixed $label): bool => is_string($label) && trim($label) !== '')
-            ->map(static fn (string $label): string => trim($label))
-            ->sort()
-            ->values()
-            ->all();
-        $expectedLabels = [
-            $this->profileTypePluralLabel('artist'),
-            $this->profileTypePluralLabel('band'),
-        ];
-        sort($expectedLabels);
-        $this->assertSame($expectedLabels, $labels);
+        $this->assertSame([], $freshOccurrence->own_profile_groups ?? []);
 
         $nestedRows = $this->eventNestedAccountRows([
             'event_id' => $eventId,
@@ -5992,22 +6011,12 @@ class EventCrudControllerTest extends TestCaseTenant
             'parent_id' => (string) $freshOccurrence->_id,
             'doc_type' => 'member_row',
         ]);
-        $nestedProfileIds = collect($nestedRows)
-            ->map(static fn (array $row): string => (string) data_get($row, 'nested_profile.id'))
-            ->filter(static fn (string $profileId): bool => $profileId !== '')
-            ->sort()
-            ->values()
-            ->all();
-        $expectedProfileIds = [(string) $this->artist->_id, (string) $this->band->_id];
-        sort($expectedProfileIds);
-        $this->assertSame($expectedProfileIds, $nestedProfileIds);
+        $this->assertSame([], $nestedRows);
 
-        $ownPartyIds = collect($freshOccurrence->own_event_parties ?? [])
-            ->map(static fn (array $party): string => trim((string) ($party['party_ref_id'] ?? '')))
-            ->sort()
-            ->values()
-            ->all();
-        $this->assertSame($expectedProfileIds, $ownPartyIds);
+        $this->assertCanonicalRelatedAccountStorage(
+            $freshOccurrence->getAttributes(),
+            'Occurrence repaired from occurrence own legacy event parties',
+        );
     }
 
     public function test_legacy_event_parties_repair_materializes_occurrence_embedded_profile_group_members(): void
@@ -6337,7 +6346,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonCount(1, 'data.event_parties');
         $response->assertJsonPath('data.event_parties.0.party_ref_id', (string) $this->band->_id);
-        $response->assertJsonPath('data.linked_account_profiles.0.id', (string) $this->band->_id);
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $this->band->_id);
+        $response->assertJsonPath('data.counterpart_count', 1);
     }
 
     public function test_event_profile_groups_reject_duplicate_members_across_groups(): void
@@ -6553,7 +6564,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);
-        $management->assertJsonCount(2, 'data.profile_groups');
+        $management->assertJsonCount(0, 'data.profile_groups');
         $this->assertSame([], $storedBefore->fresh()->profile_groups ?? []);
     }
 
@@ -7133,8 +7144,9 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);
-        $management->assertJsonPath('data.linked_account_profiles.0.avatar_url', null);
-        $management->assertJsonPath('data.linked_account_profiles.0.cover_url', null);
+        $management->assertJsonMissingPath('data.linked_account_profiles');
+        $management->assertJsonPath('data.counterpart_preview.0.avatar_url', null);
+        $management->assertJsonPath('data.counterpart_preview.0.cover_url', null);
     }
 
     public function test_public_event_detail_member_rows_use_live_profile_media_when_aggregating_groups(): void
@@ -7809,9 +7821,11 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($firstItem);
         $this->assertNotNull($secondItem);
 
+        $this->assertArrayNotHasKey('linked_account_profiles', $firstItem);
+        $this->assertArrayNotHasKey('linked_account_profiles', $secondItem);
         $this->assertSame(
             [(string) $this->band->_id],
-            collect($firstItem['linked_account_profiles'] ?? [])
+            collect($firstItem['counterpart_preview'] ?? [])
                 ->pluck('id')
                 ->map(static fn ($id) => (string) $id)
                 ->values()
@@ -7819,12 +7833,14 @@ class EventCrudControllerTest extends TestCaseTenant
         );
         $this->assertSame(
             [(string) $guestArtist->_id],
-            collect($secondItem['linked_account_profiles'] ?? [])
+            collect($secondItem['counterpart_preview'] ?? [])
                 ->pluck('id')
                 ->map(static fn ($id) => (string) $id)
                 ->values()
                 ->all()
         );
+        $this->assertSame(1, (int) ($firstItem['counterpart_count'] ?? 0));
+        $this->assertSame(1, (int) ($secondItem['counterpart_count'] ?? 0));
         foreach ([
             'content',
             'occurrences',
@@ -7837,12 +7853,12 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->assertArrayNotHasKey($field, $secondItem);
         }
         $this->assertFalse(
-            collect($firstItem['linked_account_profiles'] ?? [])
+            collect($firstItem['counterpart_preview'] ?? [])
                 ->pluck('id')
                 ->contains((string) $guestArtist->_id)
         );
         $this->assertFalse(
-            collect($secondItem['linked_account_profiles'] ?? [])
+            collect($secondItem['counterpart_preview'] ?? [])
                 ->pluck('id')
                 ->contains((string) $this->band->_id)
         );
@@ -9360,6 +9376,31 @@ class EventCrudControllerTest extends TestCaseTenant
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function assertCanonicalRelatedAccountStorage(array $attributes, string $subject): void
+    {
+        foreach ([
+            'linked_account_profiles',
+            'own_linked_account_profiles',
+            'artists',
+            'event_parties',
+            'own_event_parties',
+            'account_context_ids',
+        ] as $forbiddenKey) {
+            $this->assertArrayNotHasKey(
+                $forbiddenKey,
+                $attributes,
+                "TEACH: {$subject} still contains forbidden key [{$forbiddenKey}].\n"
+                ."Event/Occurrence related accounts are owned exclusively by accounts_nested; "
+                ."linked_account_profiles, own_linked_account_profiles, artists, event_parties, "
+                ."own_event_parties, and account_context_ids must not exist in steady-state persistence "
+                ."or public transport."
+            );
+        }
     }
 
     private function assertOccurrenceIndexAbsent(EventOccurrence $occurrence): void

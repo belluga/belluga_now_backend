@@ -196,6 +196,7 @@ class LegacyEventPartiesCanonicalizationService
         $managementPayloadIssues = $this->analyzeManagementPayloadContract($event);
         $hasLegacyProfileGroupMembers = $this->hasLegacyProfileGroupMembers($event);
         $occurrenceCanonicalization = $this->analyzeOccurrenceCanonicalization($event);
+        $hasLegacyRelatedAccountFields = $this->hasLegacyRelatedAccountFields($event);
 
         foreach ($legacyArtists as $artist) {
             if (! is_array($artist)) {
@@ -249,6 +250,7 @@ class LegacyEventPartiesCanonicalizationService
 
         $invalid = $hasLegacyArtists
             || $hasVenueParty
+            || $hasLegacyRelatedAccountFields
             || $missingCanonicalMetadata
             || $hasLegacyProfileGroupMembers
             || $occurrenceCanonicalization['invalid']
@@ -298,79 +300,27 @@ class LegacyEventPartiesCanonicalizationService
         $resolvedProfilesById = $this->resolveExistingEventPartyProfilesById(
             $analysis['target_artist_ids'] ?? [],
         );
-
-        $existingParties = $this->normalizeArray($event->event_parties ?? []);
-        $rebuiltParties = [];
-
-        foreach ($existingParties as $party) {
-            if (! is_array($party)) {
-                continue;
-            }
-
-            $partyType = trim((string) ($party['party_type'] ?? ''));
-            $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
-            if ($partyType === 'venue' || in_array($partyRefId, $analysis['target_artist_ids'], true)) {
-                continue;
-            }
-
-            $rebuiltParties[] = $party;
-        }
-
-        foreach ($analysis['target_artist_ids'] as $profileId) {
-            $profile = $resolvedProfilesById[$profileId] ?? null;
-            if (! is_array($profile)) {
-                continue;
-            }
-
-            $partyType = trim((string) ($profile['profile_type'] ?? ''));
-            if ($profileId === '' || $partyType === '' || $partyType === 'venue') {
-                throw new \RuntimeException('Legacy event party repair resolved an invalid account profile.');
-            }
-
-            $partyMapper = $this->eventPartyMappers->find($partyType);
-            if ($partyMapper === null) {
-                throw new \RuntimeException("Event party mapper [{$partyType}] is not registered.");
-            }
-
-            $existingParty = $analysis['artist_parties_by_id'][$profileId] ?? null;
-            $canEdit = true;
-            if (
-                is_array($existingParty)
-                && isset($existingParty['permissions'])
-                && is_array($existingParty['permissions'])
-                && array_key_exists('can_edit', $existingParty['permissions'])
-            ) {
-                $canEdit = (bool) $existingParty['permissions']['can_edit'];
-            } else {
-                $canEdit = $partyMapper->defaultCanEdit();
-            }
-
-            $rebuiltParties[] = [
-                'party_type' => $partyType,
-                'party_ref_id' => $profileId,
-                'permissions' => [
-                    'can_edit' => $canEdit,
-                ],
-                'metadata' => $partyMapper->mapMetadata($profile),
-            ];
-        }
+        $eventId = trim((string) $event->getKey());
+        $rootGroups = $this->canonicalizeProfileGroups(
+            $this->profileGroupMemberStore->inflateGroupsWithMembers(
+                $event->profile_groups ?? [],
+                'event',
+                $eventId,
+            ),
+        );
+        $rootGroups = $this->filterGroupsToExistingEventPartyProfiles($rootGroups);
 
         $didMutate = false;
-        $normalizedEventParties = array_values($rebuiltParties);
-        if (($event->event_parties ?? []) !== $normalizedEventParties) {
-            $event->event_parties = $normalizedEventParties;
-            $didMutate = true;
-        }
-        if ($event->artists !== null) {
-            $event->artists = null;
-            $didMutate = true;
-        }
-        $normalizedProfileGroups = $this->stripProfileGroupMembers($event->profile_groups ?? []);
+        $normalizedProfileGroups = $this->profileGroupMetadata($rootGroups);
         if (($event->profile_groups ?? []) !== $normalizedProfileGroups) {
             $event->profile_groups = $normalizedProfileGroups;
             $didMutate = true;
         }
+        $this->profileGroupMemberStore->syncEventGroups($event, $rootGroups);
 
+        if ($this->stripLegacyRelatedAccountFields($event)) {
+            $didMutate = true;
+        }
         if ($this->canonicalizeManagementPayloadFields($event)) {
             $didMutate = true;
         }
@@ -395,19 +345,6 @@ class LegacyEventPartiesCanonicalizationService
 
         if ($didMutate) {
             $this->occurrenceReconciliationService->reconcileEvent($refreshed);
-
-            $refreshed = Event::withTrashed()->find($event->getKey());
-            if (! $refreshed instanceof Event) {
-                throw new \RuntimeException('Legacy event party repair could not reload the reconciled event.');
-            }
-        }
-
-        $occurrenceCanonicalization = $this->analyzeOccurrenceCanonicalization($refreshed);
-        if ($occurrenceCanonicalization['invalid']) {
-            $this->repairOccurrenceCanonicalOwnership(
-                $refreshed,
-                $occurrenceCanonicalization['patches'],
-            );
         }
     }
 
@@ -416,7 +353,6 @@ class LegacyEventPartiesCanonicalizationService
      *   invalid: bool,
      *   patches: array<int, array{
      *     occurrence_id: string,
-     *     own_event_parties: array<int, array<string, mixed>>,
      *     profile_groups: array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
      *   }>
      * }
@@ -455,7 +391,6 @@ class LegacyEventPartiesCanonicalizationService
     /**
      * @return array{
      *   occurrence_id: string,
-     *   own_event_parties: array<int, array<string, mixed>>,
      *   profile_groups: array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
      * }|null
      */
@@ -511,44 +446,9 @@ class LegacyEventPartiesCanonicalizationService
         );
         $targetGroups = $this->filterGroupsToExistingEventPartyProfiles($targetGroups);
 
-        $eventRootParties = $this->normalizeEventPartyRows($event->event_parties ?? []);
-        $effectiveOccurrenceParties = $this->normalizeEventPartyRows(
-            $occurrence->event_parties ?? [],
-        );
-        $existingOwnParties = $this->normalizeEventPartyRows(
-            $occurrence->own_event_parties ?? [],
-        );
-        $partyRowsForTarget = $this->mergeEventPartyRows(
-            $eventRootParties,
-            $existingOwnParties,
-            $effectiveOccurrenceParties,
-        );
-
-        $linkedProfiles = $this->mergeLinkedProfileSummaries(
-            $occurrence->linked_account_profiles ?? [],
-            $occurrence->own_linked_account_profiles ?? [],
-            $event->linked_account_profiles ?? [],
-            $event->own_linked_account_profiles ?? [],
-            $this->linkedProfileSummariesForEventParties($partyRowsForTarget),
-        );
-        $assignedProfileIds = $this->orderedProfileIdsFromGroups($targetGroups);
-        $unassignedLinkedProfiles = array_values(array_filter(
-            $linkedProfiles,
-            static fn (array $profile): bool => ! in_array(
-                trim((string) ($profile['id'] ?? '')),
-                $assignedProfileIds,
-                true,
-            ),
-        ));
-        if ($unassignedLinkedProfiles !== []) {
-            $targetGroups = $this->mergeProfileGroups(
-                $targetGroups,
-                $this->fallbackProfileGroupsByPluralTypeLabel($unassignedLinkedProfiles),
-            );
-        }
-
         $targetGroups = $this->canonicalizeProfileGroups($targetGroups);
-        if (! $this->groupsHaveMembers($targetGroups)) {
+        $hasLegacyRelatedAccountFields = $this->hasLegacyRelatedAccountFields($occurrence);
+        if (! $this->groupsHaveMembers($targetGroups) && ! $hasLegacyRelatedAccountFields) {
             return null;
         }
 
@@ -559,33 +459,19 @@ class LegacyEventPartiesCanonicalizationService
             $occurrence->profile_groups ?? [],
         );
 
-        $targetProfileIds = $this->orderedProfileIdsFromGroups($targetGroups);
-        $targetOwnParties = $targetProfileIds === []
-            ? []
-            : $this->rebuildEventPartiesForProfileIds(
-                $targetProfileIds,
-                $this->mapEventPartiesByProfileId(
-                    $partyRowsForTarget !== []
-                        ? $partyRowsForTarget
-                        : $existingOwnParties,
-                ),
-            );
-
         if (
             ! $hasEmbeddedOwnGroupMembers
             && ! $hasEmbeddedEffectiveGroupMembers
             &&
             $this->profileGroupsComparable($existingOwnGroups)
                 === $this->profileGroupsComparable($targetGroups)
-            && $this->eventPartiesComparable($existingOwnParties)
-                === $this->eventPartiesComparable($targetOwnParties)
+            && ! $hasLegacyRelatedAccountFields
         ) {
             return null;
         }
 
         return [
             'occurrence_id' => $occurrenceId,
-            'own_event_parties' => $targetOwnParties,
             'profile_groups' => $targetGroups,
         ];
     }
@@ -593,7 +479,6 @@ class LegacyEventPartiesCanonicalizationService
     /**
      * @param  array<int, array{
      *   occurrence_id: string,
-     *   own_event_parties: array<int, array<string, mixed>>,
      *   profile_groups: array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
      * }>  $patches
      */
@@ -620,17 +505,7 @@ class LegacyEventPartiesCanonicalizationService
             $profileGroups = $this->canonicalizeProfileGroups(
                 $patch['profile_groups'] ?? [],
             );
-            $profileGroupMetadata = array_values(array_map(
-                static fn (array $group): array => [
-                    'id' => $group['id'],
-                    'label' => $group['label'],
-                    'order' => $group['order'],
-                ],
-                $profileGroups,
-            ));
-            $ownEventParties = $this->normalizeEventPartyRows(
-                $patch['own_event_parties'] ?? [],
-            );
+            $profileGroupMetadata = $this->profileGroupMetadata($profileGroups);
 
             $didMutate = false;
             if (
@@ -640,12 +515,7 @@ class LegacyEventPartiesCanonicalizationService
                 $occurrence->own_profile_groups = $profileGroupMetadata;
                 $didMutate = true;
             }
-            if (
-                $this->eventPartiesComparable(
-                    $this->normalizeEventPartyRows($occurrence->own_event_parties ?? []),
-                ) !== $this->eventPartiesComparable($ownEventParties)
-            ) {
-                $occurrence->own_event_parties = $ownEventParties;
+            if ($this->stripLegacyRelatedAccountFields($occurrence)) {
                 $didMutate = true;
             }
 
@@ -668,6 +538,63 @@ class LegacyEventPartiesCanonicalizationService
         }
 
         $this->occurrenceReconciliationService->reconcileEvent($refreshed);
+    }
+
+    /**
+     * @param  array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>  $groups
+     * @return array<int, array{id:string,label:string,order:int}>
+     */
+    private function profileGroupMetadata(array $groups): array
+    {
+        return array_values(array_map(
+            static fn (array $group): array => [
+                'id' => $group['id'],
+                'label' => $group['label'],
+                'order' => $group['order'],
+            ],
+            $this->canonicalizeProfileGroups($groups),
+        ));
+    }
+
+    private function stripLegacyRelatedAccountFields(Event|EventOccurrence $document): bool
+    {
+        $didMutate = false;
+
+        foreach ([
+            'artists',
+            'event_parties',
+            'own_event_parties',
+            'linked_account_profiles',
+            'own_linked_account_profiles',
+            'account_context_ids',
+        ] as $field) {
+            if (array_key_exists($field, $document->getAttributes())) {
+                $document->unset($field);
+                $didMutate = true;
+            }
+        }
+
+        return $didMutate;
+    }
+
+    private function hasLegacyRelatedAccountFields(Event|EventOccurrence $document): bool
+    {
+        $attributes = $document->getAttributes();
+
+        foreach ([
+            'artists',
+            'event_parties',
+            'own_event_parties',
+            'linked_account_profiles',
+            'own_linked_account_profiles',
+            'account_context_ids',
+        ] as $field) {
+            if (array_key_exists($field, $attributes)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function hasLegacyProfileGroupMembers(Event $event): bool
@@ -871,184 +798,6 @@ class LegacyEventPartiesCanonicalizationService
         }
 
         return trim((string) ($group['id'] ?? ''));
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
-     */
-    private function fallbackProfileGroupsByPluralTypeLabel(array $linkedProfiles): array
-    {
-        $labelsByType = $this->profileTypePluralLabelsByType($linkedProfiles);
-        $groups = [];
-        $indexByType = [];
-
-        foreach ($this->normalizeLinkedProfileSummaries($linkedProfiles) as $profile) {
-            $profileType = trim((string) ($profile['profile_type'] ?? ''));
-            $profileId = trim((string) ($profile['id'] ?? ''));
-            if ($profileType === '' || $profileId === '') {
-                continue;
-            }
-
-            if (! isset($indexByType[$profileType])) {
-                $indexByType[$profileType] = count($groups);
-                $groups[] = [
-                    'id' => $profileType,
-                    'label' => $labelsByType[$profileType]
-                        ?? Str::headline(Str::plural($profileType)),
-                    'order' => count($groups),
-                    'account_profile_ids' => [],
-                ];
-            }
-
-            $groupIndex = $indexByType[$profileType];
-            if (! in_array($profileId, $groups[$groupIndex]['account_profile_ids'], true)) {
-                $groups[$groupIndex]['account_profile_ids'][] = $profileId;
-            }
-        }
-
-        usort(
-            $groups,
-            static fn (array $left, array $right): int => [$left['label'], $left['id']]
-                <=> [$right['label'], $right['id']],
-        );
-
-        foreach ($groups as $index => &$group) {
-            $group['order'] = $index;
-        }
-        unset($group);
-
-        return array_values($groups);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<string, string>
-     */
-    private function profileTypePluralLabelsByType(array $linkedProfiles): array
-    {
-        $types = [];
-
-        foreach ($this->normalizeLinkedProfileSummaries($linkedProfiles) as $profile) {
-            $type = trim((string) ($profile['profile_type'] ?? ''));
-            if ($type !== '') {
-                $types[$type] = true;
-            }
-        }
-
-        if ($types === []) {
-            return [];
-        }
-
-        return $this->eventProfileResolver->resolveProfileTypePluralLabelsByTypes(
-            array_keys($types),
-        );
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $profiles
-     * @return array<int, array{id:string,profile_type:string}>
-     */
-    private function normalizeLinkedProfileSummaries(mixed $profiles): array
-    {
-        $rows = $this->normalizeArray($profiles);
-        if ($rows === []) {
-            return [];
-        }
-
-        $normalized = [];
-
-        foreach ($rows as $row) {
-            $profile = $this->normalizeArray($row);
-            $id = trim((string) ($profile['id'] ?? ''));
-            $profileType = trim((string) ($profile['profile_type'] ?? ''));
-            if ($id === '' || $profileType === '') {
-                continue;
-            }
-
-            $normalized[] = [
-                'id' => $id,
-                'profile_type' => $profileType,
-            ];
-        }
-
-        return $normalized;
-    }
-
-    /**
-     * @return array<int, array{id:string,profile_type:string}>
-     */
-    private function mergeLinkedProfileSummaries(mixed ...$sources): array
-    {
-        $merged = [];
-        $profileIds = [];
-
-        foreach ($sources as $source) {
-            foreach ($this->normalizeLinkedProfileSummaries($source) as $profile) {
-                $profileId = trim((string) ($profile['id'] ?? ''));
-                if ($profileId === '' || isset($profileIds[$profileId])) {
-                    continue;
-                }
-
-                $profileIds[$profileId] = true;
-                $merged[] = $profile;
-            }
-        }
-
-        return $merged;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventParties
-     * @return array<int, array{id:string,profile_type:string}>
-     */
-    private function linkedProfileSummariesForEventParties(array $eventParties): array
-    {
-        $profileIds = [];
-
-        foreach ($eventParties as $party) {
-            if (! is_array($party)) {
-                continue;
-            }
-
-            $profileId = trim((string) ($party['party_ref_id'] ?? ''));
-            $profileType = trim((string) ($party['party_type'] ?? ''));
-            if ($profileId === '' || $profileType === '' || $profileType === 'venue') {
-                continue;
-            }
-
-            if (! in_array($profileId, $profileIds, true)) {
-                $profileIds[] = $profileId;
-            }
-        }
-
-        if ($profileIds === []) {
-            return [];
-        }
-
-        $resolvedProfiles = $this->resolveExistingEventPartyProfilesById($profileIds);
-        $summariesById = [];
-
-        foreach ($resolvedProfiles as $profileId => $profile) {
-            $profileType = trim((string) ($profile['profile_type'] ?? ''));
-            if ($profileId === '' || $profileType === '') {
-                continue;
-            }
-
-            $summariesById[$profileId] = [
-                'id' => $profileId,
-                'profile_type' => $profileType,
-            ];
-        }
-
-        $summaries = [];
-        foreach ($profileIds as $profileId) {
-            if (isset($summariesById[$profileId])) {
-                $summaries[] = $summariesById[$profileId];
-            }
-        }
-
-        return $summaries;
     }
 
     /**

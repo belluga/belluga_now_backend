@@ -35,7 +35,6 @@ class EventManagementService
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
-        private readonly EventAccountContextResolver $eventAccountContextResolver,
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
         private readonly EventAggregateWriteService $eventAggregateWrites,
@@ -163,12 +162,6 @@ class EventManagementService
         $eventTypeForTaxonomy = $normalized['type'] ?? $this->resolveExistingEventTypePayload($existing);
         $resolvedCapabilities = $this->eventCapabilities->resolveEventCapabilities($payload, $existing);
         $schedule = $this->resolveSchedulePayload($payload, $existing, $eventTypeForTaxonomy);
-        if ($existing !== null && ! array_key_exists('occurrences', $payload)) {
-            $schedule['occurrences'] = $this->promoteStoredLegacyEventPartiesToOccurrenceGroups(
-                $existing,
-                $schedule['occurrences'],
-            );
-        }
         if ($schedule['touched']) {
             $this->eventCapabilities->assertScheduleConstraints($resolvedCapabilities, $schedule['occurrences']);
         }
@@ -210,20 +203,6 @@ class EventManagementService
             $payload['profile_groups'] ?? $existingEventGroups,
             'profile_groups',
             array_key_exists('profile_groups', $payload)
-        );
-        $aggregateProfileIds = $this->profileIdsFromEventAndOccurrenceGroups(
-            $normalized['profile_groups'],
-            $schedule['occurrences']
-        );
-        $normalized['event_parties'] = $this->resolveDerivedEventParties(
-            $aggregateProfileIds,
-            array_values($this->normalizeEventPartiesMap($existing?->event_parties ?? []))
-        );
-        $normalized['account_context_ids'] = $this->eventAccountContextResolver->resolveForAggregate(
-            $this->baseAccountContextIdsForPayload($payload),
-            $this->normalizeArray($normalized['event_parties'] ?? []),
-            $this->normalizeNullableArray($normalized['place_ref'] ?? ($existing?->place_ref ?? null)),
-            $schedule['occurrences']
         );
 
         return [
@@ -352,10 +331,6 @@ class EventManagementService
                 "occurrences.{$index}.profile_groups",
                 array_key_exists('profile_groups', $occurrence)
             );
-            $ownEventParties = $this->resolveDerivedEventParties(
-                $this->profileIdsFromProfileGroups($profileGroups),
-                array_values($this->normalizeEventPartiesMap($existingOccurrence['event_parties'] ?? []))
-            );
             $taxonomyTerms = array_key_exists('taxonomy_terms', $occurrence)
                 ? $this->resolveOccurrenceTaxonomyTerms(
                     $occurrence['taxonomy_terms'],
@@ -381,7 +356,6 @@ class EventManagementService
                 'occurrence_slug' => $this->normalizeOptionalString($occurrence['occurrence_slug'] ?? null),
                 'date_time_start' => $start,
                 'date_time_end' => $end,
-                'event_parties' => $ownEventParties,
                 'profile_groups' => $profileGroups,
                 'has_location_override' => false,
                 'location_override' => null,
@@ -596,202 +570,6 @@ class EventManagementService
     }
 
     /**
-     * @param  array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>  $eventProfileGroups
-     * @param  array<int, array<string, mixed>>  $occurrences
-     * @return array<int, string>
-     */
-    private function profileIdsFromEventAndOccurrenceGroups(array $eventProfileGroups, array $occurrences): array
-    {
-        $ids = $this->profileIdsFromProfileGroups($eventProfileGroups);
-
-        foreach ($occurrences as $occurrence) {
-            foreach ($this->profileIdsFromProfileGroups(
-                $this->normalizeArray($occurrence['profile_groups'] ?? [])
-            ) as $profileId) {
-                if (! in_array($profileId, $ids, true)) {
-                    $ids[] = $profileId;
-                }
-            }
-        }
-
-        return $ids;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $occurrences
-     * @return array<int, array<string, mixed>>
-     */
-    private function promoteStoredLegacyEventPartiesToOccurrenceGroups(Event $event, array $occurrences): array
-    {
-        $eventId = trim((string) $event->getKey());
-        if ($eventId === '' || $occurrences === []) {
-            return $occurrences;
-        }
-
-        $eventProfileGroups = $this->canonicalizeStoredProfileGroups(
-            $this->profileGroupMemberStore->inflateGroupsWithMembers(
-                $event->profile_groups ?? [],
-                'event',
-                $eventId,
-            ),
-        );
-        if ($this->profileIdsFromProfileGroups($eventProfileGroups) !== []) {
-            return $occurrences;
-        }
-
-        $eventPartyRows = array_values($this->normalizeEventPartiesMap($event->event_parties ?? []));
-        if ($eventPartyRows === []) {
-            return $occurrences;
-        }
-
-        foreach ($occurrences as $index => $occurrence) {
-            if (! is_array($occurrence)) {
-                continue;
-            }
-
-            $occurrenceGroups = $this->canonicalizeStoredProfileGroups($occurrence['profile_groups'] ?? []);
-            if ($this->profileIdsFromProfileGroups($occurrenceGroups) !== []) {
-                continue;
-            }
-
-            $occurrencePartyRows = array_values($this->normalizeEventPartiesMap($occurrence['event_parties'] ?? []));
-            $legacyPartyRows = $this->mergeLegacyEventPartyRows($eventPartyRows, $occurrencePartyRows);
-            $migratedGroups = $this->fallbackOccurrenceProfileGroupsFromLegacyEventParties($legacyPartyRows);
-            if ($migratedGroups === []) {
-                continue;
-            }
-
-            $occurrences[$index]['profile_groups'] = $migratedGroups;
-            $occurrences[$index]['event_parties'] = $this->resolveDerivedEventParties(
-                $this->profileIdsFromProfileGroups($migratedGroups),
-                $legacyPartyRows,
-            );
-        }
-
-        return $occurrences;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $legacyPartyRows
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
-     */
-    private function fallbackOccurrenceProfileGroupsFromLegacyEventParties(array $legacyPartyRows): array
-    {
-        $requestedIds = [];
-        foreach ($legacyPartyRows as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-
-            $partyType = trim((string) ($row['party_type'] ?? ''));
-            $profileId = trim((string) ($row['party_ref_id'] ?? ''));
-            if ($partyType === '' || $partyType === 'venue' || $profileId === '') {
-                continue;
-            }
-
-            if (! in_array($profileId, $requestedIds, true)) {
-                $requestedIds[] = $profileId;
-            }
-        }
-
-        if ($requestedIds === []) {
-            return [];
-        }
-
-        $resolvedProfiles = $this->eventProfileResolver->resolveExistingEventPartyProfilesByIds($requestedIds);
-        $orderedProfiles = [];
-        $profileTypes = [];
-
-        foreach ($requestedIds as $profileId) {
-            $profile = $resolvedProfiles[$profileId] ?? null;
-            if (! is_array($profile)) {
-                continue;
-            }
-
-            $profileType = trim((string) ($profile['profile_type'] ?? ''));
-            if ($profileType === '' || $profileType === 'venue') {
-                continue;
-            }
-
-            $orderedProfiles[] = [
-                'id' => $profileId,
-                'profile_type' => $profileType,
-            ];
-            $profileTypes[$profileType] = true;
-        }
-
-        if ($orderedProfiles === []) {
-            return [];
-        }
-
-        $labelsByType = $profileTypes === []
-            ? []
-            : $this->eventProfileResolver->resolveProfileTypePluralLabelsByTypes(array_keys($profileTypes));
-        $groups = [];
-        $indexByType = [];
-
-        foreach ($orderedProfiles as $profile) {
-            $profileType = $profile['profile_type'];
-            $profileId = $profile['id'];
-
-            if (! isset($indexByType[$profileType])) {
-                $indexByType[$profileType] = count($groups);
-                $groups[] = [
-                    'id' => $profileType,
-                    'label' => $labelsByType[$profileType] ?? Str::headline(Str::plural($profileType)),
-                    'order' => count($groups),
-                    'account_profile_ids' => [],
-                ];
-            }
-
-            $groupIndex = $indexByType[$profileType];
-            if (! in_array($profileId, $groups[$groupIndex]['account_profile_ids'], true)) {
-                $groups[$groupIndex]['account_profile_ids'][] = $profileId;
-            }
-        }
-
-        usort(
-            $groups,
-            static fn (array $left, array $right): int => [$left['label'], $left['id']]
-                <=> [$right['label'], $right['id']]
-        );
-
-        foreach ($groups as $index => &$group) {
-            $group['order'] = $index;
-        }
-        unset($group);
-
-        return array_values($groups);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  ...$rowSets
-     * @return array<int, array<string, mixed>>
-     */
-    private function mergeLegacyEventPartyRows(array ...$rowSets): array
-    {
-        $merged = [];
-
-        foreach ($rowSets as $rowSet) {
-            foreach ($rowSet as $row) {
-                if (! is_array($row)) {
-                    continue;
-                }
-
-                $partyType = trim((string) ($row['party_type'] ?? ''));
-                $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
-                if ($partyType === '' || $partyRefId === '') {
-                    continue;
-                }
-
-                $merged[$this->eventPartyKey($partyType, $partyRefId)] = $row;
-            }
-        }
-
-        return array_values($merged);
-    }
-
-    /**
      * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
      */
     private function canonicalizeStoredProfileGroups(mixed $rawGroups): array
@@ -839,81 +617,6 @@ class EventManagementService
         );
 
         return array_values($groups);
-    }
-
-    /**
-     * @param  array<int, string>  $profileIds
-     * @param  array<int, array<string, mixed>>  $existingRows
-     * @return array<int, array{
-     *   party_type: string,
-     *   party_ref_id: string,
-     *   permissions: array{can_edit: bool},
-     *   metadata?: array<string, mixed>
-     * }>
-     */
-    private function resolveDerivedEventParties(array $profileIds, array $existingRows): array
-    {
-        if ($profileIds === []) {
-            return [];
-        }
-
-        $existingByRefId = [];
-        foreach ($existingRows as $row) {
-            $partyRefId = trim((string) ($row['party_ref_id'] ?? ''));
-            if ($partyRefId !== '') {
-                $existingByRefId[$partyRefId] = $row;
-            }
-        }
-
-        try {
-            $resolvedProfiles = $this->eventProfileResolver->resolveEventPartyProfilesByIds($profileIds);
-        } catch (ValidationException $exception) {
-            $errors = $exception->errors();
-            $eventPartyErrors = $errors['event_parties'] ?? null;
-
-            if (is_array($eventPartyErrors) && $eventPartyErrors !== []) {
-                throw ValidationException::withMessages([
-                    'profile_groups' => array_values(array_map('strval', $eventPartyErrors)),
-                ]);
-            }
-
-            throw $exception;
-        }
-        $resolvedProfilesByRefId = [];
-        foreach ($resolvedProfiles as $profile) {
-            if (! is_array($profile)) {
-                continue;
-            }
-
-            $resolvedPartyRefId = trim((string) ($profile['id'] ?? ''));
-            if ($resolvedPartyRefId !== '') {
-                $resolvedProfilesByRefId[$resolvedPartyRefId] = $profile;
-            }
-        }
-
-        $resolved = [];
-        foreach ($profileIds as $profileId) {
-            $profile = $resolvedProfilesByRefId[$profileId] ?? null;
-            if (! is_array($profile)) {
-                throw ValidationException::withMessages([
-                    'profile_groups' => ['Related account profile was not found.'],
-                ]);
-            }
-
-            $profileType = trim((string) ($profile['profile_type'] ?? ''));
-            $resolved[] = $this->buildEventPartyRow(
-                $profileType,
-                $profileId,
-                $profile,
-                is_array($existingByRefId[$profileId] ?? null)
-                    ? $existingByRefId[$profileId]
-                    : null,
-                null,
-                'profile_groups'
-            );
-        }
-
-        return $resolved;
     }
 
     private function normalizeOptionalString(mixed $value): ?string

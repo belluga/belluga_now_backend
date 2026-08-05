@@ -22,7 +22,6 @@ class EventOccurrenceSyncService
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
-        private readonly EventAccountContextResolver $eventAccountContextResolver,
     ) {}
 
     /**
@@ -67,18 +66,7 @@ class EventOccurrenceSyncService
             $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
             $eventProfileGroups = $this->normalizeProfileGroups($event->profile_groups ?? []);
             $ownProfileGroups = $this->normalizeProfileGroups($occurrence['profile_groups'] ?? []);
-            $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-            $ownEventParties = $this->normalizeEventParties($occurrence['event_parties'] ?? []);
             $effectiveProfileGroups = $this->mergeProfileGroups($eventProfileGroups, $ownProfileGroups);
-            $effectiveEventParties = $this->mergeEventParties($eventParties, $ownEventParties);
-            $linkedAccountProfiles = $this->resolveLinkedAccountProfiles(
-                $effectiveProfileGroups,
-                $effectiveEventParties,
-            );
-            $ownLinkedAccountProfiles = $this->resolveLinkedAccountProfiles(
-                $ownProfileGroups,
-                $ownEventParties,
-            );
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
             $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
             $document = $resolvedDocuments[$index] ?? null;
@@ -96,25 +84,14 @@ class EventOccurrenceSyncService
                 'geo_location' => $effectiveLocation['geo_location'],
                 'has_location_override' => $effectiveLocation['has_location_override'],
                 'location_override' => $effectiveLocation['location_override'],
-                'own_event_parties' => $ownEventParties,
-                'own_linked_account_profiles' => $ownLinkedAccountProfiles,
-                'linked_account_profiles' => $linkedAccountProfiles,
                 'own_profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
                 'profile_groups' => $this->profileGroupMemberStore->metadataOnly($effectiveProfileGroups),
-                'artists' => $this->deriveArtistsReadProjection($linkedAccountProfiles),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'own_taxonomy_terms' => $ownTaxonomyTerms,
                 'taxonomy_terms' => $effectiveTaxonomyTerms,
                 'capabilities' => $this->normalizeArray($event->capabilities ?? []),
                 'created_by' => $this->normalizeArray($event->created_by ?? []),
-                'event_parties' => $effectiveEventParties,
                 'programming_items' => $programmingItems,
-                'account_context_ids' => $this->eventAccountContextResolver->resolveForOccurrence(
-                    $this->normalizeArray($event->account_context_ids ?? []),
-                    $effectiveEventParties,
-                    $effectiveLocation['place_ref'],
-                    $programmingItems
-                ),
                 'publication' => $publication,
                 'is_event_published' => $this->isEffectivelyPublished($publication, $now),
                 'is_active' => (bool) ($event->is_active ?? true),
@@ -128,6 +105,12 @@ class EventOccurrenceSyncService
             if ($document) {
                 $document->unset('occurrence_index');
                 $document->unset('tags');
+                $document->unset('linked_account_profiles');
+                $document->unset('own_linked_account_profiles');
+                $document->unset('artists');
+                $document->unset('event_parties');
+                $document->unset('own_event_parties');
+                $document->unset('account_context_ids');
                 $document->fill($payload);
                 $document->save();
             } else {
@@ -665,80 +648,6 @@ class EventOccurrenceSyncService
         );
     }
 
-    /**
-     * @param  array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>  $profileGroups
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveLinkedAccountProfiles(array $profileGroups, array $eventParties): array
-    {
-        $orderedProfileIds = [];
-        foreach ($profileGroups as $group) {
-            foreach ($this->normalizeArray($group['account_profile_ids'] ?? []) as $rawProfileId) {
-                $profileId = trim((string) $rawProfileId);
-                if ($profileId !== '' && ! in_array($profileId, $orderedProfileIds, true)) {
-                    $orderedProfileIds[] = $profileId;
-                }
-            }
-        }
-
-        foreach ($eventParties as $party) {
-            $partyType = trim((string) ($party['party_type'] ?? ''));
-            $profileId = trim((string) ($party['party_ref_id'] ?? ''));
-            if (
-                $partyType === ''
-                || $partyType === 'venue'
-                || $profileId === ''
-                || in_array($profileId, $orderedProfileIds, true)
-            ) {
-                continue;
-            }
-
-            $orderedProfileIds[] = $profileId;
-        }
-
-        if ($orderedProfileIds === []) {
-            return [];
-        }
-
-        $profilesById = [];
-        foreach ($this->eventProfileResolver->resolveNestedAccountProfileSnapshotsByIds($orderedProfileIds) as $profile) {
-            if (! is_array($profile)) {
-                continue;
-            }
-
-            $profileId = trim((string) ($profile['id'] ?? ''));
-            if ($profileId !== '') {
-                $profilesById[$profileId] = $profile;
-            }
-        }
-
-        $profiles = [];
-        foreach ($orderedProfileIds as $profileId) {
-            $profile = $profilesById[$profileId] ?? null;
-            if (! is_array($profile)) {
-                continue;
-            }
-
-            $displayName = trim((string) ($profile['label'] ?? ''));
-            $profileType = trim((string) ($profile['profile_type'] ?? ''));
-            if ($displayName === '' || $profileType === '') {
-                continue;
-            }
-
-            $profiles[] = [
-                'id' => $profileId,
-                'display_name' => $displayName,
-                'slug' => isset($profile['slug']) ? (string) $profile['slug'] : null,
-                'profile_type' => $profileType,
-                'avatar_url' => $profile['avatar_url'] ?? null,
-                'cover_url' => $profile['cover_url'] ?? null,
-                'genres' => [],
-                'taxonomy_terms' => [],
-            ];
-        }
-
-        return $profiles;
-    }
 
     /**
      * @param  array<int, array<string, mixed>>  $eventParties

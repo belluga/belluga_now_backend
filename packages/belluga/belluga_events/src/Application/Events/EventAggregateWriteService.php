@@ -32,6 +32,7 @@ class EventAggregateWriteService
             );
 
             $created = Event::query()->create($canonicalPayload);
+            $this->pruneLegacyRelatedAccountFields($created);
             $this->occurrenceSyncService->syncFromEvent($created, $occurrences);
 
             return $created->fresh() ?? $created;
@@ -54,7 +55,7 @@ class EventAggregateWriteService
             );
 
             $event->unset('tags');
-            $event->unset('artists');
+            $this->pruneLegacyRelatedAccountFields($event);
             $event->fill($canonicalPayload);
             $event->save();
 
@@ -180,5 +181,15 @@ class EventAggregateWriteService
         }
 
         return null;
+    }
+
+    private function pruneLegacyRelatedAccountFields(Event $event): void
+    {
+        $event->unset('artists');
+        $event->unset('event_parties');
+        $event->unset('account_context_ids');
+        $event->unset('linked_account_profiles');
+        $event->unset('own_linked_account_profiles');
+        $event->unset('own_event_parties');
     }
 }

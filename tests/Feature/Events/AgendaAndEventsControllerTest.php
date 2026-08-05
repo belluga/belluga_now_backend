@@ -23,6 +23,7 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as EventBus;
 use Laravel\Sanctum\Sanctum;
@@ -377,6 +378,118 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame($profileAvatarUrl, data_get($items, '0.hero_image_url'));
         $this->assertSame($venueCoverUrl, data_get($items, '0.venue.cover_url'));
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
+    }
+
+    public function test_public_root_event_detail_uses_only_the_first_ordered_occurrence_counterpart_summary(): void
+    {
+        $now = Carbon::now();
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Band',
+                'labels' => [
+                    'singular' => 'Band',
+                    'plural' => 'Bands',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+
+        $firstProfileAccount = Account::create([
+            'name' => 'First Ordered Counterpart Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $firstProfile = AccountProfile::create([
+            'account_id' => (string) $firstProfileAccount->_id,
+            'profile_type' => 'band',
+            'display_name' => 'First Ordered Counterpart',
+            'slug' => 'first-ordered-counterpart',
+            'avatar_url' => 'https://example.org/root-first-occurrence-avatar.jpg',
+            'cover_url' => null,
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $secondProfileAccount = Account::create([
+            'name' => 'Second Ordered Counterpart Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $secondProfile = AccountProfile::create([
+            'account_id' => (string) $secondProfileAccount->_id,
+            'profile_type' => 'band',
+            'display_name' => 'Second Ordered Counterpart',
+            'slug' => 'second-ordered-counterpart',
+            'avatar_url' => 'https://example.org/root-second-occurrence-avatar.jpg',
+            'cover_url' => null,
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $event = $this->createEvent([
+            'title' => 'Root detail first occurrence counterpart summary',
+            'thumb' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+            'venue' => [
+                'id' => 'venue-root-first-occurrence',
+                'display_name' => 'Venue fallback',
+                'slug' => 'venue-root-first-occurrence',
+                'profile_type' => 'venue',
+                'tagline' => 'Venue fallback',
+                'hero_image_url' => null,
+                'logo_url' => null,
+                'avatar_url' => null,
+                'cover_url' => 'https://example.org/root-venue-cover.jpg',
+                'taxonomy_terms' => [],
+            ],
+        ]);
+
+        $this->syncEventWithPersistedOccurrenceIdentity($event->fresh(), [
+            [
+                'date_time_start' => $now->copy()->addDays(1),
+                'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+                'profile_groups' => [[
+                    'id' => 'headline',
+                    'label' => 'Headline',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $firstProfile->_id],
+                ]],
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2),
+                'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+                'profile_groups' => [[
+                    'id' => 'guest',
+                    'label' => 'Guest',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $secondProfile->_id],
+                ]],
+            ],
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $firstProfile->_id);
+        $response->assertJsonPath('data.counterpart_count', 1);
+        $response->assertJsonPath('data.hero_image_url', 'https://example.org/root-first-occurrence-avatar.jpg');
+        $this->assertFalse(
+            collect($response->json('data.counterpart_preview', []))
+                ->pluck('id')
+                ->contains((string) $secondProfile->_id)
+        );
+        $this->assertNotSame(
+            'https://example.org/root-second-occurrence-avatar.jpg',
+            (string) $response->json('data.hero_image_url')
+        );
     }
 
     public function test_agenda_live_now_only_returns_only_current_occurrences_with_artists(): void
