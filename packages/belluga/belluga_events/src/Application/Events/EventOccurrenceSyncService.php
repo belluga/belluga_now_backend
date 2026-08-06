@@ -64,12 +64,12 @@ class EventOccurrenceSyncService
             );
             $ownTaxonomyTerms = $this->ensureTaxonomySnapshots($occurrence['taxonomy_terms'] ?? []);
             $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
-            $eventProfileGroups = $this->normalizeProfileGroups($event->profile_groups ?? []);
             $ownProfileGroups = $this->normalizeProfileGroups($occurrence['profile_groups'] ?? []);
-            $effectiveProfileGroups = $this->mergeProfileGroups($eventProfileGroups, $ownProfileGroups);
+            $profileGroupsExplicit = (bool) ($occurrence['_profile_groups_explicit'] ?? false);
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
             $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
             $document = $resolvedDocuments[$index] ?? null;
+            $isExistingDocument = $document instanceof EventOccurrence;
 
             $payload = [
                 'event_id' => $eventId,
@@ -85,7 +85,7 @@ class EventOccurrenceSyncService
                 'has_location_override' => $effectiveLocation['has_location_override'],
                 'location_override' => $effectiveLocation['location_override'],
                 'own_profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
-                'profile_groups' => $this->profileGroupMemberStore->metadataOnly($effectiveProfileGroups),
+                'profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'own_taxonomy_terms' => $ownTaxonomyTerms,
                 'taxonomy_terms' => $effectiveTaxonomyTerms,
@@ -118,16 +118,18 @@ class EventOccurrenceSyncService
             }
 
             if (isset($document->_id)) {
-                $this->profileGroupMemberStore->syncOccurrenceGroups(
-                    $eventId,
-                    $document,
-                    $ownProfileGroups,
-                );
-                $this->occurrenceNestedAccountStore->syncOccurrenceGroups(
-                    $eventId,
-                    $document,
-                    $effectiveProfileGroups,
-                );
+                if (! $isExistingDocument || $profileGroupsExplicit) {
+                    $this->profileGroupMemberStore->syncOccurrenceGroups(
+                        $eventId,
+                        $document,
+                        $ownProfileGroups,
+                    );
+                    $this->occurrenceNestedAccountStore->syncOccurrenceGroups(
+                        $eventId,
+                        $document,
+                        $ownProfileGroups,
+                    );
+                }
                 $documentId = (string) $document->_id;
                 $activeDocumentIds[] = $documentId;
                 $occurrenceRefs[] = [

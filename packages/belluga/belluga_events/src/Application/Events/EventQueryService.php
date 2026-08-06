@@ -628,6 +628,10 @@ class EventQueryService
                 ->orderBy('starts_at')
                 ->get();
         }
+        $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+            $event,
+            $event->trashed(),
+        );
         $hydrationDocuments = [$event];
         foreach ($occurrenceDocuments ?? [] as $occurrence) {
             $hydrationDocuments[] = $occurrence;
@@ -657,13 +661,6 @@ class EventQueryService
         $thumb = $this->normalizeThumbPayload(
             $this->normalizeArray($event->thumb ?? null)
         );
-        $linkedAccountProfiles = $this->canonicalLinkedAccountProfilesForEvent(
-            $event,
-            $occurrenceDocuments,
-            false,
-            $relatedProfilesById,
-        );
-        $eventLinkedAccountProfiles = $linkedAccountProfiles;
         $managementCounterpart = $this->publicCounterpartsForEventOccurrences(
             $occurrenceDocuments ?? [],
             $this->buildManagementCounterpartContext($occurrenceDocuments ?? []),
@@ -748,12 +745,7 @@ class EventQueryService
                 'type' => $this->scalarString($createdBy['type'] ?? null) ?? '',
                 'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
             ],
-            'profile_groups' => $this->formatProfileGroupsForManagement(
-                $event->profile_groups ?? [],
-                $eventLinkedAccountProfiles,
-                'event',
-                isset($event->_id) ? (string) $event->_id : '',
-            ),
+            'profile_groups' => $this->managementRootProfileGroupsFromOccurrences($occurrences),
             'capabilities' => $this->resolveEventCapabilities($event),
             'taxonomy_terms' => $taxonomyTerms,
             'publication' => [
@@ -2352,6 +2344,31 @@ class EventQueryService
     }
 
     /**
+     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     */
+    public function adminOccurrenceGroupMembers(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        int $defaultPerPage,
+        ?int $suppliedPerPage,
+        ?string $cursor,
+    ): array {
+        $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+            $event,
+            $event->trashed(),
+        );
+
+        return $this->occurrenceNestedAccountStore->adminOccurrenceMemberPage(
+            $occurrence,
+            $groupId,
+            $defaultPerPage,
+            $suppliedPerPage,
+            $cursor,
+        );
+    }
+
+    /**
      * @return array{event_id: string, occurrence_id: string, type: string, updated_at: string}
      */
     private function formatStreamDelta(mixed $event, Carbon $since): array
@@ -2806,19 +2823,13 @@ class EventQueryService
                 'programming_count' => count($programmingItems),
             ];
 
-                    if (! $forPublic) {
-                        $ownLinkedAccountProfiles = $this->canonicalLinkedAccountProfilesForOccurrencePayload(
-                            $event,
-                            false,
-                            $relatedProfilesById,
-                            true,
-                        );
-                        $payload['profile_groups'] = $this->formatProfileGroupsForManagement(
-                            $event->own_profile_groups ?? [],
-                            $ownLinkedAccountProfiles,
-                            'occurrence',
-                            $occurrenceId ?? '',
-                );
+            if (! $forPublic) {
+                $payload['profile_groups'] = $occurrenceId === null
+                    ? []
+                    : $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                        $event,
+                        (string) ($event->event_id ?? ''),
+                    );
             }
 
             return [$payload];
@@ -2835,6 +2846,7 @@ class EventQueryService
 
             if ($documents->isNotEmpty()) {
                 return $documents->map(function (EventOccurrence $occurrence) use (
+                    $eventId,
                     $selectedOccurrenceId,
                     $forPublic,
                     $relatedProfilesById,
@@ -2862,18 +2874,12 @@ class EventQueryService
                     ];
 
                     if (! $forPublic) {
-                        $ownLinkedAccountProfiles = $this->canonicalLinkedAccountProfilesForOccurrencePayload(
-                            $occurrence,
-                            false,
-                            $relatedProfilesById,
-                            true,
-                        );
-                        $payload['profile_groups'] = $this->formatProfileGroupsForManagement(
-                            $occurrence->own_profile_groups ?? [],
-                            $ownLinkedAccountProfiles,
-                            'occurrence',
-                            $occurrenceId ?? '',
-                        );
+                        $payload['profile_groups'] = $occurrenceId === null
+                            ? []
+                            : $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                                $occurrence,
+                                $eventId,
+                            );
                     }
 
                     return $payload;
@@ -3174,86 +3180,18 @@ class EventQueryService
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return array<int, array<string, mixed>>
      */
-    private function formatProfileGroupsForManagement(
-        mixed $rawGroups,
-        array $linkedProfiles = [],
-        string $ownerType = 'event',
-        string $ownerId = '',
-    ): array {
-        $groups = $this->normalizeProfileGroups($rawGroups, $ownerType, $ownerId);
-        if ($groups !== []) {
-            if ($linkedProfiles === []) {
-                $groupProfileIds = [];
-                foreach ($groups as $group) {
-                    foreach ($group['account_profile_ids'] as $profileId) {
-                        $normalizedProfileId = trim((string) $profileId);
-                        if ($normalizedProfileId === '' || in_array($normalizedProfileId, $groupProfileIds, true)) {
-                            continue;
-                        }
-
-                        $groupProfileIds[] = $normalizedProfileId;
-                    }
-                }
-
-                if ($groupProfileIds !== []) {
-                    $linkedProfiles = $this->orderedCurrentRelatedProfiles(
-                        $groupProfileIds,
-                        $this->resolveCurrentRelatedProfilesByIds($groupProfileIds, false),
-                    );
-                }
-            }
-
-            $allowedProfileIds = $this->managementLinkedProfileIdLookup($linkedProfiles);
-
-            return array_values(array_filter(array_map(
-                static function (array $group) use ($allowedProfileIds): array {
-                    $memberIds = [];
-                    foreach ($group['account_profile_ids'] as $profileId) {
-                        if (! isset($allowedProfileIds[$profileId])) {
-                            continue;
-                        }
-                        if (in_array($profileId, $memberIds, true)) {
-                            continue;
-                        }
-
-                        $memberIds[] = $profileId;
-                    }
-
-                    return [
-                        'id' => $group['id'],
-                        'label' => $group['label'],
-                        'order' => $group['order'],
-                        'account_profile_ids' => $memberIds,
-                    ];
-                },
-                $groups
-            ), static fn (array $group): bool => $group['account_profile_ids'] !== []));
-        }
-
-        return [];
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<string, bool>
-     */
-    private function managementLinkedProfileIdLookup(array $linkedProfiles): array
+    private function managementRootProfileGroupsFromOccurrences(array $occurrences): array
     {
-        $allowedProfileIds = [];
-
-        foreach ($this->normalizeManagementLinkedAccountProfiles($linkedProfiles) as $profile) {
-            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            if ($profileId === '' || isset($allowedProfileIds[$profileId])) {
-                continue;
-            }
-
-            $allowedProfileIds[$profileId] = true;
+        if (count($occurrences) !== 1) {
+            return [];
         }
 
-        return $allowedProfileIds;
+        $profileGroups = $occurrences[0]['profile_groups'] ?? null;
+
+        return is_array($profileGroups) ? array_values($profileGroups) : [];
     }
 
     /**

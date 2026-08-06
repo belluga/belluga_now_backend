@@ -6,14 +6,17 @@ namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class EventAggregateWriteService
 {
     public function __construct(
         private readonly EventTransactionRunner $transactions,
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
+        private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
         private readonly EventOccurrenceSyncService $occurrenceSyncService,
         private readonly EventOccurrencePayloadSnapshotService $occurrencePayloadSnapshots,
     ) {}
@@ -27,9 +30,7 @@ class EventAggregateWriteService
         /** @var Event $event */
         $event = $this->transactions->run(function () use ($payload, $occurrences): Event {
             $canonicalPayload = $payload;
-            $canonicalPayload['profile_groups'] = $this->profileGroupMemberStore->metadataOnly(
-                $payload['profile_groups'] ?? []
-            );
+            $canonicalPayload['profile_groups'] = [];
 
             $created = Event::query()->create($canonicalPayload);
             $this->pruneLegacyRelatedAccountFields($created);
@@ -50,9 +51,7 @@ class EventAggregateWriteService
         /** @var Event $updated */
         $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
             $canonicalPayload = $payload;
-            $canonicalPayload['profile_groups'] = $this->profileGroupMemberStore->metadataOnly(
-                $payload['profile_groups'] ?? []
-            );
+            $canonicalPayload['profile_groups'] = [];
 
             $event->unset('tags');
             $this->pruneLegacyRelatedAccountFields($event);
@@ -78,6 +77,78 @@ class EventAggregateWriteService
 
             return null;
         });
+    }
+
+    /**
+     * @param  array<int, string>  $addIds
+     * @param  array<int, string>  $removeIds
+     * @return array<string, mixed>
+     */
+    public function patchOccurrenceGroupMembers(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        array $addIds,
+        array $removeIds,
+    ): array {
+        /** @var array<string, mixed> $result */
+        $result = $this->transactions->run(function () use ($event, $occurrence, $groupId, $addIds, $removeIds): array {
+            $eventId = trim((string) $event->getKey());
+            $occurrenceId = trim((string) $occurrence->getKey());
+            if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
+                throw new NotFoundHttpException;
+            }
+
+            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+                $event,
+                $event->trashed(),
+            );
+
+            $existingIds = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMemberIds(
+                $occurrence,
+                $groupId,
+            );
+            $removeLookup = array_fill_keys($removeIds, true);
+            $nextIds = array_values(array_filter(
+                $existingIds,
+                static fn (string $profileId): bool => $profileId !== '' && ! isset($removeLookup[$profileId]),
+            ));
+            $seen = array_fill_keys($nextIds, true);
+            foreach ($addIds as $profileId) {
+                if ($profileId === '' || isset($seen[$profileId])) {
+                    continue;
+                }
+                $nextIds[] = $profileId;
+                $seen[$profileId] = true;
+            }
+
+            $memberCount = $this->occurrenceNestedAccountStore->replaceOccurrenceGroupMembers(
+                $occurrence,
+                $groupId,
+                $nextIds,
+            );
+
+            $event->touch();
+            $occurrence->touch();
+
+            $groups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                $occurrence->fresh() ?? $occurrence,
+                $eventId,
+            );
+            foreach ($groups as $group) {
+                if (trim((string) ($group['id'] ?? '')) !== trim($groupId)) {
+                    continue;
+                }
+
+                $group['member_count'] = $memberCount;
+
+                return $group;
+            }
+
+            throw new NotFoundHttpException;
+        });
+
+        return $result;
     }
 
     public function repairOccurrences(Event $event): void

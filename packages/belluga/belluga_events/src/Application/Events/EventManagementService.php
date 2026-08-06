@@ -34,7 +34,6 @@ class EventManagementService
         private readonly EventTypeResolverContract $eventTypeResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
         private readonly EventPartyMapperRegistryContract $eventPartyMappers,
-        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventCapabilitiesService $eventCapabilities,
         private readonly EventOccurrencePayloadSnapshotService $eventOccurrencePayloadSnapshots,
         private readonly EventAggregateWriteService $eventAggregateWrites,
@@ -90,6 +89,31 @@ class EventManagementService
 
         $this->events->dispatch(new EventDeleted($eventId));
         $this->logDeleteCompleted($event, $eventId, $startedAt);
+    }
+
+    /**
+     * @param  array<int, string>  $addIds
+     * @param  array<int, string>  $removeIds
+     * @return array<string, mixed>
+     */
+    public function patchOccurrenceGroupMembers(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        array $addIds,
+        array $removeIds,
+    ): array {
+        $updatedGroup = $this->eventAggregateWrites->patchOccurrenceGroupMembers(
+            $event,
+            $occurrence,
+            $groupId,
+            $addIds,
+            $removeIds,
+        );
+
+        $this->events->dispatch(new EventUpdated((string) $event->_id));
+
+        return $updatedGroup;
     }
 
     /**
@@ -191,19 +215,6 @@ class EventManagementService
         if ($existing === null) {
             $normalized['created_by'] = $this->resolveCreatedByPrincipal($payload);
         }
-
-        $existingEventGroups = $existing === null
-            ? []
-            : $this->profileGroupMemberStore->inflateGroupsWithMembers(
-                $existing->profile_groups ?? [],
-                'event',
-                (string) $existing->getKey(),
-            );
-        $normalized['profile_groups'] = $this->resolveProfileGroups(
-            $payload['profile_groups'] ?? $existingEventGroups,
-            'profile_groups',
-            array_key_exists('profile_groups', $payload)
-        );
 
         return [
             'payload' => $normalized,
@@ -357,6 +368,7 @@ class EventManagementService
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'profile_groups' => $profileGroups,
+                '_profile_groups_explicit' => array_key_exists('profile_groups', $occurrence),
                 'has_location_override' => false,
                 'location_override' => null,
                 'taxonomy_terms' => $taxonomyTerms,
@@ -372,7 +384,7 @@ class EventManagementService
     }
 
     /**
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
+     * @return array<int, array{id: string, label: string, order: int}>
      */
     private function resolveProfileGroups(
         mixed $rawGroups,
@@ -401,7 +413,6 @@ class EventManagementService
 
         $groups = [];
         $groupIds = [];
-        $memberIdsAcrossGroups = [];
 
         foreach ($rawGroups as $index => $rawGroup) {
             if (! is_array($rawGroup)) {
@@ -425,30 +436,11 @@ class EventManagementService
             }
             $groupIds[$id] = true;
 
-            $memberIds = $this->normalizeProfileGroupMemberIds(
-                $rawGroup['account_profile_ids'] ?? $rawGroup['profile_ids'] ?? [],
-                "{$field}.{$index}.account_profile_ids",
-            );
-
-            foreach ($memberIds as $memberId) {
-                if (isset($memberIdsAcrossGroups[$memberId])) {
-                    throw ValidationException::withMessages([
-                        "{$field}.{$index}.account_profile_ids" => ['Profile group members must not appear in more than one group.'],
-                    ]);
-                }
-                $memberIdsAcrossGroups[$memberId] = true;
-            }
-
-            if ($memberIds === [] && ! $isExplicitWrite) {
-                continue;
-            }
-
             $groups[] = [
                 '_source_index' => $index,
                 'id' => $id,
                 'label' => $label,
                 'order' => isset($rawGroup['order']) ? (int) $rawGroup['order'] : $index,
-                'account_profile_ids' => $memberIds,
             ];
         }
 
@@ -463,7 +455,6 @@ class EventManagementService
                 'id' => $group['id'],
                 'label' => $group['label'],
                 'order' => $group['order'],
-                'account_profile_ids' => $group['account_profile_ids'],
             ],
             $groups
         ));
@@ -490,133 +481,6 @@ class EventManagementService
         }
 
         return $id;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function normalizeProfileGroupMemberIds(
-        mixed $rawMemberIds,
-        string $field,
-    ): array {
-        if (! is_array($rawMemberIds)) {
-            return [];
-        }
-
-        if (count($rawMemberIds) > InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX) {
-            throw ValidationException::withMessages([
-                $field => ['Profile group members exceed the configured limit.'],
-            ]);
-        }
-
-        $memberIds = [];
-        $seen = [];
-        foreach ($rawMemberIds as $memberIndex => $rawMemberId) {
-            $memberId = trim((string) $rawMemberId);
-            if ($memberId === '') {
-                continue;
-            }
-            if (! preg_match('/^[a-f0-9]{24}$/i', $memberId)) {
-                throw ValidationException::withMessages([
-                    "{$field}.{$memberIndex}" => ['Profile group member id is invalid.'],
-                ]);
-            }
-            if (isset($seen[$memberId])) {
-                throw ValidationException::withMessages([
-                    $field => ['Profile group members must be unique.'],
-                ]);
-            }
-            $seen[$memberId] = true;
-            $memberIds[] = $memberId;
-        }
-
-        return $memberIds;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventParties
-     * @return array<int, string>
-     */
-    private function profileIdsFromEventParties(array $eventParties): array
-    {
-        $ids = [];
-        foreach ($eventParties as $party) {
-            $partyRefId = trim((string) ($party['party_ref_id'] ?? ''));
-            if ($partyRefId !== '' && ! in_array($partyRefId, $ids, true)) {
-                $ids[] = $partyRefId;
-            }
-        }
-
-        return $ids;
-    }
-
-    /**
-     * @param  array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>  $profileGroups
-     * @return array<int, string>
-     */
-    private function profileIdsFromProfileGroups(array $profileGroups): array
-    {
-        $ids = [];
-        foreach ($profileGroups as $group) {
-            foreach ($this->normalizeArray($group['account_profile_ids'] ?? []) as $rawProfileId) {
-                $profileId = trim((string) $rawProfileId);
-                if ($profileId !== '' && ! in_array($profileId, $ids, true)) {
-                    $ids[] = $profileId;
-                }
-            }
-        }
-
-        return $ids;
-    }
-
-    /**
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
-     */
-    private function canonicalizeStoredProfileGroups(mixed $rawGroups): array
-    {
-        $groups = [];
-
-        foreach (array_values($this->normalizeArray($rawGroups)) as $index => $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-
-            $label = trim((string) ($group['label'] ?? ''));
-            if ($label === '') {
-                continue;
-            }
-
-            $id = trim((string) ($group['id'] ?? $group['key'] ?? ''));
-            if ($id === '') {
-                $id = Str::slug($label);
-            }
-            if ($id === '') {
-                $id = 'group-'.$index;
-            }
-
-            $memberIds = [];
-            foreach ($this->normalizeArray($group['account_profile_ids'] ?? $group['profile_ids'] ?? []) as $rawProfileId) {
-                $profileId = trim((string) $rawProfileId);
-                if ($profileId !== '' && ! in_array($profileId, $memberIds, true)) {
-                    $memberIds[] = $profileId;
-                }
-            }
-
-            $groups[] = [
-                'id' => $id,
-                'label' => $label,
-                'order' => isset($group['order']) ? (int) $group['order'] : $index,
-                'account_profile_ids' => $memberIds,
-            ];
-        }
-
-        usort(
-            $groups,
-            static fn (array $left, array $right): int => [$left['order'], $left['label'], $left['id']]
-                <=> [$right['order'], $right['label'], $right['id']]
-        );
-
-        return array_values($groups);
     }
 
     private function normalizeOptionalString(mixed $value): ?string

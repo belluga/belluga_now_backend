@@ -7,6 +7,7 @@ namespace Tests\Feature\Events;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -455,24 +456,47 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             [
                 'date_time_start' => $now->copy()->addDays(1),
                 'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+                '_profile_groups_explicit' => true,
                 'profile_groups' => [[
                     'id' => 'headline',
                     'label' => 'Headline',
                     'order' => 0,
-                    'account_profile_ids' => [(string) $firstProfile->_id],
                 ]],
             ],
             [
                 'date_time_start' => $now->copy()->addDays(2),
                 'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+                '_profile_groups_explicit' => true,
                 'profile_groups' => [[
                     'id' => 'guest',
                     'label' => 'Guest',
                     'order' => 0,
-                    'account_profile_ids' => [(string) $secondProfile->_id],
                 ]],
             ],
         ]);
+
+        $storedOccurrences = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        $this->assertCount(2, $storedOccurrences);
+
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['events:update', 'events:read']);
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[0]->_id}/profile_groups/headline/members",
+            ['add_ids' => [(string) $firstProfile->_id]],
+        )->assertOk();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[1]->_id}/profile_groups/guest/members",
+            ['add_ids' => [(string) $secondProfile->_id]],
+        )->assertOk();
+
+        Sanctum::actingAs($this->user, ['account-users:view']);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
 

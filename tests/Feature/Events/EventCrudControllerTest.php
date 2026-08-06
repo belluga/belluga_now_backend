@@ -317,20 +317,27 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->venue->cover_url = 'https://example.org/update-venue-cover.jpg';
         $this->venue->save();
 
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['profile_groups'] = [[
+            'id' => 'bandas',
+            'label' => 'Bandas',
+            'order' => 0,
+        ]];
+
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
-            'occurrences' => [[
-                ...$this->makeOccurrences(1)[0],
-                'profile_groups' => [[
-                    'id' => 'bandas',
-                    'label' => 'Bandas',
-                    'order' => 0,
-                    'account_profile_ids' => [(string) $this->band->_id],
-                ]],
-            ]],
+            'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $storedOccurrence->_id,
+            'bandas',
+            [(string) $this->band->_id],
+        )->assertOk();
 
         $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Updated Canonical Event',
@@ -586,20 +593,27 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($this->user, ['events:create', 'events:read']);
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['profile_groups'] = [[
+            'id' => 'bandas',
+            'label' => 'Bandas',
+            'order' => 0,
+        ]];
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'title' => 'Band Related Filter Match',
             'profile_groups' => [],
-            'occurrences' => [[
-                ...$this->makeOccurrences(1)[0],
-                'profile_groups' => [[
-                    'id' => 'bandas',
-                    'label' => 'Bandas',
-                    'order' => 0,
-                    'account_profile_ids' => [(string) $this->band->_id],
-                ]],
-            ]],
+            'occurrences' => $occurrences,
         ]));
         $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'bandas',
+            [(string) $this->band->_id],
+        )->assertOk();
 
         $this->createEvent([
             'title' => 'Band Venue-shaped Filter Miss',
@@ -1620,7 +1634,16 @@ class EventCrudControllerTest extends TestCaseTenant
         ];
         $this->artist->save();
 
-        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['profile_groups'] = [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+        ]];
+
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.created_by.type', 'account_user');
@@ -1630,13 +1653,24 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
         $response->assertJsonMissingPath('data.event_parties');
         $response->assertJsonMissingPath('data.linked_account_profiles');
-        $response->assertJsonPath('data.counterpart_preview.0.slug', $artistSlug);
-        $response->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
-        $response->assertJsonPath('data.counterpart_preview.0.public_detail_path', '/parceiro/'.$artistSlug);
-        $response->assertJsonPath('data.counterpart_count', 1);
-        $response->assertJsonPath('data.occurrences.0.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-        ]);
+        $response->assertJsonMissingPath('data.occurrences.0.profile_groups.0.account_profile_ids');
+
+        $eventId = (string) $response->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'artists',
+            [(string) $this->artist->_id],
+        )->assertOk();
+
+        $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $management->assertStatus(200);
+        $management->assertJsonPath('data.counterpart_preview.0.slug', $artistSlug);
+        $management->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
+        $management->assertJsonPath('data.counterpart_preview.0.public_detail_path', '/parceiro/'.$artistSlug);
+        $management->assertJsonPath('data.counterpart_count', 1);
     }
 
     public function test_event_create_preserves_public_detail_contract_for_numeric_zero_venue_slug(): void
@@ -1670,7 +1704,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'artists',
             'label' => 'Artists',
             'order' => 0,
-            'account_profile_ids' => [(string) $this->artist->_id],
         ]];
 
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -1680,15 +1713,25 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonMissingPath('data.event_parties');
         $response->assertJsonMissingPath('data.linked_account_profiles');
-        $response->assertJsonPath('data.counterpart_preview.0.slug', '0');
-        $response->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
-        $response->assertJsonPath('data.counterpart_preview.0.public_detail_path', '/parceiro/0');
-        $response->assertJsonPath('data.counterpart_count', 1);
-        $response->assertJsonPath('data.occurrences.0.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-        ]);
+        $response->assertJsonMissingPath('data.occurrences.0.profile_groups.0.account_profile_ids');
 
         $eventId = (string) $response->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'artists',
+            [(string) $this->artist->_id],
+        )->assertOk();
+
+        $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $management->assertStatus(200);
+        $management->assertJsonPath('data.counterpart_preview.0.slug', '0');
+        $management->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
+        $management->assertJsonPath('data.counterpart_preview.0.public_detail_path', '/parceiro/0');
+        $management->assertJsonPath('data.counterpart_count', 1);
+
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}");
 
         $public->assertStatus(200);
@@ -3749,10 +3792,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'selecionados',
             'label' => 'Selecionados',
             'order' => 0,
-            'account_profile_ids' => $profiles
-                ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
-                ->values()
-                ->all(),
         ]];
 
         $response = $this->postJson($this->accountEventsBase, $payload);
@@ -3764,9 +3803,32 @@ class EventCrudControllerTest extends TestCaseTenant
             ->values()
             ->all();
 
+        $eventId = (string) $response->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'selecionados',
+            $expectedIds,
+        )->assertOk();
+
+        $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $management->assertStatus(200);
+        $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            0,
+            0,
+            'Selecionados',
+            count($expectedIds),
+        );
+
         $this->assertSame(
             $expectedIds,
-            data_get($response->json(), 'data.occurrences.0.profile_groups.0.account_profile_ids')
+            collect($this->managementGroupMemberRows($membersPath))
+                ->pluck('id')
+                ->values()
+                ->all()
         );
     }
 
@@ -3796,7 +3858,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'hidden-guests',
             'label' => 'Hidden Guests',
             'order' => 0,
-            'account_profile_ids' => [(string) $hiddenGuest->_id],
         ]];
 
         $response = $this->postJson($this->accountEventsBase, $payload);
@@ -3807,6 +3868,15 @@ class EventCrudControllerTest extends TestCaseTenant
         $eventId = (string) $response->json('data.event_id');
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'hidden-guests',
+            [(string) $hiddenGuest->_id],
+        )->assertOk();
+
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
         $this->assertSame('hidden-guests', data_get($occurrence, 'own_profile_groups.0.id'));
         $this->assertArrayNotHasKey('account_profile_ids', data_get($occurrence, 'own_profile_groups.0', []));
         $this->assertCanonicalRelatedAccountStorage(
@@ -3814,16 +3884,16 @@ class EventCrudControllerTest extends TestCaseTenant
             'Occurrence after create with non-queryable related profile'
         );
 
-        $memberRows = $this->eventProfileGroupRows([
+        $memberRows = $this->eventNestedAccountRows([
             'event_id' => $eventId,
-            'owner_type' => 'occurrence',
-            'owner_id' => (string) $occurrence->_id,
+            'parent_type' => 'event_occurrence',
+            'parent_id' => (string) $occurrence->_id,
             'doc_type' => 'member_row',
         ]);
         $this->assertSame(
             [(string) $hiddenGuest->_id],
             collect($memberRows)
-                ->map(static fn (array $row): string => (string) ($row['member_profile_id'] ?? ''))
+                ->map(static fn (array $row): string => (string) data_get($row, 'nested_profile.id'))
                 ->filter()
                 ->values()
                 ->all()
@@ -4754,10 +4824,28 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->artist->slug = $artistSlug;
         $this->artist->save();
 
-        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['profile_groups'] = [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+        ]];
+
+        $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $occurrences,
+        ]));
         $createResponse->assertStatus(201);
         $eventId = $createResponse->json('data.event_id');
         $this->assertNotEmpty($eventId);
+
+        $storedOccurrence = $this->occurrenceDocumentAtOrder((string) $eventId, 0);
+        $this->patchOccurrenceGroupMembers(
+            (string) $eventId,
+            (string) $storedOccurrence->_id,
+            'artists',
+            [(string) $this->artist->_id],
+        )->assertOk();
+
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'title' => 'Updated Title',
             'publication' => ['status' => 'ended'],
@@ -4771,9 +4859,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonMissingPath('data.linked_account_profiles');
         $response->assertJsonPath('data.counterpart_preview.0.slug', $artistSlug);
         $response->assertJsonPath('data.counterpart_count', 1);
-        $response->assertJsonPath('data.occurrences.0.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-        ]);
+        $response->assertJsonMissingPath('data.occurrences.0.profile_groups.0.account_profile_ids');
     }
 
     public function test_event_update_non_publication_fields_preserves_active_parent_occurrence_and_public_visibility(): void
@@ -4847,49 +4933,69 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertContains($eventId, $draftIds);
     }
 
-    public function test_event_update_replaces_related_account_profiles_when_occurrence_profile_groups_change(): void
+    public function test_occurrence_group_member_patch_replaces_related_account_profiles(): void
     {
         $secondArtist = $this->createAccountProfile('artist', 'DJ Two');
         $secondArtist->slug = 'dj-two-'.Str::lower(Str::random(6));
         $secondArtist->save();
 
-        $payload = $this->makeEventPayload();
-        $payload['occurrences'][0]['profile_groups'] = [[
-            'id' => 'artists',
-            'label' => 'Artists',
-            'order' => 0,
-            'account_profile_ids' => [
-                (string) $this->artist->_id,
-                (string) $secondArtist->_id,
-            ],
-        ]];
-
-        $created = $this->postJson($this->accountEventsBase, $payload);
-        $created->assertStatus(201);
-
-        $eventId = (string) $created->json('data.event_id');
-        $occurrences = $this->withPersistedOccurrenceIdentity($eventId, $this->makeOccurrences(1));
+        $occurrences = $this->makeOccurrences(1);
         $occurrences[0]['profile_groups'] = [[
             'id' => 'artists',
             'label' => 'Artists',
             'order' => 0,
-            'account_profile_ids' => [(string) $this->artist->_id],
         ]];
 
-        $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $occurrences,
-        ]);
+        ]));
+        $created->assertStatus(201);
 
-        $response->assertStatus(200);
-        $response->assertJsonMissingPath('data.event_parties');
-        $response->assertJsonPath('data.occurrences.0.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-        ]);
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'artists',
+            [
+                (string) $this->artist->_id,
+                (string) $secondArtist->_id,
+            ],
+        )->assertOk();
+
+        $response = $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'artists',
+            [],
+            [(string) $secondArtist->_id],
+        );
+
+        $response->assertOk();
+
+        $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $management->assertStatus(200);
+        $management->assertJsonMissingPath('data.event_parties');
+        $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            0,
+            0,
+            'Artists',
+            1,
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id],
+            collect($this->managementGroupMemberRows($membersPath))
+                ->pluck('id')
+                ->values()
+                ->all()
+        );
 
         $fresh = Event::query()->findOrFail($eventId);
         $this->assertCanonicalRelatedAccountStorage(
             $fresh->getAttributes(),
-            'Updated event aggregate after canonical occurrence group replacement'
+            'Event aggregate after canonical occurrence group member patch replacement'
         );
     }
 
@@ -4988,25 +5094,35 @@ class EventCrudControllerTest extends TestCaseTenant
         $secondArtist->slug = 'dj-clear-'.Str::lower(Str::random(6));
         $secondArtist->save();
 
-        $payload = $this->makeEventPayload();
-        $payload['occurrences'][0]['profile_groups'] = [[
+        $occurrences = $this->makeOccurrences(1);
+        $occurrences[0]['profile_groups'] = [[
             'id' => 'artists',
             'label' => 'Artists',
             'order' => 0,
-            'account_profile_ids' => [
-                (string) $this->artist->_id,
-                (string) $secondArtist->_id,
-            ],
         ]];
 
         $created = $this->post(
             $this->accountEventsBase,
-            array_merge($payload, [
+            array_merge($this->makeEventPayload([
+                'occurrences' => $occurrences,
+            ]), [
                 'cover' => UploadedFile::fake()->image('cover.png', 1200, 600),
             ]),
         );
         $created->assertStatus(201);
         $eventId = (string) $created->json('data.event_id');
+        $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $storedOccurrence->_id,
+            'artists',
+            [
+                (string) $this->artist->_id,
+                (string) $secondArtist->_id,
+            ],
+        )->assertOk();
+
         $occurrences = $this->withPersistedOccurrenceIdentity($eventId, $this->makeOccurrences(1));
         $occurrences[0]['profile_groups'] = '[]';
 
@@ -5711,13 +5827,11 @@ class EventCrudControllerTest extends TestCaseTenant
                     'id' => 'expositores',
                     'label' => 'Expositores',
                     'order' => 1,
-                    'account_profile_ids' => [(string) $this->band->_id],
                 ],
                 [
                     'id' => 'atracoes',
                     'label' => 'Atrações',
                     'order' => 0,
-                    'account_profile_ids' => [(string) $this->artist->_id],
                 ],
             ],
         ]));
@@ -5727,13 +5841,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $eventId = (string) $response->json('data.event_id');
         $event = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $this->assertSame('atracoes', data_get($event, 'profile_groups.0.id'));
-        $this->assertArrayNotHasKey('account_profile_ids', data_get($event, 'profile_groups.0', []));
+        $this->assertSame([], data_get($event, 'profile_groups', []));
         $this->assertSame([], data_get($occurrence, 'own_profile_groups', []));
-        $this->assertSame([
-            ['label' => 'Atrações', 'order' => 0, 'id' => 'atracoes'],
-            ['label' => 'Expositores', 'order' => 1, 'id' => 'expositores'],
-        ], data_get($occurrence, 'profile_groups', []));
+        $this->assertSame([], data_get($occurrence, 'profile_groups', []));
         $this->assertCanonicalRelatedAccountStorage(
             $event->getAttributes(),
             'Event after root profile groups create'
@@ -5762,10 +5872,6 @@ class EventCrudControllerTest extends TestCaseTenant
                 'id' => 'participantes',
                 'label' => 'Participantes',
                 'order' => 0,
-                'account_profile_ids' => [
-                    (string) $this->artist->_id,
-                    (string) $this->band->_id,
-                ],
             ]],
         ]));
         $created->assertStatus(201);
@@ -5774,12 +5880,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $storedEvent = Event::query()->findOrFail($eventId);
         $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
-        $this->assertSame('participantes', data_get($storedEvent, 'profile_groups.0.id'));
-        $this->assertArrayNotHasKey('account_profile_ids', data_get($storedEvent, 'profile_groups.0', []));
+        $this->assertSame([], data_get($storedEvent, 'profile_groups', []));
         $this->assertSame([], data_get($storedOccurrence, 'own_profile_groups', []));
-        $this->assertSame([
-            ['label' => 'Participantes', 'order' => 0, 'id' => 'participantes'],
-        ], data_get($storedOccurrence, 'profile_groups', []));
+        $this->assertSame([], data_get($storedOccurrence, 'profile_groups', []));
 
         $memberRows = $this->eventProfileGroupRows([
             'event_id' => $eventId,
@@ -6328,9 +6431,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $event->_id;
         $beforeOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
-        $this->assertSame([
-            ['label' => 'Atrações', 'order' => 0, 'id' => 'atracoes'],
-        ], data_get($beforeOccurrence, 'profile_groups', []));
+        $this->assertSame([], data_get($beforeOccurrence, 'profile_groups', []));
 
         $exitCode = Artisan::call('events:diagnostic:append-profile-group-member', [
             'tenant_ref' => $this->tenant->slug,
@@ -6349,9 +6450,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame('atracoes', data_get($freshEvent, 'profile_groups.0.id'));
         $this->assertArrayNotHasKey('account_profile_ids', data_get($freshEvent, 'profile_groups.0', []));
-        $this->assertSame([
-            ['label' => 'Atrações', 'order' => 0, 'id' => 'atracoes'],
-        ], data_get($freshOccurrence, 'profile_groups', []));
+        $this->assertSame([], data_get($freshOccurrence, 'profile_groups', []));
 
         $memberRows = $this->eventProfileGroupRows([
             'event_id' => $eventId,
@@ -6383,14 +6482,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
         $management = $this->getJson("{$this->tenantAdminEventsBase}/{$eventId}");
+        $this->actingAsEventOwnerUser();
         $management->assertStatus(200);
         $management->assertJsonMissingPath('data.event_parties');
-        $management->assertJsonCount(1, 'data.profile_groups');
-        $management->assertJsonPath('data.profile_groups.0.id', 'atracoes');
-        $management->assertJsonPath('data.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-            (string) $this->band->_id,
-        ]);
+        $management->assertJsonCount(0, 'data.profile_groups');
     }
 
     public function test_event_write_rejects_legacy_event_parties_payload_even_when_profile_groups_are_present(): void
@@ -6421,7 +6516,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'bandas',
             'label' => 'Bandas',
             'order' => 0,
-            'account_profile_ids' => [(string) $this->band->_id],
         ]];
 
         $response = $this->postJson($this->accountEventsBase, $payload);
@@ -6429,11 +6523,12 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $response->assertJsonMissingPath('data.event_parties');
         $response->assertJsonMissingPath('data.linked_account_profiles');
-        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $this->band->_id);
-        $response->assertJsonPath('data.counterpart_count', 1);
+        $response->assertJsonPath('data.counterpart_count', 0);
+        $response->assertJsonPath('data.occurrences.0.profile_groups.0.id', 'bandas');
+        $response->assertJsonPath('data.occurrences.0.profile_groups.0.member_count', 0);
     }
 
-    public function test_event_profile_groups_reject_duplicate_members_across_groups(): void
+    public function test_event_profile_groups_reject_embedded_member_ids_on_base_save_contract(): void
     {
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'profile_groups' => [
@@ -6451,7 +6546,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]));
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['profile_groups.1.account_profile_ids']);
+        $response->assertJsonValidationErrors(['profile_groups.0', 'profile_groups.1']);
     }
 
     public function test_event_update_rejects_legacy_event_parties_payload_when_profile_groups_are_canonical(): void
@@ -6477,7 +6572,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'convidados',
             'label' => 'Convidados',
             'order' => 0,
-            'account_profile_ids' => [(string) $this->band->_id],
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -6485,7 +6579,6 @@ class EventCrudControllerTest extends TestCaseTenant
                 'id' => 'atracoes',
                 'label' => 'Atrações',
                 'order' => 0,
-                'account_profile_ids' => [(string) $this->artist->_id],
             ]],
             'occurrences' => $occurrences,
         ]));
@@ -6493,15 +6586,34 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $created->json('data.event_id');
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $secondOccurrence->_id,
+            'convidados',
+            [(string) $this->band->_id],
+        )->assertOk();
+        $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
         $this->assertSame('convidados', data_get($secondOccurrence, 'own_profile_groups.0.id'));
-        $this->assertSame('atracoes', data_get($secondOccurrence, 'profile_groups.0.id'));
-        $this->assertSame('convidados', data_get($secondOccurrence, 'profile_groups.1.id'));
-        $this->assertCount(2, data_get($secondOccurrence, 'profile_groups', []));
+        $this->assertSame('convidados', data_get($secondOccurrence, 'profile_groups.0.id'));
+        $this->assertCount(1, data_get($secondOccurrence, 'profile_groups', []));
+        $this->assertSame([], data_get(Event::query()->findOrFail($eventId), 'profile_groups', []));
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertStatus(200);
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.id', 'convidados');
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.account_profile_ids.0', (string) $this->band->_id);
+        $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            1,
+            0,
+            'Convidados',
+            1,
+        );
+        $this->assertSame(
+            [(string) $this->band->_id],
+            collect($this->managementGroupMemberRows($membersPath))
+                ->pluck('id')
+                ->values()
+                ->all()
+        );
         $management->assertJsonMissingPath('data.occurrences.1.profile_groups.1');
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$secondOccurrence->_id}");
@@ -6820,10 +6932,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'participantes',
             'label' => 'Participantes',
             'order' => 0,
-            'account_profile_ids' => [
-                (string) $this->artist->_id,
-                (string) $delegate->_id,
-            ],
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -6833,56 +6941,16 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $created->json('data.event_id');
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
-        $secondOccurrence->forceFill([
-            'own_event_parties' => [
-                ...($secondOccurrence->own_event_parties ?? []),
-                [
-                    'party_type' => 'hidden_guest',
-                    'party_ref_id' => (string) $hiddenGuest->_id,
-                    'permissions' => ['can_edit' => false],
-                    'metadata' => [
-                        'display_name' => $hiddenGuest->display_name,
-                        'slug' => (string) $hiddenGuest->slug,
-                        'profile_type' => (string) $hiddenGuest->profile_type,
-                        'avatar_url' => $hiddenGuest->avatar_url ?? null,
-                        'cover_url' => $hiddenGuest->cover_url ?? null,
-                        'taxonomy_terms' => [],
-                    ],
-                ],
-            ],
-            'own_linked_account_profiles' => [
-                ...($secondOccurrence->own_linked_account_profiles ?? []),
-                [
-                    'id' => (string) $hiddenGuest->_id,
-                    'display_name' => $hiddenGuest->display_name,
-                    'slug' => (string) $hiddenGuest->slug,
-                    'profile_type' => (string) $hiddenGuest->profile_type,
-                    'avatar_url' => $hiddenGuest->avatar_url ?? null,
-                    'cover_url' => $hiddenGuest->cover_url ?? null,
-                    'taxonomy_terms' => [],
-                ],
-            ],
-            'own_profile_groups' => [[
-                'id' => 'participantes',
-                'label' => 'Participantes',
-                'order' => 0,
-                'account_profile_ids' => [
-                    (string) $this->artist->_id,
-                    (string) $delegate->_id,
-                    (string) $hiddenGuest->_id,
-                ],
-            ]],
-        ])->save();
-        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups($eventId, $secondOccurrence, [[
-            'id' => 'participantes',
-            'label' => 'Participantes',
-            'order' => 0,
-            'account_profile_ids' => [
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $secondOccurrence->_id,
+            'participantes',
+            [
                 (string) $this->artist->_id,
                 (string) $delegate->_id,
                 (string) $hiddenGuest->_id,
             ],
-        ]]);
+        )->assertOk();
 
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$secondOccurrence->_id}");
         $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
@@ -6897,10 +6965,20 @@ class EventCrudControllerTest extends TestCaseTenant
             [(string) $this->artist->_id, (string) $delegate->_id, (string) $hiddenGuest->_id],
             $profiles->pluck('id')->values()->all()
         );
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-            (string) $delegate->_id,
-        ]);
+        $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            1,
+            0,
+            'Participantes',
+            3,
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $delegate->_id, (string) $hiddenGuest->_id],
+            collect($this->managementGroupMemberRows($membersPath))
+                ->pluck('id')
+                ->values()
+                ->all()
+        );
         $public->assertJsonMissingPath('data.linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_event_parties');
@@ -6963,10 +7041,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'outro-grupo',
             'label' => 'Outro Grupo',
             'order' => 0,
-            'account_profile_ids' => [
-                (string) $this->artist->_id,
-                (string) $delegate->_id,
-            ],
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -6976,55 +7050,34 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $created->json('data.event_id');
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
-        $secondOccurrence->forceFill([
-            'own_event_parties' => [
-                ...($secondOccurrence->own_event_parties ?? []),
-                [
-                    'party_type' => 'hidden_guest',
-                    'party_ref_id' => (string) $hiddenGuest->_id,
-                    'permissions' => ['can_edit' => false],
-                    'metadata' => [
-                        'display_name' => $hiddenGuest->display_name,
-                        'slug' => (string) $hiddenGuest->slug,
-                        'profile_type' => (string) $hiddenGuest->profile_type,
-                        'avatar_url' => $hiddenGuest->avatar_url ?? null,
-                        'cover_url' => $hiddenGuest->cover_url ?? null,
-                        'taxonomy_terms' => [],
-                    ],
-                ],
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $secondOccurrence->_id,
+            'outro-grupo',
+            [
+                (string) $this->artist->_id,
+                (string) $delegate->_id,
+                (string) $hiddenGuest->_id,
             ],
-            'own_linked_account_profiles' => [
-                ...($secondOccurrence->own_linked_account_profiles ?? []),
-                [
-                    'id' => (string) $hiddenGuest->_id,
-                    'display_name' => $hiddenGuest->display_name,
-                    'slug' => (string) $hiddenGuest->slug,
-                    'profile_type' => (string) $hiddenGuest->profile_type,
-                    'avatar_url' => $hiddenGuest->avatar_url ?? null,
-                    'cover_url' => $hiddenGuest->cover_url ?? null,
-                    'taxonomy_terms' => [],
-                ],
-            ],
-            'own_profile_groups' => [[
-                'id' => 'outro-grupo',
-                'label' => 'Outro Grupo',
-                'order' => 0,
-                'account_profile_ids' => [
-                    (string) $this->artist->_id,
-                    (string) $delegate->_id,
-                    (string) $hiddenGuest->_id,
-                ],
-            ]],
-        ])->save();
+        )->assertOk();
 
         $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
 
         $management->assertStatus(200);
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.id', 'outro-grupo');
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-            (string) $delegate->_id,
-        ]);
+        $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            1,
+            0,
+            'Outro Grupo',
+            3,
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $delegate->_id, (string) $hiddenGuest->_id],
+            collect($this->managementGroupMemberRows($membersPath))
+                ->pluck('id')
+                ->values()
+                ->all()
+        );
         $management->assertJsonMissingPath('data.occurrences.1.own_linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_event_parties');
     }
@@ -7044,12 +7097,6 @@ class EventCrudControllerTest extends TestCaseTenant
             'id' => 'outro-grupo',
             'label' => 'Outro Grupo',
             'order' => 0,
-            'account_profile_ids' => [
-                (string) $this->artist->_id,
-                (string) $this->band->_id,
-                (string) $secondArtist->_id,
-                (string) $guestArtist->_id,
-            ],
         ]];
 
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
@@ -7059,6 +7106,17 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $eventId = (string) $created->json('data.event_id');
         $secondOccurrence = $this->occurrenceDocumentAtOrder($eventId, 1);
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $secondOccurrence->_id,
+            'outro-grupo',
+            [
+                (string) $this->artist->_id,
+                (string) $this->band->_id,
+                (string) $secondArtist->_id,
+                (string) $guestArtist->_id,
+            ],
+        )->assertOk();
         $secondOccurrence->forceFill([
             'own_linked_account_profiles' => array_values(array_slice(
                 $secondOccurrence->own_linked_account_profiles ?? [],
@@ -7070,13 +7128,20 @@ class EventCrudControllerTest extends TestCaseTenant
         $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
 
         $management->assertStatus(200);
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.id', 'outro-grupo');
-        $management->assertJsonPath('data.occurrences.1.profile_groups.0.account_profile_ids', [
-            (string) $this->artist->_id,
-            (string) $this->band->_id,
-            (string) $secondArtist->_id,
-            (string) $guestArtist->_id,
-        ]);
+        $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            1,
+            0,
+            'Outro Grupo',
+            4,
+        );
+        $this->assertSame(
+            [(string) $this->artist->_id, (string) $this->band->_id, (string) $secondArtist->_id, (string) $guestArtist->_id],
+            collect($this->managementGroupMemberRows($membersPath))
+                ->pluck('id')
+                ->values()
+                ->all()
+        );
         $management->assertJsonMissingPath('data.occurrences.1.own_linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_event_parties');
     }
@@ -8975,14 +9040,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'occurrences' => [[
                 'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
                 'date_time_end' => $now->copy()->addDay()->setHour(22)->setMinute(0)->setSecond(0)->toISOString(),
-                'profile_groups' => [[
-                    'id' => 'artists',
-                    'label' => 'Artists',
-                    'order' => 0,
-                    'account_profile_ids' => [
-                        (string) $this->artist->_id,
-                    ],
-                ]],
+                'profile_groups' => [],
             ]],
             'categories' => ['culture'],
             'taxonomy_terms' => [],
@@ -9588,6 +9646,86 @@ class EventCrudControllerTest extends TestCaseTenant
         return $this->publicEventRelatedProfileMembers($eventRouteKey, $tabId)
             ->assertOk()
             ->json('data.data') ?? [];
+    }
+
+    private function assertManagementOccurrenceProfileGroupMetadata(
+        \Illuminate\Testing\TestResponse $response,
+        int $occurrenceIndex,
+        int $groupIndex,
+        string $expectedLabel,
+        int $expectedMemberCount,
+    ): string {
+        $group = $response->json("data.occurrences.{$occurrenceIndex}.profile_groups.{$groupIndex}");
+        $this->assertIsArray($group, "Expected management profile group at occurrence {$occurrenceIndex}, index {$groupIndex}.");
+
+        $groupId = trim((string) ($group['id'] ?? ''));
+        $membersPath = trim((string) ($group['members_path'] ?? ''));
+
+        $this->assertNotSame('', $groupId, "Expected non-empty management profile group id at occurrence {$occurrenceIndex}, index {$groupIndex}.");
+        $this->assertSame($expectedLabel, $group['label'] ?? null);
+        $this->assertSame($expectedMemberCount, (int) ($group['member_count'] ?? -1));
+        $this->assertNotSame('', $membersPath, "Expected non-empty members_path for management group {$groupId}.");
+        $response->assertJsonMissingPath("data.occurrences.{$occurrenceIndex}.profile_groups.{$groupIndex}.account_profile_ids");
+
+        return $membersPath;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function managementGroupMemberRows(string $membersPath): array
+    {
+        $this->actingAsTenantEventAdmin(['events:read']);
+        $response = $this->getJson($membersPath);
+        $this->actingAsEventOwnerUser();
+
+        return $response->assertOk()->json('data') ?? [];
+    }
+
+    /**
+     * @param  array<int, string>  $addIds
+     * @param  array<int, string>  $removeIds
+     */
+    private function patchOccurrenceGroupMembers(
+        string $eventId,
+        string $occurrenceId,
+        string $groupId,
+        array $addIds = [],
+        array $removeIds = [],
+    ): \Illuminate\Testing\TestResponse {
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+
+        $payload = [];
+        if ($addIds !== []) {
+            $payload['add_ids'] = $addIds;
+        }
+        if ($removeIds !== []) {
+            $payload['remove_ids'] = $removeIds;
+        }
+
+        $response = $this->patchJson(
+            "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrenceId}/profile_groups/{$groupId}/members",
+            $payload,
+        );
+
+        $this->actingAsEventOwnerUser();
+
+        return $response;
+    }
+
+    private function actingAsTenantEventAdmin(array $abilities): void
+    {
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), $abilities);
+    }
+
+    private function actingAsEventOwnerUser(): void
+    {
+        Sanctum::actingAs($this->user, [
+            'events:read',
+            'events:create',
+            'events:update',
+            'events:delete',
+        ]);
     }
 
     private function patchEventsSettings(array $payload): \Illuminate\Testing\TestResponse
