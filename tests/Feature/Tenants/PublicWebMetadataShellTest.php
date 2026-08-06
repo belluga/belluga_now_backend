@@ -12,8 +12,10 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\DeepLinks\Application\WebToAppPromotionService;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Application\Mutations\InviteShareService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -281,7 +283,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('Casa Marracini | '.$this->resolvedSiteName, false);
     }
 
-    public function test_event_public_route_injects_event_metadata_with_linked_account_profile_cover_fallback(): void
+    public function test_event_public_route_injects_event_metadata_with_counterpart_preview_cover_fallback(): void
     {
         $tenantOrigin = rtrim($this->base_tenant_url, '/');
         $this->applyPublicWebMetadata([
@@ -324,21 +326,22 @@ class PublicWebMetadataShellTest extends TestCaseTenant
                 'id' => 'place-1',
                 'display_name' => 'Praia do Morro',
             ],
-            'event_parties' => [
-                [
-                    'party_type' => 'artist',
-                    'party_ref_id' => (string) $profile->_id,
-                    'permissions' => ['can_edit' => false],
-                    'metadata' => [
-                        'display_name' => (string) $profile->display_name,
-                        'slug' => (string) $profile->slug,
-                        'profile_type' => 'artist',
-                        'cover_url' => (string) $profile->cover_url,
-                        'avatar_url' => (string) $profile->avatar_url,
-                    ],
-                ],
-            ],
         ]);
+        $occurrence = EventOccurrence::create([
+            'event_id' => (string) $event->_id,
+            'starts_at' => now()->subHour(),
+            'ends_at' => now()->addHours(2),
+        ]);
+        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups(
+            (string) $event->_id,
+            $occurrence,
+            [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [(string) $profile->_id],
+            ]]
+        );
 
         $response = $this->get("{$this->base_tenant_url}agenda/evento/{$event->slug}");
         $response->assertOk();
@@ -349,7 +352,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-na-orla">', false);
     }
 
-    public function test_event_public_route_prefers_linked_account_profiles_image_over_artists_projection(): void
+    public function test_event_public_route_prefers_counterpart_preview_image_over_artists_projection(): void
     {
         $tenantOrigin = rtrim($this->base_tenant_url, '/');
         $this->applyPublicWebMetadata([
@@ -376,7 +379,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
                 'title' => 'Festival Linked',
                 'content' => 'Show com priorização de linked profiles.',
                 'thumb' => null,
-                'linked_account_profiles' => [
+                'counterpart_preview' => [
                     [
                         'cover_url' => 'https://tenant.example/media/linked-cover.png',
                         'avatar_url' => 'https://tenant.example/media/linked-avatar.png',
@@ -428,7 +431,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
                 'title' => 'Festival No Artists',
                 'content' => 'Show sem fallback legado de artists.',
                 'thumb' => null,
-                'linked_account_profiles' => [],
+                'counterpart_preview' => [],
                 'artists' => [
                     [
                         'cover_url' => 'https://tenant.example/media/artist-cover.png',

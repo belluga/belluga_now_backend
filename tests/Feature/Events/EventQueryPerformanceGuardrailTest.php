@@ -17,6 +17,7 @@ use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -189,39 +190,31 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
     }
 
-    public function test_account_scoped_management_occurrence_query_filters_profile_snapshots_before_grouping(): void
+    public function test_account_scoped_management_occurrence_query_filters_owned_events_without_legacy_account_context_snapshots(): void
     {
         $account = Account::query()->create([
             'name' => 'Scoped Performance Account',
             'document' => 'DOC-SCOPED-PERF',
         ]);
-        $profile = AccountProfile::query()->create([
-            'account_id' => (string) $account->_id,
-            'profile_type' => 'artist',
-            'display_name' => 'Scoped Performance Artist',
-            'is_active' => true,
-        ]);
         $otherAccount = Account::query()->create([
             'name' => 'Other Performance Account',
             'document' => 'DOC-OTHER-PERF',
         ]);
-        $otherProfile = AccountProfile::query()->create([
-            'account_id' => (string) $otherAccount->_id,
-            'profile_type' => 'artist',
-            'display_name' => 'Other Performance Artist',
-            'is_active' => true,
-        ]);
+        $scopedUser = $this->createAccountUserWithWildcardEventsRole($account, 'scoped-performance');
+        $otherUser = $this->createAccountUserWithWildcardEventsRole($otherAccount, 'other-performance');
 
         $start = Carbon::now()->startOfDay()->addDays(2)->setHour(10);
-        $this->createEventFixture(
+        $this->createOwnedEventFixture(
+            $account,
+            $scopedUser,
             'Scoped Account Event',
-            $start,
-            [$this->eventPartyForProfile($profile)]
+            $start
         );
-        $this->createEventFixture(
+        $this->createOwnedEventFixture(
+            $otherAccount,
+            $otherUser,
             'Other Account Event',
-            $start->copy()->addHour(),
-            [$this->eventPartyForProfile($otherProfile)]
+            $start->copy()->addHour()
         );
 
         $aggregateCalls = [];
@@ -248,21 +241,41 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $pipeline = $aggregateCalls[0]['pipeline'];
         $this->assertSame('$match', array_key_first($pipeline[0]));
         $this->assertSame('$group', array_key_first($pipeline[1]));
+        $this->assertTrue(
+            $this->pipelineContainsStage($pipeline, '$lookup'),
+            'Account-scoped management occurrence pagination must still resolve events through the indexed lookup pipeline.'
+        );
 
         $firstMatch = $pipeline[0]['$match'] ?? [];
         $this->assertIsArray($firstMatch);
-        $this->assertArrayHasKey(
-            '$and',
-            $firstMatch,
-            'Account-scoped occurrence queries must narrow by denormalized account context before grouping.'
-        );
-        $this->assertTrue(
-            $this->arrayContainsScalar($firstMatch['$and'], (string) $account->_id),
-            'Initial occurrence $match must contain the scoped account id before $group.'
+        $this->assertFalse(
+            $this->arrayContainsScalar($firstMatch, 'account_context_ids'),
+            'Initial occurrence $match must not depend on removed account_context_ids snapshots.'
         );
         $this->assertFalse(
-            $this->arrayContainsScalar($firstMatch['$and'], (string) $profile->_id),
-            'Account-scoped occurrence queries must not fan out into all profile ids before $group.'
+            $this->arrayContainsScalar($firstMatch, 'event_parties'),
+            'Initial occurrence $match must not depend on removed event_parties snapshots.'
+        );
+
+        $matchStages = array_values(array_filter(
+            $pipeline,
+            static fn (mixed $operation): bool => is_array($operation) && array_key_exists('$match', $operation)
+        ));
+        $finalMatch = $matchStages[array_key_last($matchStages)]['$match'] ?? [];
+        $this->assertIsArray($finalMatch);
+        $finalMatchJson = json_encode($finalMatch, JSON_UNESCAPED_SLASHES);
+        $this->assertIsString($finalMatchJson);
+        $this->assertTrue(
+            str_contains($finalMatchJson, 'event.created_by.id'),
+            'Account-scoped management occurrence pagination must scope owned events through event.created_by after the event lookup.'
+        );
+        $this->assertTrue(
+            str_contains($finalMatchJson, (string) $scopedUser->_id),
+            'Event ownership filter must include the scoped account-user id in the post-lookup event match.'
+        );
+        $this->assertFalse(
+            str_contains($finalMatchJson, 'account_context_ids'),
+            'Post-lookup event scoping must not reintroduce removed account_context_ids snapshots.'
         );
     }
 
@@ -513,7 +526,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
     }
 
-    public function test_event_detail_and_management_readback_stay_snapshot_only_without_live_account_profiles_queries(): void
+    public function test_event_detail_and_management_readback_use_single_bounded_live_account_profile_hydration(): void
     {
         TenantProfileType::query()->whereIn('type', ['artist', 'band'])->delete();
         foreach ([
@@ -554,36 +567,33 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             $eventParties
         );
 
-        $groupPayload = [[
-            'id' => 'artists',
-            'label' => 'Artists',
-            'order' => 0,
-            'account_profile_ids' => $profiles
-                ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
-                ->values()
-                ->all(),
-        ]];
-
-        foreach (EventOccurrence::query()->where('event_id', (string) $event->_id)->get() as $occurrence) {
-            $occurrence->forceFill([
-                'own_event_parties' => $eventParties,
-                'own_linked_account_profiles' => array_map(
-                    static fn (array $party): array => [
-                        'id' => (string) ($party['party_ref_id'] ?? ''),
-                        'display_name' => (string) data_get($party, 'metadata.display_name', ''),
-                        'profile_type' => (string) data_get($party, 'metadata.profile_type', ''),
-                    ],
-                    array_slice($eventParties, 0, 2)
-                ),
-                'profile_groups' => $groupPayload,
-            ])->save();
-        }
-
         $selectedOccurrence = EventOccurrence::query()
             ->where('event_id', (string) $event->_id)
             ->orderBy('starts_at')
-            ->skip(1)
             ->firstOrFail();
+        $groupMetadata = [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+        ]];
+        $selectedOccurrence->forceFill([
+            'own_profile_groups' => $groupMetadata,
+            'profile_groups' => $groupMetadata,
+        ])->save();
+        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups(
+            (string) $event->_id,
+            $selectedOccurrence,
+            [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => $profiles
+                    ->take(2)
+                    ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+                    ->values()
+                    ->all(),
+            ]]
+        );
 
         $service = app(EventQueryService::class);
         $connection = DB::connection('tenant');
@@ -612,9 +622,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
         $this->assertCount(
-            0,
+            1,
             $detailAccountProfileQueries,
-            'Public event detail must not hydrate broad account profile reads during formatting; counterpart preview must come from stored summaries.'
+            'Public event detail must use a single bounded live account profile hydration query keyed by stored counterpart summaries.'
         );
 
         $connection->flushQueryLog();
@@ -654,15 +664,36 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             $this->createAccountProfileFixture('artist', 'Performance List Artist 01', 611),
             $this->createAccountProfileFixture('band', 'Performance List Band 02', 621),
         ]);
-        $eventParties = $profiles
-            ->map(fn (AccountProfile $profile): array => $this->eventPartyForProfile($profile))
-            ->values()
-            ->all();
-
-        $this->createEventFixture(
+        $event = $this->createEventFixture(
             'Performance Guard List Snapshot Event',
             Carbon::now()->startOfDay()->addDays(6)->setHour(10),
-            $eventParties
+            []
+        );
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->firstOrFail();
+        $groupMetadata = [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+        ]];
+        $occurrence->forceFill([
+            'own_profile_groups' => $groupMetadata,
+            'profile_groups' => $groupMetadata,
+        ])->save();
+        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups(
+            (string) $event->_id,
+            $occurrence,
+            [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => $profiles
+                    ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+                    ->values()
+                    ->all(),
+            ]]
         );
 
         $service = app(EventQueryService::class);
@@ -887,6 +918,67 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'is_visible' => true,
             ],
         ];
+    }
+
+    private function createOwnedEventFixture(
+        Account $account,
+        mixed $user,
+        string $title,
+        Carbon $start,
+    ): Event {
+        Sanctum::actingAs($user, ['events:create', 'events:read']);
+
+        $response = $this->postJson(
+            "{$this->base_api_tenant}accounts/{$account->slug}/events",
+            [
+                'title' => $title,
+                'content' => 'Performance guard content',
+                'location' => [
+                    'mode' => 'online',
+                    'online' => [
+                        'url' => 'https://meet.example.org/'.strtolower(str_replace(' ', '-', $title)),
+                        'platform' => 'jitsi',
+                    ],
+                ],
+                'place_ref' => null,
+                'type' => [
+                    'id' => (string) $this->eventType->_id,
+                    'name' => (string) $this->eventType->name,
+                    'slug' => (string) $this->eventType->slug,
+                    'description' => (string) $this->eventType->description,
+                    'icon' => (string) $this->eventType->icon,
+                    'color' => (string) $this->eventType->color,
+                ],
+                'occurrences' => [[
+                    'date_time_start' => $start->copy()->toISOString(),
+                    'date_time_end' => $start->copy()->addHours(2)->toISOString(),
+                    'profile_groups' => [],
+                ]],
+                'categories' => [],
+                'taxonomy_terms' => [],
+                'publication' => [
+                    'status' => 'published',
+                    'publish_at' => Carbon::now()->subMinute()->toISOString(),
+                ],
+            ]
+        );
+        $response->assertCreated();
+
+        return Event::query()->where('title', $title)->firstOrFail()->fresh();
+    }
+
+    private function createAccountUserWithWildcardEventsRole(Account $account, string $slug): mixed
+    {
+        $role = $account->roleTemplates()->create([
+            'name' => sprintf('%s Events Role', ucfirst(str_replace('-', ' ', $slug))),
+            'permissions' => ['*'],
+        ]);
+
+        return app(AccountUserService::class)->create($account, [
+            'name' => sprintf('%s Events User', ucfirst(str_replace('-', ' ', $slug))),
+            'email' => sprintf('%s-%s@example.org', $slug, uniqid('', true)),
+            'password' => 'Secret!234',
+        ], (string) $role->_id);
     }
 
     private function createAccountProfileFixture(

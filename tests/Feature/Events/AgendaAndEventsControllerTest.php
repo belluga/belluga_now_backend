@@ -1245,22 +1245,75 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         ]);
 
         $collection = DB::connection('tenant')->getDatabase()->selectCollection('event_occurrences');
-        $collection->dropIndexes();
+        $droppedGeoIndexes = $this->dropAgendaGeoIndexes($collection);
 
-        $response = $this->getJson(
-            "{$this->base_api_tenant}agenda?origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=5000&page=1&page_size=10"
-        );
+        try {
+            $response = $this->getJson(
+                "{$this->base_api_tenant}agenda?origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=5000&page=1&page_size=10"
+            );
 
-        $response->assertStatus(500);
+            $response->assertStatus(500);
 
-        $indexNames = [];
-        foreach ($collection->listIndexes() as $index) {
-            $indexNames[] = (string) $index->getName();
+            $indexNames = [];
+            foreach ($collection->listIndexes() as $index) {
+                $indexNames[] = (string) $index->getName();
+            }
+            $this->assertNotContains('geo_location_2dsphere', $indexNames);
+            $this->assertNotContains('idx_event_occurrences_public_agenda_geo_v1', $indexNames);
+        } finally {
+            $this->restoreIndexes($collection, $droppedGeoIndexes);
         }
-        $this->assertNotContains('geo_location_2dsphere', $indexNames);
+    }
 
-        // Keep test isolation: recreate the required geo index for subsequent tests.
-        $collection->createIndex(['geo_location' => '2dsphere']);
+    /**
+     * @return array<int, array{name: string, key: array<string, mixed>}>
+     */
+    private function dropAgendaGeoIndexes(object $collection): array
+    {
+        $dropped = [];
+
+        foreach ($collection->listIndexes() as $index) {
+            $name = (string) $index->getName();
+            $key = $this->normalizeIndexKey($index->getKey());
+
+            if (! array_key_exists('geo_location', $key)) {
+                continue;
+            }
+
+            $dropped[] = [
+                'name' => $name,
+                'key' => $key,
+            ];
+            $collection->dropIndex($name);
+        }
+
+        return $dropped;
+    }
+
+    /**
+     * @param  array<int, array{name: string, key: array<string, mixed>}>  $indexes
+     */
+    private function restoreIndexes(object $collection, array $indexes): void
+    {
+        foreach ($indexes as $index) {
+            $collection->createIndex($index['key'], ['name' => $index['name']]);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeIndexKey(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \MongoDB\Model\BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        return is_array($value) ? $value : [];
     }
 
     public function test_agenda_confirmed_only_returns_only_confirmed_events(): void

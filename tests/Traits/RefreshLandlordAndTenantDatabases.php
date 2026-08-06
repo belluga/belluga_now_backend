@@ -63,10 +63,10 @@ trait RefreshLandlordAndTenantDatabases
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
         $isMongo = $dsn !== '' && str_contains($dsn, 'mongodb');
-        $isAtlas = $dsn !== '' && str_contains($dsn, 'mongodb+srv://');
-
         if ($isMongo) {
-            $this->wipeMongoCollectionsForRefresh($landlordDatabase, $tenantDatabase, $tenantDatabaseNames, $isAtlas);
+            // Rebuild Mongo test structure from migrations on every refresh, but
+            // wait for collection drops to settle before rerunning the migrator.
+            $this->wipeMongoCollectionsForRefresh($landlordDatabase, $tenantDatabase, $tenantDatabaseNames, false);
             LandlordUser::withTrashed()->forceDelete();
             Landlord::query()->delete();
             Tenant::withTrashed()->forceDelete();
@@ -166,7 +166,9 @@ trait RefreshLandlordAndTenantDatabases
 
     private function wipeMongoDatabaseCollectionsForRefresh(object $database, bool $deleteOnly): void
     {
-        foreach ($database->listCollectionNames() as $collectionName) {
+        $collectionNames = array_values(iterator_to_array($database->listCollectionNames()));
+
+        foreach ($collectionNames as $collectionName) {
             if ($deleteOnly) {
                 $database->selectCollection($collectionName)->deleteMany([]);
 
@@ -174,7 +176,28 @@ trait RefreshLandlordAndTenantDatabases
             }
 
             $database->dropCollection($collectionName);
+            $this->waitForMongoCollectionDrop($database, $collectionName);
         }
+    }
+
+    private function waitForMongoCollectionDrop(object $database, string $collectionName): void
+    {
+        $attemptsRemaining = 50;
+
+        while ($attemptsRemaining-- > 0) {
+            $existingCollections = array_values(iterator_to_array($database->listCollectionNames()));
+
+            if (! in_array($collectionName, $existingCollections, true)) {
+                return;
+            }
+
+            usleep(100_000);
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Timed out waiting for Mongo collection [%s] to drop during test refresh.',
+            $collectionName
+        ));
     }
 
     /**
