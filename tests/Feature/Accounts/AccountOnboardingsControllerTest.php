@@ -96,9 +96,23 @@ class AccountOnboardingsControllerTest extends TestCase
         $roleId = (string) $response->json('data.role.id');
         $profileId = (string) $response->json('data.account_profile.id');
 
-        $this->assertNotNull(Account::query()->where('_id', $accountId)->first());
-        $this->assertSame(1, AccountProfile::query()->where('_id', $profileId)->count());
-        $this->assertSame(1, AccountRoleTemplate::query()->where('_id', $roleId)->count());
+        $persistedAccount = Account::query()->where('name', $name)->first();
+        $this->assertNotNull($persistedAccount);
+        $this->assertSame($accountId, (string) $persistedAccount->_id);
+
+        $persistedProfile = AccountProfile::query()
+            ->where('account_id', $accountId)
+            ->where('display_name', $name)
+            ->first();
+        $this->assertNotNull($persistedProfile);
+        $this->assertSame($profileId, (string) $persistedProfile->_id);
+
+        $persistedRole = AccountRoleTemplate::query()
+            ->where('account_id', $accountId)
+            ->where('slug', 'admin')
+            ->first();
+        $this->assertNotNull($persistedRole);
+        $this->assertSame($roleId, (string) $persistedRole->_id);
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
     }
 
@@ -375,6 +389,9 @@ class AccountOnboardingsControllerTest extends TestCase
         $mediaMock->shouldReceive('applyUploads')
             ->once()
             ->andThrow(new \RuntimeException('Simulated media write failure'));
+        $mediaMock->shouldReceive('removeAllUploads')
+            ->once()
+            ->with(Mockery::type(AccountProfile::class));
         $this->app->instance(AccountProfileMediaService::class, $mediaMock);
 
         $response = $this->postJson($this->tenantOnboardingsUrl, [
