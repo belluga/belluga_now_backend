@@ -19,7 +19,7 @@ class InviteTargetResolverServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_resolve_falls_back_to_occurrence_linked_account_profile_summary_when_detail_projection_is_lazy(): void
+    public function test_resolve_uses_canonical_counterpart_preview_from_detail_projection(): void
     {
         $targetRead = Mockery::mock(InviteTargetReadContract::class);
         $targetRead->shouldReceive('findEventByIdOrSlug')
@@ -35,7 +35,7 @@ class InviteTargetResolverServiceTest extends TestCase
                     'status' => 'published',
                     'publish_at' => Carbon::parse('2026-03-10 12:00:00'),
                 ],
-                'event_image_url' => 'https://example.org/event.jpg',
+                'hero_image_url' => 'https://example.org/event.jpg',
                 'attributes' => [
                     'attendance_policy' => 'free_confirmation_only',
                     'place_ref' => [
@@ -75,7 +75,15 @@ class InviteTargetResolverServiceTest extends TestCase
                 'hero_image_url' => 'https://example.org/event.jpg',
                 'location' => 'Guarapari',
                 'taxonomy_terms' => [],
-                'linked_account_profiles' => [],
+                'counterpart_preview' => [[
+                    'id' => 'band-1',
+                    'display_name' => 'Du Jorge',
+                    'profile_type' => 'band',
+                ], [
+                    'id' => 'expo-1',
+                    'display_name' => 'Agro Sul',
+                    'profile_type' => 'producer',
+                ]],
                 'profile_groups' => [[
                     'id' => 'bandas',
                     'label' => 'Bandas',
@@ -96,11 +104,11 @@ class InviteTargetResolverServiceTest extends TestCase
 
         $this->assertSame(
             'Du Jorge',
-            data_get($resolved, 'event_snapshot.linked_account_profiles.0.display_name'),
+            data_get($resolved, 'event_snapshot.counterpart_preview.0.display_name'),
         );
         $this->assertSame(
             'Agro Sul',
-            data_get($resolved, 'event_snapshot.linked_account_profiles.1.display_name'),
+            data_get($resolved, 'event_snapshot.counterpart_preview.1.display_name'),
         );
         $this->assertSame(
             'Bandas',

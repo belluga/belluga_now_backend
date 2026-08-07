@@ -224,7 +224,7 @@ class PublicWebMetadataService
             ) ?: $metadata['description']
         );
         $metadata['image'] = $this->resolveImageUrl([
-            $invite['event_image_url'] ?? null,
+            $invite['hero_image_url'] ?? null,
             $metadata['image'],
         ]);
         $metadata['canonical_url'] = $this->canonicalUrlForPath($path);

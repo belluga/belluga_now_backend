@@ -44,7 +44,7 @@ class InviteTargetReadAdapter implements InviteTargetReadContract
             'date_time_start' => $event->date_time_start,
             'date_time_end' => $event->date_time_end,
             'publication' => $event->publication,
-            'event_image_url' => $this->eventHeroImages->resolveFromPayload($attributes),
+            'hero_image_url' => $this->eventHeroImages->resolveFromPayload($attributes),
             'attributes' => $attributes,
         ];
     }

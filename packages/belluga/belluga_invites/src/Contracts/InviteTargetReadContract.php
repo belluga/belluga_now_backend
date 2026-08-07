@@ -14,7 +14,7 @@ interface InviteTargetReadContract
      *     date_time_start:mixed,
      *     date_time_end:mixed,
      *     publication:mixed,
-     *     event_image_url:?string,
+     *     hero_image_url:?string,
      *     attributes:array<string,mixed>
      * }|null
      */
@@ -57,7 +57,7 @@ interface InviteTargetReadContract
      *     location:mixed,
      *     venue:?array<string,mixed>,
      *     taxonomy_terms:array<int,array<string,mixed>>,
-     *     linked_account_profiles:array<int,array<string,mixed>>,
+     *     counterpart_preview:array<int,array<string,mixed>>,
      *     profile_groups:array<int,array<string,mixed>>
      * }|null
      */

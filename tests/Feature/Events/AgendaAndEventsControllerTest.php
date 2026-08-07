@@ -7,6 +7,7 @@ namespace Tests\Feature\Events;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -23,6 +24,7 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as EventBus;
 use Laravel\Sanctum\Sanctum;
@@ -298,12 +300,13 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_single_occurrence_uses_parent_linked_profile_cover_before_venue_when_event_cover_is_missing(): void
+    public function test_agenda_single_occurrence_uses_occurrence_counterpart_cover_before_venue_when_event_cover_is_missing(): void
     {
+        $title = 'Single Parent Profile Cover';
         $profileCoverUrl = 'https://example.org/single-parent-profile-cover.jpg';
         $venueCoverUrl = 'https://example.org/single-parent-venue-cover.jpg';
         $event = $this->createEvent($this->canonicalImageEventOverrides(
-            title: 'Single Parent Profile Cover',
+            title: $title,
             eventCoverUrl: null,
             venueCoverUrl: $venueCoverUrl,
             profileCoverUrl: $profileCoverUrl,
@@ -312,6 +315,17 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $occurrence = EventOccurrence::query()
             ->where('event_id', (string) $event->_id)
             ->firstOrFail();
+        $profileId = (string) AccountProfile::query()
+            ->where('display_name', $title.' Artist')
+            ->value('_id');
+        $this->assertNotSame('', $profileId);
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $event->_id, $occurrence, [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [$profileId],
+            ]]);
         $occurrence->forceFill([
             'thumb' => null,
             'event_parties' => [],
@@ -330,13 +344,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_multi_occurrence_uses_parent_linked_profile_avatar_before_venue_when_cover_candidates_are_missing(): void
+    public function test_agenda_multi_occurrence_uses_occurrence_counterpart_avatar_before_venue_when_cover_candidates_are_missing(): void
     {
         $now = Carbon::now();
+        $title = 'Multi Parent Profile Avatar';
         $profileAvatarUrl = 'https://example.org/multi-parent-profile-avatar.jpg';
         $venueCoverUrl = 'https://example.org/multi-parent-venue-cover.jpg';
         $event = $this->createEvent($this->canonicalImageEventOverrides(
-            title: 'Multi Parent Profile Avatar',
+            title: $title,
             eventCoverUrl: null,
             venueCoverUrl: $venueCoverUrl,
             profileCoverUrl: null,
@@ -360,6 +375,24 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->get()
             ->last();
         $this->assertNotNull($selectedOccurrence);
+        $profileId = (string) AccountProfile::query()
+            ->where('display_name', $title.' Artist')
+            ->value('_id');
+        $this->assertNotSame('', $profileId);
+        $occurrences = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->get()
+            ->values();
+        $selectedOccurrence = $occurrences->last();
+        $this->assertInstanceOf(EventOccurrence::class, $selectedOccurrence);
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $event->_id, $selectedOccurrence, [[
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [$profileId],
+                ]]);
         $selectedOccurrence->forceFill([
             'thumb' => null,
             'event_parties' => [],
@@ -379,7 +412,142 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_live_now_only_returns_only_current_occurrences_with_artists(): void
+    public function test_public_root_event_detail_uses_only_the_first_ordered_occurrence_counterpart_summary(): void
+    {
+        $now = Carbon::now();
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'band'],
+            [
+                'label' => 'Band',
+                'labels' => [
+                    'singular' => 'Band',
+                    'plural' => 'Bands',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_publicly_discoverable' => true,
+                ],
+            ]
+        );
+
+        $firstProfileAccount = Account::create([
+            'name' => 'First Ordered Counterpart Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $firstProfile = AccountProfile::create([
+            'account_id' => (string) $firstProfileAccount->_id,
+            'profile_type' => 'band',
+            'display_name' => 'First Ordered Counterpart',
+            'slug' => 'first-ordered-counterpart',
+            'avatar_url' => 'https://example.org/root-first-occurrence-avatar.jpg',
+            'cover_url' => null,
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $secondProfileAccount = Account::create([
+            'name' => 'Second Ordered Counterpart Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $secondProfile = AccountProfile::create([
+            'account_id' => (string) $secondProfileAccount->_id,
+            'profile_type' => 'band',
+            'display_name' => 'Second Ordered Counterpart',
+            'slug' => 'second-ordered-counterpart',
+            'avatar_url' => 'https://example.org/root-second-occurrence-avatar.jpg',
+            'cover_url' => null,
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
+
+        $event = $this->createEvent([
+            'title' => 'Root detail first occurrence counterpart summary',
+            'thumb' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+            'venue' => [
+                'id' => 'venue-root-first-occurrence',
+                'display_name' => 'Venue fallback',
+                'slug' => 'venue-root-first-occurrence',
+                'profile_type' => 'venue',
+                'tagline' => 'Venue fallback',
+                'hero_image_url' => null,
+                'logo_url' => null,
+                'avatar_url' => null,
+                'cover_url' => 'https://example.org/root-venue-cover.jpg',
+                'taxonomy_terms' => [],
+            ],
+        ]);
+
+        $this->syncEventWithPersistedOccurrenceIdentity($event->fresh(), [
+            [
+                'date_time_start' => $now->copy()->addDays(1),
+                'date_time_end' => $now->copy()->addDays(1)->addHours(2),
+                '_profile_groups_explicit' => true,
+                'profile_groups' => [[
+                    'id' => 'headline',
+                    'label' => 'Headline',
+                    'order' => 0,
+                ]],
+            ],
+            [
+                'date_time_start' => $now->copy()->addDays(2),
+                'date_time_end' => $now->copy()->addDays(2)->addHours(2),
+                '_profile_groups_explicit' => true,
+                'profile_groups' => [[
+                    'id' => 'guest',
+                    'label' => 'Guest',
+                    'order' => 0,
+                ]],
+            ],
+        ]);
+
+        $storedOccurrences = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->orderBy('_id')
+            ->get()
+            ->values();
+
+        $this->assertCount(2, $storedOccurrences);
+
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['events:update', 'events:read']);
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[0]->_id}/profile_groups/headline/members",
+            ['add_ids' => [(string) $firstProfile->_id]],
+        )->assertOk();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[1]->_id}/profile_groups/guest/members",
+            ['add_ids' => [(string) $secondProfile->_id]],
+        )->assertOk();
+
+        Sanctum::actingAs($this->user, ['account-users:view']);
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonMissingPath('data.linked_account_profiles');
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $firstProfile->_id);
+        $response->assertJsonPath('data.counterpart_count', 1);
+        $response->assertJsonPath('data.hero_image_url', 'https://example.org/root-first-occurrence-avatar.jpg');
+        $this->assertFalse(
+            collect($response->json('data.counterpart_preview', []))
+                ->pluck('id')
+                ->contains((string) $secondProfile->_id)
+        );
+        $this->assertNotSame(
+            'https://example.org/root-second-occurrence-avatar.jpg',
+            (string) $response->json('data.hero_image_url')
+        );
+    }
+
+    public function test_agenda_live_now_only_returns_only_current_occurrences_with_counterpart_preview(): void
     {
         $now = Carbon::now();
 
@@ -442,7 +610,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'is_verified' => false,
         ]);
 
-        $this->createEvent([
+        $liveEvent = $this->createEvent([
             'title' => 'Live Discovery Slot',
             'date_time_start' => $now->copy()->subMinutes(15),
             'date_time_end' => $now->copy()->addMinutes(45),
@@ -463,6 +631,24 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
             ],
         ]);
+        $liveOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $liveEvent->_id)
+            ->firstOrFail();
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $liveEvent->_id, $liveOccurrence, [
+                [
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $liveArtistOne->_id],
+                ],
+                [
+                    'id' => 'bands',
+                    'label' => 'Bands',
+                    'order' => 1,
+                    'account_profile_ids' => [(string) $liveArtistTwo->_id],
+                ],
+            ]);
 
         $this->createEvent([
             'title' => 'Upcoming Hidden In Live',
@@ -482,8 +668,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $items = $response->json('items');
         $this->assertCount(1, $items);
         $this->assertSame('Live Discovery Slot', (string) ($items[0]['title'] ?? ''));
-        $this->assertSame('Live Artist One', (string) ($items[0]['artists'][0]['display_name'] ?? ''));
-        $this->assertSame((string) $liveArtistOne->_id, (string) ($items[0]['artists'][0]['id'] ?? ''));
+        $this->assertArrayNotHasKey(
+            'artists',
+            $items[0],
+            'Public agenda cards must expose canonical counterpart_preview instead of legacy artists payload.'
+        );
+        $this->assertSame('Live Artist One', (string) ($items[0]['counterpart_preview'][0]['display_name'] ?? ''));
+        $this->assertSame((string) $liveArtistOne->_id, (string) ($items[0]['counterpart_preview'][0]['id'] ?? ''));
+        $this->assertSame(2, (int) ($items[0]['counterpart_count'] ?? 0));
     }
 
     public function test_agenda_public_endpoint_shows_only_effectively_published_items(): void
@@ -1126,22 +1318,75 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         ]);
 
         $collection = DB::connection('tenant')->getDatabase()->selectCollection('event_occurrences');
-        $collection->dropIndexes();
+        $droppedGeoIndexes = $this->dropAgendaGeoIndexes($collection);
 
-        $response = $this->getJson(
-            "{$this->base_api_tenant}agenda?origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=5000&page=1&page_size=10"
-        );
+        try {
+            $response = $this->getJson(
+                "{$this->base_api_tenant}agenda?origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=5000&page=1&page_size=10"
+            );
 
-        $response->assertStatus(500);
+            $response->assertStatus(500);
 
-        $indexNames = [];
-        foreach ($collection->listIndexes() as $index) {
-            $indexNames[] = (string) $index->getName();
+            $indexNames = [];
+            foreach ($collection->listIndexes() as $index) {
+                $indexNames[] = (string) $index->getName();
+            }
+            $this->assertNotContains('geo_location_2dsphere', $indexNames);
+            $this->assertNotContains('idx_event_occurrences_public_agenda_geo_v1', $indexNames);
+        } finally {
+            $this->restoreIndexes($collection, $droppedGeoIndexes);
         }
-        $this->assertNotContains('geo_location_2dsphere', $indexNames);
+    }
 
-        // Keep test isolation: recreate the required geo index for subsequent tests.
-        $collection->createIndex(['geo_location' => '2dsphere']);
+    /**
+     * @return array<int, array{name: string, key: array<string, mixed>}>
+     */
+    private function dropAgendaGeoIndexes(object $collection): array
+    {
+        $dropped = [];
+
+        foreach ($collection->listIndexes() as $index) {
+            $name = (string) $index->getName();
+            $key = $this->normalizeIndexKey($index->getKey());
+
+            if (! array_key_exists('geo_location', $key)) {
+                continue;
+            }
+
+            $dropped[] = [
+                'name' => $name,
+                'key' => $key,
+            ];
+            $collection->dropIndex($name);
+        }
+
+        return $dropped;
+    }
+
+    /**
+     * @param  array<int, array{name: string, key: array<string, mixed>}>  $indexes
+     */
+    private function restoreIndexes(object $collection, array $indexes): void
+    {
+        foreach ($indexes as $index) {
+            $collection->createIndex($index['key'], ['name' => $index['name']]);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeIndexKey(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument) {
+            return $value->getArrayCopy();
+        }
+
+        if ($value instanceof \MongoDB\Model\BSONArray) {
+            return $value->getArrayCopy();
+        }
+
+        return is_array($value) ? $value : [];
     }
 
     public function test_agenda_confirmed_only_returns_only_confirmed_events(): void
@@ -1734,16 +1979,16 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'profile_groups' => [],
         ]);
 
-        $this->syncEventWithPersistedOccurrenceIdentity($event->fresh(), [[
-            'date_time_start' => Carbon::instance($event->date_time_start),
-            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
-            'profile_groups' => [[
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $event->_id, $occurrence, [[
                 'id' => 'bands',
                 'label' => 'Bands',
                 'order' => 0,
                 'account_profile_ids' => [(string) $profile->_id],
-            ]],
-        ]]);
+            ]]);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);

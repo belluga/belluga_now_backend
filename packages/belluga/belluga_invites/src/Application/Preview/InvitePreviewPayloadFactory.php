@@ -16,11 +16,11 @@ class InvitePreviewPayloadFactory
      *         event_name:string,
      *         event_slug:string,
      *         event_date:?Carbon,
-     *         event_image_url:?string,
+     *         hero_image_url:?string,
      *         location:string,
      *         host_name:string,
      *         taxonomy_terms:array<int,array<string,mixed>>,
-     *         linked_account_profiles:array<int,array<string,mixed>>,
+     *         counterpart_preview:array<int,array<string,mixed>>,
      *         profile_groups:array<int,array<string,mixed>>,
      *         venue_account_profile_id:?string,
      *         attendance_policy:string,
@@ -46,12 +46,12 @@ class InvitePreviewPayloadFactory
             eventName: (string) ($target['event_snapshot']['event_name'] ?? ''),
             eventSlug: (string) ($target['event_snapshot']['event_slug'] ?? ''),
             eventDate: $target['event_snapshot']['event_date'] ?? null,
-            eventImageUrl: $target['event_snapshot']['event_image_url'] ?? null,
+            heroImageUrl: $target['event_snapshot']['hero_image_url'] ?? null,
             location: (string) ($target['event_snapshot']['location'] ?? ''),
             hostName: (string) ($target['event_snapshot']['host_name'] ?? ''),
             message: 'Entre para aceitar ou recusar o convite.',
             taxonomyTerms: $target['event_snapshot']['taxonomy_terms'] ?? [],
-            linkedAccountProfiles: $target['event_snapshot']['linked_account_profiles'] ?? [],
+            counterpartPreview: $target['event_snapshot']['counterpart_preview'] ?? [],
             profileGroups: $target['event_snapshot']['profile_groups'] ?? [],
             venueAccountProfileId: $target['event_snapshot']['venue_account_profile_id'] ?? null,
             attendancePolicy: (string) ($target['event_snapshot']['attendance_policy'] ?? 'free_confirmation_only'),
@@ -83,12 +83,12 @@ class InvitePreviewPayloadFactory
             eventName: (string) ($edge->event_name ?? ''),
             eventSlug: (string) ($edge->event_slug ?? ''),
             eventDate: $edge->event_date,
-            eventImageUrl: $edge->event_image_url,
+            heroImageUrl: $edge->event_image_url,
             location: (string) ($edge->location_label ?? ''),
             hostName: (string) ($edge->host_name ?? ''),
             message: (string) ($edge->message ?? ''),
             taxonomyTerms: is_array($edge->taxonomy_terms) ? $edge->taxonomy_terms : [],
-            linkedAccountProfiles: is_array($edge->linked_account_profiles) ? $edge->linked_account_profiles : [],
+            counterpartPreview: is_array($edge->linked_account_profiles) ? $edge->linked_account_profiles : [],
             profileGroups: is_array($edge->profile_groups) ? $edge->profile_groups : [],
             venueAccountProfileId: $edge->venue_account_profile_id,
             attendancePolicy: (string) ($edge->attendance_policy ?? 'free_confirmation_only'),
@@ -100,7 +100,7 @@ class InvitePreviewPayloadFactory
      * @param  array{event_id:string,occurrence_id:string}  $targetRef
      * @param  array{kind:string,id:string}  $principal
      * @param  array<int, array<string, mixed>>  $taxonomyTerms
-     * @param  array<int, array<string, mixed>>  $linkedAccountProfiles
+     * @param  array<int, array<string, mixed>>  $counterpartPreview
      * @param  array<int, array<string, mixed>>  $profileGroups
      * @return array<string, mixed>
      */
@@ -113,12 +113,12 @@ class InvitePreviewPayloadFactory
         string $eventName,
         string $eventSlug,
         ?Carbon $eventDate,
-        ?string $eventImageUrl,
+        ?string $heroImageUrl,
         string $location,
         string $hostName,
         string $message,
         array $taxonomyTerms,
-        array $linkedAccountProfiles,
+        array $counterpartPreview,
         array $profileGroups,
         ?string $venueAccountProfileId,
         string $attendancePolicy,
@@ -147,7 +147,7 @@ class InvitePreviewPayloadFactory
             'target_ref' => $normalizedTargetRef,
             'event_name' => trim($eventName),
             'event_date' => ($eventDate ?? Carbon::now())->toISOString(),
-            'event_image_url' => $this->normalizeOptionalString($eventImageUrl),
+            'hero_image_url' => $this->normalizeOptionalString($heroImageUrl),
             'location' => trim($location),
             'host_name' => trim($hostName),
             'message' => trim($message),
@@ -155,8 +155,8 @@ class InvitePreviewPayloadFactory
                 array_map([$this, 'normalizeMap'], $taxonomyTerms),
                 static fn (array $term): bool => $term !== [],
             )),
-            'linked_account_profiles' => array_values(array_filter(
-                array_map([$this, 'normalizeMap'], $linkedAccountProfiles),
+            'counterpart_preview' => array_values(array_filter(
+                array_map([$this, 'normalizeMap'], $counterpartPreview),
                 static fn (array $profile): bool => $profile !== [],
             )),
             'profile_groups' => array_values(array_filter(

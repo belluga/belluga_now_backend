@@ -22,12 +22,6 @@ class InitializationControllerTest extends TestCase
         $this->refreshLandlordAndTenantDatabases();
     }
 
-    protected function tearDown(): void
-    {
-        $this->refreshLandlordAndTenantDatabases();
-        parent::tearDown();
-    }
-
     public function test_system_initializes_successfully(): void
     {
         $response = $this->withServerVariables([

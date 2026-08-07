@@ -14,9 +14,13 @@ use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Http\Api\v1\Requests\EventAccountProfileCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
+use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersPatchRequest;
+use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
+use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
+use MongoDB\BSON\ObjectId;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -196,6 +200,57 @@ class EventsController extends Controller
         ]);
     }
 
+    public function occurrenceProfileGroupMembers(
+        EventOccurrenceGroupMembersRequest $request,
+        string $tenant_domain,
+        string $event_id,
+        string $occurrence_id,
+        string $group_id,
+    ): JsonResponse {
+        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+
+        $occurrence = $this->findOccurrenceOrFail($event, $occurrence_id);
+
+        return response()->json(
+            $this->eventQueryService->adminOccurrenceGroupMembers(
+                $event,
+                $occurrence,
+                $group_id,
+                $request->perPage(),
+                $request->suppliedPerPage(),
+                $request->cursor(),
+            )
+        );
+    }
+
+    public function patchOccurrenceProfileGroupMembers(
+        EventOccurrenceGroupMembersPatchRequest $request,
+        string $tenant_domain,
+        string $event_id,
+        string $occurrence_id,
+        string $group_id,
+    ): JsonResponse {
+        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+
+        $occurrence = $this->findOccurrenceOrFail($event, $occurrence_id);
+
+        return response()->json([
+            'data' => $this->eventManagementService->patchOccurrenceGroupMembers(
+                $event,
+                $occurrence,
+                $group_id,
+                $request->addIds(),
+                $request->removeIds(),
+            ),
+        ]);
+    }
+
     public function relatedProfileTabMembers(Request $request, string $event_id, string $tab_id): JsonResponse
     {
         $eventId = (string) ($request->route('event_id') ?? $event_id);
@@ -253,6 +308,31 @@ class EventsController extends Controller
         $user = $request->user();
 
         return $user ? (string) $user->getAuthIdentifier() : null;
+    }
+
+    private function findOccurrenceOrFail(\Belluga\Events\Models\Tenants\Event $event, string $occurrenceId): EventOccurrence
+    {
+        $eventId = trim((string) $event->getKey());
+        $occurrenceId = trim($occurrenceId);
+        if ($eventId === '' || $occurrenceId === '') {
+            abort(404, 'Occurrence not found.');
+        }
+
+        $candidates = [$occurrenceId];
+        if (preg_match('/^[a-f0-9]{24}$/i', $occurrenceId) === 1) {
+            $candidates[] = new ObjectId($occurrenceId);
+        }
+
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', $eventId)
+            ->whereIn('_id', $candidates)
+            ->first();
+
+        if (! $occurrence instanceof EventOccurrence) {
+            abort(404, 'Occurrence not found.');
+        }
+
+        return $occurrence;
     }
 
     /**

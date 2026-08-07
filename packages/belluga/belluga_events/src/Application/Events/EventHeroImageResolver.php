@@ -17,7 +17,7 @@ class EventHeroImageResolver
     /**
      * Resolve the canonical event hero image used by downstream event consumers.
      *
-     * Order: event thumb, linked account profiles, then venue/location media.
+     * Order: event thumb, counterpart preview, then venue/location media.
      *
      * @param  array<string, mixed>  $eventPayload
      */
@@ -31,7 +31,7 @@ class EventHeroImageResolver
             $thumbData['url'] ?? null,
             $thumb['url'] ?? null,
             $thumb['uri'] ?? null,
-            ...$this->linkedAccountProfileHeroImageCandidates($eventPayload),
+            ...$this->counterpartPreviewHeroImageCandidates($eventPayload),
             $venue['cover_url'] ?? null,
             $venue['hero_image_url'] ?? null,
             $venue['avatar_url'] ?? null,
@@ -43,12 +43,12 @@ class EventHeroImageResolver
      * @param  array<string, mixed>  $eventPayload
      * @return array<int, mixed>
      */
-    private function linkedAccountProfileHeroImageCandidates(array $eventPayload): array
+    private function counterpartPreviewHeroImageCandidates(array $eventPayload): array
     {
-        $linkedProfiles = $this->normalizeArray($eventPayload['linked_account_profiles'] ?? []);
+        $counterpartPreview = $this->normalizeArray($eventPayload['counterpart_preview'] ?? []);
 
         $candidates = [];
-        foreach ($linkedProfiles as $profile) {
+        foreach ($counterpartPreview as $profile) {
             $profilePayload = $this->normalizeArray($profile);
             if ($profilePayload === []) {
                 continue;
