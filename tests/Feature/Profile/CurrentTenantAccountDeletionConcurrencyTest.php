@@ -106,7 +106,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         $results = $this->runLeaderWithFollowers(
             $this->deleteProcess((string) $target->_id, [
-                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '1200',
+                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2500',
             ]),
             [
                 $this->verifyProcess(
@@ -249,7 +249,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
 
         $results = $this->runLeaderWithFollowers(
             $this->deleteProcess((string) $target->_id, [
-                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2000',
+                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2500',
             ]),
             $processes,
             0,
