@@ -171,6 +171,36 @@ class AccountProfileNestedGroupService
         ));
     }
 
+    public function assertMetadataOnlyInput(mixed $rawGroups): void
+    {
+        if (! is_array($rawGroups)) {
+            return;
+        }
+
+        $errors = [];
+        foreach ($rawGroups as $index => $rawGroup) {
+            if (! is_array($rawGroup)) {
+                continue;
+            }
+
+            if (array_key_exists('account_profile_ids', $rawGroup)) {
+                $errors["nested_profile_groups.{$index}.account_profile_ids"] = [
+                    'Nested profile group members must be managed through the dedicated members endpoint.',
+                ];
+            }
+
+            if (array_key_exists('profile_ids', $rawGroup)) {
+                $errors["nested_profile_groups.{$index}.profile_ids"] = [
+                    'Nested profile group members must be managed through the dedicated members endpoint.',
+                ];
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */

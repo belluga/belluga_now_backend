@@ -5402,6 +5402,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
         $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
         $readback->assertJsonPath('data.nested_profile_groups.1.member_count', 1);
+        $readback->assertJsonMissingPath('data.nested_profile_groups.0.account_profile_ids');
+        $readback->assertJsonMissingPath('data.nested_profile_groups.1.account_profile_ids');
+
+        $persistedParent = $parent->fresh();
+        $persistedGroups = $persistedParent?->getAttribute('nested_profile_groups') ?? [];
+        $this->assertIsArray($persistedGroups);
+        $this->assertArrayNotHasKey('account_profile_ids', $persistedGroups[0] ?? []);
+        $this->assertArrayNotHasKey('account_profile_ids', $persistedGroups[1] ?? []);
 
         $partnersPage = $this->getJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
@@ -5420,7 +5428,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sponsorsPage->assertJsonPath('data.0.id', (string) $sponsor->_id);
     }
 
-    public function test_account_profile_update_persists_nested_profile_groups_with_members_in_single_request(): void
+    public function test_account_profile_update_rejects_embedded_nested_profile_group_members_on_base_update(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -5454,57 +5462,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertOk();
-        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
-        $response->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
-
-        $readback = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            $this->getHeaders()
-        );
-
-        $readback->assertOk();
-        $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
-        $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
-
-        $membersPage = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
-            $this->getHeaders()
-        );
-        $membersPage->assertOk();
-        $membersPage->assertJsonPath('data.0.id', (string) $partnerB->_id);
-        $membersPage->assertJsonPath('data.1.id', (string) $partnerA->_id);
-
-        $storedMember = DB::connection('tenant')->getDatabase()
-            ->selectCollection('accounts_nested')
-            ->findOne([
-                'parent_type' => 'account_profile',
-                'parent_id' => (string) $parent->_id,
-                'group_key' => 'parceiros',
-                'doc_type' => 'member_row',
-                'nested_profile.id' => (string) $partnerB->_id,
-            ]);
-        $this->assertNotNull($storedMember);
-        $this->assertSame(
-            ['cuisine:japanese'],
-            array_values((array) data_get($storedMember, 'nested_profile.taxonomy_terms_flat')),
-        );
-        $this->assertNull(data_get($storedMember, 'nested_profile.tags'));
-
-        $publicDetail = $this->getJson(
-            "{$this->base_api_tenant}account_profiles/{$parent->slug}",
-            $this->getHeaders()
-        );
-
-        $publicDetail->assertOk();
-        $publicDetail->assertJsonCount(1, 'data.nested_profile_groups');
-        $publicDetail->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
-        $publicDetail->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
-        $publicDetail->assertJsonPath(
-            'data.nested_profile_groups.0.members_path',
-            "/api/v1/account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members"
-        );
-        $publicDetail->assertJsonMissingPath('data.nested_profile_groups.0.profiles');
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups.0.account_profile_ids']);
     }
 
     public function test_relation_admission_touches_contact_and_nested_targets_before_the_parent_commit(): void
@@ -6036,38 +5995,53 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ])->fresh();
         $partner = $this->createNestedProfileFixture('Nested Duplicate', 'nested-duplicate');
 
-        $duplicate = $this->patchJson(
+        $metadataResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
             [
+                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
                 'nested_profile_groups' => [
                     [
                         'id' => 'parceiros',
                         'label' => 'Parceiros',
-                        'account_profile_ids' => [
-                            (string) $partner->_id,
-                            (string) $partner->_id,
-                        ],
                     ],
                 ],
             ],
             $this->getHeaders()
         );
-        $duplicate->assertStatus(422);
+        $metadataResponse->assertOk();
+
+        $duplicate = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
+                'add_ids' => [
+                    (string) $partner->_id,
+                    (string) $partner->_id,
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $duplicate->assertOk();
+        $duplicate->assertJsonPath('data.member_count', 1);
+
+        $membersAfterDuplicate = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            $this->getHeaders()
+        );
+        $membersAfterDuplicate->assertOk();
+        $membersAfterDuplicate->assertJsonCount(1, 'data');
+        $membersAfterDuplicate->assertJsonPath('data.0.id', (string) $partner->_id);
 
         $selfLink = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'equipe',
-                        'label' => 'Equipe',
-                        'account_profile_ids' => [(string) $parent->_id],
-                    ],
-                ],
+                'aggregate_revision' => (int) $duplicate->json('data.aggregate_revision'),
+                'add_ids' => [(string) $parent->_id],
             ],
             $this->getHeaders()
         );
         $selfLink->assertStatus(422);
+        $selfLink->assertJsonValidationErrors(['nested_profile_groups']);
     }
 
     public function test_account_profile_update_rejects_non_queryable_nested_profile_group_members(): void
@@ -6138,7 +6112,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['visibility' => 'private']
         );
 
-        $response = $this->patchJson(
+        $metadataResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
             [
                 'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
@@ -6146,9 +6120,18 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     [
                         'id' => 'parceiros',
                         'label' => 'Parceiros',
-                        'account_profile_ids' => [(string) $privateMember->_id],
                     ],
                 ],
+            ],
+            $this->getHeaders()
+        );
+        $metadataResponse->assertOk();
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
+                'add_ids' => [(string) $privateMember->_id],
             ],
             $this->getHeaders()
         );

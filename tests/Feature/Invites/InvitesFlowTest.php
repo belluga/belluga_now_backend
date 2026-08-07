@@ -154,7 +154,7 @@ class InvitesFlowTest extends TestCaseTenant
         $feedResponse->assertJsonPath('invites.0.venue_account_profile_id', 'venue-1');
         $feedResponse->assertJsonPath('invites.0.profile_groups.0.label', 'Bandas');
         $feedResponse->assertJsonPath('invites.0.profile_groups.1.label', 'Expositores');
-        $feedResponse->assertJsonPath('invites.0.linked_account_profiles.0.display_name', 'Invite Band');
+        $feedResponse->assertJsonPath('invites.0.counterpart_preview.0.display_name', 'Invite Band');
     }
 
     public function test_feed_expires_finished_invites_before_returning_projections(): void
@@ -305,7 +305,7 @@ class InvitesFlowTest extends TestCaseTenant
         );
         $this->assertSame(
             data_get($message->fcm_options, 'notification.image'),
-            data_get($message->fcm_options, 'data.event_image_url'),
+            data_get($message->fcm_options, 'data.hero_image_url'),
         );
         $this->assertSame('Sender User', data_get($message->fcm_options, 'data.inviter_name'));
         $this->assertNull(data_get($message->payload_template, 'layoutType'));
@@ -1352,13 +1352,13 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('invite.target_ref.event_id', (string) $this->event->_id);
         $response->assertJsonPath('invite.target_ref.occurrence_id', $occurrenceId);
         $response->assertJsonPath('invite.event_slug', (string) $this->event->slug);
-        $response->assertJsonPath('invite.event_image_url', 'https://example.org/thumb.jpg');
+        $response->assertJsonPath('invite.hero_image_url', 'https://example.org/thumb.jpg');
         $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Sender User');
         $response->assertJsonPath('invite.inviter_candidates.0.status', 'pending');
         $response->assertJsonPath('invite.venue_account_profile_id', 'venue-1');
         $response->assertJsonPath('invite.profile_groups.0.label', 'Bandas');
         $response->assertJsonPath('invite.profile_groups.1.label', 'Expositores');
-        $response->assertJsonPath('invite.linked_account_profiles.0.display_name', 'Invite Band');
+        $response->assertJsonPath('invite.counterpart_preview.0.display_name', 'Invite Band');
     }
 
     public function test_share_preview_exposes_taxonomy_terms_when_legacy_tags_are_absent(): void

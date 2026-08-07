@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Contracts\EventAttendanceReadContract;
+use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
@@ -42,6 +43,7 @@ class EventQueryService
 
     public function __construct(
         private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventAccountResolverContract $eventAccountResolver,
         private readonly EventRadiusSettingsContract $eventRadiusSettings,
         private readonly EventCapabilitySettingsContract $eventCapabilitySettings,
         private readonly EventAttendanceReadContract $eventAttendanceRead,
@@ -53,7 +55,11 @@ class EventQueryService
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
-            ?? new EventManagementOccurrenceQuery($this->occurrenceNestedAccountStore);
+            ?? new EventManagementOccurrenceQuery(
+                $this->occurrenceNestedAccountStore,
+                $this->eventProfileResolver,
+                $this->eventAccountResolver,
+            );
     }
 
     /**
@@ -569,47 +575,32 @@ class EventQueryService
         $thumb = $this->normalizeThumbPayload(
             $this->normalizeArray($event->thumb ?? null)
         );
-        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
         $occurrenceDocuments = $eventId === ''
             ? []
             : EventOccurrence::query()
                 ->where('event_id', $eventId)
                 ->orderBy('starts_at')
                 ->get();
-        $readDocuments = array_merge(
-            [$event],
-            is_array($occurrenceDocuments) ? $occurrenceDocuments : $occurrenceDocuments->all()
+        $publicCounterparts = $this->publicCounterpartsForEventOccurrences(
+            $occurrenceDocuments,
+            $this->buildPublicCounterpartContext($occurrenceDocuments),
         );
         $hydrationContext = [
-            'related_profiles' => $this->resolveCurrentRelatedProfilesForReadDocuments(
-                $readDocuments,
-                false,
-            ),
             'physical_hosts' => $this->resolveCurrentPhysicalHostsForReadDocuments(
-                $readDocuments,
+                array_merge([$event], is_array($occurrenceDocuments) ? $occurrenceDocuments : $occurrenceDocuments->all()),
                 false,
             ),
         ];
-        $relatedProfilesById = is_array($hydrationContext['related_profiles'] ?? null)
-            ? $hydrationContext['related_profiles']
-            : [];
         $physicalHostsById = is_array($hydrationContext['physical_hosts'] ?? null)
             ? $hydrationContext['physical_hosts']
             : [];
-        $linkedAccountProfiles = $this->canonicalLinkedAccountProfilesForEvent(
-            $event,
-            $occurrenceDocuments,
-            false,
-            $relatedProfilesById,
-        );
-
         $venuePayload = $this->currentVenuePayloadFromResolvedHosts(
             $event->place_ref ?? null,
             $venue,
             $physicalHostsById,
         );
 
-        return $this->withCanonicalHeroImage([
+        return $this->withPublicCounterpartContract([
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
             'title' => $this->scalarString($event->title ?? null) ?? '',
             'content' => $this->scalarString($event->content ?? null) ?? '',
@@ -617,9 +608,7 @@ class EventQueryService
             'place_ref' => $placeRef === [] ? null : $placeRef,
             'venue' => $venuePayload,
             'thumb' => $thumb,
-            'event_parties' => $eventParties,
-            'linked_account_profiles' => $linkedAccountProfiles,
-        ]);
+        ], $publicCounterparts['profiles'], $publicCounterparts['counterpart_count']);
     }
 
     /**
@@ -639,6 +628,10 @@ class EventQueryService
                 ->orderBy('starts_at')
                 ->get();
         }
+        $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+            $event,
+            $event->trashed(),
+        );
         $hydrationDocuments = [$event];
         foreach ($occurrenceDocuments ?? [] as $occurrence) {
             $hydrationDocuments[] = $occurrence;
@@ -668,14 +661,10 @@ class EventQueryService
         $thumb = $this->normalizeThumbPayload(
             $this->normalizeArray($event->thumb ?? null)
         );
-        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-        $linkedAccountProfiles = $this->canonicalLinkedAccountProfilesForEvent(
-            $event,
-            $occurrenceDocuments,
-            false,
-            $relatedProfilesById,
+        $managementCounterpart = $this->publicCounterpartsForEventOccurrences(
+            $occurrenceDocuments ?? [],
+            $this->buildManagementCounterpartContext($occurrenceDocuments ?? []),
         );
-        $eventLinkedAccountProfiles = $linkedAccountProfiles;
         $taxonomyTerms = $this->ensureTaxonomySnapshots(
             $event->taxonomy_terms ?? []
         );
@@ -726,7 +715,7 @@ class EventQueryService
         }
         $createdBy = $this->normalizeArray($event->created_by ?? []);
 
-        return [
+        return $this->withPublicCounterpartContract([
             'event_id' => isset($event->_id) ? (string) $event->_id : '',
             'occurrence_id' => null,
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
@@ -756,14 +745,7 @@ class EventQueryService
                 'type' => $this->scalarString($createdBy['type'] ?? null) ?? '',
                 'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
             ],
-            'event_parties' => $eventParties,
-            'linked_account_profiles' => $linkedAccountProfiles,
-            'profile_groups' => $this->formatProfileGroupsForManagement(
-                $event->profile_groups ?? [],
-                $eventLinkedAccountProfiles,
-                'event',
-                isset($event->_id) ? (string) $event->_id : '',
-            ),
+            'profile_groups' => $this->managementRootProfileGroupsFromOccurrences($occurrences),
             'capabilities' => $this->resolveEventCapabilities($event),
             'taxonomy_terms' => $taxonomyTerms,
             'publication' => [
@@ -773,7 +755,7 @@ class EventQueryService
             'created_at' => $event->created_at?->toJSON(),
             'updated_at' => $event->updated_at?->toJSON(),
             'deleted_at' => $event->deleted_at?->toJSON(),
-        ];
+        ], $managementCounterpart['profiles'], $managementCounterpart['counterpart_count']);
     }
 
     /**
@@ -787,16 +769,34 @@ class EventQueryService
     ): array {
         $items = is_array($events) ? array_values($events) : iterator_to_array($events, false);
         $parentEventsById = $this->loadParentEventsForOccurrences($items);
-        $readDocuments = array_merge($items, array_values($parentEventsById));
+        $occurrenceIds = array_values(array_filter(array_map(
+            fn (mixed $event): string => $this->isOccurrencePayload($event)
+                ? trim((string) ($event->_id ?? ''))
+                : '',
+            $items,
+        )));
+        $rootEventIds = array_values(array_filter(array_map(
+            fn (mixed $event): string => $this->isOccurrencePayload($event) || ! isset($event->_id)
+                ? ''
+                : (string) $event->_id,
+            $items,
+        )));
+        $publicEventOccurrencesByEventId = $this->loadOccurrencesByEventIds($rootEventIds);
+        $publicOccurrenceDocuments = $this->loadOccurrencesByIds($occurrenceIds);
+        foreach ($publicEventOccurrencesByEventId as $occurrences) {
+            foreach ($occurrences as $occurrence) {
+                if ($occurrence instanceof EventOccurrence) {
+                    $publicOccurrenceDocuments[] = $occurrence;
+                }
+            }
+        }
         $hydrationContext = [
-            'related_profiles' => $this->resolveCurrentRelatedProfilesForReadDocuments(
-                $readDocuments,
-                true,
-            ),
             'physical_hosts' => $this->resolveCurrentPhysicalHostsForReadDocuments(
-                $readDocuments,
+                array_merge($items, array_values($parentEventsById)),
                 true,
             ),
+            'public_counterparts' => $this->buildPublicCounterpartContext($publicOccurrenceDocuments),
+            'public_event_occurrences' => $publicEventOccurrencesByEventId,
         ];
 
         return array_values(array_map(
@@ -822,9 +822,6 @@ class EventQueryService
         array $hydrationContext = [],
     ): array {
         $isOccurrence = $this->isOccurrencePayload($event);
-        $relatedProfilesById = is_array($hydrationContext['related_profiles'] ?? null)
-            ? $hydrationContext['related_profiles']
-            : [];
         $physicalHostsById = is_array($hydrationContext['physical_hosts'] ?? null)
             ? $hydrationContext['physical_hosts']
             : [];
@@ -841,25 +838,28 @@ class EventQueryService
                     : ($event->thumb ?? null)
             )
         );
-        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-        if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
-            $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
-        }
-        $linkedAccountProfiles = $isOccurrence
-            ? $this->canonicalLinkedAccountProfilesForOccurrencePayload(
-                $event,
-                true,
-                $relatedProfilesById,
-            )
-            : $this->canonicalLinkedAccountProfilesForEvent(
-                $event,
-                publicOnly: true,
-                resolvedProfilesById: $relatedProfilesById,
+        $publicCounterpartContext = is_array($hydrationContext['public_counterparts'] ?? null)
+            ? $hydrationContext['public_counterparts']
+            : ['summaries_by_occurrence' => [], 'profiles_by_id' => []];
+        if ($isOccurrence) {
+            $counterpart = $this->publicCounterpartsForOccurrenceId(
+                trim((string) ($event->_id ?? '')),
+                $publicCounterpartContext,
             );
+        } else {
+            $eventOccurrences = is_array($hydrationContext['public_event_occurrences'] ?? null)
+                ? ($hydrationContext['public_event_occurrences'][(string) ($event->_id ?? '')] ?? [])
+                : [];
+            if ($eventOccurrences === []) {
+                $eventOccurrences = $this->loadEventOccurrenceDocuments($event);
+                $publicCounterpartContext = $this->buildPublicCounterpartContext($eventOccurrences);
+            }
+            $counterpart = $this->publicCounterpartsForEventOccurrences(
+                $eventOccurrences,
+                $publicCounterpartContext,
+            );
+        }
         $taxonomyTerms = $this->resolvePublicEventTaxonomyTerms($event);
-        $artists = $includeArtists
-            ? $this->resolveArtistsReadProjectionFromLinkedProfiles($linkedAccountProfiles)
-            : [];
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
@@ -910,15 +910,14 @@ class EventQueryService
             'date_time_end' => $isOccurrence
                 ? $this->formatDate($this->extractRawAttribute($event, 'ends_at'))
                 : $this->formatDate($this->extractRawAttribute($event, 'date_time_end')),
-            'linked_account_profiles' => $linkedAccountProfiles,
             'taxonomy_terms' => $taxonomyTerms,
         ];
 
-        if ($includeArtists) {
-            $payload['artists'] = $artists;
-        }
-
-        return $this->withCanonicalHeroImage($payload);
+        return $this->withPublicCounterpartContract(
+            $payload,
+            $counterpart['profiles'],
+            $counterpart['counterpart_count'],
+        );
     }
 
     /**
@@ -965,14 +964,19 @@ class EventQueryService
                 $hydrationDocuments[] = $occurrence;
             }
             $hydrationContext = [
-                'related_profiles' => $this->resolveCurrentRelatedProfilesForReadDocuments(
-                    $hydrationDocuments,
-                    $includeTaxonomyTerms,
-                ),
+                'related_profiles' => $includeTaxonomyTerms
+                    ? []
+                    : $this->resolveCurrentRelatedProfilesForReadDocuments(
+                        $hydrationDocuments,
+                        false,
+                    ),
                 'physical_hosts' => $this->resolveCurrentPhysicalHostsForReadDocuments(
                     $hydrationDocuments,
                     $includeTaxonomyTerms,
                 ),
+                'public_counterparts' => $includeTaxonomyTerms
+                    ? $this->buildPublicCounterpartContext($preloadedOccurrences ?? [])
+                    : null,
             ];
         }
         $relatedProfilesById = is_array($hydrationContext['related_profiles'] ?? null)
@@ -989,12 +993,21 @@ class EventQueryService
         $thumb = $this->normalizeThumbPayload(
             $this->normalizeArray($event->thumb ?? null)
         );
-        $linkedAccountProfiles = $this->canonicalLinkedAccountProfilesForEvent(
-            $event,
-            $preloadedOccurrences,
-            $includeTaxonomyTerms,
-            $relatedProfilesById,
-        );
+        $eventOccurrences = $preloadedOccurrences ?? $this->loadEventOccurrenceDocuments($event);
+        if ($includeTaxonomyTerms) {
+            $publicCounterpartContext = is_array($hydrationContext['public_counterparts'] ?? null)
+                ? $hydrationContext['public_counterparts']
+                : $this->buildPublicCounterpartContext($eventOccurrences);
+            $counterpart = $this->publicCounterpartsForEventOccurrences(
+                $eventOccurrences,
+                $publicCounterpartContext,
+            );
+        } else {
+            $counterpart = $this->publicCounterpartsForEventOccurrences(
+                $eventOccurrences,
+                $this->buildManagementCounterpartContext($eventOccurrences),
+            );
+        }
         $typeVisual = $this->normalizeEventTypeVisual(
             $this->normalizeArray($type['visual'] ?? $type['poi_visual'] ?? null)
         );
@@ -1033,7 +1046,6 @@ class EventQueryService
             'date_time_start' => $dateTimeStart,
             'date_time_end' => $dateTimeEnd,
             'occurrences' => $occurrences,
-            'linked_account_profiles' => $linkedAccountProfiles,
             'publication' => [
                 'status' => $this->scalarString($publication['status'] ?? null) ?? 'draft',
                 'publish_at' => $this->formatDate($publication['publish_at'] ?? null),
@@ -1045,68 +1057,34 @@ class EventQueryService
 
         if ($includeTaxonomyTerms) {
             $payload['taxonomy_terms'] = $this->resolvePublicEventTaxonomyTerms($event);
+
+            return $this->withPublicCounterpartContract(
+                $payload,
+                $counterpart['profiles'],
+                $counterpart['counterpart_count'],
+            );
         }
 
-        return $payload;
+        return $this->withPublicCounterpartContract(
+            $payload,
+            $counterpart['profiles'],
+            $counterpart['counterpart_count'],
+        );
     }
 
     public function eventBelongsToAccount(Event $event, string $accountId): bool
     {
-        $profileIds = $this->resolveAccountProfileIds($accountId);
-        if ($profileIds === []) {
-            return false;
-        }
-
-        if ($this->eventReferencesPlaceRefProfile($event, $profileIds)) {
-            return true;
-        }
-
-        $parties = $this->normalizeEventParties($event->event_parties ?? []);
-        foreach ($parties as $party) {
-            if (in_array($party['party_ref_id'], $profileIds, true)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->eventOwnedByAccount($event, $accountId);
     }
 
     public function eventEditableByAccount(Event $event, string $accountId, ?string $actorUserId = null): bool
     {
-        $profileIds = $this->resolveAccountProfileIds($accountId);
-        if ($profileIds === []) {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
             return false;
         }
 
-        $referencesAccountPlace = $this->eventReferencesPlaceRefProfile($event, $profileIds);
-        $matchingParties = [];
-
-        $parties = $this->normalizeEventParties($event->event_parties ?? []);
-        foreach ($parties as $party) {
-            if (in_array($party['party_ref_id'], $profileIds, true)) {
-                $matchingParties[] = $party;
-            }
-        }
-
-        if (! $referencesAccountPlace && $matchingParties === []) {
-            return false;
-        }
-
-        if ($actorUserId !== null && $this->isAccountOwner($event, $actorUserId)) {
-            return true;
-        }
-
-        if ($referencesAccountPlace) {
-            return true;
-        }
-
-        foreach ($matchingParties as $party) {
-            if ((bool) ($party['permissions']['can_edit'] ?? false)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->eventOwnedByAccount($event, $normalizedAccountId);
     }
 
     public function assertPublicVisible(Event $event): void
@@ -2004,7 +1982,6 @@ class EventQueryService
                 ['content' => ['$regex' => $regex, '$options' => 'i']],
                 ['categories' => ['$regex' => $regex, '$options' => 'i']],
                 ['taxonomy_terms.value' => ['$regex' => $regex, '$options' => 'i']],
-                ['event_parties.metadata.display_name' => ['$regex' => $regex, '$options' => 'i']],
             ],
         ];
     }
@@ -2095,10 +2072,6 @@ class EventQueryService
                     : ($event->thumb ?? null)
             )
         );
-        $eventParties = $this->normalizeEventParties($event->event_parties ?? []);
-        if ($parentEvent !== null && $isOccurrence && $eventParties === []) {
-            $eventParties = $this->normalizeEventParties($parentEvent->event_parties ?? []);
-        }
         $taxonomyTerms = $this->resolvePublicEventTaxonomyTerms($event);
 
         $geo = $this->normalizeArray($location['geo'] ?? $event->geo_location ?? null);
@@ -2127,10 +2100,13 @@ class EventQueryService
             $hydrationDocuments,
             true,
         );
-        $eventLinkedProfiles = $this->storedLinkedAccountProfilesForPublicDetailSubject($event);
-        if ($eventLinkedProfiles === [] && $isOccurrence && $parentEvent instanceof Event) {
-            $eventLinkedProfiles = $this->storedLinkedAccountProfilesForPublicDetailSubject($parentEvent);
-        }
+        $publicCounterpartContext = $this->buildPublicCounterpartContext($detailOccurrences);
+        $counterpart = $isOccurrence && $event instanceof EventOccurrence
+            ? $this->publicCounterpartsForOccurrence($event, $publicCounterpartContext)
+            : $this->publicCounterpartsForEventOccurrences(
+                $detailOccurrences,
+                $publicCounterpartContext,
+            );
         $venuePayload = $this->currentVenuePayloadFromResolvedHosts(
             $event->place_ref ?? null,
             $venue,
@@ -2141,7 +2117,7 @@ class EventQueryService
             $eventRoot,
             null,
             $detailOccurrences,
-            false,
+            true,
             $programmingRelatedProfilesById,
             $physicalHostsById,
         );
@@ -2194,7 +2170,6 @@ class EventQueryService
                 'type' => $this->scalarString($createdBy['type'] ?? null) ?? '',
                 'id' => $this->scalarString($createdBy['id'] ?? null) ?? '',
             ],
-            'event_parties' => $eventParties,
             'profile_groups' => $profileGroups,
             'programming_items' => $this->normalizeProgrammingItems(
                 $event->programming_items ?? [],
@@ -2206,16 +2181,11 @@ class EventQueryService
             'taxonomy_terms' => $taxonomyTerms,
         ];
 
-        $artists = $this->publicDetailArtistProjection(
-            $event,
-            $parentEvent,
-            $detailOccurrences,
-            $eventLinkedProfiles,
+        return $this->withPublicCounterpartContract(
+            $payload,
+            $counterpart['profiles'],
+            $counterpart['counterpart_count'],
         );
-        $payload['counterpart_preview'] = array_slice($artists, 0, 1);
-        $payload['counterpart_count'] = count($artists);
-
-        return $this->withCanonicalHeroImage($payload);
     }
 
     /**
@@ -2237,25 +2207,118 @@ class EventQueryService
     }
 
     /**
-     * @param  iterable<int, mixed>  $occurrences
-     * @return array<int, array<string, mixed>>
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array{summaries_by_occurrence: array<string, array{first_profile_id: ?string, counterpart_count: int}>, profiles_by_id: array<string, array<string, mixed>>}
      */
-    private function publicDetailArtistProjection(
-        mixed $event,
-        ?Event $parentEvent,
-        iterable $occurrences,
-        array $eventLinkedProfiles = [],
-    ): array {
-        $isOccurrence = $this->isOccurrencePayload($event);
-        $linkedAccountProfiles = $eventLinkedProfiles;
-        if ($linkedAccountProfiles === [] && $isOccurrence && $parentEvent instanceof Event) {
-            $linkedAccountProfiles = $this->storedLinkedAccountProfilesForPublicDetailSubject($parentEvent);
-        }
-        if ($linkedAccountProfiles !== [] || ! $isOccurrence) {
-            $linkedAccountProfiles = $this->resolveDetailLinkedAccountProfiles($linkedAccountProfiles, $occurrences);
+    private function buildPublicCounterpartContext(iterable $occurrences): array
+    {
+        $summaries = $this->occurrenceNestedAccountStore
+            ->publicCounterpartSummariesByOccurrence($occurrences);
+        $candidateIds = array_values(array_unique(array_filter(array_map(
+            static fn (array $summary): string => trim((string) ($summary['first_profile_id'] ?? '')),
+            $summaries,
+        ), static fn (string $profileId): bool => $profileId !== '')));
+
+        return [
+            'summaries_by_occurrence' => $summaries,
+            'profiles_by_id' => $this->resolveCurrentRelatedProfilesByIds($candidateIds, true),
+        ];
+    }
+
+    /**
+     * @return array{summaries_by_occurrence: array<string, array{first_profile_id: ?string, counterpart_count: int}>, profiles_by_id: array<string, array<string, mixed>>}
+     */
+    private function buildManagementCounterpartContext(iterable $occurrences): array
+    {
+        $summaries = $this->occurrenceNestedAccountStore
+            ->publicCounterpartSummariesByOccurrence($occurrences);
+        $candidateIds = array_values(array_unique(array_filter(array_map(
+            static fn (array $summary): string => trim((string) ($summary['first_profile_id'] ?? '')),
+            $summaries,
+        ), static fn (string $profileId): bool => $profileId !== '')));
+
+        return [
+            'summaries_by_occurrence' => $summaries,
+            'profiles_by_id' => $this->resolveCurrentRelatedProfilesByIds($candidateIds, false),
+        ];
+    }
+
+    /**
+     * @param  array{summaries_by_occurrence?: array<string, array{first_profile_id: ?string, counterpart_count: int}>, profiles_by_id?: array<string, array<string, mixed>>}  $context
+     * @return array{profiles: array<int, array<string, mixed>>, counterpart_count: int}
+     */
+    private function publicCounterpartsForOccurrence(EventOccurrence $occurrence, array $context): array
+    {
+        return $this->publicCounterpartsForOccurrenceId(
+            trim((string) $occurrence->getKey()),
+            $context,
+        );
+    }
+
+    /**
+     * @param  array{summaries_by_occurrence?: array<string, array{first_profile_id: ?string, counterpart_count: int}>, profiles_by_id?: array<string, array<string, mixed>>}  $context
+     * @return array{profiles: array<int, array<string, mixed>>, counterpart_count: int}
+     */
+    private function publicCounterpartsForOccurrenceId(string $occurrenceId, array $context): array
+    {
+        $summaries = is_array($context['summaries_by_occurrence'] ?? null)
+            ? $context['summaries_by_occurrence']
+            : [];
+        $summary = is_array($summaries[$occurrenceId] ?? null) ? $summaries[$occurrenceId] : [];
+        $profileId = trim((string) ($summary['first_profile_id'] ?? ''));
+        $profilesById = is_array($context['profiles_by_id'] ?? null)
+            ? $context['profiles_by_id']
+            : [];
+        $profile = $profileId === '' ? null : ($profilesById[$profileId] ?? null);
+
+        return [
+            'profiles' => is_array($profile) ? [$profile] : [],
+            'counterpart_count' => max(0, (int) ($summary['counterpart_count'] ?? 0)),
+        ];
+    }
+
+    /**
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @param  array{summaries_by_occurrence?: array<string, array{first_profile_id: ?string, counterpart_count: int}>, profiles_by_id?: array<string, array<string, mixed>>}  $context
+     * @return array{profiles: array<int, array<string, mixed>>, counterpart_count: int}
+     */
+    private function publicCounterpartsForEventOccurrences(iterable $occurrences, array $context): array
+    {
+        foreach ($occurrences as $occurrence) {
+            if (! $occurrence instanceof EventOccurrence) {
+                continue;
+            }
+
+            // Root Event public surfaces mirror only the first ordered occurrence.
+            return $this->publicCounterpartsForOccurrence($occurrence, $context);
         }
 
-        return $this->resolveArtistsReadProjectionFromLinkedProfiles($linkedAccountProfiles);
+        return [
+            'profiles' => [],
+            'counterpart_count' => 0,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, array<string, mixed>>  $linkedAccountProfiles
+     * @return array<string, mixed>
+     */
+    private function withPublicCounterpartContract(
+        array $payload,
+        array $linkedAccountProfiles,
+        ?int $counterpartCount = null,
+    ): array
+    {
+        $counterpartPreview = $this->normalizeManagementLinkedAccountProfiles(
+            $linkedAccountProfiles,
+        );
+        $payload['counterpart_preview'] = $counterpartPreview;
+        $payload['counterpart_count'] = $counterpartCount ?? count($counterpartPreview);
+        $payload = $this->withCanonicalHeroImage($payload);
+        $payload['counterpart_preview'] = array_slice($counterpartPreview, 0, 1);
+
+        return $payload;
     }
 
     /**
@@ -2276,6 +2339,31 @@ class EventQueryService
             $tabId,
             InputConstraints::PUBLIC_PAGE_SIZE_MAX,
             $perPage,
+            $cursor,
+        );
+    }
+
+    /**
+     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     */
+    public function adminOccurrenceGroupMembers(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        int $defaultPerPage,
+        ?int $suppliedPerPage,
+        ?string $cursor,
+    ): array {
+        $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+            $event,
+            $event->trashed(),
+        );
+
+        return $this->occurrenceNestedAccountStore->adminOccurrenceMemberPage(
+            $occurrence,
+            $groupId,
+            $defaultPerPage,
+            $suppliedPerPage,
             $cursor,
         );
     }
@@ -2509,6 +2597,28 @@ class EventQueryService
     }
 
     /**
+     * @param  array<int, string>  $occurrenceIds
+     * @return array<int, EventOccurrence>
+     */
+    private function loadOccurrencesByIds(array $occurrenceIds): array
+    {
+        $normalized = array_values(array_filter(array_unique(array_map(
+            static fn (mixed $occurrenceId): string => trim((string) $occurrenceId),
+            $occurrenceIds
+        ))));
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        return EventOccurrence::query()
+            ->whereIn('_id', $this->buildDocumentIdCandidates($normalized))
+            ->orderBy('starts_at')
+            ->get()
+            ->all();
+    }
+
+    /**
      * @param  array<int, mixed>  $events
      * @return array<string, Event>
      */
@@ -2635,7 +2745,7 @@ class EventQueryService
         return $documents->first();
     }
 
-    private function loadEventOccurrenceDocuments(Event $event): mixed
+    private function loadEventOccurrenceDocuments(mixed $event): mixed
     {
         $eventId = isset($event->_id) ? (string) $event->_id : '';
         if ($eventId === '') {
@@ -2714,21 +2824,12 @@ class EventQueryService
             ];
 
             if (! $forPublic) {
-                $ownEventParties = $this->normalizeEventParties($event->own_event_parties ?? []);
-                $ownLinkedAccountProfiles = $this->canonicalLinkedAccountProfilesForOccurrencePayload(
-                    $event,
-                    false,
-                    $relatedProfilesById,
-                    true,
-                );
-                $payload['own_event_parties'] = $ownEventParties;
-                $payload['own_linked_account_profiles'] = $ownLinkedAccountProfiles;
-                $payload['profile_groups'] = $this->formatProfileGroupsForManagement(
-                    $event->own_profile_groups ?? [],
-                    $ownLinkedAccountProfiles,
-                    'occurrence',
-                    $occurrenceId ?? '',
-                );
+                $payload['profile_groups'] = $occurrenceId === null
+                    ? []
+                    : $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                        $event,
+                        (string) ($event->event_id ?? ''),
+                    );
             }
 
             return [$payload];
@@ -2745,6 +2846,7 @@ class EventQueryService
 
             if ($documents->isNotEmpty()) {
                 return $documents->map(function (EventOccurrence $occurrence) use (
+                    $eventId,
                     $selectedOccurrenceId,
                     $forPublic,
                     $relatedProfilesById,
@@ -2772,21 +2874,12 @@ class EventQueryService
                     ];
 
                     if (! $forPublic) {
-                        $ownEventParties = $this->normalizeEventParties($occurrence->own_event_parties ?? []);
-                        $ownLinkedAccountProfiles = $this->canonicalLinkedAccountProfilesForOccurrencePayload(
-                            $occurrence,
-                            false,
-                            $relatedProfilesById,
-                            true,
-                        );
-                        $payload['own_event_parties'] = $ownEventParties;
-                        $payload['own_linked_account_profiles'] = $ownLinkedAccountProfiles;
-                        $payload['profile_groups'] = $this->formatProfileGroupsForManagement(
-                            $occurrence->own_profile_groups ?? [],
-                            $ownLinkedAccountProfiles,
-                            'occurrence',
-                            $occurrenceId ?? '',
-                        );
+                        $payload['profile_groups'] = $occurrenceId === null
+                            ? []
+                            : $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                                $occurrence,
+                                $eventId,
+                            );
                     }
 
                     return $payload;
@@ -2842,22 +2935,139 @@ class EventQueryService
         return $this->tenantCapabilitiesCache;
     }
 
-    private function isAccountOwner(Event $event, string $actorUserId): bool
-    {
-        $createdBy = $this->normalizeArray($event->created_by ?? []);
-        $createdByType = (string) ($createdBy['type'] ?? '');
-        $createdById = (string) ($createdBy['id'] ?? '');
-
-        return $createdByType === 'account_user' && $createdById !== '' && $createdById === $actorUserId;
-    }
-
     private function applyAccountFiltersToQuery($query, string $accountId): void
     {
-        if ($accountId === '') {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
             return;
         }
 
-        $query->where('account_context_ids', $accountId);
+        $this->applyAccountOwnershipFilter(
+            $query,
+            $this->resolveAccountProfileIds($normalizedAccountId),
+            $this->resolveAccountUserIds($normalizedAccountId),
+        );
+    }
+
+    private function eventOwnedByAccount(Event $event, string $accountId): bool
+    {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
+            return false;
+        }
+
+        $placeRefId = $this->resolvePlaceRefId(
+            $this->normalizeArray($event->place_ref ?? null)
+        );
+        $profileIds = $this->resolveAccountProfileIds($normalizedAccountId);
+        if ($placeRefId !== '') {
+            return $profileIds !== [] && in_array($placeRefId, $profileIds, true);
+        }
+
+        return $this->eventCreatedByAccountUserIds(
+            $event,
+            $this->resolveAccountUserIds($normalizedAccountId),
+        );
+    }
+
+    private function eventCreatedByAccountUserIds(Event $event, array $accountUserIds): bool
+    {
+        if ($accountUserIds === []) {
+            return false;
+        }
+
+        $createdBy = $this->normalizeArray($event->created_by ?? []);
+        $createdByType = trim((string) ($createdBy['type'] ?? ''));
+        $createdById = trim((string) ($createdBy['id'] ?? ''));
+
+        return $createdByType === 'account_user'
+            && $createdById !== ''
+            && in_array($createdById, $accountUserIds, true);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveAccountUserIds(string $accountId): array
+    {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
+            return [];
+        }
+
+        return $this->eventAccountResolver->resolveAccessibleAccountUserIds($normalizedAccountId);
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @param  array<int, string>  $accountUserIds
+     */
+    private function applyAccountOwnershipFilter($query, array $profileIds, array $accountUserIds): void
+    {
+        $profileCandidates = $this->buildProfileIdCandidatesFromList($profileIds);
+        $accountUserCandidates = $this->buildDocumentIdCandidates($accountUserIds);
+
+        if ($profileCandidates === [] && $accountUserCandidates === []) {
+            $query->whereRaw(['_id' => ['$in' => []]]);
+
+            return;
+        }
+
+        $clauses = [];
+
+        if ($profileCandidates !== []) {
+            $clauses[] = [
+                '$or' => [
+                    ['place_ref.id' => ['$in' => $profileCandidates]],
+                    ['place_ref._id' => ['$in' => $profileCandidates]],
+                ],
+            ];
+        }
+
+        if ($accountUserCandidates !== []) {
+            $clauses[] = [
+                '$and' => [
+                    $this->missingPlaceRefOwnershipClause(),
+                    ['created_by.type' => 'account_user'],
+                    [
+                        '$or' => [
+                            ['created_by.id' => ['$in' => $accountUserCandidates]],
+                            ['created_by._id' => ['$in' => $accountUserCandidates]],
+                        ],
+                    ],
+                ],
+            ];
+        }
+
+        $query->whereRaw(count($clauses) === 1 ? $clauses[0] : ['$or' => $clauses]);
+    }
+
+    /**
+     * When a concrete place_ref exists, account ownership is derived from that profile.
+     * created_by is only the fallback for account-scoped online events that have no place_ref.
+     *
+     * @return array<string, mixed>
+     */
+    private function missingPlaceRefOwnershipClause(): array
+    {
+        return [
+            '$and' => [
+                [
+                    '$or' => [
+                        ['place_ref.id' => ['$exists' => false]],
+                        ['place_ref.id' => null],
+                        ['place_ref.id' => ''],
+                    ],
+                ],
+                [
+                    '$or' => [
+                        ['place_ref._id' => ['$exists' => false]],
+                        ['place_ref._id' => null],
+                        ['place_ref._id' => ''],
+                    ],
+                ],
+            ],
+        ];
     }
 
     /**
@@ -2912,76 +3122,6 @@ class EventQueryService
         return $normalized;
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $eventParties
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveArtistsReadProjection(array $eventParties): array
-    {
-        return array_values(array_map(function (array $party): array {
-            $metadata = isset($party['metadata']) && is_array($party['metadata'])
-                ? $party['metadata']
-                : [];
-            $profileType = $this->scalarString($metadata['profile_type'] ?? null)
-                ?? $this->scalarString($party['party_type'] ?? null)
-                ?? '';
-
-            return [
-                'id' => $this->scalarString($party['party_ref_id'] ?? null) ?? '',
-                'display_name' => $this->scalarString($metadata['display_name'] ?? null) ?? '',
-                'slug' => $this->scalarString($metadata['slug'] ?? null),
-                'profile_type' => $profileType,
-                'avatar_url' => $this->accountProfileMediaUrlString(
-                    $metadata['avatar_url'] ?? null,
-                    $this->scalarString($party['party_ref_id'] ?? null),
-                    'avatar'
-                ),
-                'cover_url' => $this->accountProfileMediaUrlString(
-                    $metadata['cover_url'] ?? null,
-                    $this->scalarString($party['party_ref_id'] ?? null),
-                    'cover'
-                ),
-                'highlight' => false,
-                'genres' => array_values($this->normalizeStringArray($metadata['genres'] ?? [])),
-                'taxonomy_terms' => $this->ensureTaxonomySnapshots($metadata['taxonomy_terms'] ?? []),
-            ];
-        }, array_values(array_filter($eventParties, function (array $party): bool {
-            $partyType = trim((string) ($party['party_type'] ?? ''));
-            $metadata = isset($party['metadata']) && is_array($party['metadata'])
-                ? $party['metadata']
-                : [];
-            $profileType = trim((string) ($metadata['profile_type'] ?? $party['party_type'] ?? ''));
-
-            return $partyType !== 'venue'
-                && trim((string) ($party['party_ref_id'] ?? '')) !== ''
-                && trim((string) ($metadata['display_name'] ?? '')) !== ''
-                && $this->eventProfileResolver->isProfileTypeQueryable($profileType);
-        }))));
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventParties
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveLinkedAccountProfiles(
-        array $eventParties,
-        bool $publicOnly = false,
-        ?array $resolvedProfilesById = null,
-    ): array {
-        $orderedIds = $this->profileIdsFromEventPartiesPayload($eventParties);
-        if ($orderedIds === []) {
-            return [];
-        }
-
-        $profilesById = $resolvedProfilesById
-            ?? $this->resolveCurrentRelatedProfilesByIds($orderedIds, $publicOnly);
-
-        return $this->orderedCurrentRelatedProfiles($orderedIds, $profilesById);
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
     private function resolveManagementListOccurrences(
         mixed $event,
         ?iterable $preloadedOccurrences = null
@@ -3040,319 +3180,18 @@ class EventQueryService
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
-     */
-    private function formatProfileGroupsForManagement(
-        mixed $rawGroups,
-        array $linkedProfiles = [],
-        string $ownerType = 'event',
-        string $ownerId = '',
-    ): array {
-        $groups = $this->normalizeProfileGroups($rawGroups, $ownerType, $ownerId);
-        if ($groups !== []) {
-            $allowedProfileIds = $this->managementLinkedProfileIdLookup($linkedProfiles);
-
-            return array_values(array_filter(array_map(
-                static function (array $group) use ($allowedProfileIds): array {
-                    $memberIds = [];
-                    foreach ($group['account_profile_ids'] as $profileId) {
-                        if (! isset($allowedProfileIds[$profileId])) {
-                            continue;
-                        }
-                        if (in_array($profileId, $memberIds, true)) {
-                            continue;
-                        }
-
-                        $memberIds[] = $profileId;
-                    }
-
-                    return [
-                        'id' => $group['id'],
-                        'label' => $group['label'],
-                        'order' => $group['order'],
-                        'account_profile_ids' => $memberIds,
-                    ];
-                },
-                $groups
-            ), static fn (array $group): bool => $group['account_profile_ids'] !== []));
-        }
-
-        return array_map(
-            static fn (array $group): array => [
-                'id' => $group['id'],
-                'label' => $group['label'],
-                'order' => $group['order'],
-                'account_profile_ids' => array_values(array_map(
-                    static fn (array $profile): string => (string) ($profile['id'] ?? ''),
-                    $group['profiles'] ?? []
-                )),
-            ],
-            $this->fallbackProfileGroupsByType($linkedProfiles)
-        );
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
+     * @param  array<int, array<string, mixed>>  $occurrences
      * @return array<int, array<string, mixed>>
      */
-    private function formatProfileGroupsForPublic(
-        mixed $rawGroups,
-        array $linkedProfiles,
-        string $ownerType = 'event',
-        string $ownerId = '',
-        bool $allowFallback = true
-    ): array {
-        $groups = $this->normalizeProfileGroups($rawGroups, $ownerType, $ownerId);
-        if ($groups === []) {
-            return $allowFallback ? $this->fallbackProfileGroupsByType($linkedProfiles) : [];
-        }
-
-        $profilesById = [];
-        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
-            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            if ($id !== '' && ! isset($profilesById[$id])) {
-                $profilesById[$id] = $profile;
-            }
-        }
-
-        $publicGroups = [];
-        foreach ($groups as $group) {
-            $profiles = [];
-            foreach ($group['account_profile_ids'] as $profileId) {
-                $profile = $profilesById[$profileId] ?? null;
-                if (! is_array($profile)) {
-                    continue;
-                }
-                $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
-                if ($normalized !== null) {
-                    $profiles[] = $normalized;
-                }
-            }
-
-            if ($profiles === []) {
-                continue;
-            }
-
-            $publicGroups[] = [
-                'id' => $group['id'],
-                'label' => $group['label'],
-                'order' => $group['order'],
-                'profiles' => $profiles,
-            ];
-        }
-
-        return $publicGroups;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<string, bool>
-     */
-    private function managementLinkedProfileIdLookup(array $linkedProfiles): array
+    private function managementRootProfileGroupsFromOccurrences(array $occurrences): array
     {
-        $allowedProfileIds = [];
-
-        foreach ($this->normalizeManagementLinkedAccountProfiles($linkedProfiles, []) as $profile) {
-            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            if ($profileId === '' || isset($allowedProfileIds[$profileId])) {
-                continue;
-            }
-
-            $allowedProfileIds[$profileId] = true;
-        }
-
-        return $allowedProfileIds;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function formatSelectedOccurrenceProfileGroupsForPublic(Event $event, EventOccurrence $occurrence): array
-    {
-        $eventLinkedProfiles = $this->resolveLinkedAccountProfiles(
-            $this->normalizeEventParties($event->event_parties ?? [])
-        );
-        $occurrenceLinkedProfiles = $this->normalizeManagementLinkedAccountProfiles(
-            $occurrence->own_linked_account_profiles ?? [],
-            $this->normalizeEventParties($occurrence->own_event_parties ?? [])
-        );
-
-        $eventExplicitGroups = $this->formatProfileGroupsForPublic(
-            $event->profile_groups ?? [],
-            $eventLinkedProfiles,
-            'event',
-            (string) $event->getKey(),
-            false
-        );
-        $occurrenceExplicitGroups = $this->formatProfileGroupsForPublic(
-            $occurrence->own_profile_groups ?? [],
-            $occurrenceLinkedProfiles,
-            'occurrence',
-            (string) $occurrence->getKey(),
-            false
-        );
-
-        $eventGroups = $eventExplicitGroups !== []
-            ? $eventExplicitGroups
-            : $this->fallbackPublicGroupsForLegacyEventParties(
-                $event->event_parties ?? [],
-                $this->excludeLinkedProfilesById(
-                    $eventLinkedProfiles,
-                    $this->profileIdsFromPublicGroups($occurrenceExplicitGroups)
-                )
-            );
-
-        $occurrenceGroups = $occurrenceExplicitGroups !== []
-            ? $occurrenceExplicitGroups
-            : $this->fallbackPublicGroupsForLegacyEventParties(
-                $occurrence->own_event_parties ?? [],
-                $this->excludeLinkedProfilesById(
-                    $occurrenceLinkedProfiles,
-                    $this->profileIdsFromPublicGroups($eventExplicitGroups)
-                )
-            );
-
-        return $this->mergeProfileGroupsForPublic(
-            $eventGroups,
-            $occurrenceGroups
-        );
-    }
-
-    /**
-     * @param  iterable<int, EventOccurrence>  $occurrences
-     * @return array<int, array<string, mixed>>
-     */
-    private function formatAggregateProfileGroupsForPublic(Event $event, iterable $occurrences): array
-    {
-        $groupSets = [];
-        $eventLinkedProfiles = $this->resolveLinkedAccountProfiles(
-            $this->normalizeEventParties($event->event_parties ?? [])
-        );
-        $eventExplicitGroups = $this->formatProfileGroupsForPublic(
-            $event->profile_groups ?? [],
-            $eventLinkedProfiles,
-            'event',
-            (string) $event->getKey(),
-            false
-        );
-
-        $occurrenceContexts = [];
-        $explicitCoveredIds = $this->profileIdsFromPublicGroups($eventExplicitGroups);
-
-        foreach ($occurrences as $occurrence) {
-            $occurrenceLinkedProfiles = $this->normalizeManagementLinkedAccountProfiles(
-                $occurrence->own_linked_account_profiles ?? [],
-                $this->normalizeEventParties($occurrence->own_event_parties ?? [])
-            );
-
-            $occurrenceExplicitGroups = $this->formatProfileGroupsForPublic(
-                $occurrence->own_profile_groups ?? [],
-                $occurrenceLinkedProfiles,
-                'occurrence',
-                (string) $occurrence->getKey(),
-                false
-            );
-
-            foreach ($this->profileIdsFromPublicGroups($occurrenceExplicitGroups) as $profileId) {
-                if (! in_array($profileId, $explicitCoveredIds, true)) {
-                    $explicitCoveredIds[] = $profileId;
-                }
-            }
-
-            $occurrenceContexts[] = [
-                'linked_profiles' => $occurrenceLinkedProfiles,
-                'explicit_groups' => $occurrenceExplicitGroups,
-                'legacy_event_parties' => $occurrence->own_event_parties ?? [],
-            ];
-        }
-
-        $groupSets[] = $eventExplicitGroups !== []
-            ? $eventExplicitGroups
-            : $this->fallbackPublicGroupsForLegacyEventParties(
-                $event->event_parties ?? [],
-                $this->excludeLinkedProfilesById($eventLinkedProfiles, $explicitCoveredIds)
-            );
-
-        foreach ($occurrenceContexts as $context) {
-            $explicitGroups = $context['explicit_groups'];
-            if ($explicitGroups !== []) {
-                $groupSets[] = $explicitGroups;
-
-                continue;
-            }
-
-            $groupSets[] = $this->fallbackPublicGroupsForLegacyEventParties(
-                $context['legacy_event_parties'] ?? [],
-                $this->excludeLinkedProfilesById(
-                    $context['linked_profiles'],
-                    $explicitCoveredIds
-                )
-            );
-        }
-
-        return $this->mergeProfileGroupsForPublic(...$groupSets);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $groups
-     * @return array<int, string>
-     */
-    private function profileIdsFromPublicGroups(array $groups): array
-    {
-        $ids = [];
-
-        foreach ($groups as $group) {
-            foreach ($this->normalizeLinkedAccountProfileSummaries($group['profiles'] ?? []) as $profile) {
-                $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-                if ($profileId !== '' && ! in_array($profileId, $ids, true)) {
-                    $ids[] = $profileId;
-                }
-            }
-        }
-
-        return $ids;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<int, array<string, mixed>>
-     */
-    private function fallbackPublicGroupsForLegacyEventParties(
-        mixed $legacyEventParties,
-        array $linkedProfiles
-    ): array {
-        if ($this->normalizeEventParties($legacyEventParties) === []) {
+        if (count($occurrences) !== 1) {
             return [];
         }
 
-        return $this->fallbackProfileGroupsByType($linkedProfiles);
-    }
+        $profileGroups = $occurrences[0]['profile_groups'] ?? null;
 
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @param  array<int, string>  $excludedProfileIds
-     * @return array<int, array<string, mixed>>
-     */
-    private function excludeLinkedProfilesById(array $linkedProfiles, array $excludedProfileIds): array
-    {
-        if ($excludedProfileIds === []) {
-            return $this->normalizeLinkedAccountProfileSummaries($linkedProfiles);
-        }
-
-        $excluded = array_fill_keys($excludedProfileIds, true);
-        $filtered = [];
-
-        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
-            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            if ($profileId === '' || isset($excluded[$profileId])) {
-                continue;
-            }
-
-            $filtered[] = $profile;
-        }
-
-        return $filtered;
+        return is_array($profileGroups) ? array_values($profileGroups) : [];
     }
 
     /**
@@ -3615,22 +3454,6 @@ class EventQueryService
         $this->appendOrderedIdentifiers(
             $relatedProfileIds,
             $this->profileIdsFromStoredProfileGroups(data_get($payload, 'own_profile_groups'))
-        );
-        $this->appendOrderedIdentifiers(
-            $relatedProfileIds,
-            $this->profileIdsFromEventPartiesPayload(data_get($payload, 'event_parties'))
-        );
-        $this->appendOrderedIdentifiers(
-            $relatedProfileIds,
-            $this->profileIdsFromEventPartiesPayload(data_get($payload, 'own_event_parties'))
-        );
-        $this->appendOrderedIdentifiers(
-            $relatedProfileIds,
-            $this->profileIdsFromLinkedProfilePayloads(data_get($payload, 'linked_account_profiles'))
-        );
-        $this->appendOrderedIdentifiers(
-            $relatedProfileIds,
-            $this->profileIdsFromLinkedProfilePayloads(data_get($payload, 'own_linked_account_profiles'))
         );
         $this->collectRelatedProfileIdsForProgrammingPayload($payload, $relatedProfileIds);
     }
@@ -3953,16 +3776,6 @@ class EventQueryService
             $orderedIds,
             $this->profileIdsFromStoredProfileGroups($event->profile_groups ?? [])
         );
-        $this->appendOrderedIdentifiers(
-            $orderedIds,
-            $this->profileIdsFromEventPartiesPayload($event->event_parties ?? [])
-        );
-        $this->appendOrderedIdentifiers(
-            $orderedIds,
-            $this->profileIdsFromLinkedProfilePayloads(
-                $event->linked_account_profiles ?? $event->own_linked_account_profiles ?? []
-            )
-        );
 
         $eventId = isset($event->_id) ? (string) $event->_id : '';
         $documents = $occurrenceDocuments;
@@ -4006,17 +3819,6 @@ class EventQueryService
             $orderedIds,
             $this->profileIdsFromStoredProfileGroups(data_get($event, 'own_profile_groups'))
         );
-        $this->appendOrderedIdentifiers(
-            $orderedIds,
-            $this->profileIdsFromEventPartiesPayload(data_get($event, 'own_event_parties'))
-        );
-        $this->appendOrderedIdentifiers(
-            $orderedIds,
-            $this->profileIdsFromLinkedProfilePayloads(
-                data_get($event, 'own_linked_account_profiles')
-            )
-        );
-
         return array_keys($orderedIds);
     }
 
@@ -4040,15 +3842,6 @@ class EventQueryService
             $orderedIds,
             $this->profileIdsFromStoredProfileGroups(data_get($event, 'profile_groups'))
         );
-        $this->appendOrderedIdentifiers(
-            $orderedIds,
-            $this->profileIdsFromEventPartiesPayload(data_get($event, 'event_parties'))
-        );
-        $this->appendOrderedIdentifiers(
-            $orderedIds,
-            $this->profileIdsFromLinkedProfilePayloads(data_get($event, 'linked_account_profiles'))
-        );
-
         return array_keys($orderedIds);
     }
 
@@ -4119,10 +3912,9 @@ class EventQueryService
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $eventParties
      * @return array<int, array<string, mixed>>
      */
-    private function normalizeManagementLinkedAccountProfiles(mixed $linkedProfiles, array $eventParties): array
+    private function normalizeManagementLinkedAccountProfiles(mixed $linkedProfiles): array
     {
         $normalizedById = [];
         foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
@@ -4140,64 +3932,6 @@ class EventQueryService
             }
 
             $normalizedById[$profileId] = $profilePayload;
-        }
-
-        if ($eventParties === []) {
-            return array_values($normalizedById);
-        }
-
-        $resolvedById = [];
-        foreach ($eventParties as $party) {
-            $metadata = isset($party['metadata']) && is_array($party['metadata'])
-                ? $party['metadata']
-                : [];
-            $profilePayload = $this->normalizeManagementLinkedAccountProfileSummary(
-                [
-                    'id' => $party['party_ref_id'] ?? '',
-                    'display_name' => $metadata['display_name'] ?? '',
-                    'slug' => $metadata['slug'] ?? null,
-                    'profile_type' => $metadata['profile_type'] ?? null,
-                    'party_type' => $party['party_type'] ?? null,
-                    'avatar_url' => $metadata['avatar_url'] ?? null,
-                    'cover_url' => $metadata['cover_url'] ?? null,
-                    'taxonomy_terms' => $metadata['taxonomy_terms'] ?? [],
-                ]
-            );
-            if ($profilePayload === null) {
-                continue;
-            }
-
-            $profileId = trim((string) ($this->scalarString($profilePayload['id'] ?? null) ?? ''));
-            if ($profileId === '' || isset($resolvedById[$profileId])) {
-                continue;
-            }
-
-            $resolvedById[$profileId] = $profilePayload;
-        }
-
-        $merged = [];
-        $seenIds = [];
-        foreach ($eventParties as $party) {
-            $profileId = trim((string) ($this->scalarString($party['party_ref_id'] ?? null) ?? ''));
-            if ($profileId === '' || isset($seenIds[$profileId])) {
-                continue;
-            }
-
-            $profilePayload = $resolvedById[$profileId] ?? $normalizedById[$profileId] ?? null;
-            if (! is_array($profilePayload)) {
-                continue;
-            }
-
-            $merged[] = $profilePayload;
-            $seenIds[$profileId] = true;
-        }
-
-        if ($merged !== []) {
-            return $merged;
-        }
-
-        if ($resolvedById !== []) {
-            return array_values($resolvedById);
         }
 
         return array_values($normalizedById);
@@ -4241,71 +3975,6 @@ class EventQueryService
             $ownerType,
             $ownerId,
         );
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<int, array<string, mixed>>
-     */
-    private function fallbackProfileGroupsByType(array $linkedProfiles): array
-    {
-        $labelsByType = $this->profileTypePluralLabelsByType($linkedProfiles);
-        $groups = [];
-        $indexByType = [];
-
-        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
-            $type = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
-            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            if ($type === '' || $id === '') {
-                continue;
-            }
-
-            if (! isset($indexByType[$type])) {
-                $indexByType[$type] = count($groups);
-                $groups[] = [
-                    'id' => $type,
-                    'label' => $labelsByType[$type] ?? Str::headline(Str::plural($type)),
-                    'order' => count($groups),
-                    'profiles' => [],
-                ];
-            }
-
-            $groups[$indexByType[$type]]['profiles'][] = $profile;
-        }
-
-        usort(
-            $groups,
-            static fn (array $left, array $right): int => [$left['label'], $left['id']]
-                <=> [$right['label'], $right['id']]
-        );
-
-        foreach ($groups as $index => &$group) {
-            $group['order'] = $index;
-        }
-        unset($group);
-
-        return $groups;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<string, string>
-     */
-    private function profileTypePluralLabelsByType(array $linkedProfiles): array
-    {
-        $types = [];
-        foreach ($this->normalizeLinkedAccountProfileSummaries($linkedProfiles) as $profile) {
-            $type = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
-            if ($type !== '') {
-                $types[$type] = true;
-            }
-        }
-
-        if ($types === []) {
-            return [];
-        }
-
-        return $this->eventProfileResolver->resolveProfileTypePluralLabelsByTypes(array_keys($types));
     }
 
     /**
@@ -4448,120 +4117,6 @@ class EventQueryService
         $payload['public_detail_path'] = $publicDetailPath;
 
         return $payload;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function storedLinkedAccountProfilesForPublicDetailSubject(mixed $event): array
-    {
-        if ($this->isOccurrencePayload($event)) {
-            return $this->normalizeManagementLinkedAccountProfiles(
-                data_get($event, 'own_linked_account_profiles')
-                    ?? data_get($event, 'linked_account_profiles')
-                    ?? [],
-                [],
-            );
-        }
-
-        if ($event instanceof Event) {
-            return $this->normalizeManagementLinkedAccountProfiles(
-                $event->linked_account_profiles ?? $event->own_linked_account_profiles ?? [],
-                [],
-            );
-        }
-
-        return [];
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventLinkedProfiles
-     * @param  iterable<int, mixed>  $occurrences
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveDetailLinkedAccountProfiles(array $eventLinkedProfiles, iterable $occurrences): array
-    {
-        $profiles = [];
-        $seenIds = [];
-
-        $push = function (mixed $profile) use (&$profiles, &$seenIds): void {
-            $normalized = $this->normalizeLinkedAccountProfileSummary($profile);
-            if ($normalized === null) {
-                return;
-            }
-
-            $id = trim((string) ($this->scalarString($normalized['id'] ?? null) ?? ''));
-            $displayName = trim((string) ($this->scalarString($normalized['display_name'] ?? null) ?? ''));
-            $profileType = trim((string) ($this->scalarString($normalized['profile_type'] ?? null) ?? ''));
-            if ($id === '' || $displayName === '' || $profileType === '' || isset($seenIds[$id])) {
-                return;
-            }
-
-            $profiles[] = [
-                'id' => $id,
-                'display_name' => $displayName,
-                'slug' => $this->scalarString($normalized['slug'] ?? null),
-                'profile_type' => $profileType,
-                'party_type' => $this->scalarString($normalized['party_type'] ?? null),
-                'can_open_public_detail' => (bool) ($normalized['can_open_public_detail'] ?? false),
-                'public_detail_path' => $this->scalarString($normalized['public_detail_path'] ?? null),
-                'avatar_url' => $this->accountProfileMediaUrlString($normalized['avatar_url'] ?? null, $id, 'avatar'),
-                'cover_url' => $this->accountProfileMediaUrlString($normalized['cover_url'] ?? null, $id, 'cover'),
-                'taxonomy_terms' => $this->ensureTaxonomySnapshots($normalized['taxonomy_terms'] ?? []),
-            ];
-            $seenIds[$id] = true;
-        };
-
-        foreach ($this->normalizeLinkedAccountProfileSummaries($eventLinkedProfiles) as $profile) {
-            $push($profile);
-        }
-
-        foreach (is_array($occurrences) ? $occurrences : iterator_to_array($occurrences, false) as $occurrence) {
-            foreach ($this->normalizeLinkedAccountProfileSummaries(data_get($occurrence, 'own_linked_account_profiles')) as $profile) {
-                $push($profile);
-            }
-
-            foreach ($this->normalizeArray(data_get($occurrence, 'programming_items')) as $item) {
-                foreach ($this->normalizeLinkedAccountProfileSummaries(data_get($item, 'linked_account_profiles')) as $profile) {
-                    $push($profile);
-                }
-            }
-        }
-
-        return $profiles;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $linkedProfiles
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveArtistsReadProjectionFromLinkedProfiles(array $linkedProfiles): array
-    {
-        return array_values(array_map(function (array $profile): array {
-            $profileId = $this->scalarString($profile['id'] ?? null) ?? '';
-
-            return [
-                'id' => $profileId,
-                'display_name' => $this->scalarString($profile['display_name'] ?? null) ?? '',
-                'slug' => $this->scalarString($profile['slug'] ?? null),
-                'profile_type' => $this->scalarString($profile['profile_type'] ?? null) ?? '',
-                'avatar_url' => $this->accountProfileMediaUrlString($profile['avatar_url'] ?? null, $profileId, 'avatar'),
-                'cover_url' => $this->accountProfileMediaUrlString($profile['cover_url'] ?? null, $profileId, 'cover'),
-                'highlight' => false,
-                'genres' => [],
-                'taxonomy_terms' => $this->ensureTaxonomySnapshots($profile['taxonomy_terms'] ?? []),
-            ];
-        }, array_values(array_filter($this->normalizeLinkedAccountProfileSummaries($linkedProfiles), function (array $profile): bool {
-            $id = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
-            $displayName = trim((string) ($this->scalarString($profile['display_name'] ?? null) ?? ''));
-            $profileType = trim((string) ($this->scalarString($profile['profile_type'] ?? null) ?? ''));
-            $partyType = trim((string) ($this->scalarString($profile['party_type'] ?? null) ?? ''));
-
-            return $id !== ''
-                && $displayName !== ''
-                && $profileType !== 'venue'
-                && $partyType !== 'venue';
-        }))));
     }
 
     /**

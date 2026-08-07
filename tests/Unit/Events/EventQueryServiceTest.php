@@ -10,6 +10,7 @@ use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
+use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
@@ -68,6 +69,7 @@ class EventQueryServiceTest extends TestCase
 
         return new EventQueryService(
             Mockery::mock(EventProfileResolverContract::class),
+            Mockery::mock(EventAccountResolverContract::class),
             Mockery::mock(EventRadiusSettingsContract::class),
             Mockery::mock(EventCapabilitySettingsContract::class),
             Mockery::mock(EventAttendanceReadContract::class),

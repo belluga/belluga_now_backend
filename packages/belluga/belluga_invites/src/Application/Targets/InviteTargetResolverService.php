@@ -27,11 +27,11 @@ class InviteTargetResolverService
      *         event_name:string,
      *         event_slug:string,
      *         event_date:?Carbon,
-     *         event_image_url:?string,
+     *         hero_image_url:?string,
      *         location:string,
      *         host_name:string,
      *         taxonomy_terms:array<int,array<string,mixed>>,
-     *         linked_account_profiles:array<int,array<string,mixed>>,
+     *         counterpart_preview:array<int,array<string,mixed>>,
      *         profile_groups:array<int,array<string,mixed>>,
      *         venue_account_profile_id:?string,
      *         attendance_policy:string,
@@ -92,8 +92,8 @@ class InviteTargetResolverService
                 'event_name' => (string) ($detailProjection['title'] ?? $event['title'] ?? ''),
                 'event_slug' => (string) ($detailProjection['slug'] ?? $event['slug'] ?? ''),
                 'event_date' => $eventDate,
-                'event_image_url' => $this->normalizeOptionalString(
-                    $detailProjection['hero_image_url'] ?? $event['event_image_url'] ?? null,
+                'hero_image_url' => $this->normalizeOptionalString(
+                    $detailProjection['hero_image_url'] ?? $event['hero_image_url'] ?? null,
                 ),
                 'location' => $location,
                 'host_name' => $hostName,
@@ -101,9 +101,8 @@ class InviteTargetResolverService
                     $detailProjection,
                     $eventPayload,
                 ),
-                'linked_account_profiles' => $this->resolveSnapshotLinkedAccountProfiles(
+                'counterpart_preview' => $this->resolveSnapshotCounterpartPreview(
                     $detailProjection,
-                    $occurrencePayload,
                 ),
                 'profile_groups' => $this->normalizeListOfMaps(
                     $detailProjection['profile_groups'] ?? [],
@@ -175,24 +174,12 @@ class InviteTargetResolverService
 
     /**
      * @param  array<string, mixed>  $detailProjection
-     * @param  array<string, mixed>  $occurrencePayload
      * @return array<int, array<string, mixed>>
      */
-    private function resolveSnapshotLinkedAccountProfiles(
-        array $detailProjection,
-        array $occurrencePayload,
-    ): array {
-        $detailProfiles = $this->normalizeListOfMaps(
-            $detailProjection['linked_account_profiles'] ?? [],
-        );
-        if ($detailProfiles !== []) {
-            return $detailProfiles;
-        }
-
+    private function resolveSnapshotCounterpartPreview(array $detailProjection): array
+    {
         return $this->normalizeListOfMaps(
-            $occurrencePayload['linked_account_profiles']
-                ?? $occurrencePayload['own_linked_account_profiles']
-                ?? [],
+            $detailProjection['counterpart_preview'] ?? [],
         );
     }
 
@@ -295,7 +282,7 @@ class InviteTargetResolverService
             }
         }
 
-        foreach ($this->normalizeListOfMaps($detailProjection['linked_account_profiles'] ?? []) as $profile) {
+        foreach ($this->normalizeListOfMaps($detailProjection['counterpart_preview'] ?? []) as $profile) {
             foreach ([$profile['display_name'] ?? null, $profile['name'] ?? null] as $candidate) {
                 if (is_string($candidate) && trim($candidate) !== '') {
                     return trim($candidate);
@@ -306,22 +293,6 @@ class InviteTargetResolverService
         $venue = $this->normalizeArray($eventPayload['venue'] ?? []);
         if (isset($venue['display_name']) && is_string($venue['display_name']) && trim($venue['display_name']) !== '') {
             return trim($venue['display_name']);
-        }
-
-        $eventParties = $this->normalizeList($eventPayload['event_parties'] ?? []);
-        foreach ($eventParties as $party) {
-            $payload = $this->normalizeArray($party);
-            $metadata = $this->normalizeArray($payload['metadata'] ?? []);
-            foreach ([
-                $payload['display_name'] ?? null,
-                $payload['name'] ?? null,
-                $metadata['display_name'] ?? null,
-                $metadata['name'] ?? null,
-            ] as $candidate) {
-                if (is_string($candidate) && trim($candidate) !== '') {
-                    return trim($candidate);
-                }
-            }
         }
 
         return 'Belluga';

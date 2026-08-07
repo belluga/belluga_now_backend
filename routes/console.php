@@ -637,45 +637,7 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
         $event->profile_groups = $profileGroupMemberStore->metadataOnly($groups);
 
         if ((bool) $this->option('with-event-party')) {
-            $eventParties = $normalizeDocumentArray($event->event_parties ?? []);
-            $canonicalParty = [
-                'party_type' => trim((string) ($profile->profile_type ?? '')),
-                'party_ref_id' => (string) $profile->getKey(),
-                'permissions' => [
-                    'can_edit' => false,
-                ],
-                'metadata' => [
-                    'display_name' => trim((string) ($profile->display_name ?? '')),
-                    'slug' => trim((string) ($profile->slug ?? '')),
-                    'profile_type' => trim((string) ($profile->profile_type ?? '')),
-                    'avatar_url' => $profile->avatar_url ?? null,
-                    'cover_url' => $profile->cover_url ?? null,
-                    'taxonomy_terms' => $normalizeDocumentArray($profile->taxonomy_terms ?? []),
-                ],
-            ];
-
-            if ($canonicalParty['party_type'] === '' || $canonicalParty['metadata']['display_name'] === '') {
-                $this->error('Canonical event-party mutation requires a profile with non-empty profile_type and display_name.');
-
-                return 1;
-            }
-
-            $replaced = false;
-            foreach ($eventParties as $index => $row) {
-                if ((string) ($row['party_ref_id'] ?? '') !== $profileId) {
-                    continue;
-                }
-
-                $eventParties[$index] = $canonicalParty;
-                $replaced = true;
-                break;
-            }
-
-            if (! $replaced) {
-                $eventParties[] = $canonicalParty;
-            }
-
-            $event->event_parties = $eventParties;
+            $this->warn('--with-event-party is deprecated and ignored; canonical diagnostics only mutate profile_groups.');
         }
 
         $event->save();
@@ -687,7 +649,8 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
             'tenant_ref' => $tenantRef,
             'event_id' => $eventId,
             'profile_id' => $profileId,
-            'with_event_party' => (bool) $this->option('with-event-party'),
+            'with_event_party' => false,
+            'with_event_party_requested' => (bool) $this->option('with-event-party'),
             'occurrence_projections_repaired' => true,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
@@ -695,7 +658,7 @@ Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {ev
     } finally {
         $tenant->forgetCurrent();
     }
-})->purpose('Append a profile id to the first event profile group, optionally mirror a canonical event-party payload, and resync occurrence projections for local diagnostics.');
+})->purpose('Append a profile id to the first event profile group and resync occurrence projections for local diagnostics.');
 
 Artisan::command('push:topics:repair {tenant_slug?} {--all} {--chunk=200}', function (PushTopicMembershipService $memberships) {
     $chunkSize = max(1, min((int) $this->option('chunk'), 1000));
