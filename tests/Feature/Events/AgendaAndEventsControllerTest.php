@@ -300,12 +300,13 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_single_occurrence_uses_parent_linked_profile_cover_before_venue_when_event_cover_is_missing(): void
+    public function test_agenda_single_occurrence_uses_occurrence_counterpart_cover_before_venue_when_event_cover_is_missing(): void
     {
+        $title = 'Single Parent Profile Cover';
         $profileCoverUrl = 'https://example.org/single-parent-profile-cover.jpg';
         $venueCoverUrl = 'https://example.org/single-parent-venue-cover.jpg';
         $event = $this->createEvent($this->canonicalImageEventOverrides(
-            title: 'Single Parent Profile Cover',
+            title: $title,
             eventCoverUrl: null,
             venueCoverUrl: $venueCoverUrl,
             profileCoverUrl: $profileCoverUrl,
@@ -314,6 +315,17 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $occurrence = EventOccurrence::query()
             ->where('event_id', (string) $event->_id)
             ->firstOrFail();
+        $profileId = (string) AccountProfile::query()
+            ->where('display_name', $title.' Artist')
+            ->value('_id');
+        $this->assertNotSame('', $profileId);
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $event->_id, $occurrence, [[
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [$profileId],
+            ]]);
         $occurrence->forceFill([
             'thumb' => null,
             'event_parties' => [],
@@ -332,13 +344,14 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertNotSame(data_get($items, '0.venue.cover_url'), data_get($items, '0.hero_image_url'));
     }
 
-    public function test_agenda_multi_occurrence_uses_parent_linked_profile_avatar_before_venue_when_cover_candidates_are_missing(): void
+    public function test_agenda_multi_occurrence_uses_occurrence_counterpart_avatar_before_venue_when_cover_candidates_are_missing(): void
     {
         $now = Carbon::now();
+        $title = 'Multi Parent Profile Avatar';
         $profileAvatarUrl = 'https://example.org/multi-parent-profile-avatar.jpg';
         $venueCoverUrl = 'https://example.org/multi-parent-venue-cover.jpg';
         $event = $this->createEvent($this->canonicalImageEventOverrides(
-            title: 'Multi Parent Profile Avatar',
+            title: $title,
             eventCoverUrl: null,
             venueCoverUrl: $venueCoverUrl,
             profileCoverUrl: null,
@@ -362,6 +375,24 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->get()
             ->last();
         $this->assertNotNull($selectedOccurrence);
+        $profileId = (string) AccountProfile::query()
+            ->where('display_name', $title.' Artist')
+            ->value('_id');
+        $this->assertNotSame('', $profileId);
+        $occurrences = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->orderBy('starts_at')
+            ->get()
+            ->values();
+        $selectedOccurrence = $occurrences->last();
+        $this->assertInstanceOf(EventOccurrence::class, $selectedOccurrence);
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $event->_id, $selectedOccurrence, [[
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [$profileId],
+                ]]);
         $selectedOccurrence->forceFill([
             'thumb' => null,
             'event_parties' => [],
@@ -579,7 +610,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'is_verified' => false,
         ]);
 
-        $this->createEvent([
+        $liveEvent = $this->createEvent([
             'title' => 'Live Discovery Slot',
             'date_time_start' => $now->copy()->subMinutes(15),
             'date_time_end' => $now->copy()->addMinutes(45),
@@ -600,6 +631,24 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
             ],
         ]);
+        $liveOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $liveEvent->_id)
+            ->firstOrFail();
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $liveEvent->_id, $liveOccurrence, [
+                [
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $liveArtistOne->_id],
+                ],
+                [
+                    'id' => 'bands',
+                    'label' => 'Bands',
+                    'order' => 1,
+                    'account_profile_ids' => [(string) $liveArtistTwo->_id],
+                ],
+            ]);
 
         $this->createEvent([
             'title' => 'Upcoming Hidden In Live',
@@ -1930,16 +1979,16 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'profile_groups' => [],
         ]);
 
-        $this->syncEventWithPersistedOccurrenceIdentity($event->fresh(), [[
-            'date_time_start' => Carbon::instance($event->date_time_start),
-            'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
-            'profile_groups' => [[
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
+            ->syncOccurrenceGroups((string) $event->_id, $occurrence, [[
                 'id' => 'bands',
                 'label' => 'Bands',
                 'order' => 0,
                 'account_profile_ids' => [(string) $profile->_id],
-            ]],
-        ]]);
+            ]]);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);

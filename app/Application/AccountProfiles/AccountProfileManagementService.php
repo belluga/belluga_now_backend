@@ -536,6 +536,14 @@ class AccountProfileManagementService
     ): array {
         $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
         $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
+        $profileId = trim((string) $profile->getKey());
+        foreach ($addIds as $candidateId) {
+            if ($profileId !== '' && trim((string) $candidateId) === $profileId) {
+                throw ValidationException::withMessages([
+                    'nested_profile_groups' => ['A profile cannot link itself as a nested profile.'],
+                ]);
+            }
+        }
 
         $existingIds = $this->nestedGroupMemberStore->groupMemberIds($profile, (string) $group['id']);
         $removeLookup = array_fill_keys($removeIds, true);
@@ -646,13 +654,13 @@ class AccountProfileManagementService
             $profileType,
             $payload['nested_profile_groups']
         );
-        $normalizedGroups = $this->nestedGroupService->normalizeForWrite(
+        $this->nestedGroupService->assertMetadataOnlyInput(
+            $payload['nested_profile_groups']
+        );
+        $normalizedGroups = $this->nestedGroupService->normalizeMetadataForWrite(
             $payload['nested_profile_groups'],
-            $parentProfileId,
         );
-        $payload['nested_profile_groups'] = $this->nestedGroupService->normalizeMetadataForWrite(
-            $normalizedGroups,
-        );
+        $payload['nested_profile_groups'] = $normalizedGroups;
 
         return $normalizedGroups;
     }

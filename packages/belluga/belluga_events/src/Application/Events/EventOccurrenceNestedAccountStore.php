@@ -69,6 +69,99 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $groups
+     */
+    public function syncOccurrenceGroupMetadata(string $eventId, EventOccurrence $occurrence, array $groups): void
+    {
+        $eventId = trim($eventId);
+        $occurrenceId = trim((string) $occurrence->getKey());
+        if ($eventId === '' || $occurrenceId === '') {
+            return;
+        }
+
+        $filter = [
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+        ];
+
+        $normalizedGroups = array_values(array_filter(array_map(
+            function (array $group): ?array {
+                $groupId = trim((string) ($group['id'] ?? ''));
+                $label = trim((string) ($group['label'] ?? ''));
+                if ($groupId === '' || $label === '') {
+                    return null;
+                }
+
+                return [
+                    'id' => $groupId,
+                    'label' => $label,
+                    'order' => (int) ($group['order'] ?? 0),
+                ];
+            },
+            $groups,
+        )));
+
+        if ($normalizedGroups === []) {
+            $this->collection()->deleteMany($filter);
+
+            return;
+        }
+
+        $now = new UTCDateTime((int) now()->getTimestampMs());
+        $keepGroupIds = [];
+
+        foreach ($normalizedGroups as $group) {
+            $groupId = (string) $group['id'];
+            $keepGroupIds[] = $groupId;
+
+            $this->collection()->updateOne(
+                [
+                    '_id' => $this->headId($occurrenceId, $groupId),
+                ],
+                [
+                    '$set' => [
+                        'tenant_id' => $filter['tenant_id'],
+                        'event_id' => $eventId,
+                        'parent_type' => self::PARENT_TYPE,
+                        'parent_id' => $occurrenceId,
+                        'group_key' => $groupId,
+                        'group_label' => (string) $group['label'],
+                        'group_order' => (int) $group['order'],
+                        'doc_type' => self::DOC_TYPE_HEAD,
+                        'updated_at' => $now,
+                    ],
+                ],
+                ['upsert' => true],
+            );
+
+            $this->collection()->updateMany(
+                [
+                    'tenant_id' => $filter['tenant_id'],
+                    'event_id' => $eventId,
+                    'parent_type' => self::PARENT_TYPE,
+                    'parent_id' => $occurrenceId,
+                    'group_key' => $groupId,
+                    'doc_type' => self::DOC_TYPE_MEMBER,
+                ],
+                [
+                    '$set' => [
+                        'group_label' => (string) $group['label'],
+                        'group_order' => (int) $group['order'],
+                        'updated_at' => $now,
+                    ],
+                ],
+            );
+        }
+
+        $this->collection()->deleteMany([
+            ...$filter,
+            'group_key' => ['$nin' => array_values(array_unique($keepGroupIds))],
+        ]);
+    }
+
+    /**
      * @param  array<int, string>  $activeOccurrenceIds
      */
     public function purgeMissingOccurrences(string $eventId, array $activeOccurrenceIds): void

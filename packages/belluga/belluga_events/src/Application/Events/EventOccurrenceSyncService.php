@@ -118,13 +118,19 @@ class EventOccurrenceSyncService
             }
 
             if (isset($document->_id)) {
-                if (! $isExistingDocument || $profileGroupsExplicit) {
+                if (! $isExistingDocument) {
                     $this->profileGroupMemberStore->syncOccurrenceGroups(
                         $eventId,
                         $document,
                         $ownProfileGroups,
                     );
                     $this->occurrenceNestedAccountStore->syncOccurrenceGroups(
+                        $eventId,
+                        $document,
+                        $ownProfileGroups,
+                    );
+                } elseif ($profileGroupsExplicit) {
+                    $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
                         $eventId,
                         $document,
                         $ownProfileGroups,

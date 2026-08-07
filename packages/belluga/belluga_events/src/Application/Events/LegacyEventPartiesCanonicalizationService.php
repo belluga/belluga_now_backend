@@ -528,6 +528,11 @@ class LegacyEventPartiesCanonicalizationService
                 $occurrence,
                 $profileGroups,
             );
+            $this->nestedAccountStore->syncOccurrenceGroups(
+                $eventId,
+                $occurrence,
+                $profileGroups,
+            );
         }
 
         $refreshed = Event::withTrashed()->find($event->getKey());

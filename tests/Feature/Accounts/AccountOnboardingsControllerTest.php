@@ -237,9 +237,20 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertNotEmpty($errors['location.lng'] ?? null);
     }
 
-    public function test_onboarding_rejects_invalid_nested_group_member_ids(): void
+    public function test_onboarding_rejects_embedded_nested_group_member_ids(): void
     {
         $this->actingAsAdmin(['account-users:create']);
+        TenantProfileType::query()
+            ->where('type', 'venue')
+            ->update([
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                    'has_nested_profile_groups' => true,
+                ],
+            ]);
         $accountsBefore = Account::query()->count();
         $profilesBefore = AccountProfile::query()->count();
 
@@ -254,17 +265,17 @@ class AccountOnboardingsControllerTest extends TestCase
             'nested_profile_groups' => [[
                 'id' => 'parceiros',
                 'label' => 'Parceiros',
-                'account_profile_ids' => ['not-an-object-id'],
+                'account_profile_ids' => ['507f1f77bcf86cd799439011'],
             ]],
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['nested_profile_groups.0.account_profile_ids.0']);
+        $response->assertJsonValidationErrors(['nested_profile_groups.0.account_profile_ids']);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }
 
-    public function test_onboarding_persists_nested_group_members_in_single_request(): void
+    public function test_onboarding_persists_nested_group_metadata_and_requires_dedicated_member_management(): void
     {
         $this->actingAsAdmin(['account-users:create', 'account-users:update', 'account-users:view']);
 
@@ -305,16 +316,31 @@ class AccountOnboardingsControllerTest extends TestCase
                 'id' => 'parceiros',
                 'label' => 'Parceiros',
                 'order' => 0,
-                'account_profile_ids' => [(string) $supportingProfile->_id],
             ]],
         ]);
 
         $response->assertCreated();
         $response->assertJsonPath('data.account_profile.nested_profile_groups.0.id', 'parceiros');
         $response->assertJsonPath('data.account_profile.nested_profile_groups.0.label', 'Parceiros');
-        $response->assertJsonPath('data.account_profile.nested_profile_groups.0.member_count', 1);
+        $response->assertJsonPath('data.account_profile.nested_profile_groups.0.member_count', 0);
+        $response->assertJsonMissingPath('data.account_profile.nested_profile_groups.0.account_profile_ids');
 
         $profileId = (string) $response->json('data.account_profile.id');
+        $metadataRevision = (int) ($response->json('data.account_profile.aggregate_revision') ?? 0);
+        $persistedProfile = AccountProfile::query()->findOrFail($profileId);
+        $persistedGroups = $persistedProfile->getAttribute('nested_profile_groups') ?? [];
+        $this->assertIsArray($persistedGroups);
+        $this->assertArrayNotHasKey('account_profile_ids', $persistedGroups[0] ?? []);
+
+        $delta = $this->patchJson(
+            "{$this->tenantAccountProfilesLegacyUrl}/{$profileId}/nested_profile_groups/parceiros/members",
+            [
+                'aggregate_revision' => $metadataRevision,
+                'add_ids' => [(string) $supportingProfile->_id],
+            ]
+        );
+        $delta->assertOk();
+        $delta->assertJsonPath('data.member_count', 1);
 
         $readback = $this->getJson(
             "{$this->tenantAccountProfilesLegacyUrl}/{$profileId}"
@@ -322,6 +348,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $readback->assertOk();
         $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
         $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+        $readback->assertJsonMissingPath('data.nested_profile_groups.0.account_profile_ids');
 
         $members = $this->getJson(
             "{$this->tenantAccountProfilesLegacyUrl}/{$profileId}/nested_profile_groups/parceiros/members"
@@ -510,8 +537,18 @@ class AccountOnboardingsControllerTest extends TestCase
 
     private function actingAsAdmin(array $abilities): void
     {
+        $tenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
+        $user = LandlordUser::query()->firstOrFail();
+        $user->tenant_roles = [[
+            'name' => 'Tenant Admin',
+            'slug' => 'tenant-admin',
+            'permissions' => ['*'],
+            'tenant_id' => (string) $tenant->_id,
+        ]];
+        $user->save();
+
         Sanctum::actingAs(
-            LandlordUser::query()->firstOrFail(),
+            $user,
             $abilities
         );
     }
