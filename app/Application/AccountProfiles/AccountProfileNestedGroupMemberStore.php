@@ -218,9 +218,47 @@ final class AccountProfileNestedGroupMemberStore
     ): void {
         $tenantId = $this->tenantId();
         $parentProfileId = (string) $profile->getKey();
-        $normalizedGroups = $this->nestedGroupService->formatForRead($groups);
+        $normalizedGroups = [];
         $groupIds = [];
+        $groupMemberIdsByGroupId = [];
+        $groupsWithExplicitMembers = [];
         $allMemberIds = [];
+
+        foreach ($groups as $rawGroup) {
+            if (! is_array($rawGroup)) {
+                continue;
+            }
+
+            $formattedGroup = $this->nestedGroupService->formatForRead([$rawGroup])[0] ?? null;
+            if (! is_array($formattedGroup)) {
+                continue;
+            }
+
+            $normalizedGroups[] = $formattedGroup;
+
+            $groupId = trim((string) ($formattedGroup['id'] ?? ''));
+            if ($groupId === '') {
+                continue;
+            }
+
+            $hasExplicitMembers = array_key_exists('account_profile_ids', $rawGroup)
+                || array_key_exists('profile_ids', $rawGroup);
+            if (! $hasExplicitMembers) {
+                continue;
+            }
+
+            $groupsWithExplicitMembers[$groupId] = true;
+            $groupMemberIdsByGroupId[$groupId] = [];
+            foreach ((array) ($formattedGroup['account_profile_ids'] ?? []) as $memberId) {
+                $memberId = trim((string) $memberId);
+                if ($memberId === '') {
+                    continue;
+                }
+
+                $groupMemberIdsByGroupId[$groupId][] = $memberId;
+                $allMemberIds[$memberId] = $memberId;
+            }
+        }
 
         foreach ($normalizedGroups as $group) {
             $groupId = trim((string) ($group['id'] ?? ''));
@@ -229,12 +267,6 @@ final class AccountProfileNestedGroupMemberStore
             }
 
             $groupIds[] = $groupId;
-            foreach ((array) ($group['account_profile_ids'] ?? []) as $memberId) {
-                $memberId = trim((string) $memberId);
-                if ($memberId !== '') {
-                    $allMemberIds[$memberId] = $memberId;
-                }
-            }
         }
 
         if ($groupIds === []) {
@@ -279,14 +311,24 @@ final class AccountProfileNestedGroupMemberStore
                 [...$context->rawOptions(), 'upsert' => true],
             );
 
-            $this->replaceGroupMembersWithinContext(
-                $context,
-                $profile,
-                $groupId,
-                array_values((array) ($group['account_profile_ids'] ?? [])),
-                $profilesById,
-                $group,
-            );
+            if (isset($groupsWithExplicitMembers[$groupId])) {
+                $this->replaceGroupMembersWithinContext(
+                    $context,
+                    $profile,
+                    $groupId,
+                    array_values($groupMemberIdsByGroupId[$groupId] ?? []),
+                    $profilesById,
+                    $group,
+                );
+            } else {
+                $this->syncGroupMemberMetadataWithinContext(
+                    $context,
+                    $profile,
+                    $groupId,
+                    $groupLabel,
+                    $groupOrder,
+                );
+            }
         }
 
         $context->collection(self::COLLECTION)->deleteMany(
@@ -387,6 +429,32 @@ final class AccountProfileNestedGroupMemberStore
         if ($rows !== []) {
             $context->collection(self::COLLECTION)->insertMany($rows, $context->rawOptions());
         }
+    }
+
+    private function syncGroupMemberMetadataWithinContext(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        string $groupId,
+        string $groupLabel,
+        int $groupOrder,
+    ): void {
+        $context->collection(self::COLLECTION)->updateMany(
+            [
+                'tenant_id' => $this->tenantId(),
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => (string) $profile->getKey(),
+                'group_key' => $groupId,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+            ],
+            [
+                '$set' => [
+                    'group_label' => $groupLabel,
+                    'group_order' => $groupOrder,
+                    'updated_at' => new UTCDateTime((int) now()->getTimestampMs()),
+                ],
+            ],
+            $context->rawOptions(),
+        );
     }
 
     public function materializeLegacyIfNeededWithinContext(

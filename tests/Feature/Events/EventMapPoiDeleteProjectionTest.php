@@ -236,12 +236,6 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
             'occurrences' => [[
                 'date_time_start' => $now->copy()->addDay()->setHour(20)->setMinute(0)->setSecond(0)->toISOString(),
                 'date_time_end' => $now->copy()->addDay()->setHour(22)->setMinute(0)->setSecond(0)->toISOString(),
-                'profile_groups' => [[
-                    'id' => 'artists',
-                    'label' => 'Artists',
-                    'order' => 0,
-                    'account_profile_ids' => [(string) $this->artist->_id],
-                ]],
             ]],
             'publication' => [
                 'status' => 'published',

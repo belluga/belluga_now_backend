@@ -181,7 +181,7 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
         string $pushType,
         array $extraData,
     ): array {
-        $eventImageUrl = trim((string) ($invitePayload['event_image_url'] ?? ''));
+        $heroImageUrl = trim((string) ($invitePayload['hero_image_url'] ?? ''));
 
         $options = [
             'notification' => [
@@ -199,16 +199,16 @@ class InvitePushDeliveryService implements InvitePushDeliveryContract
                 'event_id' => trim((string) ($invitePayload['event_id'] ?? '')),
                 'occurrence_id' => trim((string) ($invitePayload['occurrence_id'] ?? '')),
                 'push_type' => $pushType,
-                'event_image_url' => $eventImageUrl,
+                'hero_image_url' => $heroImageUrl,
                 'inviter_name' => trim((string) ($invitePayload['inviter_name'] ?? '')),
                 'inviter_avatar_url' => trim((string) ($invitePayload['inviter_avatar_url'] ?? '')),
                 ...$extraData,
             ],
         ];
 
-        if ($eventImageUrl !== '') {
-            $options['notification']['image'] = $eventImageUrl;
-            $options['android']['notification']['image'] = $eventImageUrl;
+        if ($heroImageUrl !== '') {
+            $options['notification']['image'] = $heroImageUrl;
+            $options['android']['notification']['image'] = $heroImageUrl;
         }
 
         return $options;

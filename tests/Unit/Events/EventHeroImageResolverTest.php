@@ -27,7 +27,7 @@ class EventHeroImageResolverTest extends TestCase
                 ),
                 'expected' => 'https://example.org/img-01-event-cover.jpg',
             ],
-            'IMG-03 linked account profile cover wins when event cover is absent' => [
+            'IMG-03 counterpart preview cover wins when event cover is absent' => [
                 'payload' => $this->eventPayload(
                     profileCoverUrl: 'https://example.org/img-03-profile-cover.jpg',
                     profileAvatarUrl: 'https://example.org/img-03-profile-avatar.jpg',
@@ -35,14 +35,14 @@ class EventHeroImageResolverTest extends TestCase
                 ),
                 'expected' => 'https://example.org/img-03-profile-cover.jpg',
             ],
-            'IMG-04 linked account profile avatar wins when profile cover is absent' => [
+            'IMG-04 counterpart preview avatar wins when profile cover is absent' => [
                 'payload' => $this->eventPayload(
                     profileAvatarUrl: 'https://example.org/img-04-profile-avatar.jpg',
                     venueCoverUrl: 'https://example.org/img-04-venue-cover.jpg',
                 ),
                 'expected' => 'https://example.org/img-04-profile-avatar.jpg',
             ],
-            'IMG-05 venue cover wins when event and linked profile media are absent' => [
+            'IMG-05 venue cover wins when event and counterpart media are absent' => [
                 'payload' => $this->eventPayload(
                     venueCoverUrl: 'https://example.org/img-05-venue-cover.jpg',
                     venueHeroUrl: 'https://example.org/img-05-venue-hero.jpg',
@@ -76,24 +76,8 @@ class EventHeroImageResolverTest extends TestCase
                 'payload' => $this->eventPayload(),
                 'expected' => null,
             ],
-            'IMG-10 venue wins when linked account profile summary is absent' => [
+            'IMG-10 venue wins when counterpart preview is absent' => [
                 'payload' => [
-                    'event_parties' => [
-                        [
-                            'party_type' => 'venue',
-                            'metadata' => [
-                                'cover_url' => 'https://example.org/img-10-party-venue-cover.jpg',
-                                'avatar_url' => 'https://example.org/img-10-party-venue-avatar.jpg',
-                            ],
-                        ],
-                        [
-                            'party_type' => 'artist',
-                            'metadata' => [
-                                'cover_url' => 'https://example.org/img-10-party-profile-cover.jpg',
-                                'avatar_url' => 'https://example.org/img-10-party-profile-avatar.jpg',
-                            ],
-                        ],
-                    ],
                     'venue' => [
                         'cover_url' => 'https://example.org/img-10-venue-cover.jpg',
                     ],
@@ -122,7 +106,7 @@ class EventHeroImageResolverTest extends TestCase
                     'url' => 'https://example.org/event-cover.jpg',
                 ],
             ],
-            'linked_account_profiles' => [[
+            'counterpart_preview' => [[
                 'cover_url' => 'https://example.org/profile-cover.jpg',
                 'avatar_url' => 'https://example.org/profile-avatar.jpg',
             ]],
@@ -133,12 +117,12 @@ class EventHeroImageResolverTest extends TestCase
         ]));
     }
 
-    public function test_resolves_linked_profile_cover_before_venue_media_when_event_thumb_is_absent(): void
+    public function test_resolves_second_counterpart_preview_cover_before_venue_media_when_first_has_no_media(): void
     {
         $resolver = new EventHeroImageResolver(new AccountProfileHeroImageResolver);
 
         $this->assertSame('https://example.org/profile-cover.jpg', $resolver->resolveFromPayload([
-            'linked_account_profiles' => [[
+            'counterpart_preview' => [[
                 'cover_url' => '',
                 'avatar_url' => '',
             ], [
@@ -152,24 +136,11 @@ class EventHeroImageResolverTest extends TestCase
         ]));
     }
 
-    public function test_resolves_venue_media_when_linked_profiles_are_absent_even_if_event_parties_exist(): void
+    public function test_resolves_venue_media_when_counterpart_preview_is_absent(): void
     {
         $resolver = new EventHeroImageResolver(new AccountProfileHeroImageResolver);
 
         $this->assertSame('https://example.org/venue-cover.jpg', $resolver->resolveFromPayload([
-            'event_parties' => [[
-                'party_type' => 'venue',
-                'metadata' => [
-                    'cover_url' => 'https://example.org/location-cover.jpg',
-                    'avatar_url' => 'https://example.org/location-avatar.jpg',
-                ],
-            ], [
-                'party_type' => 'artist',
-                'metadata' => [
-                    'cover_url' => 'https://example.org/party-cover.jpg',
-                    'avatar_url' => 'https://example.org/party-avatar.jpg',
-                ],
-            ]],
             'venue' => [
                 'cover_url' => 'https://example.org/venue-cover.jpg',
                 'hero_image_url' => 'https://example.org/venue-hero.jpg',
@@ -201,7 +172,7 @@ class EventHeroImageResolverTest extends TestCase
         }
 
         if ($profileCoverUrl !== null || $profileAvatarUrl !== null) {
-            $payload['linked_account_profiles'] = [[
+            $payload['counterpart_preview'] = [[
                 'cover_url' => $profileCoverUrl,
                 'avatar_url' => $profileAvatarUrl,
             ]];

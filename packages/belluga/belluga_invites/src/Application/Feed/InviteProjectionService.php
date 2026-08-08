@@ -146,12 +146,12 @@ class InviteProjectionService
             'event_slug' => (string) ($projection->event_slug ?? ''),
             'event_name' => (string) ($projection->event_name ?? ''),
             'event_date' => $projection->event_date?->toISOString(),
-            'event_image_url' => $projection->event_image_url,
+            'hero_image_url' => $projection->event_image_url,
             'location' => (string) ($projection->location ?? ''),
             'host_name' => (string) ($projection->host_name ?? ''),
             'message' => (string) ($projection->message ?? ''),
             'taxonomy_terms' => is_array($projection->taxonomy_terms) ? $projection->taxonomy_terms : [],
-            'linked_account_profiles' => is_array($projection->linked_account_profiles) ? $projection->linked_account_profiles : [],
+            'counterpart_preview' => is_array($projection->linked_account_profiles) ? $projection->linked_account_profiles : [],
             'profile_groups' => is_array($projection->profile_groups) ? $projection->profile_groups : [],
             'venue_account_profile_id' => is_string($projection->venue_account_profile_id)
                 ? trim($projection->venue_account_profile_id)

@@ -34,6 +34,8 @@ final class EventOccurrenceNestedAccountStore
 
     private const CURSOR_SCOPE = 'event_related_profile_members';
 
+    private const ADMIN_CURSOR_SCOPE = 'event_admin_occurrence_group_members';
+
     public function __construct(
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventProfileResolverContract $eventProfileResolver,
@@ -64,6 +66,99 @@ final class EventOccurrenceNestedAccountStore
         if ($rows !== []) {
             $this->collection()->insertMany($rows);
         }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     */
+    public function syncOccurrenceGroupMetadata(string $eventId, EventOccurrence $occurrence, array $groups): void
+    {
+        $eventId = trim($eventId);
+        $occurrenceId = trim((string) $occurrence->getKey());
+        if ($eventId === '' || $occurrenceId === '') {
+            return;
+        }
+
+        $filter = [
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+        ];
+
+        $normalizedGroups = array_values(array_filter(array_map(
+            function (array $group): ?array {
+                $groupId = trim((string) ($group['id'] ?? ''));
+                $label = trim((string) ($group['label'] ?? ''));
+                if ($groupId === '' || $label === '') {
+                    return null;
+                }
+
+                return [
+                    'id' => $groupId,
+                    'label' => $label,
+                    'order' => (int) ($group['order'] ?? 0),
+                ];
+            },
+            $groups,
+        )));
+
+        if ($normalizedGroups === []) {
+            $this->collection()->deleteMany($filter);
+
+            return;
+        }
+
+        $now = new UTCDateTime((int) now()->getTimestampMs());
+        $keepGroupIds = [];
+
+        foreach ($normalizedGroups as $group) {
+            $groupId = (string) $group['id'];
+            $keepGroupIds[] = $groupId;
+
+            $this->collection()->updateOne(
+                [
+                    '_id' => $this->headId($occurrenceId, $groupId),
+                ],
+                [
+                    '$set' => [
+                        'tenant_id' => $filter['tenant_id'],
+                        'event_id' => $eventId,
+                        'parent_type' => self::PARENT_TYPE,
+                        'parent_id' => $occurrenceId,
+                        'group_key' => $groupId,
+                        'group_label' => (string) $group['label'],
+                        'group_order' => (int) $group['order'],
+                        'doc_type' => self::DOC_TYPE_HEAD,
+                        'updated_at' => $now,
+                    ],
+                ],
+                ['upsert' => true],
+            );
+
+            $this->collection()->updateMany(
+                [
+                    'tenant_id' => $filter['tenant_id'],
+                    'event_id' => $eventId,
+                    'parent_type' => self::PARENT_TYPE,
+                    'parent_id' => $occurrenceId,
+                    'group_key' => $groupId,
+                    'doc_type' => self::DOC_TYPE_MEMBER,
+                ],
+                [
+                    '$set' => [
+                        'group_label' => (string) $group['label'],
+                        'group_order' => (int) $group['order'],
+                        'updated_at' => $now,
+                    ],
+                ],
+            );
+        }
+
+        $this->collection()->deleteMany([
+            ...$filter,
+            'group_key' => ['$nin' => array_values(array_unique($keepGroupIds))],
+        ]);
     }
 
     /**
@@ -229,6 +324,334 @@ final class EventOccurrenceNestedAccountStore
                 $ownGroups,
             );
         }
+    }
+
+    /**
+     * @return array<int, array{id:string,label:string,order:int,member_count:int,members_path:string}>
+     */
+    public function adminOccurrenceGroupMetadata(EventOccurrence $occurrence, string $eventRouteKey): array
+    {
+        $eventId = trim((string) ($occurrence->event_id ?? ''));
+        $occurrenceId = trim((string) $occurrence->getKey());
+        if ($eventId === '' || $occurrenceId === '') {
+            return [];
+        }
+
+        $headRows = iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $this->tenantId(),
+                'event_id' => $eventId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $occurrenceId,
+                'doc_type' => self::DOC_TYPE_HEAD,
+            ],
+            [
+                'sort' => ['group_order' => 1, '_id' => 1],
+            ],
+        ));
+
+        if ($headRows === []) {
+            return [];
+        }
+
+        $memberRows = iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $this->tenantId(),
+                'event_id' => $eventId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $occurrenceId,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+            ],
+            [
+                'projection' => ['group_key' => 1, 'nested_profile.id' => 1],
+                'sort' => ['item_order' => 1, '_id' => 1],
+            ],
+        ));
+
+        $memberIdsByGroup = [];
+        foreach ($memberRows as $row) {
+            $document = $this->documentToArray($row);
+            $groupKey = trim((string) ($document['group_key'] ?? ''));
+            $memberId = trim((string) (($this->normalizeArray($document['nested_profile'] ?? [])['id'] ?? null) ?: ''));
+            if ($groupKey === '' || $memberId === '') {
+                continue;
+            }
+
+            $memberIdsByGroup[$groupKey] ??= [];
+            if (! in_array($memberId, $memberIdsByGroup[$groupKey], true)) {
+                $memberIdsByGroup[$groupKey][] = $memberId;
+            }
+        }
+
+        $eventRouteKey = trim($eventRouteKey);
+        if ($eventRouteKey === '') {
+            $eventRouteKey = $eventId;
+        }
+
+        $groups = [];
+        foreach ($headRows as $row) {
+            $document = $this->documentToArray($row);
+            $groupKey = trim((string) ($document['group_key'] ?? ''));
+            $label = trim((string) ($document['group_label'] ?? ''));
+            if ($groupKey === '' || $label === '') {
+                continue;
+            }
+
+            $groups[] = [
+                'id' => $groupKey,
+                'label' => $label,
+                'order' => (int) ($document['group_order'] ?? count($groups)),
+                'member_count' => count($memberIdsByGroup[$groupKey] ?? []),
+                'members_path' => "/admin/api/v1/events/{$eventRouteKey}/occurrences/{$occurrenceId}/profile_groups/{$groupKey}/members",
+            ];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     */
+    public function adminOccurrenceMemberPage(
+        EventOccurrence $occurrence,
+        string $groupId,
+        int $defaultPerPage,
+        ?int $suppliedPerPage,
+        ?string $cursor,
+    ): array {
+        $eventId = trim((string) ($occurrence->event_id ?? ''));
+        $occurrenceId = trim((string) $occurrence->getKey());
+        if ($eventId === '' || $occurrenceId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
+        $perPage = max(1, $defaultPerPage);
+        $offset = 0;
+
+        if ($cursor !== null) {
+            $payload = $this->decodeAdminCursor($cursor);
+            if (($payload['scope'] ?? null) !== self::ADMIN_CURSOR_SCOPE
+                || ($payload['event_id'] ?? null) !== $eventId
+                || ($payload['occurrence_id'] ?? null) !== $occurrenceId
+                || ($payload['group_id'] ?? null) !== (string) ($group['group_key'] ?? '')) {
+                throw ValidationException::withMessages([
+                    'cursor' => ['Event related-account member cursor is invalid for this occurrence or group.'],
+                ]);
+            }
+
+            $cursorPerPage = (int) ($payload['per_page'] ?? 0);
+            if ($suppliedPerPage !== null && $suppliedPerPage !== $cursorPerPage) {
+                throw ValidationException::withMessages([
+                    'per_page' => ['Event related-account member cursor fixes the page size for continuation requests.'],
+                ]);
+            }
+
+            $perPage = max(1, $cursorPerPage);
+            $offset = max(0, (int) ($payload['offset'] ?? 0));
+        } elseif ($suppliedPerPage !== null) {
+            $perPage = max(1, $suppliedPerPage);
+        }
+
+        $memberIds = $this->occurrenceGroupMemberIds($eventId, $occurrenceId, (string) ($group['group_key'] ?? ''));
+        $pageIds = array_slice($memberIds, $offset, $perPage + 1);
+        $visibleIds = array_slice($pageIds, 0, $perPage);
+        $profilesById = $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds($visibleIds);
+
+        $nextCursor = null;
+        if (count($pageIds) > $perPage) {
+            $nextCursor = Crypt::encryptString(json_encode([
+                'version' => self::CURSOR_VERSION,
+                'scope' => self::ADMIN_CURSOR_SCOPE,
+                'event_id' => $eventId,
+                'occurrence_id' => $occurrenceId,
+                'group_id' => (string) ($group['group_key'] ?? ''),
+                'per_page' => $perPage,
+                'offset' => $offset + $perPage,
+                'expires_at' => now()->addMinutes(15)->toIso8601String(),
+            ], JSON_THROW_ON_ERROR));
+        }
+
+        return [
+            'aggregate_revision' => 0,
+            'data' => array_values(array_map(function (string $profileId) use ($profilesById): array {
+                $profile = $profilesById[$profileId] ?? null;
+
+                return [
+                    'id' => $profileId,
+                    'display_name' => is_array($profile)
+                        ? ($label = trim((string) ($profile['display_name'] ?? ''))) === '' ? null : $label
+                        : null,
+                    'is_queryable_candidate' => is_array($profile),
+                    'is_contact_capable_candidate' => false,
+                ];
+            }, $visibleIds)),
+            'next_cursor' => $nextCursor,
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $memberIds
+     */
+    public function replaceOccurrenceGroupMembers(
+        EventOccurrence $occurrence,
+        string $groupId,
+        array $memberIds,
+    ): int {
+        $eventId = trim((string) ($occurrence->event_id ?? ''));
+        $occurrenceId = trim((string) $occurrence->getKey());
+        if ($eventId === '' || $occurrenceId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
+        $normalizedIds = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $memberId): string => trim((string) $memberId),
+            $memberIds,
+        ), static fn (string $memberId): bool => $memberId !== '')));
+
+        $profilesById = $this->profilesByIdForIds($normalizedIds);
+        $now = new UTCDateTime((int) now()->getTimestampMs());
+        $groupKey = (string) ($group['group_key'] ?? '');
+
+        $this->collection()->deleteMany([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'group_key' => $groupKey,
+            'doc_type' => self::DOC_TYPE_MEMBER,
+        ]);
+
+        $this->collection()->updateOne(
+            [
+                '_id' => $group['_id'] ?? $this->headId($occurrenceId, $groupKey),
+            ],
+            [
+                '$set' => [
+                    'tenant_id' => $this->tenantId(),
+                    'event_id' => $eventId,
+                    'parent_type' => self::PARENT_TYPE,
+                    'parent_id' => $occurrenceId,
+                    'group_key' => $groupKey,
+                    'group_label' => (string) ($group['group_label'] ?? ''),
+                    'group_order' => (int) ($group['group_order'] ?? 0),
+                    'doc_type' => self::DOC_TYPE_HEAD,
+                    'updated_at' => $now,
+                ],
+            ],
+            ['upsert' => true],
+        );
+
+        if ($normalizedIds !== []) {
+            $rows = [];
+            foreach ($normalizedIds as $itemOrder => $memberId) {
+                $rows[] = [
+                    '_id' => $this->memberId($occurrenceId, $groupKey, $memberId),
+                    'tenant_id' => $this->tenantId(),
+                    'event_id' => $eventId,
+                    'parent_type' => self::PARENT_TYPE,
+                    'parent_id' => $occurrenceId,
+                    'group_key' => $groupKey,
+                    'group_label' => (string) ($group['group_label'] ?? ''),
+                    'group_order' => (int) ($group['group_order'] ?? 0),
+                    'item_order' => $itemOrder,
+                    'doc_type' => self::DOC_TYPE_MEMBER,
+                    'nested_profile' => $this->nestedProfileDocument(
+                        $memberId,
+                        $profilesById[$memberId] ?? null,
+                    ),
+                    'updated_at' => $now,
+                ];
+            }
+            $this->collection()->insertMany($rows);
+        }
+
+        return count($normalizedIds);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function adminOccurrenceGroupMemberIds(
+        EventOccurrence $occurrence,
+        string $groupId,
+    ): array {
+        $eventId = trim((string) ($occurrence->event_id ?? ''));
+        $occurrenceId = trim((string) $occurrence->getKey());
+        if ($eventId === '' || $occurrenceId === '') {
+            return [];
+        }
+
+        $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
+
+        return $this->occurrenceGroupMemberIds($eventId, $occurrenceId, trim($groupId));
+    }
+
+    /**
+     * Return the only related-account data needed by public event cards: a
+     * count and the first non-venue member per occurrence. Member rows remain
+     * lazy and are never expanded into the Event/Occurrence transport.
+     *
+     * @param  iterable<int, EventOccurrence>  $occurrences
+     * @return array<string, array{first_profile_id: ?string, counterpart_count: int}>
+     */
+    public function publicCounterpartSummariesByOccurrence(iterable $occurrences): array
+    {
+        $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
+        if ($occurrenceOrderById === []) {
+            return [];
+        }
+
+        $rows = $this->collection()->aggregate([
+            ['$match' => [
+                'tenant_id' => $this->tenantId(),
+                'parent_type' => self::PARENT_TYPE,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+                'parent_id' => ['$in' => array_keys($occurrenceOrderById)],
+                'nested_profile.id' => ['$nin' => [null, '']],
+                'nested_profile.profile_type' => ['$ne' => 'venue'],
+            ]],
+            ['$sort' => ['parent_id' => 1, 'group_order' => 1, 'item_order' => 1, '_id' => 1]],
+            ['$group' => [
+                '_id' => [
+                    'parent_id' => '$parent_id',
+                    'profile_id' => '$nested_profile.id',
+                ],
+                'group_order' => ['$first' => '$group_order'],
+                'item_order' => ['$first' => '$item_order'],
+                'row_id' => ['$first' => '$_id'],
+            ]],
+            ['$sort' => [
+                '_id.parent_id' => 1,
+                'group_order' => 1,
+                'item_order' => 1,
+                'row_id' => 1,
+            ]],
+            ['$group' => [
+                '_id' => '$_id.parent_id',
+                'first_profile_id' => ['$first' => '$_id.profile_id'],
+                'counterpart_count' => ['$sum' => 1],
+            ]],
+        ]);
+
+        $summaries = [];
+        foreach ($rows as $row) {
+            $document = $this->documentToArray($row);
+            $occurrenceId = trim((string) ($document['_id'] ?? ''));
+            if ($occurrenceId === '' || ! array_key_exists($occurrenceId, $occurrenceOrderById)) {
+                continue;
+            }
+
+            $summaries[$occurrenceId] = [
+                'first_profile_id' => ($profileId = trim((string) ($document['first_profile_id'] ?? ''))) === ''
+                    ? null
+                    : $profileId,
+                'counterpart_count' => max(0, (int) ($document['counterpart_count'] ?? 0)),
+            ];
+        }
+
+        return $summaries;
     }
 
     /**
@@ -654,6 +1077,65 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function findOccurrenceGroupHeadOrFail(string $eventId, string $occurrenceId, string $groupId): array
+    {
+        $groupId = trim($groupId);
+        if ($groupId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $row = $this->collection()->findOne([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'group_key' => $groupId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ]);
+
+        $document = $this->documentToArray($row);
+        if ($document === []) {
+            throw new NotFoundHttpException;
+        }
+
+        return $document;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function occurrenceGroupMemberIds(string $eventId, string $occurrenceId, string $groupId): array
+    {
+        $rows = iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $this->tenantId(),
+                'event_id' => $eventId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $occurrenceId,
+                'group_key' => $groupId,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+            ],
+            [
+                'projection' => ['nested_profile.id' => 1],
+                'sort' => ['item_order' => 1, '_id' => 1],
+            ],
+        ));
+
+        $ids = [];
+        foreach ($rows as $row) {
+            $document = $this->documentToArray($row);
+            $profileId = trim((string) (($this->normalizeArray($document['nested_profile'] ?? [])['id'] ?? null) ?: ''));
+            if ($profileId !== '' && ! in_array($profileId, $ids, true)) {
+                $ids[] = $profileId;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     private function headRowsForEvent(string $eventId): array
@@ -1013,6 +1495,33 @@ final class EventOccurrenceNestedAccountStore
     private function memberId(string $occurrenceId, string $groupKey, string $memberId): string
     {
         return 'accounts-nested:member:'.self::PARENT_TYPE.':'.$occurrenceId.':'.$groupKey.':'.$memberId;
+    }
+
+    /** @return array<string, mixed> */
+    private function decodeAdminCursor(string $cursor): array
+    {
+        try {
+            $payload = json_decode(Crypt::decryptString($cursor), true, flags: JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            throw ValidationException::withMessages([
+                'cursor' => ['Event related-account member cursor is invalid.'],
+            ]);
+        }
+
+        if (! is_array($payload) || (int) ($payload['version'] ?? 0) !== self::CURSOR_VERSION) {
+            throw ValidationException::withMessages([
+                'cursor' => ['Event related-account member cursor is invalid.'],
+            ]);
+        }
+
+        $expiresAt = $payload['expires_at'] ?? null;
+        if (! is_string($expiresAt) || Carbon::parse($expiresAt)->isPast()) {
+            throw ValidationException::withMessages([
+                'cursor' => ['Event related-account member cursor expired.'],
+            ]);
+        }
+
+        return $payload;
     }
 
     /** @return array<string, mixed> */

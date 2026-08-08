@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Arr;
@@ -18,6 +20,8 @@ class EventManagementOccurrenceQuery
 
     public function __construct(
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
+        private readonly EventProfileResolverContract $eventProfileResolver,
+        private readonly EventAccountResolverContract $eventAccountResolver,
     ) {}
 
     /**
@@ -183,10 +187,6 @@ class EventManagementOccurrenceQuery
     ): void {
         $clauses = [];
 
-        if ($accountContextId !== null) {
-            $clauses[] = ['account_context_ids' => $accountContextId];
-        }
-
         $venueProfileId = $this->extractProfileFilterId($queryParams, 'venue_profile_id');
         if ($venueProfileId !== null) {
             $profileIds = $this->buildProfileIdCandidates($venueProfileId);
@@ -236,7 +236,7 @@ class EventManagementOccurrenceQuery
         }
 
         if ($accountContextId !== null) {
-            $match['$and'][] = ['event.account_context_ids' => $accountContextId];
+            $match['$and'][] = $this->buildAccountOwnedEventMatch($accountContextId);
         }
 
         $venueProfileId = $this->extractProfileFilterId($queryParams, 'venue_profile_id');
@@ -377,6 +377,85 @@ class EventManagementOccurrenceQuery
         }
 
         return $candidates;
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string|ObjectId>
+     */
+    private function buildProfileIdCandidatesFromList(array $profileIds): array
+    {
+        $candidates = [];
+
+        foreach ($profileIds as $profileId) {
+            foreach ($this->buildProfileIdCandidates($profileId) as $candidate) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildAccountOwnedEventMatch(string $accountId): array
+    {
+        $normalizedAccountId = $this->normalizeAccountContextId($accountId);
+        if ($normalizedAccountId === null) {
+            return ['_id' => ['$in' => []]];
+        }
+
+        $profileCandidates = $this->buildProfileIdCandidatesFromList(
+            $this->eventProfileResolver->listProfileIdsForAccount($normalizedAccountId)
+        );
+        $accountUserIds = $this->buildDocumentIdCandidates(
+            $this->resolveAccountUserIds($normalizedAccountId)
+        );
+
+        if ($profileCandidates === [] && $accountUserIds === []) {
+            return ['_id' => ['$in' => []]];
+        }
+
+        $clauses = [];
+
+        if ($profileCandidates !== []) {
+            $clauses[] = [
+                '$or' => [
+                    ['event.place_ref.id' => ['$in' => $profileCandidates]],
+                    ['event.place_ref._id' => ['$in' => $profileCandidates]],
+                ],
+            ];
+        }
+
+        if ($accountUserIds !== []) {
+            $clauses[] = [
+                '$and' => [
+                    ['event.created_by.type' => 'account_user'],
+                    [
+                        '$or' => [
+                            ['event.created_by.id' => ['$in' => $accountUserIds]],
+                            ['event.created_by._id' => ['$in' => $accountUserIds]],
+                        ],
+                    ],
+                ],
+            ];
+        }
+
+        return count($clauses) === 1 ? $clauses[0] : ['$or' => $clauses];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveAccountUserIds(string $accountId): array
+    {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
+            return [];
+        }
+
+        return $this->eventAccountResolver->resolveAccessibleAccountUserIds($normalizedAccountId);
     }
 
     /**
