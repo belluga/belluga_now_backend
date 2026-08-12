@@ -16,7 +16,9 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
@@ -231,6 +233,39 @@ class AccountProfilesController extends Controller
         ));
     }
 
+    public function storeNestedGroup(
+        AccountProfileNestedGroupStoreRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json([
+            'data' => $this->profileService->createNestedGroup(
+                $profile,
+                $request->label(),
+                $request->header('X-Request-Id'),
+            ),
+        ], 201);
+    }
+
+    public function deleteNestedGroup(
+        AccountProfileNestedGroupDeleteRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $group_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json([
+            'data' => $this->profileService->deleteNestedGroup(
+                $profile,
+                $group_id,
+                $request->header('X-Request-Id'),
+            ),
+        ]);
+    }
+
     public function patchNestedGroupMembers(
         AccountProfileNestedGroupMembersPatchRequest $request,
         string $tenant_domain,
@@ -243,7 +278,6 @@ class AccountProfilesController extends Controller
             'data' => $this->profileService->patchNestedGroupMembers(
                 $profile,
                 $group_id,
-                $request->aggregateRevision(),
                 $request->addIds(),
                 $request->removeIds(),
                 $request->header('X-Request-Id'),

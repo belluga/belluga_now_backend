@@ -14,6 +14,7 @@ use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Http\Api\v1\Requests\EventAccountProfileCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
+use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersPatchRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
@@ -224,6 +225,51 @@ class EventsController extends Controller
                 $request->cursor(),
             )
         );
+    }
+
+    public function storeOccurrenceProfileGroup(
+        EventOccurrenceGroupStoreRequest $request,
+        string $tenant_domain,
+        string $event_id,
+        string $occurrence_id,
+    ): JsonResponse {
+        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+
+        $occurrence = $this->findOccurrenceOrFail($event, $occurrence_id);
+
+        return response()->json([
+            'data' => $this->eventManagementService->createOccurrenceGroup(
+                $event,
+                $occurrence,
+                $request->label(),
+            ),
+        ], 201);
+    }
+
+    public function deleteOccurrenceProfileGroup(
+        Request $request,
+        string $tenant_domain,
+        string $event_id,
+        string $occurrence_id,
+        string $group_id,
+    ): JsonResponse {
+        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+
+        $occurrence = $this->findOccurrenceOrFail($event, $occurrence_id);
+
+        return response()->json([
+            'data' => $this->eventManagementService->deleteOccurrenceGroup(
+                $event,
+                $occurrence,
+                $group_id,
+            ),
+        ]);
     }
 
     public function patchOccurrenceProfileGroupMembers(

@@ -9,6 +9,9 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class EventAggregateWriteService
@@ -151,6 +154,161 @@ class EventAggregateWriteService
         return $result;
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function createOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $label,
+    ): array {
+        /** @var array<string, mixed> $result */
+        $result = $this->transactions->run(function () use ($event, $occurrence, $label): array {
+            $eventId = trim((string) $event->getKey());
+            $occurrenceId = trim((string) $occurrence->getKey());
+            if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
+                throw new NotFoundHttpException;
+            }
+
+            $normalizedLabel = trim($label);
+            if ($normalizedLabel === '') {
+                throw ValidationException::withMessages([
+                    'label' => ['Related-account group label is required.'],
+                ]);
+            }
+
+            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+                $event,
+                $event->trashed(),
+            );
+
+            $existingGroups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                $occurrence,
+                $eventId,
+            );
+            if (count($existingGroups) >= InputConstraints::EVENT_PROFILE_GROUPS_MAX) {
+                throw ValidationException::withMessages([
+                    'profile_groups' => ['Related-account groups exceed the configured limit.'],
+                ]);
+            }
+
+            $nextGroups = $this->normalizeOccurrenceGroupPayloads([
+                ...$existingGroups,
+                [
+                    'id' => $this->nextOccurrenceGroupId($existingGroups, $normalizedLabel),
+                    'label' => $normalizedLabel,
+                    'order' => count($existingGroups),
+                ],
+            ]);
+
+            $metadataOnly = $this->profileGroupMemberStore->metadataOnly($nextGroups);
+            $occurrence->forceFill([
+                'own_profile_groups' => $metadataOnly,
+                'profile_groups' => $metadataOnly,
+            ]);
+            $occurrence->save();
+
+            $freshOccurrence = $occurrence->fresh() ?? $occurrence;
+            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
+                $eventId,
+                $freshOccurrence,
+                $metadataOnly,
+            );
+
+            $event->touch();
+            $freshOccurrence = $freshOccurrence->fresh() ?? $freshOccurrence;
+
+            return [
+                'occurrence_id' => (string) $freshOccurrence->getKey(),
+                'profile_groups' => $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                    $freshOccurrence,
+                    $eventId,
+                ),
+            ];
+        });
+
+        return $result;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function deleteOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+    ): array {
+        /** @var array<string, mixed> $result */
+        $result = $this->transactions->run(function () use ($event, $occurrence, $groupId): array {
+            $eventId = trim((string) $event->getKey());
+            $occurrenceId = trim((string) $occurrence->getKey());
+            if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
+                throw new NotFoundHttpException;
+            }
+
+            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
+                $event,
+                $event->trashed(),
+            );
+
+            $existingGroups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                $occurrence,
+                $eventId,
+            );
+            $group = $this->findOccurrenceGroupOrFail($existingGroups, $groupId);
+            $memberIds = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMemberIds(
+                $occurrence,
+                (string) $group['id'],
+            );
+            if (count($memberIds) > InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX) {
+                throw ValidationException::withMessages([
+                    'profile_groups' => ['Related-account group delete exceeds the approved member budget.'],
+                ]);
+            }
+
+            $nextGroups = [];
+            foreach ($existingGroups as $candidate) {
+                if (trim((string) ($candidate['id'] ?? '')) === (string) $group['id']) {
+                    continue;
+                }
+
+                $nextGroups[] = [
+                    'id' => trim((string) ($candidate['id'] ?? '')),
+                    'label' => trim((string) ($candidate['label'] ?? '')),
+                    'order' => count($nextGroups),
+                ];
+            }
+
+            $metadataOnly = $this->profileGroupMemberStore->metadataOnly($nextGroups);
+            $occurrence->forceFill([
+                'own_profile_groups' => $metadataOnly,
+                'profile_groups' => $metadataOnly,
+            ]);
+            $occurrence->save();
+
+            $freshOccurrence = $occurrence->fresh() ?? $occurrence;
+            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
+                $eventId,
+                $freshOccurrence,
+                $metadataOnly,
+            );
+
+            $event->touch();
+            $freshOccurrence = $freshOccurrence->fresh() ?? $freshOccurrence;
+
+            return [
+                'occurrence_id' => (string) $freshOccurrence->getKey(),
+                'deleted_group_id' => (string) $group['id'],
+                'profile_groups' => $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
+                    $freshOccurrence,
+                    $eventId,
+                ),
+            ];
+        });
+
+        return $result;
+    }
+
     public function repairOccurrences(Event $event): void
     {
         $eventId = (string) $event->_id;
@@ -262,5 +420,85 @@ class EventAggregateWriteService
         $event->unset('linked_account_profiles');
         $event->unset('own_linked_account_profiles');
         $event->unset('own_event_parties');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeOccurrenceGroupPayloads(array $groups): array
+    {
+        $normalized = [];
+        foreach ($groups as $group) {
+            $groupId = trim((string) ($group['id'] ?? ''));
+            $label = trim((string) ($group['label'] ?? ''));
+            if ($groupId === '' || $label === '') {
+                continue;
+            }
+
+            $normalized[] = [
+                'id' => $groupId,
+                'label' => $label,
+                'order' => count($normalized),
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<string, mixed>
+     */
+    private function findOccurrenceGroupOrFail(array $groups, string $groupId): array
+    {
+        $targetId = trim($groupId);
+        foreach ($groups as $group) {
+            if (trim((string) ($group['id'] ?? '')) === $targetId) {
+                return $group;
+            }
+        }
+
+        throw new NotFoundHttpException;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $existingGroups
+     */
+    private function nextOccurrenceGroupId(array $existingGroups, string $label): string
+    {
+        $usedIds = [];
+        foreach ($existingGroups as $group) {
+            $groupId = trim((string) ($group['id'] ?? ''));
+            if ($groupId !== '') {
+                $usedIds[$groupId] = true;
+            }
+        }
+
+        $base = trim(Str::slug($label), '-_');
+        if ($base === '') {
+            $base = 'grupo';
+        }
+
+        $base = substr($base, 0, InputConstraints::EVENT_PROFILE_GROUP_KEY_MAX);
+        $base = rtrim($base, '-_');
+        if ($base === '') {
+            $base = 'grupo';
+        }
+
+        $candidate = $base;
+        $suffix = 2;
+        while (isset($usedIds[$candidate])) {
+            $suffixText = '-'.$suffix;
+            $prefixLength = max(1, InputConstraints::EVENT_PROFILE_GROUP_KEY_MAX - strlen($suffixText));
+            $candidate = rtrim(substr($base, 0, $prefixLength), '-_');
+            if ($candidate === '') {
+                $candidate = 'grupo';
+            }
+            $candidate .= $suffixText;
+            $suffix++;
+        }
+
+        return $candidate;
     }
 }

@@ -9,6 +9,7 @@ use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Support\Validation\InputConstraints;
 use Closure;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -240,6 +241,7 @@ class AccountProfileManagementService
         array $fingerprintSupplement = [],
         bool $dispatchOutboxImmediately = true,
         ?Closure $compensateKnownRollback = null,
+        bool $useAggregateRevisionCas = true,
     ): AccountProfile {
         $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
 
@@ -328,6 +330,7 @@ class AccountProfileManagementService
                     $fingerprint,
                     $mutateWithinTransaction,
                     $expectedAggregateRevision,
+                    $useAggregateRevisionCas,
                 ): array {
                     $receipt = $this->outboxPublisher->receipt($context, $commandId);
                     if ($receipt !== null) {
@@ -387,11 +390,16 @@ class AccountProfileManagementService
                             $mutateWithinTransaction($persistedProfile, $context);
                         }
 
-                        $persistedProfile = $this->persistWithAggregateRevisionCas(
-                            $context,
-                            $persistedProfile,
-                            $expectedAggregateRevision,
-                        );
+                        $persistedProfile = $useAggregateRevisionCas
+                            ? $this->persistWithAggregateRevisionCas(
+                                $context,
+                                $persistedProfile,
+                                $expectedAggregateRevision,
+                            )
+                            : $this->persistWithoutAggregateRevisionCas(
+                                $context,
+                                $persistedProfile,
+                            );
                         if (array_key_exists('nested_profile_groups', $attributes)) {
                             $this->nestedGroupMemberStore->replaceAllGroupsWithinContext(
                                 $context,
@@ -529,7 +537,6 @@ class AccountProfileManagementService
     public function patchNestedGroupMembers(
         AccountProfile $profile,
         string $groupId,
-        int $aggregateRevision,
         array $addIds,
         array $removeIds,
         ?string $commandId = null,
@@ -562,9 +569,7 @@ class AccountProfileManagementService
 
         $updatedProfile = $this->update(
             $profile,
-            [
-                'aggregate_revision' => $aggregateRevision,
-            ],
+            [],
             $commandId,
             function (AccountProfile $persistedProfile, AccountProfileTransactionContext $context) use ($group, $addIds, $nextIds): void {
                 $admittedTargets = [];
@@ -589,6 +594,7 @@ class AccountProfileManagementService
                     $group,
                 );
             },
+            useAggregateRevisionCas: false,
         );
         $updatedGroups = $this->nestedGroupMemberStore->metadataGroups($updatedProfile);
         $updatedGroup = $this->nestedGroupService->findGroupOrFail($updatedGroups, (string) $group['id']);
@@ -598,7 +604,96 @@ class AccountProfileManagementService
             'label' => (string) $updatedGroup['label'],
             'order' => (int) ($updatedGroup['order'] ?? 0),
             'member_count' => max(0, (int) ($updatedGroup['member_count'] ?? count($updatedGroup['account_profile_ids'] ?? []))),
-            'aggregate_revision' => max(0, (int) ($updatedProfile->aggregate_revision ?? 0)),
+        ];
+    }
+
+    /**
+     * @return array{nested_profile_groups:array<int, array<string, mixed>>}
+     */
+    public function createNestedGroup(
+        AccountProfile $profile,
+        string $label,
+        ?string $commandId = null,
+    ): array {
+        $normalizedLabel = trim($label);
+        if ($normalizedLabel === '') {
+            throw ValidationException::withMessages([
+                'label' => ['Nested profile group label is required.'],
+            ]);
+        }
+
+        $existingGroups = $this->nestedGroupMemberStore->metadataGroups($profile);
+        if (count($existingGroups) >= InputConstraints::ACCOUNT_PROFILE_NESTED_GROUPS_MAX) {
+            throw ValidationException::withMessages([
+                'nested_profile_groups' => ['Nested profile groups exceed the configured limit.'],
+            ]);
+        }
+
+        $nextGroups = [
+            ...$existingGroups,
+            [
+                'id' => $this->nextNestedGroupId($existingGroups, $normalizedLabel),
+                'label' => $normalizedLabel,
+                'order' => count($existingGroups),
+            ],
+        ];
+
+        $updatedProfile = $this->update(
+            $profile,
+            [
+                'nested_profile_groups' => $nextGroups,
+            ],
+            $commandId,
+            useAggregateRevisionCas: false,
+        );
+
+        return [
+            'nested_profile_groups' => $this->nestedGroupMemberStore->metadataGroups($updatedProfile),
+        ];
+    }
+
+    /**
+     * @return array{nested_profile_groups:array<int, array<string, mixed>>,deleted_group_id:string}
+     */
+    public function deleteNestedGroup(
+        AccountProfile $profile,
+        string $groupId,
+        ?string $commandId = null,
+    ): array {
+        $existingGroups = $this->nestedGroupMemberStore->metadataGroups($profile);
+        $group = $this->nestedGroupService->findGroupOrFail($existingGroups, $groupId);
+        $memberIds = $this->nestedGroupMemberStore->groupMemberIds($profile, (string) $group['id']);
+        if (count($memberIds) > InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX) {
+            throw ValidationException::withMessages([
+                'nested_profile_groups' => ['Nested profile group delete exceeds the approved member budget.'],
+            ]);
+        }
+
+        $nextGroups = [];
+        foreach ($existingGroups as $candidate) {
+            if (trim((string) ($candidate['id'] ?? '')) === (string) $group['id']) {
+                continue;
+            }
+
+            $nextGroups[] = [
+                'id' => trim((string) ($candidate['id'] ?? '')),
+                'label' => trim((string) ($candidate['label'] ?? '')),
+                'order' => count($nextGroups),
+            ];
+        }
+
+        $updatedProfile = $this->update(
+            $profile,
+            [
+                'nested_profile_groups' => $nextGroups,
+            ],
+            $commandId,
+            useAggregateRevisionCas: false,
+        );
+
+        return [
+            'nested_profile_groups' => $this->nestedGroupMemberStore->metadataGroups($updatedProfile),
+            'deleted_group_id' => (string) $group['id'],
         ];
     }
 
@@ -665,6 +760,46 @@ class AccountProfileManagementService
         return $normalizedGroups;
     }
 
+    /**
+     * @param  array<int, array<string, mixed>>  $existingGroups
+     */
+    private function nextNestedGroupId(array $existingGroups, string $label): string
+    {
+        $usedIds = [];
+        foreach ($existingGroups as $group) {
+            $groupId = trim((string) ($group['id'] ?? ''));
+            if ($groupId !== '') {
+                $usedIds[$groupId] = true;
+            }
+        }
+
+        $base = trim(Str::slug($label), '-_');
+        if ($base === '') {
+            $base = 'grupo';
+        }
+
+        $base = substr($base, 0, InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_KEY_MAX);
+        $base = rtrim($base, '-_');
+        if ($base === '') {
+            $base = 'grupo';
+        }
+
+        $candidate = $base;
+        $suffix = 2;
+        while (isset($usedIds[$candidate])) {
+            $suffixText = '-'.$suffix;
+            $prefixLength = max(1, InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_KEY_MAX - strlen($suffixText));
+            $candidate = rtrim(substr($base, 0, $prefixLength), '-_');
+            if ($candidate === '') {
+                $candidate = 'grupo';
+            }
+            $candidate .= $suffixText;
+            $suffix++;
+        }
+
+        return $candidate;
+    }
+
     private function persistWithAggregateRevisionCas(
         AccountProfileTransactionContext $context,
         AccountProfile $profile,
@@ -718,6 +853,53 @@ class AccountProfileManagementService
         );
         if ($updated === null) {
             throw new ConcurrencyConflictException('Account Profile aggregate revision changed during mutation.');
+        }
+
+        return AccountProfile::query()->findOrFail($profileId);
+    }
+
+    private function persistWithoutAggregateRevisionCas(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+    ): AccountProfile {
+        $profileId = trim((string) $profile->getKey());
+        if ($profileId === '') {
+            throw new ConcurrencyConflictException('Account Profile aggregate id is required for a non-CAS mutation.');
+        }
+
+        try {
+            $objectId = new ObjectId($profileId);
+        } catch (\Throwable) {
+            throw new ConcurrencyConflictException('Account Profile aggregate id is invalid for a non-CAS mutation.');
+        }
+
+        if ($profile->isDirty('display_name') || trim((string) $profile->getAttribute('name_search_key')) === '') {
+            $profile->setAttribute(
+                'name_search_key',
+                AccountProfileNameSearchKey::fromDisplayName((string) $profile->getAttribute('display_name')),
+            );
+        }
+        $profile->setAttribute('updated_at', now());
+        $dirty = $profile->getDirty();
+        unset($dirty['_id'], $dirty['aggregate_revision']);
+
+        $updated = $context->collection('account_profiles')->findOneAndUpdate(
+            ['_id' => $objectId],
+            [[
+                '$set' => [
+                    ...$dirty,
+                    'aggregate_revision' => [
+                        '$add' => [
+                            ['$ifNull' => ['$aggregate_revision', 0]],
+                            1,
+                        ],
+                    ],
+                ],
+            ]],
+            [...$context->rawOptions(), 'returnDocument' => FindOneAndUpdate::RETURN_DOCUMENT_AFTER],
+        );
+        if ($updated === null) {
+            throw new ConcurrencyConflictException('Account Profile aggregate could not be updated.');
         }
 
         return AccountProfile::query()->findOrFail($profileId);

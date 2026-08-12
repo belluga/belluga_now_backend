@@ -410,7 +410,7 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
-     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     * @return array{data: array<int, array<string, mixed>>,next_cursor:?string}
      */
     public function adminOccurrenceMemberPage(
         EventOccurrence $occurrence,
@@ -473,7 +473,6 @@ final class EventOccurrenceNestedAccountStore
         }
 
         return [
-            'aggregate_revision' => 0,
             'data' => array_values(array_map(function (string $profileId) use ($profilesById): array {
                 $profile = $profilesById[$profileId] ?? null;
 
