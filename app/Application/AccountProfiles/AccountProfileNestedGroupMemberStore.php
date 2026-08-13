@@ -69,7 +69,7 @@ final class AccountProfileNestedGroupMemberStore
     }
 
     /**
-     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     * @return array{data: array<int, array<string, mixed>>,next_cursor:?string}
      */
     public function adminMemberPage(
         AccountProfile $parentProfile,
@@ -85,7 +85,6 @@ final class AccountProfileNestedGroupMemberStore
         $group = $this->findGroupHeadOrFail($parentProfileId, $groupId);
         $perPage = $defaultPerPage;
         $offset = 0;
-        $aggregateRevision = max(0, (int) ($parentProfile->aggregate_revision ?? 0));
 
         if ($cursor !== null) {
             $payload = $this->decodeAdminCursor($cursor);
@@ -155,7 +154,6 @@ final class AccountProfileNestedGroupMemberStore
         }
 
         return [
-            'aggregate_revision' => $aggregateRevision,
             'data' => $data,
             'next_cursor' => $nextCursor,
         ];

@@ -43,14 +43,14 @@ final class EventPayloadFanoutGuard
 
         if ($occurrences === []) {
             if (array_key_exists('event_parties', $payload)) {
-                $errors['event_parties'] = 'event_parties was removed from normal event writes; use profile_groups.';
+                $errors['event_parties'] = 'event_parties was removed from normal event writes; use the dedicated occurrence group endpoints.';
             }
 
             return $errors;
         }
 
         if (array_key_exists('event_parties', $payload)) {
-            $errors['event_parties'] = 'event_parties was removed from normal event writes; use profile_groups.';
+            $errors['event_parties'] = 'event_parties was removed from normal event writes; use the dedicated occurrence group endpoints.';
         }
 
         $relatedProfileCount = count(self::profileGroupMemberIds(self::list($payload['profile_groups'] ?? [])));
@@ -66,7 +66,7 @@ final class EventPayloadFanoutGuard
 
             if (array_key_exists('event_parties', $occurrence)) {
                 $errors["occurrences.{$occurrenceIndex}.event_parties"] =
-                    'event_parties was removed from normal occurrence writes; use profile_groups.';
+                    'event_parties was removed from normal occurrence writes; use the dedicated occurrence group endpoints.';
             }
             $relatedProfileCount += count(self::profileGroupMemberIds(
                 self::list($occurrence['profile_groups'] ?? [])
