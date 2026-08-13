@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMapPoiOutboxConsumer;
+use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileOutboxPublisher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -6140,6 +6141,84 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(422);
+    }
+
+    public function test_account_profile_delete_rejects_nested_profile_group_over_budget_member_fanout(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Delete Budget Parent',
+            'slug' => 'nested-delete-budget-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $created = $this->createNestedGroupHead($parent, 'Budget Members');
+        $created->assertCreated();
+
+        $groupId = 'budget-members';
+        $tenantId = (string) Tenant::current()->getKey();
+        $parentId = (string) $parent->getKey();
+        $memberIds = array_map(
+            static fn (): string => (string) new ObjectId,
+            range(1, InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1),
+        );
+
+        $rows = [];
+        foreach ($memberIds as $position => $memberId) {
+            $rows[] = [
+                '_id' => "account_profile:{$parentId}:{$groupId}:{$memberId}",
+                'tenant_id' => $tenantId,
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                'parent_id' => $parentId,
+                'group_key' => $groupId,
+                'group_label' => 'Budget Members',
+                'group_order' => 0,
+                'item_order' => $position,
+                'doc_type' => 'member_row',
+                'nested_profile' => ['id' => $memberId],
+            ];
+        }
+
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
+            ->insertMany($rows);
+
+        $response = $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parentId}/nested_profile_groups/{$groupId}",
+            [],
+            $this->getHeaders(),
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+
+        $readback = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parentId}",
+            $this->getHeaders(),
+        );
+        $readback->assertOk();
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', $groupId);
+        $readback->assertJsonPath(
+            'data.nested_profile_groups.0.member_count',
+            InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
+        );
+
+        $this->assertSame(
+            InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
+                ->countDocuments([
+                    'tenant_id' => $tenantId,
+                    'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                    'parent_id' => $parentId,
+                    'group_key' => $groupId,
+                    'doc_type' => 'member_row',
+                ]),
+        );
     }
 
     public function test_account_profile_update_rejects_nested_profile_groups_when_type_capability_is_disabled(): void

@@ -8483,6 +8483,80 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['profile_groups']);
     }
 
+    public function test_event_occurrence_group_delete_rejects_over_budget_member_fanout(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'occurrences' => $this->makeOccurrences(1),
+        ]));
+        $created->assertStatus(201);
+
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrenceId = (string) $occurrence->_id;
+        $groupId = 'budget-members';
+        $label = 'Budget Members';
+
+        $this->createOccurrenceGroupHead($eventId, $occurrenceId, $label)->assertCreated();
+
+        $tenantId = (string) Tenant::current()->getKey();
+        $memberIds = array_map(
+            static fn (): string => (string) new ObjectId,
+            range(1, InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1),
+        );
+
+        $rows = [];
+        foreach ($memberIds as $position => $memberId) {
+            $rows[] = [
+                '_id' => "{$occurrenceId}:{$groupId}:{$memberId}",
+                'tenant_id' => $tenantId,
+                'event_id' => $eventId,
+                'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+                'parent_id' => $occurrenceId,
+                'group_key' => $groupId,
+                'group_label' => $label,
+                'group_order' => 0,
+                'item_order' => $position,
+                'doc_type' => 'member_row',
+                'nested_profile' => ['id' => $memberId],
+            ];
+        }
+
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
+            ->insertMany($rows);
+
+        $response = $this->deleteOccurrenceProfileGroup($eventId, $occurrenceId, $groupId);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['profile_groups']);
+
+        $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
+        $management->assertOk();
+        $this->assertManagementOccurrenceProfileGroupMetadata(
+            $management,
+            0,
+            0,
+            $label,
+            InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
+        );
+
+        $this->assertSame(
+            InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
+                ->countDocuments([
+                    'tenant_id' => $tenantId,
+                    'event_id' => $eventId,
+                    'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+                    'parent_id' => $occurrenceId,
+                    'group_key' => $groupId,
+                    'doc_type' => 'member_row',
+                ]),
+        );
+    }
+
     public function test_event_update_without_schedule_mutation_keeps_stored_occurrences(): void
     {
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
