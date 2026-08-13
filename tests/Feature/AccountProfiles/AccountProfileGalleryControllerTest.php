@@ -7,12 +7,15 @@ namespace Tests\Feature\AccountProfiles;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
+use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -47,6 +50,10 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
             ->where('slug', $this->tenant->slug)
             ->firstOrFail()
             ->makeCurrent();
+        Sanctum::actingAs(
+            LandlordUser::query()->firstOrFail(),
+            ['account-users:update', 'account-users:view']
+        );
         AccountProfile::query()->delete();
         TenantProfileType::query()->delete();
 
@@ -123,7 +130,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
             ],
         );
 
-        $response->assertOk();
+        $this->assertOkWithDiagnostics($response);
         $response->assertJsonPath('data.gallery_groups.0.group_id', 'salas');
         $response->assertJsonPath('data.gallery_groups.0.subtitle', 'Salas');
         $response->assertJsonPath('data.gallery_groups.0.order', 0);
@@ -849,10 +856,16 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
 
     private function getMultipartHeaders(): array
     {
-        $headers = $this->getHeaders();
-        unset($headers['Content-Type']);
-        $headers['Accept'] = 'application/json';
+        return [
+            'Accept' => 'application/json',
+        ];
+    }
 
-        return $headers;
+    private function assertOkWithDiagnostics(TestResponse $response): void
+    {
+        $this->assertSame(200, $response->getStatusCode(), json_encode([
+            'body' => $response->getContent(),
+            'headers' => $response->headers->all(),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 }

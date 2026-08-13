@@ -82,7 +82,20 @@ abstract class TestCase extends BaseTestCase
     ) {
         $effectiveServer = array_replace($this->serverVariables, $server);
         $hostOverride = null;
-        if (isset($effectiveServer['HTTP_HOST']) && is_string($effectiveServer['HTTP_HOST']) && $effectiveServer['HTTP_HOST'] !== '') {
+        $absoluteHost = null;
+
+        if (is_string($uri) && (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://'))) {
+            $parsedHost = parse_url($uri, PHP_URL_HOST);
+            if (is_string($parsedHost) && $parsedHost !== '') {
+                $absoluteHost = $parsedHost;
+                $effectiveServer['HTTP_HOST'] = $parsedHost;
+                $effectiveServer['SERVER_NAME'] = $parsedHost;
+            }
+        }
+
+        if (is_string($absoluteHost) && $absoluteHost !== '') {
+            $hostOverride = $absoluteHost;
+        } elseif (isset($effectiveServer['HTTP_HOST']) && is_string($effectiveServer['HTTP_HOST']) && $effectiveServer['HTTP_HOST'] !== '') {
             $hostOverride = $effectiveServer['HTTP_HOST'];
         } elseif (isset($effectiveServer['SERVER_NAME']) && is_string($effectiveServer['SERVER_NAME']) && $effectiveServer['SERVER_NAME'] !== '') {
             $hostOverride = $effectiveServer['SERVER_NAME'];
@@ -90,7 +103,7 @@ abstract class TestCase extends BaseTestCase
 
         $uri = $this->normalizeTestUri($uri, $hostOverride);
 
-        return parent::call($method, $uri, $parameters, $cookies, $files, $server, $content);
+        return parent::call($method, $uri, $parameters, $cookies, $files, $effectiveServer, $content);
     }
 
     protected string $api_url_admin {

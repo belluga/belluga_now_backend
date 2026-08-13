@@ -23,7 +23,6 @@ final class AccountProfileNestedGroupMembersPatchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'aggregate_revision' => ['required', 'integer', 'min:0'],
             'add_ids' => ['sometimes', 'array', 'max:'.self::MAX_OPERATION_IDS],
             'add_ids.*' => ['required_with:add_ids', 'string', 'size:'.InputConstraints::OBJECT_ID_LENGTH],
             'remove_ids' => ['sometimes', 'array', 'max:'.self::MAX_OPERATION_IDS],
@@ -44,11 +43,6 @@ final class AccountProfileNestedGroupMembersPatchRequest extends FormRequest
                 $validator->errors()->add('nested_profile_groups', 'Nested profile member delta cannot overlap add_ids and remove_ids.');
             }
         });
-    }
-
-    public function aggregateRevision(): int
-    {
-        return max(0, (int) $this->input('aggregate_revision'));
     }
 
     /**

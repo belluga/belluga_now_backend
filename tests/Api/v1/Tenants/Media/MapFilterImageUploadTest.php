@@ -8,6 +8,7 @@ use App\Application\Media\MapFilterImageStorageService;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
 use Tests\TestCaseTenant;
@@ -59,7 +60,9 @@ final class MapFilterImageUploadTest extends TestCaseTenant
 
     public function test_rejects_non_square_image(): void
     {
-        $response = $this->withHeaders($this->uploadHeadersFor($this->landlord->user_superadmin))
+        $this->authenticateMultipartMutations();
+
+        $response = $this->withHeaders($this->multipartMutationHeaders())
             ->post("{$this->base_tenant_api_admin}media/map-filter-image", [
                 'key' => 'events',
                 'image' => UploadedFile::fake()->image('events.png', 1024, 900),
@@ -72,8 +75,9 @@ final class MapFilterImageUploadTest extends TestCaseTenant
     public function test_uploads_map_filter_image_and_returns_public_uri(): void
     {
         Storage::fake('public');
+        $this->authenticateMultipartMutations();
 
-        $response = $this->withHeaders($this->uploadHeadersFor($this->landlord->user_superadmin))
+        $response = $this->withHeaders($this->multipartMutationHeaders())
             ->post("{$this->base_tenant_api_admin}media/map-filter-image", [
                 'key' => 'Events_Main',
                 'image' => UploadedFile::fake()->image('events.png', 1024, 1024),
@@ -109,8 +113,9 @@ final class MapFilterImageUploadTest extends TestCaseTenant
     public function test_replacing_map_filter_image_returns_a_new_public_fingerprint(): void
     {
         Storage::fake('public');
+        $this->authenticateMultipartMutations();
 
-        $firstResponse = $this->withHeaders($this->uploadHeadersFor($this->landlord->user_superadmin))
+        $firstResponse = $this->withHeaders($this->multipartMutationHeaders())
             ->post("{$this->base_tenant_api_admin}media/map-filter-image", [
                 'key' => 'events_main',
                 'image' => UploadedFile::fake()->image('events.png', 1024, 1024),
@@ -119,7 +124,7 @@ final class MapFilterImageUploadTest extends TestCaseTenant
         $firstResponse->assertOk();
         $firstUri = (string) $firstResponse->json('data.image_uri');
 
-        $secondResponse = $this->withHeaders($this->uploadHeadersFor($this->landlord->user_superadmin))
+        $secondResponse = $this->withHeaders($this->multipartMutationHeaders())
             ->post("{$this->base_tenant_api_admin}media/map-filter-image", [
                 'key' => 'events_main',
                 'image' => UploadedFile::fake()->image('events.jpg', 1024, 1024),
@@ -140,5 +145,20 @@ final class MapFilterImageUploadTest extends TestCaseTenant
             'Authorization' => "Bearer {$user->token}",
             'Accept' => 'application/json',
         ];
+    }
+
+    private function multipartMutationHeaders(): array
+    {
+        return [
+            'Accept' => 'application/json',
+        ];
+    }
+
+    private function authenticateMultipartMutations(): void
+    {
+        Sanctum::actingAs(
+            LandlordUser::query()->firstOrFail(),
+            ['map-pois-settings:update']
+        );
     }
 }

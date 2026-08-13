@@ -431,7 +431,6 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'occurrences' => [[
                     'date_time_start' => $start->copy()->toISOString(),
                     'date_time_end' => $start->copy()->addHours(2)->toISOString(),
-                    'profile_groups' => [],
                 ]],
                 'categories' => [],
                 'taxonomy_terms' => [],
@@ -952,7 +951,6 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'occurrences' => [[
                     'date_time_start' => $start->copy()->toISOString(),
                     'date_time_end' => $start->copy()->addHours(2)->toISOString(),
-                    'profile_groups' => [],
                 ]],
                 'categories' => [],
                 'taxonomy_terms' => [],
