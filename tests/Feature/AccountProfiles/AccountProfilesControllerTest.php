@@ -75,6 +75,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        Sanctum::actingAs(
+            LandlordUser::query()->firstOrFail(),
+            [
+                'account-users:view',
+                'account-users:create',
+                'account-users:update',
+                'account-users:delete',
+            ]
+        );
 
         AccountProfile::query()->delete();
         TaxonomyTerm::query()->delete();
@@ -6625,10 +6634,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     private function getMultipartHeaders(): array
     {
-        $headers = $this->getHeaders();
-        unset($headers['Content-Type']);
-        $headers['Accept'] = 'application/json';
-
-        return $headers;
+        return [
+            'Accept' => 'application/json',
+        ];
     }
 }

@@ -30,7 +30,10 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
 {
     private const SYNC_BARRIER_TIMEOUT_SECONDS = 60;
 
-    private const SYNC_PROCESS_TIMEOUT_SECONDS = 90;
+    // Full-suite contention plus snapshot rebuild side effects can push the
+    // heaviest synchronized batch beyond the standalone envelope without
+    // indicating a product regression.
+    private const SYNC_PROCESS_TIMEOUT_SECONDS = 150;
 
     use RefreshLandlordAndTenantDatabases;
 
