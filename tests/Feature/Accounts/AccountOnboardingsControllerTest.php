@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Accounts;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\Initialization\InitializationPayload;
@@ -35,6 +36,8 @@ class AccountOnboardingsControllerTest extends TestCase
     private string $tenantAccountProfilesLegacyUrl;
 
     private string $tenantLoginUrl;
+
+    private string $tenantPublicProfilesUrl;
 
     protected function setUp(): void
     {
@@ -74,6 +77,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->tenantAccountsLegacyUrl = "http://{$tenantHost}/admin/api/v1/accounts";
         $this->tenantAccountProfilesLegacyUrl = "http://{$tenantHost}/admin/api/v1/account_profiles";
         $this->tenantLoginUrl = "http://{$tenantHost}/admin/api/v1/auth/login";
+        $this->tenantPublicProfilesUrl = "http://{$tenantHost}/api/v1/account_profiles";
     }
 
     public function test_onboarding_success_creates_account_role_and_profile(): void
@@ -89,6 +93,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertCreated();
         $response->assertJsonPath('data.account.name', $name);
+        $response->assertJsonPath('data.account.publication.status', AccountPublicationStateService::DRAFT);
         $response->assertJsonPath('data.account_profile.display_name', $name);
         $response->assertJsonPath('data.account_profile.profile_type', 'personal');
 
@@ -99,6 +104,10 @@ class AccountOnboardingsControllerTest extends TestCase
         $persistedAccount = Account::query()->where('name', $name)->first();
         $this->assertNotNull($persistedAccount);
         $this->assertSame($accountId, (string) $persistedAccount->_id);
+        $this->assertSame(
+            AccountPublicationStateService::DRAFT,
+            data_get($persistedAccount?->getAttribute('publication'), 'status')
+        );
 
         $persistedProfile = AccountProfile::query()
             ->where('account_id', $accountId)
@@ -114,6 +123,25 @@ class AccountOnboardingsControllerTest extends TestCase
         $this->assertNotNull($persistedRole);
         $this->assertSame($roleId, (string) $persistedRole->_id);
         $this->assertSame($accountId, (string) $response->json('data.account_profile.account_id'));
+    }
+
+    public function test_onboarding_creates_draft_account_that_is_not_publicly_readable_by_default(): void
+    {
+        $this->actingAsAdmin(['account-users:create']);
+        $name = 'Draft Visibility '.Str::random(8);
+
+        $response = $this->postJson($this->tenantOnboardingsUrl, [
+            'name' => $name,
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+
+        $response->assertCreated();
+        $slug = (string) $response->json('data.account_profile.slug');
+        $this->assertNotSame('', trim($slug));
+
+        $this->getJson("{$this->tenantPublicProfilesUrl}/{$slug}")
+            ->assertStatus(404);
     }
 
     public function test_personal_onboarding_only_bootstraps_the_personal_profile_type_when_the_registry_is_empty(): void

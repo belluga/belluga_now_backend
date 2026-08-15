@@ -142,13 +142,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_profile_index_accessible_for_account_user(): void
     {
-        $user = $this->createAccountUser([]);
+        $this->createAccountUser([]);
 
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'Profile Viewer',
+            'slug' => 'profile-viewer',
+            'visibility' => 'public',
             'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
         ]);
 
         $response = $this->getJson("{$this->base_api_tenant}account_profiles");
@@ -1407,6 +1413,49 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->getJson("{$this->base_api_tenant}account_profiles/{$profile->slug}")
             ->assertStatus(200)
             ->assertJsonPath('data.profile_type', 'navigable_non_favoritable');
+    }
+
+    public function test_public_account_profile_catalog_and_detail_exclude_profiles_whose_parent_account_is_draft(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'draft_hidden_profile',
+            'label' => 'Draft Hidden Profile',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+            ],
+        ]);
+
+        $draftAccount = Account::create([
+            'name' => 'Draft Hidden Account',
+            'document' => 'DOC-DRAFT-HIDDEN',
+            'publication' => [
+                'status' => 'draft',
+                'publish_at' => null,
+            ],
+        ]);
+        $draftProfile = AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'draft_hidden_profile',
+            'display_name' => 'Draft Hidden Profile',
+            'slug' => 'draft-hidden-profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles")
+            ->assertStatus(200)
+            ->assertJsonMissing([
+                'slug' => $draftProfile->slug,
+            ]);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/{$draftProfile->slug}")
+            ->assertStatus(404);
     }
 
     public function test_public_account_profile_index_allows_filter_for_publicly_discoverable_non_favoritable_type(): void
@@ -4015,10 +4064,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $profileId = (string) $response->json('data.account_profile.id');
         $profile = AccountProfile::query()->findOrFail($profileId);
+        $account = Account::query()->findOrFail((string) $profile->account_id);
         $profile->profile_type = 'venue';
         $profile->visibility = 'public';
         $profile->is_active = true;
         $profile->save();
+        $account->publication = [
+            'status' => 'published',
+            'publish_at' => null,
+        ];
+        $account->save();
 
         $this->assertMediaUrlHealthy($avatarUrl);
         $this->assertMediaUrlHealthy($coverUrl);

@@ -10,6 +10,7 @@ use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
@@ -29,6 +30,7 @@ class AccountProfileQueryServiceTest extends TestCase
 
         $service = new AccountProfileQueryService(
             $this->createMock(AccountOwnershipStateService::class),
+            new AccountPublicationStateService,
             $this->createMock(AccountProfileMediaService::class),
             $this->createMock(TaxonomyTermSummaryResolverService::class),
             new AccountProfileTypeSetProvider,
