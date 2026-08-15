@@ -296,6 +296,41 @@ class MapPoisControllerTest extends TestCaseTenant
         $nearLocalLocation = $this->point(-40.00000, -20.00030);
         $farLocalLocation = $this->point(-40.00000, -20.00150);
 
+        $nearAccount = Account::create([
+            'name' => 'Local Near Account',
+            'document' => 'DOC-LOCAL-NEAR-ACCOUNT',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $farAccount = Account::create([
+            'name' => 'Local Far Account',
+            'document' => 'DOC-LOCAL-FAR-ACCOUNT',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $nearProfile = AccountProfile::create([
+            'account_id' => (string) $nearAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Local Near',
+            'slug' => 'local-near',
+            'visibility' => 'public',
+            'location' => $nearLocalLocation,
+            'is_active' => true,
+        ]);
+        $farProfile = AccountProfile::create([
+            'account_id' => (string) $farAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Local Far',
+            'slug' => 'local-far',
+            'visibility' => 'public',
+            'location' => $farLocalLocation,
+            'is_active' => true,
+        ]);
+
         MapPoi::create([
             'ref_type' => 'event',
             'ref_id' => 'event-anchor',
@@ -311,7 +346,7 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
         MapPoi::create([
             'ref_type' => 'account_profile',
-            'ref_id' => 'local-near',
+            'ref_id' => (string) $nearProfile->_id,
             'ref_slug' => 'local-near',
             'ref_path' => '/parceiro/local-near',
             'name' => 'Local Near',
@@ -324,7 +359,7 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
         MapPoi::create([
             'ref_type' => 'account_profile',
-            'ref_id' => 'local-far',
+            'ref_id' => (string) $farProfile->_id,
             'ref_slug' => 'local-far',
             'ref_path' => '/parceiro/local-far',
             'name' => 'Local Far',
@@ -341,13 +376,13 @@ class MapPoisControllerTest extends TestCaseTenant
         );
         $response->assertStatus(200);
 
-        $refIds = collect($response->json('stacks') ?? [])
-            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_id', ''))
+        $refSlugs = collect($response->json('stacks') ?? [])
+            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_slug', ''))
             ->all();
 
-        $this->assertContains('event-anchor', $refIds);
-        $this->assertContains('local-far', $refIds);
-        $this->assertNotContains('local-near', $refIds);
+        $this->assertContains('event-anchor', $refSlugs);
+        $this->assertContains('local-far', $refSlugs);
+        $this->assertNotContains('local-near', $refSlugs);
     }
 
     public function test_map_pois_exposes_visual_from_bson_type_projection_chain(): void
