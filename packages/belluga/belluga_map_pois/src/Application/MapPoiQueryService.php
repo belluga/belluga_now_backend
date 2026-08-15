@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\MapPois\Application;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use Belluga\MapPois\Application\Concerns\MapPoiQueryFormatting;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
@@ -127,6 +128,7 @@ class MapPoiQueryService
 
         $pipeline = [
             ['$match' => $match],
+            ...$this->publishedAccountProfileGateStages(),
             ['$limit' => 1],
         ];
 
@@ -1041,7 +1043,7 @@ class MapPoiQueryService
             $pipeline[] = ['$match' => array_merge($match, $geoMatch)];
         }
 
-        return $pipeline;
+        return array_merge($pipeline, $this->publishedAccountProfileGateStages());
     }
 
     /**
@@ -1111,6 +1113,96 @@ class MapPoiQueryService
         ];
 
         return $match;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function publishedAccountProfileGateStages(): array
+    {
+        return [
+            [
+                '$lookup' => [
+                    'from' => 'account_profiles',
+                    'let' => [
+                        'profile_ref_id' => '$ref_id',
+                        'profile_ref_type' => '$ref_type',
+                    ],
+                    'pipeline' => [
+                        [
+                            '$match' => [
+                                '$expr' => [
+                                    '$and' => [
+                                        [
+                                            '$eq' => [
+                                                '$$profile_ref_type',
+                                                'account_profile',
+                                            ],
+                                        ],
+                                        [
+                                            '$eq' => [
+                                                ['$toString' => '$_id'],
+                                                '$$profile_ref_id',
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            '$lookup' => [
+                                'from' => 'accounts',
+                                'let' => [
+                                    'parent_account_id' => '$account_id',
+                                ],
+                                'pipeline' => [
+                                    [
+                                        '$match' => [
+                                            '$expr' => [
+                                                '$eq' => [
+                                                    ['$toString' => '$_id'],
+                                                    '$$parent_account_id',
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                    [
+                                        '$match' => [
+                                            'publication.status' => AccountPublicationStateService::PUBLISHED,
+                                        ],
+                                    ],
+                                    [
+                                        '$project' => [
+                                            '_id' => 1,
+                                        ],
+                                    ],
+                                ],
+                                'as' => 'published_parent_accounts',
+                            ],
+                        ],
+                        [
+                            '$match' => [
+                                'published_parent_accounts.0' => ['$exists' => true],
+                            ],
+                        ],
+                        [
+                            '$project' => [
+                                '_id' => 1,
+                            ],
+                        ],
+                    ],
+                    'as' => 'published_account_profile_refs',
+                ],
+            ],
+            [
+                '$match' => [
+                    '$or' => [
+                        ['ref_type' => ['$ne' => 'account_profile']],
+                        ['published_account_profile_refs.0' => ['$exists' => true]],
+                    ],
+                ],
+            ],
+        ];
     }
 
     private function mapSourceToRefType(string $source): ?string

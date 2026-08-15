@@ -370,9 +370,8 @@ class AccountOnboardingsControllerTest extends TestCase
         $lookupUrl = str_replace('/admin/api/v1/account_onboardings', '', $this->tenantOnboardingsUrl)
             ."/api/v1/map/pois/lookup?ref_type=account_profile&ref_id={$profileId}";
         $lookupResponse = $this->getJson($lookupUrl);
-        $lookupResponse->assertOk();
-        $lookupResponse->assertJsonPath('poi.ref_type', 'account_profile');
-        $lookupResponse->assertJsonPath('poi.ref_id', $profileId);
+        $lookupResponse->assertStatus(404);
+        $lookupResponse->assertJsonPath('message', 'POI not found.');
 
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')

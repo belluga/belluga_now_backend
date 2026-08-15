@@ -16,6 +16,7 @@ use App\Application\AccountProfiles\AccountProfileTransactionContext;
 use App\Application\AccountProfiles\AccountProfileTransactionRetryPolicy;
 use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Application\Accounts\AccountManagementService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -1456,6 +1457,175 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $this->getJson("{$this->base_api_tenant}account_profiles/{$draftProfile->slug}")
             ->assertStatus(404);
+    }
+
+    public function test_public_account_profile_index_filters_parent_publication_in_aggregate_without_unbounded_account_scan(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'aggregate_guard_profile',
+            'label' => 'Aggregate Guard Profile',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+            ],
+        ]);
+
+        $publishedAccount = Account::create([
+            'name' => 'Aggregate Guard Published Account',
+            'document' => 'DOC-AGGREGATE-GUARD-PUBLISHED',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $draftAccount = Account::create([
+            'name' => 'Aggregate Guard Draft Account',
+            'document' => 'DOC-AGGREGATE-GUARD-DRAFT',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $publishedAccount->_id,
+            'profile_type' => 'aggregate_guard_profile',
+            'display_name' => 'Aggregate Guard Published',
+            'slug' => 'aggregate-guard-published',
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'aggregate_guard_profile',
+            'display_name' => 'Aggregate Guard Draft',
+            'slug' => 'aggregate-guard-draft',
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+
+        $aggregateCalls = [];
+        EventBus::listen(
+            'account_profiles.public_discovery_aggregate',
+            static function (string $purpose, array $pipeline) use (&$aggregateCalls): void {
+                $aggregateCalls[] = [
+                    'purpose' => $purpose,
+                    'pipeline' => $pipeline,
+                ];
+            }
+        );
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=aggregate_guard_profile"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.slug', 'aggregate-guard-published');
+        $response->assertJsonMissing([
+            'slug' => 'aggregate-guard-draft',
+        ]);
+
+        $this->assertCount(1, $aggregateCalls);
+        $this->assertTrue(
+            collect($aggregateCalls[0]['pipeline'])->contains(
+                static fn (array $stage): bool => ($stage['$lookup']['from'] ?? null) === 'accounts'
+            ),
+            'Public discovery aggregate must join accounts in-pipeline instead of prefetching published account ids.'
+        );
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'public account profile index',
+        );
+    }
+
+    public function test_public_account_profile_near_avoids_unbounded_account_publication_scan(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'near_guard_profile',
+            'label' => 'Near Guard Profile',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $publishedAccount = Account::create([
+            'name' => 'Near Guard Published Account',
+            'document' => 'DOC-NEAR-GUARD-PUBLISHED',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $draftAccount = Account::create([
+            'name' => 'Near Guard Draft Account',
+            'document' => 'DOC-NEAR-GUARD-DRAFT',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $publishedAccount->_id,
+            'profile_type' => 'near_guard_profile',
+            'display_name' => 'Near Guard Published',
+            'slug' => 'near-guard-published',
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0002, -20.0002],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'near_guard_profile',
+            'display_name' => 'Near Guard Draft',
+            'slug' => 'near-guard-draft',
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
+            'is_active' => true,
+        ]);
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10&profile_type=near_guard_profile"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Near Guard Published', $items->first()['display_name'] ?? null);
+        $this->assertFalse(
+            $items->contains(static fn (array $item): bool => ($item['slug'] ?? null) === 'near-guard-draft')
+        );
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'public account profile near',
+        );
     }
 
     public function test_public_account_profile_index_allows_filter_for_publicly_discoverable_non_favoritable_type(): void
@@ -6730,6 +6900,42 @@ class AccountProfilesControllerTest extends TestCaseTenant
         Sanctum::actingAs($user, $permissions);
 
         return $user;
+    }
+
+    /**
+     * @param  array<int, mixed>  $queryLog
+     */
+    private function assertNoUnboundedAccountPublicationScan(array $queryLog, string $surface): void
+    {
+        $queries = collect($queryLog);
+        $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
+        $publicationScans = $queries->filter(static function (array $query): bool {
+            $serialized = json_encode($query, JSON_UNESCAPED_SLASHES);
+            if (! is_string($serialized)) {
+                return false;
+            }
+
+            $isAccountsFind = str_contains($serialized, '\"find\" : \"accounts\"')
+                || str_contains($serialized, '"find":"accounts"')
+                || str_contains($serialized, 'accounts.find');
+            $hasPublicationProjection = str_contains($serialized, 'publication');
+            $isBoundedByIdSet = str_contains($serialized, '\"$in\"')
+                || str_contains($serialized, '"$in"');
+
+            return $isAccountsFind
+                && $hasPublicationProjection
+                && ! $isBoundedByIdSet;
+        });
+
+        $this->assertCount(
+            0,
+            $publicationScans,
+            sprintf(
+                '%s must not prefetch published account ids via an unbounded accounts scan. Query log: %s',
+                $surface,
+                $queryLogJson ?: 'null'
+            )
+        );
     }
 
     private function assertMediaUrlHealthy(?string $url): void

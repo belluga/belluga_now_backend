@@ -122,43 +122,14 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
-            ->catalogSnapshot()
-            ->policy();
-        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds();
-        if ($publishedAccountIds === []) {
-            return new LengthAwarePaginator([], 0, $perPage, $page);
-        }
-        $allowedTypes = $publicCatalogPolicy->catalogTypeKeys();
-        $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
+        $envelope = $this->publicPageEnvelope($queryParams, $perPage);
 
-        $query = $this->withoutPublicProfileTypeFilters($queryParams);
-        $taxonomyFilters = $this->resolvePublicTaxonomyFilters($query);
-        $query = $this->withoutPublicTaxonomyFilters($query);
-        $search = trim((string) ($query['search'] ?? ''));
-        unset($query['search']);
-
-        $baseQuery = AccountProfile::query();
-        $publicCatalogPolicy->applyCatalogConstraint($baseQuery);
-        $baseQuery->whereIn('account_id', $publishedAccountIds);
-
-        if ($effectiveTypes === []) {
-            $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
-        } else {
-            $baseQuery->whereIn('profile_type', $effectiveTypes);
-        }
-
-        $this->applyPublicTaxonomyFilter($baseQuery, $taxonomyFilters);
-        $this->applyPublicSearchFilter($baseQuery, $search);
-        $paginator = $this->buildPaginator(
-            $baseQuery,
-            $query,
-            false,
+        return new LengthAwarePaginator(
+            $envelope['data'] ?? [],
+            (int) ($envelope['total'] ?? 0),
             $perPage,
-            $page
+            $page,
         );
-
-        return $this->hydrateOwnershipState($paginator);
     }
 
     /**
@@ -172,18 +143,6 @@ class AccountProfileQueryService extends AbstractQueryService
         $publicCatalogPolicy = $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
             ->policy();
-        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds();
-        if ($publishedAccountIds === []) {
-            return [
-                'data' => [],
-                'current_page' => $page,
-                'per_page' => $perPage,
-                'last_page' => 1,
-                'total' => 0,
-                'has_more' => false,
-                'discovery_filter_facets' => $this->emptyPublicDiscoveryFilterFacetsPayload(),
-            ];
-        }
         $allowedTypes = $publicCatalogPolicy->catalogTypeKeys();
         $requestedTypes = $this->requestedPublicProfileTypes($queryParams);
         $selectedTypes = $this->resolveEffectivePublicProfileTypesFromRequested(
@@ -211,7 +170,6 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $aggregate = $this->runPublicDiscoveryAggregate(
             publicCatalogPolicy: $publicCatalogPolicy,
-            publishedAccountIds: $publishedAccountIds,
             selectedTypes: $selectedTypesForItems,
             taxonomyFilters: $taxonomyFilters,
             search: $search,
@@ -244,7 +202,6 @@ class AccountProfileQueryService extends AbstractQueryService
                 : $repairedSelectedTypes;
             $aggregate = $this->runPublicDiscoveryAggregate(
                 publicCatalogPolicy: $publicCatalogPolicy,
-                publishedAccountIds: $publishedAccountIds,
                 selectedTypes: $repairedSelectedTypesForItems,
                 taxonomyFilters: $repairedSelection['taxonomy'],
                 search: $search,
@@ -338,18 +295,6 @@ class AccountProfileQueryService extends AbstractQueryService
     public function publicNear(array $queryParams): array
     {
         $publicPoiPolicy = $this->publicCatalogSnapshotReader->publicPoiEligibilityPolicy();
-        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds();
-        if ($publishedAccountIds === []) {
-            return [
-                'page' => $this->normalizePublicPage($queryParams['page'] ?? 1),
-                'page_size' => $this->normalizePublicPageSize(
-                    (int) ($queryParams['page_size'] ?? self::PUBLIC_NEAR_PAGE_SIZE_DEFAULT),
-                    self::PUBLIC_NEAR_PAGE_SIZE_DEFAULT
-                ),
-                'has_more' => false,
-                'data' => [],
-            ];
-        }
         $allowedTypes = $publicPoiPolicy->catalogTypeKeys();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $taxonomyFilters = $this->resolvePublicTaxonomyFilters($queryParams);
@@ -381,7 +326,6 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $search = trim((string) ($queryParams['search'] ?? ''));
         $baseMatch = $publicPoiPolicy->matchExpressionForTypeKeys($effectiveTypes);
-        $baseMatch['$and'][] = ['account_id' => ['$in' => $publishedAccountIds]];
         $baseMatch['$and'][] = ['location' => ['$ne' => null]];
         if ($search !== '') {
             $baseMatch['$and'][] = $this->publicSearchExpression($search);
@@ -413,6 +357,7 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $pipeline = [
             ['$geoNear' => $geoNear],
+            ...$this->publishedParentAccountGateStages(),
             ['$sort' => ['distance_meters' => 1, '_id' => 1]],
             ['$skip' => $skip],
             ['$limit' => $limit],
@@ -496,7 +441,6 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     private function runPublicDiscoveryAggregate(
         AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
-        array $publishedAccountIds,
         array $selectedTypes,
         array $taxonomyFilters,
         string $search,
@@ -508,7 +452,6 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $pipeline = $this->buildPublicDiscoveryAggregatePipeline(
             publicCatalogPolicy: $publicCatalogPolicy,
-            publishedAccountIds: $publishedAccountIds,
             selectedTypes: $selectedTypes,
             taxonomyFilters: $taxonomyFilters,
             search: $search,
@@ -540,7 +483,6 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     private function buildPublicDiscoveryAggregatePipeline(
         AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
-        array $publishedAccountIds,
         array $selectedTypes,
         array $taxonomyFilters,
         string $search,
@@ -548,7 +490,6 @@ class AccountProfileQueryService extends AbstractQueryService
         int $limit,
     ): array {
         $baseMatch = $publicCatalogPolicy->catalogMatchExpression();
-        $baseMatch['$and'][] = ['account_id' => ['$in' => $publishedAccountIds]];
 
         if ($search !== '') {
             $baseMatch['$and'][] = $this->publicSearchExpression($search);
@@ -584,7 +525,53 @@ class AccountProfileQueryService extends AbstractQueryService
 
         return [
             ['$match' => $baseMatch],
+            ...$this->publishedParentAccountGateStages(),
             ['$facet' => $facet],
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function publishedParentAccountGateStages(): array
+    {
+        return [
+            [
+                '$lookup' => [
+                    'from' => 'accounts',
+                    'let' => [
+                        'parent_account_id' => '$account_id',
+                    ],
+                    'pipeline' => [
+                        [
+                            '$match' => [
+                                '$expr' => [
+                                    '$eq' => [
+                                        ['$toString' => '$_id'],
+                                        '$$parent_account_id',
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            '$match' => [
+                                'publication.status' => AccountPublicationStateService::PUBLISHED,
+                            ],
+                        ],
+                        [
+                            '$project' => [
+                                '_id' => 1,
+                            ],
+                        ],
+                    ],
+                    'as' => 'published_parent_accounts',
+                ],
+            ],
+            [
+                '$match' => [
+                    'published_parent_accounts.0' => ['$exists' => true],
+                ],
+            ],
         ];
     }
 
