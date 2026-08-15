@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Belluga\MapPois\Application;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use Belluga\MapPois\Application\Concerns\MapPoiQueryFormatting;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
@@ -18,6 +17,7 @@ class MapPoiQueryService
     use MapPoiQueryFormatting;
 
     private const EVENT_DOMINANCE_RADIUS_METERS = 50.0;
+    private const PUBLISHED_ACCOUNT_STATUS = 'published';
 
     public function __construct(
         private readonly MapPoiSettingsContract $settings,
@@ -1168,7 +1168,7 @@ class MapPoiQueryService
                                     ],
                                     [
                                         '$match' => [
-                                            'publication.status' => AccountPublicationStateService::PUBLISHED,
+                                            'publication.status' => self::PUBLISHED_ACCOUNT_STATUS,
                                         ],
                                     ],
                                     [
