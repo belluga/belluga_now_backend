@@ -4779,6 +4779,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $createResponse->assertStatus(201);
+        $accountId = (string) $createResponse->json('data.account.id');
+        Account::query()
+            ->findOrFail($accountId)
+            ->update([
+                'publication' => [
+                    'status' => AccountPublicationStateService::PUBLISHED,
+                    'publish_at' => null,
+                ],
+            ]);
+
         $profileId = (string) $createResponse->json('data.account_profile.id');
         $slug = (string) $createResponse->json('data.account_profile.slug');
         $this->assertNotSame('', $slug);
