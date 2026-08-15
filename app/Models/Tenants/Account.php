@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Context;
 use MongoDB\Laravel\Eloquent\Model;
@@ -27,6 +28,7 @@ class Account extends Model
         'slug',
         'document',
         'ownership_state',
+        'publication',
         'organization_id',
         'created_by',
         'created_by_type',
@@ -36,6 +38,20 @@ class Account extends Model
 
     protected $casts = [
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(static function (self $account): void {
+            if ($account->getAttribute('publication') !== null) {
+                return;
+            }
+
+            $account->setAttribute('publication', [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ]);
+        });
+    }
 
     /**
      * Get the users that belong to this account
