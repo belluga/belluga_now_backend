@@ -1542,9 +1542,34 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ),
             'Public discovery aggregate must join accounts in-pipeline instead of prefetching published account ids.'
         );
+        $this->assertPublishedAccountAggregateUsesObjectIdConversion(
+            $aggregateCalls[0]['pipeline'],
+            'public account profile index',
+        );
         $this->assertNoUnboundedAccountPublicationScan(
             $connection->getQueryLog(),
             'public account profile index',
+        );
+    }
+
+    public function test_public_catalog_profile_resolution_skips_account_scan_when_no_profiles_resolve(): void
+    {
+        $this->createAccountUser([]);
+
+        $service = $this->app->make(AccountProfileQueryService::class);
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $payload = $service->findExistingPublicCatalogProfilesByIds([
+            (string) new ObjectId(),
+            (string) new ObjectId(),
+        ]);
+
+        $this->assertSame([], $payload);
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'public catalog profile resolution',
         );
     }
 
@@ -6945,6 +6970,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 $surface,
                 $queryLogJson ?: 'null'
             )
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $pipeline
+     */
+    private function assertPublishedAccountAggregateUsesObjectIdConversion(array $pipeline, string $surface): void
+    {
+        $serialized = json_encode($pipeline, JSON_UNESCAPED_SLASHES);
+        $this->assertNotFalse($serialized, sprintf('Failed to serialize [%s] aggregate pipeline.', $surface));
+
+        $canonical = str_replace(' ', '', (string) $serialized);
+
+        $this->assertStringContainsString(
+            '"$convert"',
+            $canonical,
+            sprintf('%s must convert string ids to ObjectId inside the lookup pipeline.', $surface)
+        );
+        $this->assertStringNotContainsString(
+            '"$toString":"$_id"',
+            $canonical,
+            sprintf('%s must not stringify foreign _id inside the lookup pipeline.', $surface)
         );
     }
 

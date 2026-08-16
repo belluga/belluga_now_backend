@@ -10,7 +10,7 @@ final class AccountPublicationStateService
 {
     public const string DRAFT = 'draft';
     public const string PUBLISHED = 'published';
-    public const string PUBLISH_SCHEDULED = 'publish_scheduled';
+    private const string LEGACY_PUBLISH_SCHEDULED = 'publish_scheduled';
 
     /**
      * @return array{status:string,publish_at:null}
@@ -58,17 +58,18 @@ final class AccountPublicationStateService
     {
         $status = trim((string) data_get($publication, 'status', ''));
 
-        if (! in_array($status, [
+        if ($status === self::LEGACY_PUBLISH_SCHEDULED) {
+            $status = self::DRAFT;
+        } elseif (! in_array($status, [
             self::DRAFT,
             self::PUBLISHED,
-            self::PUBLISH_SCHEDULED,
         ], true)) {
             $status = self::PUBLISHED;
         }
 
         return [
             'status' => $status,
-            'publish_at' => data_get($publication, 'publish_at'),
+            'publish_at' => null,
         ];
     }
 
@@ -88,10 +89,12 @@ final class AccountPublicationStateService
             $accountIds,
         ), static fn (string $id): bool => $id !== '')));
 
-        $query = Account::query()->select(['_id', 'publication']);
-        if ($normalizedIds !== []) {
-            $query->whereIn('_id', $normalizedIds);
+        if ($normalizedIds === []) {
+            return [];
         }
+
+        $query = Account::query()->select(['_id', 'publication']);
+        $query->whereIn('_id', $normalizedIds);
 
         return $query
             ->get()

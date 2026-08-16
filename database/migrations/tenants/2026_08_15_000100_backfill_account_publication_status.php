@@ -38,6 +38,18 @@ return new class extends Migration
             ],
         );
 
+        $collection->updateMany(
+            [
+                'publication.status' => 'publish_scheduled',
+            ],
+            [
+                '$set' => [
+                    'publication.status' => AccountPublicationStateService::DRAFT,
+                    'publication.publish_at' => null,
+                ],
+            ],
+        );
+
         Schema::table('accounts', static function (Blueprint $collection): void {
             $collection->index(['publication.status' => 1]);
         });

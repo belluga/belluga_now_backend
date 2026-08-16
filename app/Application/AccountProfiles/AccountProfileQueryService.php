@@ -547,8 +547,15 @@ class AccountProfileQueryService extends AbstractQueryService
                             '$match' => [
                                 '$expr' => [
                                     '$eq' => [
-                                        ['$toString' => '$_id'],
-                                        '$$parent_account_id',
+                                        '$_id',
+                                        [
+                                            '$convert' => [
+                                                'input' => '$$parent_account_id',
+                                                'to' => 'objectId',
+                                                'onError' => null,
+                                                'onNull' => null,
+                                            ],
+                                        ],
                                     ],
                                 ],
                             ],
