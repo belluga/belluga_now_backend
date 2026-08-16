@@ -262,6 +262,32 @@ class AccountControllerTest extends TestCase
         );
     }
 
+    public function test_index_normalizes_legacy_publish_scheduled_accounts_to_draft(): void
+    {
+        $legacyAccount = Account::query()->create([
+            'name' => fake()->unique()->company(),
+            'document' => strtoupper(fake()->bothify('LEGACY########')),
+            'ownership_state' => 'tenant_owned',
+            'publication' => [
+                'status' => 'publish_scheduled',
+                'publish_at' => '2026-08-16T12:00:00Z',
+            ],
+        ]);
+
+        $response = $this->getJson($this->tenantAccountsAdminUrl);
+
+        $response->assertOk();
+        $items = collect($response->json('data'));
+        $legacyItem = $items->firstWhere('id', (string) $legacyAccount->getAttribute('_id'));
+
+        $this->assertIsArray($legacyItem);
+        $this->assertSame(
+            AccountPublicationStateService::DRAFT,
+            data_get($legacyItem, 'publication.status'),
+        );
+        $this->assertNull(data_get($legacyItem, 'publication.publish_at'));
+    }
+
     public function test_index_filters_by_unmanaged_ownership_state(): void
     {
         $unmanagedName = fake()->unique()->company();

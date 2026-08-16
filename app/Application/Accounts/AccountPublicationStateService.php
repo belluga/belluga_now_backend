@@ -10,6 +10,7 @@ final class AccountPublicationStateService
 {
     public const string DRAFT = 'draft';
     public const string PUBLISHED = 'published';
+    private const string LEGACY_PUBLISH_SCHEDULED = 'publish_scheduled';
 
     /**
      * @return array{status:string,publish_at:null}
@@ -57,7 +58,9 @@ final class AccountPublicationStateService
     {
         $status = trim((string) data_get($publication, 'status', ''));
 
-        if (! in_array($status, [
+        if ($status === self::LEGACY_PUBLISH_SCHEDULED) {
+            $status = self::DRAFT;
+        } elseif (! in_array($status, [
             self::DRAFT,
             self::PUBLISHED,
         ], true)) {
