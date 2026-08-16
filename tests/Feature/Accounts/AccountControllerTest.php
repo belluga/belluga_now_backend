@@ -471,7 +471,6 @@ class AccountControllerTest extends TestCase
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
                 'status' => AccountPublicationStateService::PUBLISHED,
-                'publish_at' => null,
             ],
         ]);
 
@@ -486,6 +485,27 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::PUBLISHED,
             data_get($updated->getAttribute('publication'), 'status'),
         );
+    }
+
+    public function test_update_rejects_publish_scheduled_account_publication_status(): void
+    {
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+        $createResponse->assertCreated();
+        $accountSlug = $createResponse->json('data.account.slug');
+
+        $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'status' => 'publish_scheduled',
+                'publish_at' => '2026-08-16T12:00:00Z',
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['publication.status']);
     }
 
     public function test_delete_rejects_non_unmanaged_account(): void

@@ -41,9 +41,7 @@ class AccountUpdateRequest extends FormRequest
             'publication' => 'sometimes|array',
             'publication.status' => 'required_with:publication|string|in:'
                 .AccountPublicationStateService::DRAFT.','
-                .AccountPublicationStateService::PUBLISHED.','
-                .AccountPublicationStateService::PUBLISH_SCHEDULED,
-            'publication.publish_at' => 'sometimes|nullable|date',
+                .AccountPublicationStateService::PUBLISHED,
         ];
     }
 

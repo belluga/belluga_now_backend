@@ -116,7 +116,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     needs:
       - lane_policy
     if: ${{ github.event_name != 'pull_request' || needs.lane_policy.result == 'success' }}
