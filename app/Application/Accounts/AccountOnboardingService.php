@@ -24,6 +24,7 @@ class AccountOnboardingService
 {
     public function __construct(
         private readonly AccountManagementService $accountService,
+        private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly AccountProfileManagementService $profileService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileRegistrySeeder $registrySeeder,
@@ -68,6 +69,7 @@ class AccountOnboardingService
                 $accountResult = $this->accountService->createWithinCurrentTransaction([
                     'name' => $payload['name'],
                     'ownership_state' => $payload['ownership_state'],
+                    'publication' => $this->accountPublicationStateService->draftPublication(),
                     'created_by' => $payload['created_by'] ?? null,
                     'created_by_type' => $payload['created_by_type'] ?? null,
                     'updated_by' => $payload['updated_by'] ?? null,
