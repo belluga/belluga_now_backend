@@ -1052,6 +1052,46 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertSame((string) $this->receiver->_id, (string) $directoryRow->matched_user_id);
     }
 
+    public function test_contacts_import_accepts_large_hashed_batch_and_reimport_upserts_directory_rows(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $this->accountProfileIdFor($this->receiver);
+
+        $matchedHash = hash('sha256', strtolower(trim((string) $this->receiver->emails[0])));
+        $contacts = [
+            ['type' => 'email', 'hash' => $matchedHash],
+        ];
+        for ($index = 1; $index < 2170; $index++) {
+            $contacts[] = [
+                'type' => 'email',
+                'hash' => hash('sha256', 'g34-unmatched-'.$index.'@example.org'),
+            ];
+        }
+
+        $importResponse = $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => $contacts,
+        ]);
+
+        $importResponse->assertOk();
+        $importResponse->assertJsonPath('matches.0.user_id', (string) $this->receiver->_id);
+        $this->assertSame(2170, ContactHashDirectory::query()->count());
+
+        $reimportResponse = $this->postJson("{$this->base_api_tenant}contacts/import", [
+            'contacts' => [
+                ['type' => 'email', 'hash' => $matchedHash],
+            ],
+        ]);
+
+        $reimportResponse->assertOk();
+        $this->assertSame(2170, ContactHashDirectory::query()->count());
+        $directoryRow = ContactHashDirectory::query()
+            ->where('importing_user_id', (string) $this->sender->_id)
+            ->where('contact_hash', $matchedHash)
+            ->first();
+        $this->assertNotNull($directoryRow);
+        $this->assertSame((string) $this->receiver->_id, (string) $directoryRow->matched_user_id);
+    }
+
     public function test_share_materialize_rejects_anonymous_user(): void
     {
         Sanctum::actingAs($this->sender, ['*']);
