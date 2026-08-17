@@ -19,8 +19,8 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
 
@@ -117,6 +117,44 @@ class EventManagementService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function createOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $label,
+    ): array {
+        $createdGroup = $this->eventAggregateWrites->createOccurrenceGroup(
+            $event,
+            $occurrence,
+            $label,
+        );
+
+        $this->events->dispatch(new EventUpdated((string) $event->_id));
+
+        return $createdGroup;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function deleteOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+    ): array {
+        $result = $this->eventAggregateWrites->deleteOccurrenceGroup(
+            $event,
+            $occurrence,
+            $groupId,
+        );
+
+        $this->events->dispatch(new EventUpdated((string) $event->_id));
+
+        return $result;
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array{
      *   payload: array<string, mixed>,
@@ -139,7 +177,12 @@ class EventManagementService
         }
         if (array_key_exists('event_parties', $payload)) {
             throw ValidationException::withMessages([
-                'event_parties' => ['The legacy event_parties field was removed from normal writes; use profile_groups.'],
+                'event_parties' => ['The legacy event_parties field was removed from normal writes; use the dedicated occurrence group endpoints.'],
+            ]);
+        }
+        if (array_key_exists('profile_groups', $payload)) {
+            throw ValidationException::withMessages([
+                'profile_groups' => ['Related-account group heads must be managed through the dedicated occurrence endpoints.'],
             ]);
         }
 
@@ -309,7 +352,12 @@ class EventManagementService
             }
             if (array_key_exists('event_parties', $occurrence)) {
                 throw ValidationException::withMessages([
-                    "occurrences.{$index}.event_parties" => ['The legacy event_parties field was removed from normal writes; use profile_groups.'],
+                    "occurrences.{$index}.event_parties" => ['The legacy event_parties field was removed from normal occurrence writes; use the dedicated occurrence group endpoints.'],
+                ]);
+            }
+            if (array_key_exists('profile_groups', $occurrence)) {
+                throw ValidationException::withMessages([
+                    "occurrences.{$index}.profile_groups" => ['Related-account group heads must be managed through the dedicated occurrence endpoints.'],
                 ]);
             }
 

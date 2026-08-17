@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
@@ -13,6 +14,7 @@ class AccountProfileFormatterService
 {
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService,
+        private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
@@ -36,7 +38,11 @@ class AccountProfileFormatterService
         $account = Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
         $publicCatalogPolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile)
+            && $account instanceof Account
+            && $this->accountPublicationStateService->isPublished(
+                $account->getAttribute('publication')
+            );
 
         $nestedProfileGroups = $includeAgendaOccurrences
             ? $this->nestedPublicMembersProjectionService->publicMetadataGroups($profile)

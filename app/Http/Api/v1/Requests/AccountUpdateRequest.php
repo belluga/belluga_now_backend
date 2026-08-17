@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -37,6 +38,10 @@ class AccountUpdateRequest extends FormRequest
             'document.number' => 'required_with:document.type|string|max:'.InputConstraints::NAME_MAX,
             'organization_id' => 'sometimes|string|size:'.InputConstraints::OBJECT_ID_LENGTH,
             'ownership_state' => 'sometimes|string|in:tenant_owned,unmanaged',
+            'publication' => 'sometimes|array',
+            'publication.status' => 'required_with:publication|string|in:'
+                .AccountPublicationStateService::DRAFT.','
+                .AccountPublicationStateService::PUBLISHED,
         ];
     }
 

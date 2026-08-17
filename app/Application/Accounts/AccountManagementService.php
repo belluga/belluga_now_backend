@@ -26,6 +26,7 @@ class AccountManagementService
     public function __construct(
         private readonly AccountQueryService $accountQueryService,
         private readonly AccountOwnershipStateService $ownershipStateService,
+        private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly MapPoiProjectionService $mapPoiProjectionService,
         private readonly PushUserGatewayContract $pushUsers,
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
@@ -79,6 +80,7 @@ class AccountManagementService
     {
         $ownershipIntent = $this->resolveOwnershipIntent($payload);
         $payload = $this->applyOwnershipIntent($payload, $ownershipIntent);
+        $payload = $this->accountPublicationStateService->applyCreatePublication($payload);
         $account = Account::create($payload);
 
         $role = $account->roleTemplates()->create([
@@ -157,6 +159,12 @@ class AccountManagementService
             if ($normalizedOwnershipState === AccountOwnershipStateService::UNMANAGED) {
                 $attributes['organization_id'] = null;
             }
+        }
+
+        if (array_key_exists('publication', $attributes)) {
+            $attributes['publication'] = $this->accountPublicationStateService->normalizePublication(
+                $attributes['publication']
+            );
         }
 
         try {

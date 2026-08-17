@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMapPoiOutboxConsumer;
+use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileOutboxPublisher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -15,6 +16,7 @@ use App\Application\AccountProfiles\AccountProfileTransactionContext;
 use App\Application\AccountProfiles\AccountProfileTransactionRetryPolicy;
 use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Application\Accounts\AccountManagementService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -75,6 +77,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
+        Sanctum::actingAs(
+            LandlordUser::query()->firstOrFail(),
+            [
+                'account-users:view',
+                'account-users:create',
+                'account-users:update',
+                'account-users:delete',
+            ]
+        );
 
         AccountProfile::query()->delete();
         TaxonomyTerm::query()->delete();
@@ -132,13 +143,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_profile_index_accessible_for_account_user(): void
     {
-        $user = $this->createAccountUser([]);
+        $this->createAccountUser([]);
 
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'Profile Viewer',
+            'slug' => 'profile-viewer',
+            'visibility' => 'public',
             'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
         ]);
 
         $response = $this->getJson("{$this->base_api_tenant}account_profiles");
@@ -1397,6 +1414,243 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->getJson("{$this->base_api_tenant}account_profiles/{$profile->slug}")
             ->assertStatus(200)
             ->assertJsonPath('data.profile_type', 'navigable_non_favoritable');
+    }
+
+    public function test_public_account_profile_catalog_and_detail_exclude_profiles_whose_parent_account_is_draft(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'draft_hidden_profile',
+            'label' => 'Draft Hidden Profile',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+            ],
+        ]);
+
+        $draftAccount = Account::create([
+            'name' => 'Draft Hidden Account',
+            'document' => 'DOC-DRAFT-HIDDEN',
+            'publication' => [
+                'status' => 'draft',
+                'publish_at' => null,
+            ],
+        ]);
+        $draftProfile = AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'draft_hidden_profile',
+            'display_name' => 'Draft Hidden Profile',
+            'slug' => 'draft-hidden-profile',
+            'is_active' => true,
+            'visibility' => 'public',
+        ]);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles")
+            ->assertStatus(200)
+            ->assertJsonMissing([
+                'slug' => $draftProfile->slug,
+            ]);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/{$draftProfile->slug}")
+            ->assertStatus(404);
+    }
+
+    public function test_public_account_profile_index_filters_parent_publication_in_aggregate_without_unbounded_account_scan(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'aggregate_guard_profile',
+            'label' => 'Aggregate Guard Profile',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+            ],
+        ]);
+
+        $publishedAccount = Account::create([
+            'name' => 'Aggregate Guard Published Account',
+            'document' => 'DOC-AGGREGATE-GUARD-PUBLISHED',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $draftAccount = Account::create([
+            'name' => 'Aggregate Guard Draft Account',
+            'document' => 'DOC-AGGREGATE-GUARD-DRAFT',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $publishedAccount->_id,
+            'profile_type' => 'aggregate_guard_profile',
+            'display_name' => 'Aggregate Guard Published',
+            'slug' => 'aggregate-guard-published',
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'aggregate_guard_profile',
+            'display_name' => 'Aggregate Guard Draft',
+            'slug' => 'aggregate-guard-draft',
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+
+        $aggregateCalls = [];
+        EventBus::listen(
+            'account_profiles.public_discovery_aggregate',
+            static function (string $purpose, array $pipeline) use (&$aggregateCalls): void {
+                $aggregateCalls[] = [
+                    'purpose' => $purpose,
+                    'pipeline' => $pipeline,
+                ];
+            }
+        );
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles?profile_type=aggregate_guard_profile"
+        );
+
+        $response->assertStatus(200);
+        $response->assertJsonCount(1, 'data');
+        $response->assertJsonPath('data.0.slug', 'aggregate-guard-published');
+        $response->assertJsonMissing([
+            'slug' => 'aggregate-guard-draft',
+        ]);
+
+        $this->assertCount(1, $aggregateCalls);
+        $this->assertTrue(
+            collect($aggregateCalls[0]['pipeline'])->contains(
+                static fn (array $stage): bool => ($stage['$lookup']['from'] ?? null) === 'accounts'
+            ),
+            'Public discovery aggregate must join accounts in-pipeline instead of prefetching published account ids.'
+        );
+        $this->assertPublishedAccountAggregateUsesObjectIdConversion(
+            $aggregateCalls[0]['pipeline'],
+            'public account profile index',
+        );
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'public account profile index',
+        );
+    }
+
+    public function test_public_catalog_profile_resolution_skips_account_scan_when_no_profiles_resolve(): void
+    {
+        $this->createAccountUser([]);
+
+        $service = $this->app->make(AccountProfileQueryService::class);
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $payload = $service->findExistingPublicCatalogProfilesByIds([
+            (string) new ObjectId(),
+            (string) new ObjectId(),
+        ]);
+
+        $this->assertSame([], $payload);
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'public catalog profile resolution',
+        );
+    }
+
+    public function test_public_account_profile_near_avoids_unbounded_account_publication_scan(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::create([
+            'type' => 'near_guard_profile',
+            'label' => 'Near Guard Profile',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $publishedAccount = Account::create([
+            'name' => 'Near Guard Published Account',
+            'document' => 'DOC-NEAR-GUARD-PUBLISHED',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $draftAccount = Account::create([
+            'name' => 'Near Guard Draft Account',
+            'document' => 'DOC-NEAR-GUARD-DRAFT',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        AccountProfile::create([
+            'account_id' => (string) $publishedAccount->_id,
+            'profile_type' => 'near_guard_profile',
+            'display_name' => 'Near Guard Published',
+            'slug' => 'near-guard-published',
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0002, -20.0002],
+            ],
+            'is_active' => true,
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'near_guard_profile',
+            'display_name' => 'Near Guard Draft',
+            'slug' => 'near-guard-draft',
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
+            'is_active' => true,
+        ]);
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10&profile_type=near_guard_profile"
+        );
+
+        $response->assertStatus(200);
+        $items = collect($response->json('data'));
+        $this->assertCount(1, $items);
+        $this->assertSame('Near Guard Published', $items->first()['display_name'] ?? null);
+        $this->assertFalse(
+            $items->contains(static fn (array $item): bool => ($item['slug'] ?? null) === 'near-guard-draft')
+        );
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'public account profile near',
+        );
     }
 
     public function test_public_account_profile_index_allows_filter_for_publicly_discoverable_non_favoritable_type(): void
@@ -4005,15 +4259,47 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $profileId = (string) $response->json('data.account_profile.id');
         $profile = AccountProfile::query()->findOrFail($profileId);
+        $account = Account::query()->findOrFail((string) $profile->account_id);
         $profile->profile_type = 'venue';
         $profile->visibility = 'public';
         $profile->is_active = true;
         $profile->save();
+        $account->publication = [
+            'status' => 'published',
+            'publish_at' => null,
+        ];
+        $account->save();
 
         $this->assertMediaUrlHealthy($avatarUrl);
         $this->assertMediaUrlHealthy($coverUrl);
         $this->assertMediaStored($profileId, 'avatar');
         $this->assertMediaStored($profileId, 'cover');
+    }
+
+    public function test_avatar_and_cover_media_of_draft_account_return_404(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Profile Media Draft Gate',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'document' => 'DOC-DRAFT-MEDIA-'.uniqid('', true),
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $avatarUrl = $response->json('data.account_profile.avatar_url');
+        $coverUrl = $response->json('data.account_profile.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
     }
 
     public function test_avatar_and_cover_media_are_not_publicly_served_when_profile_is_not_publicly_exposed(): void
@@ -4039,8 +4325,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($coverUrl);
 
         $profile = AccountProfile::query()->findOrFail($profileId);
-        $this->assertMediaUrlAccess($avatarUrl, 404);
-        $this->assertMediaUrlAccess($coverUrl, 404);
+        $account = Account::query()->findOrFail((string) $profile->account_id);
+        $account->publication = [
+            'status' => AccountPublicationStateService::PUBLISHED,
+            'publish_at' => null,
+        ];
+        $account->save();
 
         $profile->visibility = 'friends_only';
         $profile->save();
@@ -4544,6 +4834,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $createResponse->assertStatus(201);
+        $accountId = (string) $createResponse->json('data.account.id');
+        Account::query()
+            ->findOrFail($accountId)
+            ->update([
+                'publication' => [
+                    'status' => AccountPublicationStateService::PUBLISHED,
+                    'publish_at' => null,
+                ],
+            ]);
+
         $profileId = (string) $createResponse->json('data.account_profile.id');
         $slug = (string) $createResponse->json('data.account_profile.slug');
         $this->assertNotSame('', $slug);
@@ -5322,7 +5622,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['slug']);
     }
 
-    public function test_account_profile_update_persists_nested_profile_group_metadata_and_member_deltas_in_order(): void
+    public function test_account_profile_group_head_endpoints_persist_metadata_and_member_deltas_in_order(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -5337,39 +5637,34 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $partnerB = $this->createNestedProfileFixture('Nested Partner B', 'nested-partner-b');
         $sponsor = $this->createNestedProfileFixture('Nested Sponsor', 'nested-sponsor');
 
-        $response = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
+        $partnersCreate = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups',
             [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'patrocinadores',
-                        'label' => 'Patrocinadores',
-                        'order' => 1,
-                    ],
-                    [
-                        'id' => 'parceiros',
-                        'label' => 'Parceiros',
-                        'order' => 0,
-                    ],
-                ],
+                'label' => 'Parceiros',
             ],
             $this->getHeaders()
         );
+        $partnersCreate->assertCreated();
+        $partnersCreate->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $partnersCreate->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
+        $partnersCreate->assertJsonPath('data.nested_profile_groups.0.member_count', 0);
 
-        $response->assertStatus(200);
-        $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
-        $response->assertJsonPath('data.nested_profile_groups.0.label', 'Parceiros');
-        $response->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
-        $response->assertJsonPath('data.nested_profile_groups.0.member_count', 0);
-        $response->assertJsonPath('data.nested_profile_groups.1.member_count', 0);
-
-        $metadataRevision = (int) $response->json('data.aggregate_revision');
+        $sponsorsCreate = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups',
+            [
+                'label' => 'Patrocinadores',
+            ],
+            $this->getHeaders()
+        );
+        $sponsorsCreate->assertCreated();
+        $sponsorsCreate->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
+        $sponsorsCreate->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
+        $sponsorsCreate->assertJsonPath('data.nested_profile_groups.0.member_count', 0);
+        $sponsorsCreate->assertJsonPath('data.nested_profile_groups.1.member_count', 0);
 
         $partnersDelta = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => $metadataRevision,
                 'add_ids' => [
                     (string) $partnerB->_id,
                     (string) $partnerA->_id,
@@ -5383,7 +5678,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sponsorsDelta = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/patrocinadores/members',
             [
-                'aggregate_revision' => (int) $partnersDelta->json('data.aggregate_revision'),
                 'add_ids' => [(string) $sponsor->_id],
             ],
             $this->getHeaders()
@@ -5397,7 +5691,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $readback->assertStatus(200);
-        $readback->assertJsonPath('data.aggregate_revision', (int) $sponsorsDelta->json('data.aggregate_revision'));
+        $readback->assertJsonPath('data.aggregate_revision', (int) ($parent->fresh()->aggregate_revision ?? 0));
         $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
         $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
         $readback->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
@@ -5416,7 +5710,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
         $partnersPage->assertOk();
-        $partnersPage->assertJsonPath('aggregate_revision', (int) $sponsorsDelta->json('data.aggregate_revision'));
         $partnersPage->assertJsonPath('data.0.id', (string) $partnerB->_id);
         $partnersPage->assertJsonPath('data.1.id', (string) $partnerA->_id);
 
@@ -5463,7 +5756,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['nested_profile_groups.0.account_profile_ids']);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
     }
 
     public function test_relation_admission_touches_contact_and_nested_targets_before_the_parent_commit(): void
@@ -5494,26 +5787,29 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
                 'contact_mode' => 'mirrored_account_profile',
                 'contact_source_account_profile_id' => (string) $contactSource->_id,
-                'nested_profile_groups' => [[
-                    'id' => 'admitted-members',
-                    'label' => 'Admitted members',
-                ]],
             ],
             $this->getHeaders(),
         );
 
         $response->assertOk();
+        $metadataResponse = $this->createNestedGroupHead(
+            $parent,
+            'Admitted members',
+            (int) ($response->json('data.aggregate_revision') ?? 0),
+        );
+        $metadataResponse->assertCreated();
+        $revisionBeforeDelta = (int) ($parent->fresh()->aggregate_revision ?? 0);
+
         $delta = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/admitted-members/members",
             [
-                'aggregate_revision' => (int) $response->json('data.aggregate_revision'),
                 'add_ids' => [(string) $nestedMember->_id],
             ],
             $this->getHeaders(),
         );
 
         $delta->assertOk();
-        $this->assertSame((int) $delta->json('data.aggregate_revision'), (int) $parent->fresh()->aggregate_revision);
+        $this->assertGreaterThan($revisionBeforeDelta, (int) ($parent->fresh()->aggregate_revision ?? 0));
         $this->assertSame(1, (int) $contactSource->fresh()->lifecycle_fence_revision);
         $this->assertSame(1, (int) $nestedMember->fresh()->lifecycle_fence_revision);
     }
@@ -5591,15 +5887,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $tenantA->makeCurrent();
+        $groupCreate = $this->createNestedGroupHead(
+            $parent,
+            'Cross tenant members',
+            max(1, (int) ($parent->fresh()?->aggregate_revision ?? 1)),
+        );
+        $groupCreate->assertCreated();
+        $parentBefore = $parent->fresh()->only(array_keys($parentBefore));
+
         $nestedCommandId = 'u07a-cross-tenant-nested-'.uniqid('', true);
         $nestedResponse = $this->patchJson(
-            $tenantAUrl,
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/cross-tenant-members/members",
             [
-                'nested_profile_groups' => [[
-                    'id' => 'cross-tenant-members',
-                    'label' => 'Cross tenant members',
-                    'account_profile_ids' => [$tenantBProfileId],
-                ]],
+                'add_ids' => [$tenantBProfileId],
             ],
             [...$this->getHeaders(), 'X-Request-Id' => $nestedCommandId],
         );
@@ -5661,23 +5961,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $metadataResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [[
-                    'id' => 'cascade-members',
-                    'label' => 'Cascade Members',
-                ]],
-            ],
-            $this->getHeaders(),
+        $metadataResponse = $this->createNestedGroupHead(
+            $parent,
+            'Cascade Members',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadataResponse->assertOk();
+        $metadataResponse->assertCreated();
 
         $memberResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/cascade-members/members',
             [
-                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $target->_id, (string) $surviving->_id],
             ],
             $this->getHeaders(),
@@ -5744,23 +6037,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $metadataResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [[
-                    'id' => 'direct-members',
-                    'label' => 'Direct Members',
-                ]],
-            ],
-            $this->getHeaders(),
+        $metadataResponse = $this->createNestedGroupHead(
+            $parent,
+            'Direct Members',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadataResponse->assertOk();
+        $metadataResponse->assertCreated();
 
         $memberResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/direct-members/members',
             [
-                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $target->_id],
             ],
             $this->getHeaders(),
@@ -5847,24 +6133,30 @@ class AccountProfilesControllerTest extends TestCaseTenant
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
             [
                 'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [[
-                    'id' => 'linked',
-                    'label' => 'Linked profiles',
-                    'order' => 0,
-                ]],
                 'contact_mode' => 'mirrored_account_profile',
                 'contact_source_account_profile_id' => (string) $contactSource->_id,
             ],
             $this->getHeaders(),
         );
         $metadataResponse->assertOk();
+        $linkedGroupResponse = $this->createNestedGroupHead(
+            $parent,
+            'Linked profiles',
+            (int) ($metadataResponse->json('data.aggregate_revision') ?? 0),
+        );
+        $linkedGroupResponse->assertCreated();
+        $linkedGroupId = (string) (
+            collect($linkedGroupResponse->json('data.nested_profile_groups', []))
+                ->firstWhere('label', 'Linked profiles')['id'] ?? ''
+        );
+        $this->assertNotSame('', $linkedGroupId);
 
         $collection = DB::connection('tenant')->getDatabase()
             ->selectCollection('accounts_nested');
         $groupHead = $collection->findOne([
             'parent_type' => 'account_profile',
             'parent_id' => (string) $parent->_id,
-            'group_key' => 'linked',
+            'group_key' => $linkedGroupId,
             'doc_type' => 'group_head',
         ]);
         $this->assertNotNull($groupHead);
@@ -5875,16 +6167,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'tenant_id' => $tenantId,
             'parent_type' => 'account_profile',
             'parent_id' => (string) $parent->_id,
-            'group_key' => 'linked',
+            'group_key' => $linkedGroupId,
             'doc_type' => 'member_row',
         ]);
         $collection->insertMany([
             [
-                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.(string) $queryable->_id,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':'.$linkedGroupId.':'.(string) $queryable->_id,
                 'tenant_id' => $tenantId,
                 'parent_type' => 'account_profile',
                 'parent_id' => (string) $parent->_id,
-                'group_key' => 'linked',
+                'group_key' => $linkedGroupId,
                 'group_label' => 'Linked profiles',
                 'group_order' => 0,
                 'item_order' => 0,
@@ -5893,11 +6185,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
             [
-                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.(string) $inactive->_id,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':'.$linkedGroupId.':'.(string) $inactive->_id,
                 'tenant_id' => $tenantId,
                 'parent_type' => 'account_profile',
                 'parent_id' => (string) $parent->_id,
-                'group_key' => 'linked',
+                'group_key' => $linkedGroupId,
                 'group_label' => 'Linked profiles',
                 'group_order' => 0,
                 'item_order' => 1,
@@ -5906,11 +6198,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
             [
-                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.(string) $deleted->_id,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':'.$linkedGroupId.':'.(string) $deleted->_id,
                 'tenant_id' => $tenantId,
                 'parent_type' => 'account_profile',
                 'parent_id' => (string) $parent->_id,
-                'group_key' => 'linked',
+                'group_key' => $linkedGroupId,
                 'group_label' => 'Linked profiles',
                 'group_order' => 0,
                 'item_order' => 2,
@@ -5919,11 +6211,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'updated_at' => $groupHead['updated_at'] ?? null,
             ],
             [
-                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':linked:'.$missingId,
+                '_id' => 'accounts-nested:test:'.(string) $parent->_id.':'.$linkedGroupId.':'.$missingId,
                 'tenant_id' => $tenantId,
                 'parent_type' => 'account_profile',
                 'parent_id' => (string) $parent->_id,
-                'group_key' => 'linked',
+                'group_key' => $linkedGroupId,
                 'group_label' => 'Linked profiles',
                 'group_order' => 0,
                 'item_order' => 3,
@@ -5939,7 +6231,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
-        $response->assertJsonPath('data.nested_profile_groups.0.id', 'linked');
+        $response->assertJsonPath('data.nested_profile_groups.0.id', $linkedGroupId);
         $response->assertJsonPath('data.nested_profile_groups.0.label', 'Linked profiles');
         $response->assertJsonPath('data.nested_profile_groups.0.member_count', 4);
         $response->assertJsonMissingPath('data.nested_profile_groups.0.account_profile_summaries');
@@ -5951,7 +6243,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
 
         $membersResponse = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/linked/members',
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id."/nested_profile_groups/{$linkedGroupId}/members",
             $this->getHeaders(),
         );
 
@@ -5995,25 +6287,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ])->fresh();
         $partner = $this->createNestedProfileFixture('Nested Duplicate', 'nested-duplicate');
 
-        $metadataResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'parceiros',
-                        'label' => 'Parceiros',
-                    ],
-                ],
-            ],
-            $this->getHeaders()
+        $metadataResponse = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadataResponse->assertOk();
+        $metadataResponse->assertCreated();
 
         $duplicate = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [
                     (string) $partner->_id,
                     (string) $partner->_id,
@@ -6035,7 +6318,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $selfLink = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => (int) $duplicate->json('data.aggregate_revision'),
                 'add_ids' => [(string) $parent->_id],
             ],
             $this->getHeaders()
@@ -6068,25 +6350,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['profile_type' => 'hidden_guest']
         );
 
-        $metadataResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'parceiros',
-                        'label' => 'Parceiros',
-                    ],
-                ],
-            ],
-            $this->getHeaders()
+        $metadataResponse = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadataResponse->assertOk();
+        $metadataResponse->assertCreated();
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $hiddenMember->_id],
             ],
             $this->getHeaders()
@@ -6112,25 +6385,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['visibility' => 'private']
         );
 
-        $metadataResponse = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'parceiros',
-                        'label' => 'Parceiros',
-                    ],
-                ],
-            ],
-            $this->getHeaders()
+        $metadataResponse = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadataResponse->assertOk();
+        $metadataResponse->assertCreated();
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => (int) $metadataResponse->json('data.aggregate_revision'),
                 'add_ids' => [(string) $privateMember->_id],
             ],
             $this->getHeaders()
@@ -6151,22 +6415,100 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'visibility' => 'public',
         ])->fresh();
 
-        $groups = [];
-        for ($index = 0; $index <= InputConstraints::ACCOUNT_PROFILE_NESTED_GROUPS_MAX; $index++) {
-            $groups[] = [
-                'id' => "grupo-{$index}",
-                'label' => "Grupo {$index}",
-                'account_profile_ids' => [],
-            ];
+        for ($index = 0; $index < InputConstraints::ACCOUNT_PROFILE_NESTED_GROUPS_MAX; $index++) {
+            $created = $this->createNestedGroupHead(
+                $parent,
+                "Grupo {$index}",
+                max(1, (int) ($parent->fresh()->aggregate_revision ?? 1)),
+            );
+            $created->assertCreated();
         }
 
-        $response = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            ['nested_profile_groups' => $groups],
-            $this->getHeaders()
+        $response = $this->createNestedGroupHead(
+            $parent,
+            'Grupo excedente',
+            max(1, (int) ($parent->fresh()->aggregate_revision ?? 1)),
         );
 
         $response->assertStatus(422);
+    }
+
+    public function test_account_profile_delete_rejects_nested_profile_group_over_budget_member_fanout(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Delete Budget Parent',
+            'slug' => 'nested-delete-budget-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $created = $this->createNestedGroupHead($parent, 'Budget Members');
+        $created->assertCreated();
+
+        $groupId = 'budget-members';
+        $tenantId = (string) Tenant::current()->getKey();
+        $parentId = (string) $parent->getKey();
+        $memberIds = array_map(
+            static fn (): string => (string) new ObjectId,
+            range(1, InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1),
+        );
+
+        $rows = [];
+        foreach ($memberIds as $position => $memberId) {
+            $rows[] = [
+                '_id' => "account_profile:{$parentId}:{$groupId}:{$memberId}",
+                'tenant_id' => $tenantId,
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                'parent_id' => $parentId,
+                'group_key' => $groupId,
+                'group_label' => 'Budget Members',
+                'group_order' => 0,
+                'item_order' => $position,
+                'doc_type' => 'member_row',
+                'nested_profile' => ['id' => $memberId],
+            ];
+        }
+
+        DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
+            ->insertMany($rows);
+
+        $response = $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parentId}/nested_profile_groups/{$groupId}",
+            [],
+            $this->getHeaders(),
+        );
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['nested_profile_groups']);
+
+        $readback = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parentId}",
+            $this->getHeaders(),
+        );
+        $readback->assertOk();
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', $groupId);
+        $readback->assertJsonPath(
+            'data.nested_profile_groups.0.member_count',
+            InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
+        );
+
+        $this->assertSame(
+            InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
+            DB::connection('tenant')
+                ->getDatabase()
+                ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
+                ->countDocuments([
+                    'tenant_id' => $tenantId,
+                    'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                    'parent_id' => $parentId,
+                    'group_key' => $groupId,
+                    'doc_type' => 'member_row',
+                ]),
+        );
     }
 
     public function test_account_profile_update_rejects_nested_profile_groups_when_type_capability_is_disabled(): void
@@ -6190,20 +6532,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_active' => true,
             'visibility' => 'public',
         ])->fresh();
-        $partner = $this->createNestedProfileFixture('Disabled Partner', 'disabled-partner');
-
-        $response = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'parceiros',
-                        'label' => 'Parceiros',
-                    ],
-                ],
-            ],
-            $this->getHeaders()
+        $response = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
 
         $response->assertStatus(422);
@@ -6223,36 +6555,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $partnerA = $this->createNestedProfileFixture('Public Partner A', 'public-partner-a');
         $partnerB = $this->createNestedProfileFixture('Public Partner B', 'public-partner-b');
-        $metadata = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [
-                    [
-                        'id' => 'vazio',
-                        'label' => 'Vazio',
-                        'order' => 0,
-                    ],
-                    [
-                        'id' => 'parceiros',
-                        'label' => 'Parceiros',
-                        'order' => 1,
-                    ],
-                    [
-                        'id' => 'privados',
-                        'label' => 'Privados',
-                        'order' => 2,
-                    ],
-                ],
-            ],
-            $this->getHeaders()
+        $emptyGroup = $this->createNestedGroupHead(
+            $parent,
+            'Vazio',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadata->assertStatus(200);
+        $emptyGroup->assertCreated();
+        $partnersGroup = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->fresh()->aggregate_revision ?? 1)),
+        );
+        $partnersGroup->assertCreated();
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Privados',
+            max(1, (int) ($parent->fresh()->aggregate_revision ?? 1)),
+        );
+        $metadata->assertCreated();
 
         $partnersDelta = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => (int) $metadata->json('data.aggregate_revision'),
                 'add_ids' => [
                     (string) $partnerB->_id,
                     (string) $partnerA->_id,
@@ -6331,24 +6655,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'visibility' => 'public',
         ])->fresh();
 
-        $metadata = $this->patchJson(
-            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id,
-            [
-                'aggregate_revision' => max(1, (int) ($parent->aggregate_revision ?? 1)),
-                'nested_profile_groups' => [[
-                    'id' => 'parceiros',
-                    'label' => 'Parceiros',
-                    'order' => 0,
-                ]],
-            ],
-            $this->getHeaders()
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
         );
-        $metadata->assertOk();
+        $metadata->assertCreated();
 
         $delta = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
             [
-                'aggregate_revision' => (int) $metadata->json('data.aggregate_revision'),
                 'add_ids' => [(string) $navigableMember->_id],
             ],
             $this->getHeaders()
@@ -6585,6 +6901,17 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ], $overrides))->fresh();
     }
 
+    private function createNestedGroupHead(AccountProfile $parent, string $label, ?int $aggregateRevision = null)
+    {
+        return $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups',
+            [
+                'label' => $label,
+            ],
+            $this->getHeaders(),
+        );
+    }
+
     private function enableContactChannelsCapability(string $type): void
     {
         $profileType = TenantProfileType::query()->where('type', $type)->firstOrFail();
@@ -6640,6 +6967,64 @@ class AccountProfilesControllerTest extends TestCaseTenant
         return $user;
     }
 
+    /**
+     * @param  array<int, mixed>  $queryLog
+     */
+    private function assertNoUnboundedAccountPublicationScan(array $queryLog, string $surface): void
+    {
+        $queries = collect($queryLog);
+        $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
+        $publicationScans = $queries->filter(static function (array $query): bool {
+            $serialized = json_encode($query, JSON_UNESCAPED_SLASHES);
+            if (! is_string($serialized)) {
+                return false;
+            }
+
+            $isAccountsFind = str_contains($serialized, '\"find\" : \"accounts\"')
+                || str_contains($serialized, '"find":"accounts"')
+                || str_contains($serialized, 'accounts.find');
+            $hasPublicationProjection = str_contains($serialized, 'publication');
+            $isBoundedByIdSet = str_contains($serialized, '\"$in\"')
+                || str_contains($serialized, '"$in"');
+
+            return $isAccountsFind
+                && $hasPublicationProjection
+                && ! $isBoundedByIdSet;
+        });
+
+        $this->assertCount(
+            0,
+            $publicationScans,
+            sprintf(
+                '%s must not prefetch published account ids via an unbounded accounts scan. Query log: %s',
+                $surface,
+                $queryLogJson ?: 'null'
+            )
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $pipeline
+     */
+    private function assertPublishedAccountAggregateUsesObjectIdConversion(array $pipeline, string $surface): void
+    {
+        $serialized = json_encode($pipeline, JSON_UNESCAPED_SLASHES);
+        $this->assertNotFalse($serialized, sprintf('Failed to serialize [%s] aggregate pipeline.', $surface));
+
+        $canonical = str_replace(' ', '', (string) $serialized);
+
+        $this->assertStringContainsString(
+            '"$convert"',
+            $canonical,
+            sprintf('%s must convert string ids to ObjectId inside the lookup pipeline.', $surface)
+        );
+        $this->assertStringNotContainsString(
+            '"$toString":"$_id"',
+            $canonical,
+            sprintf('%s must not stringify foreign _id inside the lookup pipeline.', $surface)
+        );
+    }
+
     private function assertMediaUrlHealthy(?string $url): void
     {
         $this->assertNotEmpty($url);
@@ -6676,10 +7061,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     private function getMultipartHeaders(): array
     {
-        $headers = $this->getHeaders();
-        unset($headers['Content-Type']);
-        $headers['Accept'] = 'application/json';
-
-        return $headers;
+        return [
+            'Accept' => 'application/json',
+        ];
     }
 }

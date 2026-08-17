@@ -2344,7 +2344,7 @@ class EventQueryService
     }
 
     /**
-     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     * @return array{data: array<int, array<string, mixed>>,next_cursor:?string}
      */
     public function adminOccurrenceGroupMembers(
         Event $event,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\Shared\Query\AbstractQueryService;
@@ -29,6 +30,7 @@ class AccountProfileQueryService extends AbstractQueryService
 
     public function __construct(
         private readonly AccountOwnershipStateService $ownershipStateService,
+        private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly AccountProfileMediaService $mediaService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileTypeSetProvider $typeSetProvider,
@@ -120,38 +122,14 @@ class AccountProfileQueryService extends AbstractQueryService
     {
         $perPage = $this->normalizePublicPageSize($perPage);
         $page = $this->normalizePublicPage($queryParams['page'] ?? 1);
-        $publicCatalogPolicy = $this->publicCatalogSnapshotReader
-            ->catalogSnapshot()
-            ->policy();
-        $allowedTypes = $publicCatalogPolicy->catalogTypeKeys();
-        $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
+        $envelope = $this->publicPageEnvelope($queryParams, $perPage);
 
-        $query = $this->withoutPublicProfileTypeFilters($queryParams);
-        $taxonomyFilters = $this->resolvePublicTaxonomyFilters($query);
-        $query = $this->withoutPublicTaxonomyFilters($query);
-        $search = trim((string) ($query['search'] ?? ''));
-        unset($query['search']);
-
-        $baseQuery = AccountProfile::query();
-        $publicCatalogPolicy->applyCatalogConstraint($baseQuery);
-
-        if ($effectiveTypes === []) {
-            $baseQuery->whereRaw(['_id' => ['$exists' => false]]);
-        } else {
-            $baseQuery->whereIn('profile_type', $effectiveTypes);
-        }
-
-        $this->applyPublicTaxonomyFilter($baseQuery, $taxonomyFilters);
-        $this->applyPublicSearchFilter($baseQuery, $search);
-        $paginator = $this->buildPaginator(
-            $baseQuery,
-            $query,
-            false,
+        return new LengthAwarePaginator(
+            $envelope['data'] ?? [],
+            (int) ($envelope['total'] ?? 0),
             $perPage,
-            $page
+            $page,
         );
-
-        return $this->hydrateOwnershipState($paginator);
     }
 
     /**
@@ -379,6 +357,7 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $pipeline = [
             ['$geoNear' => $geoNear],
+            ...$this->publishedParentAccountGateStages(),
             ['$sort' => ['distance_meters' => 1, '_id' => 1]],
             ['$skip' => $skip],
             ['$limit' => $limit],
@@ -546,7 +525,60 @@ class AccountProfileQueryService extends AbstractQueryService
 
         return [
             ['$match' => $baseMatch],
+            ...$this->publishedParentAccountGateStages(),
             ['$facet' => $facet],
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function publishedParentAccountGateStages(): array
+    {
+        return [
+            [
+                '$lookup' => [
+                    'from' => 'accounts',
+                    'let' => [
+                        'parent_account_id' => '$account_id',
+                    ],
+                    'pipeline' => [
+                        [
+                            '$match' => [
+                                '$expr' => [
+                                    '$eq' => [
+                                        '$_id',
+                                        [
+                                            '$convert' => [
+                                                'input' => '$$parent_account_id',
+                                                'to' => 'objectId',
+                                                'onError' => null,
+                                                'onNull' => null,
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            '$match' => [
+                                'publication.status' => AccountPublicationStateService::PUBLISHED,
+                            ],
+                        ],
+                        [
+                            '$project' => [
+                                '_id' => 1,
+                            ],
+                        ],
+                    ],
+                    'as' => 'published_parent_accounts',
+                ],
+            ],
+            [
+                '$match' => [
+                    'published_parent_accounts.0' => ['$exists' => true],
+                ],
+            ],
         ];
     }
 
@@ -843,7 +875,7 @@ class AccountProfileQueryService extends AbstractQueryService
             ->whereRaw($publicCatalogPolicy->publicDetailMatchExpression(requireSlug: true));
 
         $profile = $query->first();
-        if (! $profile) {
+        if (! $profile || ! $this->isPubliclyNavigable($profile)) {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$normalizedSlug]);
         }
 
@@ -879,7 +911,24 @@ class AccountProfileQueryService extends AbstractQueryService
             $resolved[(string) $profile->getKey()] = $profile;
         }
 
-        return $resolved;
+        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds(
+            array_values(array_unique(array_map(
+                static fn (AccountProfile $profile): string => trim((string) $profile->account_id),
+                array_values($resolved)
+            )))
+        );
+        if ($publishedAccountIds === []) {
+            return [];
+        }
+
+        return array_filter(
+            $resolved,
+            static fn (AccountProfile $profile): bool => in_array(
+                trim((string) $profile->account_id),
+                $publishedAccountIds,
+                true,
+            ),
+        );
     }
 
     public function isPubliclyExposed(AccountProfile $profile): bool
@@ -887,7 +936,8 @@ class AccountProfileQueryService extends AbstractQueryService
         return $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
             ->policy()
-            ->isPubliclyExposed($profile);
+            ->isPubliclyExposed($profile)
+            && $this->isParentAccountPublished($profile);
     }
 
     public function isPubliclyNavigable(AccountProfile $profile): bool
@@ -897,7 +947,8 @@ class AccountProfileQueryService extends AbstractQueryService
             && trim((string) $profile->getAttribute('visibility')) === 'public'
             && $this->typeSetProvider->isPubliclyNavigable(
                 trim((string) $profile->getAttribute('profile_type'))
-            );
+            )
+            && $this->isParentAccountPublished($profile);
     }
 
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
@@ -945,9 +996,11 @@ class AccountProfileQueryService extends AbstractQueryService
         $resolvedAccount = $account
             ?? Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = ($publicCatalogPolicy
-            ?? $this->publicCatalogSnapshotReader->catalogSnapshot()->policy())
-            ->canOpenPublicDetail($profile);
+        $canOpenPublicDetail = $this->canOpenPublicDetailForProfile(
+            $profile,
+            $resolvedAccount,
+            $publicCatalogPolicy,
+        );
 
         return [
             'id' => (string) $profile->_id,
@@ -987,6 +1040,31 @@ class AccountProfileQueryService extends AbstractQueryService
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+    }
+
+    private function isParentAccountPublished(AccountProfile $profile, ?Account $account = null): bool
+    {
+        if ($account instanceof Account) {
+            return $this->accountPublicationStateService->isPublished(
+                $account->getAttribute('publication')
+            );
+        }
+
+        return $this->accountPublicationStateService->isAccountIdPublished(
+            (string) $profile->account_id
+        );
+    }
+
+    private function canOpenPublicDetailForProfile(
+        AccountProfile $profile,
+        ?Account $account = null,
+        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+    ): bool {
+        $policy = $publicCatalogPolicy
+            ?? $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+
+        return $policy->canOpenPublicDetail($profile)
+            && $this->isParentAccountPublished($profile, $account);
     }
 
     /**

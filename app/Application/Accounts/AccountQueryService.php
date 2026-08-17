@@ -16,7 +16,8 @@ use MongoDB\BSON\ObjectId;
 class AccountQueryService extends AbstractQueryService
 {
     public function __construct(
-        private readonly AccountOwnershipStateService $ownershipStateService
+        private readonly AccountOwnershipStateService $ownershipStateService,
+        private readonly AccountPublicationStateService $accountPublicationStateService,
     ) {}
 
     public function paginateForUser(
@@ -104,6 +105,9 @@ class AccountQueryService extends AbstractQueryService
             'document' => $account->document,
             'organization_id' => $account->organization_id ?? null,
             'ownership_state' => $this->ownershipStateService->deriveOwnershipState($account),
+            'publication' => $this->accountPublicationStateService->normalizePublication(
+                $account->getAttribute('publication')
+            ),
             'avatar_url' => $avatarResolved
                 ? $avatarUrl
                 : ($avatarUrl ?? $this->resolveAvatarUrlForAccount($account)),

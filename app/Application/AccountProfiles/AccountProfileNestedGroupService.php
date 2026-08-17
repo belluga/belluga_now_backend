@@ -285,7 +285,7 @@ class AccountProfileNestedGroupService
     }
 
     /**
-     * @return array{aggregate_revision:int,data: array<int, array<string, mixed>>,next_cursor:?string}
+     * @return array{data: array<int, array<string, mixed>>,next_cursor:?string}
      */
     public function adminMemberPage(
         AccountProfile $parentProfile,
@@ -300,7 +300,6 @@ class AccountProfileNestedGroupService
 
         $perPage = $defaultPerPage;
         $offset = 0;
-        $aggregateRevision = max(0, (int) ($parentProfile->aggregate_revision ?? 0));
         $parentProfileId = (string) $parentProfile->getKey();
 
         if ($cursor !== null) {
@@ -317,12 +316,6 @@ class AccountProfileNestedGroupService
             if ($suppliedPerPage !== null && $suppliedPerPage !== $cursorPerPage) {
                 throw ValidationException::withMessages([
                     'per_page' => ['Nested profile member cursor fixes the page size for continuation requests.'],
-                ]);
-            }
-
-            if ((int) ($payload['aggregate_revision'] ?? -1) !== $aggregateRevision) {
-                throw ValidationException::withMessages([
-                    'cursor' => ['Nested profile member cursor is stale for the current aggregate revision.'],
                 ]);
             }
 
@@ -350,7 +343,6 @@ class AccountProfileNestedGroupService
                 'scope' => self::ADMIN_CURSOR_SCOPE,
                 'parent_profile_id' => $parentProfileId,
                 'group_id' => $group['id'],
-                'aggregate_revision' => $aggregateRevision,
                 'per_page' => $perPage,
                 'offset' => $offset + $perPage,
                 'expires_at' => now()->addMinutes(15)->toIso8601String(),
@@ -358,7 +350,6 @@ class AccountProfileNestedGroupService
         }
 
         return [
-            'aggregate_revision' => $aggregateRevision,
             'data' => $data,
             'next_cursor' => $nextCursor,
         ];

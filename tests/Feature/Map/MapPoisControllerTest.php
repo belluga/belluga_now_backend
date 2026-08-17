@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Map;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -295,6 +296,41 @@ class MapPoisControllerTest extends TestCaseTenant
         $nearLocalLocation = $this->point(-40.00000, -20.00030);
         $farLocalLocation = $this->point(-40.00000, -20.00150);
 
+        $nearAccount = Account::create([
+            'name' => 'Local Near Account',
+            'document' => 'DOC-LOCAL-NEAR-ACCOUNT',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $farAccount = Account::create([
+            'name' => 'Local Far Account',
+            'document' => 'DOC-LOCAL-FAR-ACCOUNT',
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $nearProfile = AccountProfile::create([
+            'account_id' => (string) $nearAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Local Near',
+            'slug' => 'local-near',
+            'visibility' => 'public',
+            'location' => $nearLocalLocation,
+            'is_active' => true,
+        ]);
+        $farProfile = AccountProfile::create([
+            'account_id' => (string) $farAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Local Far',
+            'slug' => 'local-far',
+            'visibility' => 'public',
+            'location' => $farLocalLocation,
+            'is_active' => true,
+        ]);
+
         MapPoi::create([
             'ref_type' => 'event',
             'ref_id' => 'event-anchor',
@@ -310,7 +346,7 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
         MapPoi::create([
             'ref_type' => 'account_profile',
-            'ref_id' => 'local-near',
+            'ref_id' => (string) $nearProfile->_id,
             'ref_slug' => 'local-near',
             'ref_path' => '/parceiro/local-near',
             'name' => 'Local Near',
@@ -323,7 +359,7 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
         MapPoi::create([
             'ref_type' => 'account_profile',
-            'ref_id' => 'local-far',
+            'ref_id' => (string) $farProfile->_id,
             'ref_slug' => 'local-far',
             'ref_path' => '/parceiro/local-far',
             'name' => 'Local Far',
@@ -340,13 +376,13 @@ class MapPoisControllerTest extends TestCaseTenant
         );
         $response->assertStatus(200);
 
-        $refIds = collect($response->json('stacks') ?? [])
-            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_id', ''))
+        $refSlugs = collect($response->json('stacks') ?? [])
+            ->map(static fn (array $stack): string => (string) data_get($stack, 'top_poi.ref_slug', ''))
             ->all();
 
-        $this->assertContains('event-anchor', $refIds);
-        $this->assertContains('local-far', $refIds);
-        $this->assertNotContains('local-near', $refIds);
+        $this->assertContains('event-anchor', $refSlugs);
+        $this->assertContains('local-far', $refSlugs);
+        $this->assertNotContains('local-near', $refSlugs);
     }
 
     public function test_map_pois_exposes_visual_from_bson_type_projection_chain(): void
@@ -394,6 +430,73 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('stacks.0.top_poi.visual.icon', 'restaurant');
         $response->assertJsonPath('stacks.0.top_poi.visual.color', '#EB2528');
         $response->assertJsonPath('stacks.0.top_poi.visual.icon_color', '#FFFFFF');
+    }
+
+    public function test_map_routes_hide_account_profile_pois_whose_parent_account_is_draft(): void
+    {
+        TenantProfileType::query()->delete();
+        AccountProfile::query()->delete();
+        MapPoi::query()->delete();
+
+        TenantProfileType::create([
+            'type' => 'venue',
+            'label' => 'Venue',
+            'allowed_taxonomies' => [],
+            'poi_visual' => new BSONDocument([
+                'mode' => 'icon',
+                'icon' => 'restaurant',
+                'color' => '#eb2528',
+                'icon_color' => '#ffffff',
+            ]),
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+                'is_favoritable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $draftAccount = Account::create([
+            'name' => 'Draft Map Account',
+            'document' => 'DOC-DRAFT-MAP-ACCOUNT',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $draftAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Draft Map Venue',
+            'slug' => 'draft-map-venue',
+            'visibility' => 'public',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'is_active' => true,
+        ]);
+
+        $this->app->make(MapPoiProjectionService::class)->upsertFromAccountProfile(
+            $profile->fresh()
+        );
+
+        $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0")
+            ->assertStatus(200)
+            ->assertJsonMissing([
+                'ref_id' => (string) $profile->_id,
+            ]);
+
+        $this->getJson("{$this->base_api_tenant}map/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10")
+            ->assertStatus(200)
+            ->assertJsonMissing([
+                'ref_id' => (string) $profile->_id,
+            ]);
+
+        $this->getJson("{$this->base_api_tenant}map/pois/lookup?ref_type=account_profile&ref_id={$profile->_id}")
+            ->assertStatus(404)
+            ->assertJsonPath('message', 'POI not found.');
     }
 
     public function test_map_near_returns_cards_with_tags_and_taxonomy(): void
