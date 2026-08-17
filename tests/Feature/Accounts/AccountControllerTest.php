@@ -468,6 +468,7 @@ class AccountControllerTest extends TestCase
             'name' => fake()->unique()->company(),
             'ownership_state' => 'tenant_owned',
             'profile_type' => 'personal',
+            'document' => 'DOC-PUBLICATION-PUBLISHED-'.uniqid('', true),
         ]);
         $createResponse->assertCreated();
         $accountSlug = $createResponse->json('data.account.slug');
@@ -490,6 +491,7 @@ class AccountControllerTest extends TestCase
             'name' => fake()->unique()->company(),
             'ownership_state' => 'tenant_owned',
             'profile_type' => 'personal',
+            'document' => 'DOC-PUBLICATION-DRAFT-'.uniqid('', true),
         ]);
         $createResponse->assertCreated();
         $accountSlug = $createResponse->json('data.account.slug');
@@ -511,6 +513,42 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::PUBLISHED,
             data_get($updated->getAttribute('publication'), 'status'),
         );
+    }
+
+    public function test_update_accepts_publication_transition_back_to_draft(): void
+    {
+        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
+            'name' => fake()->unique()->company(),
+            'ownership_state' => 'tenant_owned',
+            'profile_type' => 'personal',
+        ]);
+        $createResponse->assertCreated();
+        $accountSlug = $createResponse->json('data.account.slug');
+
+        $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+            ],
+        ])->assertOk();
+
+        $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath(
+            'data.publication.status',
+            AccountPublicationStateService::DRAFT,
+        );
+
+        $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
+        $this->assertSame(
+            AccountPublicationStateService::DRAFT,
+            data_get($updated->getAttribute('publication'), 'status'),
+        );
+        $this->assertNull(data_get($updated->getAttribute('publication'), 'publish_at'));
     }
 
     public function test_update_rejects_publish_scheduled_account_publication_status(): void
