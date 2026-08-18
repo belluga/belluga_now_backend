@@ -491,13 +491,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_accepts_publication_transition_to_published(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = $createResponse->json('data.account.slug');
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -520,13 +515,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_rejects_publish_scheduled_account_publication_status(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = $createResponse->json('data.account.slug');
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -541,14 +531,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_rejects_publication_payload_without_status(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-            'document' => 'DOC-PUBLICATION-MISSING-STATUS-'.uniqid('', true),
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = $createResponse->json('data.account.slug');
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [],
@@ -603,18 +587,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_rolls_back_publication_when_nested_public_projection_rebuild_fails(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-            'document' => 'DOC-PUBLICATION-ROLLBACK-'.uniqid('', true),
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = (string) $createResponse->json('data.account.slug');
-        $account = Account::query()->where('slug', $accountSlug)->firstOrFail();
-        $parentProfile = AccountProfile::query()
-            ->where('account_id', (string) $account->_id)
-            ->firstOrFail();
+        [$account, $parentProfile] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -1060,5 +1034,30 @@ class AccountControllerTest extends TestCase
         );
 
         $service->initialize($payload);
+    }
+
+    /**
+     * @return array{Account, AccountProfile}
+     */
+    private function createDraftPersonalAccountAggregate(): array
+    {
+        $name = fake()->unique()->company();
+        $account = Account::query()->create([
+            'name' => $name,
+            'document' => 'DOC-PUBLICATION-'.uniqid('', true),
+            'ownership_state' => 'tenant_owned',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => $name,
+        ]);
+
+        return [$account->fresh(), $profile->fresh()];
     }
 }
