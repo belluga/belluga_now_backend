@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Favorites;
 
+use App\Application\Accounts\AccountManagementService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -20,6 +22,7 @@ use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\Fakes\FakePushTopicTransport;
 use Tests\Helpers\TenantLabels;
@@ -404,6 +407,104 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertSame([], $response->json('items'));
     }
 
+    public function test_favorites_omit_profiles_whose_parent_account_is_draft_without_deleting_edges_or_published_rows(): void
+    {
+        $publishedLead = $this->createProfile(
+            displayName: 'Profile Published Lead',
+            slug: 'profile-published-lead',
+            profileType: 'restaurant',
+        );
+        $draftedProfile = $this->createProfile(
+            displayName: 'Profile Draft Favorite',
+            slug: 'profile-draft-favorite',
+            profileType: 'restaurant',
+        );
+        $publishedTail = $this->createProfile(
+            displayName: 'Profile Published Tail',
+            slug: 'profile-published-tail',
+            profileType: 'restaurant',
+        );
+
+        $this->createEdge((string) $publishedLead->_id, Carbon::parse('2026-03-19T12:00:00Z'));
+        $this->createEdge((string) $draftedProfile->_id, Carbon::parse('2026-03-18T12:00:00Z'));
+        $this->createEdge((string) $publishedTail->_id, Carbon::parse('2026-03-17T12:00:00Z'));
+
+        $visibleResponse = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+        $visibleResponse->assertStatus(200);
+        $visibleResponse->assertJsonPath('items.0.target_id', (string) $publishedLead->_id);
+        $visibleResponse->assertJsonPath('items.1.target_id', (string) $draftedProfile->_id);
+        $visibleResponse->assertJsonPath('items.2.target_id', (string) $publishedTail->_id);
+
+        $account = Account::query()->findOrFail((string) $draftedProfile->account_id);
+        app(AccountManagementService::class)->update($account, [
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $pageOne = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=1&registry_key=account_profile&target_type=account_profile");
+        $pageTwo = $this->getJson("{$this->base_api_tenant}favorites?page=2&page_size=1&registry_key=account_profile&target_type=account_profile");
+        $fullResponse = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $pageOne->assertStatus(200);
+        $pageOne->assertJsonPath('has_more', true);
+        $pageOne->assertJsonPath('items.0.target_id', (string) $publishedLead->_id);
+
+        $pageTwo->assertStatus(200);
+        $pageTwo->assertJsonPath('has_more', false);
+        $pageTwo->assertJsonPath('items.0.target_id', (string) $publishedTail->_id);
+
+        $fullResponse->assertStatus(200);
+        $fullResponse->assertJsonPath('has_more', false);
+        $this->assertSame(
+            [(string) $publishedLead->_id, (string) $publishedTail->_id],
+            collect($fullResponse->json('items'))->pluck('target_id')->map(static fn (mixed $id): string => (string) $id)->all()
+        );
+        $this->assertNotNull(FavoriteEdge::query()->where('target_id', (string) $draftedProfile->_id)->first());
+        $this->assertNotNull(Account::query()->find((string) $account->_id));
+        $this->assertNotNull(AccountProfile::query()->find((string) $draftedProfile->_id));
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'favorites direct-read',
+        );
+
+        app(AccountManagementService::class)->update($account->fresh(), [
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+
+        $republishedPageOne = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=1&registry_key=account_profile&target_type=account_profile");
+        $republishedPageTwo = $this->getJson("{$this->base_api_tenant}favorites?page=2&page_size=1&registry_key=account_profile&target_type=account_profile");
+        $republishedPageThree = $this->getJson("{$this->base_api_tenant}favorites?page=3&page_size=1&registry_key=account_profile&target_type=account_profile");
+        $republishedFullResponse = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $republishedPageOne->assertStatus(200);
+        $republishedPageOne->assertJsonPath('has_more', true);
+        $republishedPageOne->assertJsonPath('items.0.target_id', (string) $publishedLead->_id);
+
+        $republishedPageTwo->assertStatus(200);
+        $republishedPageTwo->assertJsonPath('has_more', true);
+        $republishedPageTwo->assertJsonPath('items.0.target_id', (string) $draftedProfile->_id);
+
+        $republishedPageThree->assertStatus(200);
+        $republishedPageThree->assertJsonPath('has_more', false);
+        $republishedPageThree->assertJsonPath('items.0.target_id', (string) $publishedTail->_id);
+
+        $republishedFullResponse->assertStatus(200);
+        $republishedFullResponse->assertJsonPath('has_more', false);
+        $this->assertSame(
+            [(string) $publishedLead->_id, (string) $draftedProfile->_id, (string) $publishedTail->_id],
+            collect($republishedFullResponse->json('items'))->pluck('target_id')->map(static fn (mixed $id): string => (string) $id)->all()
+        );
+    }
+
     public function test_favorites_rejects_page_size_above_ten(): void
     {
         $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=11");
@@ -654,6 +755,169 @@ class FavoritesControllerTest extends TestCaseTenant
             'target_id' => $targetId,
             'favorited_at' => $favoritedAt,
         ]);
+    }
+
+    /**
+     * @param  array<int, mixed>  $queryLog
+     */
+    private function assertNoUnboundedAccountPublicationScan(array $queryLog, string $surface): void
+    {
+        $queries = collect($queryLog);
+        $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
+        $publicationScans = $queries->filter(function (array $query): bool {
+            foreach ($this->accountsCommandNodes($query) as $accountsCommand) {
+                if ($this->queryTouchesPublication($accountsCommand)
+                    && ! $this->accountsCommandHasBoundedAccountIdConstraint($accountsCommand)) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
+        $this->assertCount(
+            0,
+            $publicationScans,
+            sprintf(
+                '%s must not prefetch published account ids via an unbounded accounts scan. Query log: %s',
+                $surface,
+                $queryLogJson ?: 'null'
+            )
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function accountsCommandNodes(mixed $query): array
+    {
+        if (! is_array($query)) {
+            return [];
+        }
+
+        $nodes = [];
+        if (($query['find'] ?? null) === 'accounts' || ($query['collection'] ?? null) === 'accounts') {
+            $nodes[] = $query;
+        }
+
+        foreach ($query as $value) {
+            if (is_array($value)) {
+                $nodes = [...$nodes, ...$this->accountsCommandNodes($value)];
+            }
+        }
+
+        return $nodes;
+    }
+
+    private function accountsCommandHasBoundedAccountIdConstraint(array $accountsCommand): bool
+    {
+        foreach (['filter', 'query'] as $key) {
+            $scope = $accountsCommand[$key] ?? null;
+            if (is_array($scope) && $this->scopeHasBoundedAccountIdConstraint($scope)) {
+                return true;
+            }
+        }
+
+        $pipeline = $accountsCommand['pipeline'] ?? null;
+        if (is_array($pipeline)) {
+            foreach ($pipeline as $stage) {
+                $match = is_array($stage) ? ($stage['$match'] ?? null) : null;
+                if (is_array($match) && $this->scopeHasBoundedAccountIdConstraint($match)) {
+                    return true;
+                }
+            }
+        }
+
+        $command = $accountsCommand['command'] ?? null;
+        if (is_array($command) && $this->accountsCommandHasBoundedAccountIdConstraint($command)) {
+            return true;
+        }
+
+        return $this->scopeHasBoundedAccountIdConstraint($accountsCommand);
+    }
+
+    private function queryTouchesPublication(mixed $query): bool
+    {
+        if (! is_array($query)) {
+            return is_string($query) && str_contains($query, 'publication');
+        }
+
+        foreach ($query as $key => $value) {
+            if (is_string($key) && str_contains($key, 'publication')) {
+                return true;
+            }
+
+            if ($this->queryTouchesPublication($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function scopeHasBoundedAccountIdConstraint(mixed $query): bool
+    {
+        if (! is_array($query)) {
+            return false;
+        }
+
+        if ($this->arrayHasDirectBoundedAccountIdConstraint($query)) {
+            return true;
+        }
+
+        $andClauses = $query['$and'] ?? null;
+        if (is_array($andClauses)) {
+            foreach ($andClauses as $clause) {
+                if (is_array($clause) && $this->arrayHasDirectBoundedAccountIdConstraint($clause)) {
+                    return true;
+                }
+            }
+        }
+
+        $orClauses = $query['$or'] ?? null;
+        if (is_array($orClauses)) {
+            foreach ($orClauses as $clause) {
+                if (is_array($clause) && $this->scopeHasBoundedAccountIdConstraint($clause)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function arrayHasDirectBoundedAccountIdConstraint(array $query): bool
+    {
+        foreach (['_id', 'account_id'] as $key) {
+            if (array_key_exists($key, $query) && $this->isBoundedAccountIdValue($query[$key])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isBoundedAccountIdValue(mixed $value): bool
+    {
+        if (is_string($value)) {
+            return trim($value) !== '';
+        }
+
+        if ($value instanceof \MongoDB\BSON\ObjectId) {
+            return true;
+        }
+
+        if (! is_array($value)) {
+            return false;
+        }
+
+        if (array_key_exists('$eq', $value)) {
+            return $this->isBoundedAccountIdValue($value['$eq']);
+        }
+
+        $inConstraint = $value['$in'] ?? null;
+
+        return is_array($inConstraint) && $inConstraint !== [];
     }
 
     private function seedPushRuntimeReady(): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Accounts;
 
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileTransactionContext;
 use App\Models\Landlord\LandlordUser;
@@ -29,6 +30,7 @@ class AccountManagementService
         private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly MapPoiProjectionService $mapPoiProjectionService,
         private readonly PushUserGatewayContract $pushUsers,
+        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
         private readonly AccountProfileOutboxDispatcher $accountProfileOutboxDispatcher,
     ) {}
@@ -141,6 +143,7 @@ class AccountManagementService
      */
     public function update(Account $account, array $attributes): Account
     {
+        $publicationChanged = false;
         if (array_key_exists('ownership_state', $attributes)) {
             $normalizedOwnershipState = $this->ownershipStateService->normalize(
                 is_string($attributes['ownership_state'])
@@ -162,14 +165,36 @@ class AccountManagementService
         }
 
         if (array_key_exists('publication', $attributes)) {
+            $currentPublication = $this->accountPublicationStateService->normalizePublication(
+                $account->getAttribute('publication')
+            );
             $attributes['publication'] = $this->accountPublicationStateService->normalizePublication(
                 $attributes['publication']
             );
+            $publicationChanged = $attributes['publication'] !== $currentPublication;
         }
 
         try {
-            $account->fill($attributes);
-            $account->save();
+            $tenantConnection = DB::connection('tenant');
+            if (! $tenantConnection instanceof Connection) {
+                throw new RuntimeException('A MongoDB tenant connection is required for Account aggregate updates.');
+            }
+
+            return $tenantConnection->transaction(function () use (
+                $account,
+                $attributes,
+                $publicationChanged,
+                $tenantConnection,
+            ): Account {
+                $account->fill($attributes);
+                $account->save();
+
+                if ($publicationChanged) {
+                    $this->syncNestedPublicMembersProjectionForAccount($tenantConnection, $account);
+                }
+
+                return $account->fresh();
+            });
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -181,8 +206,6 @@ class AccountManagementService
                 'account' => ['Something went wrong when trying to update the account.'],
             ]);
         }
-
-        return $account->fresh();
     }
 
     public function delete(Account $account, ?string $commandId = null): void
@@ -451,6 +474,32 @@ class AccountManagementService
             ->filter(static fn (string $id): bool => $id !== '')
             ->values()
             ->all();
+    }
+
+    private function syncNestedPublicMembersProjectionForAccount(Connection $connection, Account $account): void
+    {
+        $profiles = AccountProfile::withTrashed()
+            ->where('account_id', (string) $account->_id)
+            ->orderBy('_id')
+            ->get();
+
+        if ($profiles->isEmpty()) {
+            return;
+        }
+
+        $context = $this->profileTransactionContext($connection);
+        $profileIds = [];
+        foreach ($profiles as $profile) {
+            if (! $profile instanceof AccountProfile) {
+                continue;
+            }
+
+            $profileIds[] = trim((string) $profile->getKey());
+            $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $profile);
+        }
+
+        $this->nestedPublicMembersProjectionService
+            ->rebuildParentsAffectedByMemberProfilesWithinContext($context, $profileIds, $profileIds);
     }
 
     private function profileTransactionContext(Connection $connection): AccountProfileTransactionContext

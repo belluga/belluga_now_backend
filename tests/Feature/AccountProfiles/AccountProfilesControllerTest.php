@@ -6666,6 +6666,434 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame(['navigable-member'], collect($members->json('data'))->pluck('slug')->all());
     }
 
+    public function test_public_nested_group_members_return_not_found_when_parent_account_is_draft(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Draft Nested Parent',
+            'slug' => 'draft-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $member = $this->createNestedProfileFixture('Draft Nested Member', 'draft-nested-member');
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        );
+        $metadata->assertCreated();
+
+        $delta = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'add_ids' => [(string) $member->_id],
+            ],
+            $this->getHeaders()
+        );
+        $delta->assertOk();
+        $delta->assertJsonPath('data.member_count', 1);
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
+
+        $this->patchAccountPublication(
+            (string) ($this->account->fresh()->slug ?? ''),
+            AccountPublicationStateService::DRAFT,
+        );
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/draft-nested-parent")
+            ->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+        $this->assertSame(
+            0,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+            ])
+        );
+    }
+
+    public function test_public_nested_group_members_return_not_found_for_stale_parent_slug_projection_head(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Stale Slug Nested Parent',
+            'slug' => 'stale-slug-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $member = $this->createNestedProfileFixture('Stale Slug Nested Member', 'stale-slug-nested-member');
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        );
+        $metadata->assertCreated();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'add_ids' => [(string) $member->_id],
+            ],
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/stale-slug-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
+
+        $parent->slug = 'renamed-stale-slug-nested-parent';
+        $parent->save();
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/stale-slug-nested-parent")
+            ->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/stale-slug-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+    }
+
+    public function test_public_nested_group_members_preserve_siblings_and_restore_republished_child_accounts_after_account_publication_update(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Draft Child Nested Parent',
+            'slug' => 'draft-child-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $draftedMember = $this->createNestedProfileFixture('Draft Child Nested Member', 'draft-child-nested-member');
+        $survivingMember = $this->createNestedProfileFixture('Still Public Nested Member', 'still-public-nested-member');
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        );
+        $metadata->assertCreated();
+
+        $delta = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'add_ids' => [
+                    (string) $draftedMember->_id,
+                    (string) $survivingMember->_id,
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $delta->assertOk();
+        $delta->assertJsonPath('data.member_count', 2);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/draft-child-nested-parent")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.0.id', (string) $draftedMember->_id)
+            ->assertJsonPath('data.1.id', (string) $survivingMember->_id);
+        $firstPage = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members?per_page=1",
+            $this->getHeaders()
+        );
+        $firstPage->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $draftedMember->_id);
+        $staleCursor = (string) ($firstPage->json('next_cursor') ?? '');
+        $this->assertNotSame('', $staleCursor);
+
+        $memberAccount = Account::query()->findOrFail((string) $draftedMember->account_id);
+        $this->patchAccountPublication(
+            (string) ($memberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::DRAFT,
+        );
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/draft-child-nested-parent")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $survivingMember->_id);
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members?cursor=".urlencode($staleCursor),
+            $this->getHeaders()
+        )->assertStatus(409)
+            ->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+        $this->assertSame(
+            1,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+                'doc_type' => 'group_head',
+            ])
+        );
+        $this->assertSame(
+            0,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+                'member_profile_id' => (string) $draftedMember->_id,
+                'doc_type' => 'member_edge',
+            ])
+        );
+        $this->assertSame(
+            1,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+                'member_profile_id' => (string) $survivingMember->_id,
+                'doc_type' => 'member_edge',
+            ])
+        );
+
+        $this->patchAccountPublication(
+            (string) ($memberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::PUBLISHED,
+        );
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/draft-child-nested-parent")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.id', (string) $draftedMember->_id)
+            ->assertJsonPath('data.1.id', (string) $survivingMember->_id);
+        $this->assertSame(
+            1,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+                'member_profile_id' => (string) $draftedMember->_id,
+                'doc_type' => 'member_edge',
+            ])
+        );
+    }
+
+    public function test_public_nested_group_members_rebuild_embedded_parent_memberships_after_member_account_publication_round_trip(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Embedded Nested Parent',
+            'slug' => 'embedded-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [],
+        ])->fresh();
+
+        $member = $this->createNestedProfileFixture('Embedded Nested Member', 'embedded-nested-member');
+        $parent->nested_profile_groups = [[
+            'id' => 'parceiros',
+            'label' => 'Parceiros',
+            'order' => 0,
+            'account_profile_ids' => [(string) $member->_id],
+            'member_count' => 1,
+        ]];
+        $parent->save();
+
+        $nestedCollection = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('accounts_nested');
+        $this->assertSame(
+            0,
+            $nestedCollection->countDocuments([
+                'parent_id' => (string) $parent->_id,
+            ])
+        );
+
+        $memberAccount = Account::query()->findOrFail((string) $member->account_id);
+        $this->patchAccountPublication(
+            (string) ($memberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::DRAFT,
+        );
+
+        $this->assertGreaterThan(
+            0,
+            $nestedCollection->countDocuments([
+                'parent_id' => (string) $parent->_id,
+            ])
+        );
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/embedded-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+
+        $this->patchAccountPublication(
+            (string) ($memberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::PUBLISHED,
+        );
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/embedded-nested-parent")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/embedded-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $member->_id);
+    }
+
+    public function test_public_nested_group_members_return_not_found_when_group_has_no_visible_public_members(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Empty Public Group Parent',
+            'slug' => 'empty-public-group-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $firstMember = $this->createNestedProfileFixture('Empty Public Group Member One', 'empty-public-group-member-one');
+        $secondMember = $this->createNestedProfileFixture('Empty Public Group Member Two', 'empty-public-group-member-two');
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        );
+        $metadata->assertCreated();
+
+        $delta = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'add_ids' => [
+                    (string) $firstMember->_id,
+                    (string) $secondMember->_id,
+                ],
+            ],
+            $this->getHeaders()
+        );
+        $delta->assertOk();
+        $delta->assertJsonPath('data.member_count', 2);
+
+        $firstPage = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/empty-public-group-parent/nested_profile_groups/parceiros/members?per_page=1",
+            $this->getHeaders()
+        );
+        $firstPage->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $firstMember->_id);
+        $staleCursor = (string) ($firstPage->json('next_cursor') ?? '');
+        $this->assertNotSame('', $staleCursor);
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/empty-public-group-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.id', (string) $firstMember->_id)
+            ->assertJsonPath('data.1.id', (string) $secondMember->_id);
+
+        $firstMemberAccount = Account::query()->findOrFail((string) $firstMember->account_id);
+        $this->patchAccountPublication(
+            (string) ($firstMemberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::DRAFT,
+        );
+        $secondMemberAccount = Account::query()->findOrFail((string) $secondMember->account_id);
+        $this->patchAccountPublication(
+            (string) ($secondMemberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::DRAFT,
+        );
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/empty-public-group-parent")
+            ->assertOk()
+            ->assertJsonCount(0, 'data.nested_profile_groups');
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/empty-public-group-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/empty-public-group-parent/nested_profile_groups/parceiros/members?cursor=".urlencode($staleCursor),
+            $this->getHeaders()
+        )->assertStatus(409)
+            ->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+        $this->assertSame(
+            1,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+                'doc_type' => 'group_head',
+            ])
+        );
+        $this->assertSame(
+            0,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $parent->_id,
+                'doc_type' => 'member_edge',
+            ])
+        );
+    }
+
+    public function test_public_nested_group_members_return_not_found_when_parent_profile_is_no_longer_publicly_visible(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Private Nested Parent',
+            'slug' => 'private-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+
+        $member = $this->createNestedProfileFixture('Private Nested Member', 'private-nested-member');
+        $metadata = $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        );
+        $metadata->assertCreated();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'add_ids' => [(string) $member->_id],
+            ],
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/private-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
+
+        $parent->visibility = 'private';
+        $parent->save();
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/private-nested-parent")
+            ->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/private-nested-parent/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertStatus(404)
+            ->assertJsonPath('message', 'Resource you are looking for was not found.');
+    }
+
     public function test_public_account_profile_detail_hides_nested_groups_when_type_capability_is_disabled(): void
     {
         $venueType = TenantProfileType::query()
@@ -6882,6 +7310,29 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
+    private function patchAccountPublication(string $accountSlug, string $status): void
+    {
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}accounts/{$accountSlug}",
+            [
+                'publication' => [
+                    'status' => $status,
+                ],
+            ],
+            $this->getHeaders(),
+        )->assertOk();
+    }
+
+    private function nestedPublicMembersProjectionCollection(): \MongoDB\Collection
+    {
+        $tenantConnection = DB::connection('tenant');
+        $this->assertInstanceOf(Connection::class, $tenantConnection);
+
+        return $tenantConnection->getDatabase()->selectCollection(
+            'account_profile_nested_public_member_projection'
+        );
+    }
+
     private function enableContactChannelsCapability(string $type): void
     {
         $profileType = TenantProfileType::query()->where('type', $type)->firstOrFail();
@@ -6944,22 +7395,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
     {
         $queries = collect($queryLog);
         $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
-        $publicationScans = $queries->filter(static function (array $query): bool {
-            $serialized = json_encode($query, JSON_UNESCAPED_SLASHES);
-            if (! is_string($serialized)) {
-                return false;
+        $publicationScans = $queries->filter(function (array $query): bool {
+            foreach ($this->accountsCommandNodes($query) as $accountsCommand) {
+                if ($this->queryTouchesPublication($accountsCommand)
+                    && ! $this->accountsCommandHasBoundedAccountIdConstraint($accountsCommand)) {
+                    return true;
+                }
             }
 
-            $isAccountsFind = str_contains($serialized, '\"find\" : \"accounts\"')
-                || str_contains($serialized, '"find":"accounts"')
-                || str_contains($serialized, 'accounts.find');
-            $hasPublicationProjection = str_contains($serialized, 'publication');
-            $isBoundedByIdSet = str_contains($serialized, '\"$in\"')
-                || str_contains($serialized, '"$in"');
-
-            return $isAccountsFind
-                && $hasPublicationProjection
-                && ! $isBoundedByIdSet;
+            return false;
         });
 
         $this->assertCount(
@@ -6971,6 +7415,140 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 $queryLogJson ?: 'null'
             )
         );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function accountsCommandNodes(mixed $query): array
+    {
+        if (! is_array($query)) {
+            return [];
+        }
+
+        $nodes = [];
+        if (($query['find'] ?? null) === 'accounts' || ($query['collection'] ?? null) === 'accounts') {
+            $nodes[] = $query;
+        }
+
+        foreach ($query as $value) {
+            if (is_array($value)) {
+                $nodes = [...$nodes, ...$this->accountsCommandNodes($value)];
+            }
+        }
+
+        return $nodes;
+    }
+
+    private function accountsCommandHasBoundedAccountIdConstraint(array $accountsCommand): bool
+    {
+        foreach (['filter', 'query'] as $key) {
+            $scope = $accountsCommand[$key] ?? null;
+            if (is_array($scope) && $this->scopeHasBoundedAccountIdConstraint($scope)) {
+                return true;
+            }
+        }
+
+        $pipeline = $accountsCommand['pipeline'] ?? null;
+        if (is_array($pipeline)) {
+            foreach ($pipeline as $stage) {
+                $match = is_array($stage) ? ($stage['$match'] ?? null) : null;
+                if (is_array($match) && $this->scopeHasBoundedAccountIdConstraint($match)) {
+                    return true;
+                }
+            }
+        }
+
+        $command = $accountsCommand['command'] ?? null;
+        if (is_array($command) && $this->accountsCommandHasBoundedAccountIdConstraint($command)) {
+            return true;
+        }
+
+        return $this->scopeHasBoundedAccountIdConstraint($accountsCommand);
+    }
+
+    private function queryTouchesPublication(mixed $query): bool
+    {
+        if (! is_array($query)) {
+            return is_string($query) && str_contains($query, 'publication');
+        }
+
+        foreach ($query as $key => $value) {
+            if (is_string($key) && str_contains($key, 'publication')) {
+                return true;
+            }
+
+            if ($this->queryTouchesPublication($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function scopeHasBoundedAccountIdConstraint(mixed $query): bool
+    {
+        if (! is_array($query)) {
+            return false;
+        }
+
+        if ($this->arrayHasDirectBoundedAccountIdConstraint($query)) {
+            return true;
+        }
+
+        $andClauses = $query['$and'] ?? null;
+        if (is_array($andClauses)) {
+            foreach ($andClauses as $clause) {
+                if (is_array($clause) && $this->arrayHasDirectBoundedAccountIdConstraint($clause)) {
+                    return true;
+                }
+            }
+        }
+
+        $orClauses = $query['$or'] ?? null;
+        if (is_array($orClauses)) {
+            foreach ($orClauses as $clause) {
+                if (is_array($clause) && $this->scopeHasBoundedAccountIdConstraint($clause)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function arrayHasDirectBoundedAccountIdConstraint(array $query): bool
+    {
+        foreach (['_id', 'account_id'] as $key) {
+            if (array_key_exists($key, $query) && $this->isBoundedAccountIdValue($query[$key])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isBoundedAccountIdValue(mixed $value): bool
+    {
+        if (is_string($value)) {
+            return trim($value) !== '';
+        }
+
+        if ($value instanceof \MongoDB\BSON\ObjectId) {
+            return true;
+        }
+
+        if (! is_array($value)) {
+            return false;
+        }
+
+        if (array_key_exists('$eq', $value)) {
+            return $this->isBoundedAccountIdValue($value['$eq']);
+        }
+
+        $inConstraint = $value['$in'] ?? null;
+
+        return is_array($inConstraint) && $inConstraint !== [];
     }
 
     /**

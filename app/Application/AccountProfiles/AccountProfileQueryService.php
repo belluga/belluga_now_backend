@@ -940,6 +940,15 @@ class AccountProfileQueryService extends AbstractQueryService
             && $this->isParentAccountPublished($profile);
     }
 
+    public function isPublicNestedParent(AccountProfile $profile): bool
+    {
+        return $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy()
+            ->isPublicNestedParent($profile)
+            && $this->isParentAccountPublished($profile);
+    }
+
     public function isPubliclyNavigable(AccountProfile $profile): bool
     {
         return $profile->getAttribute('is_active') === true
