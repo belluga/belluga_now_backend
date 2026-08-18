@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Exceptions\FoundationControlPlane\StaleNestedPublicMembersCursorException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Support\Carbon;
@@ -145,11 +146,11 @@ final class AccountProfileNestedPublicMembersProjectionService
             }
 
             if ((int) ($payload['aggregate_revision'] ?? -1) !== $aggregateRevision) {
-                throw new ConcurrencyConflictException('Account Profile nested profile groups revision changed.');
+                throw new StaleNestedPublicMembersCursorException('Account Profile nested profile groups revision changed.');
             }
             if ($projectionRevision !== ''
                 && trim((string) ($payload['projection_revision'] ?? '')) !== $projectionRevision) {
-                throw new ConcurrencyConflictException('Account Profile nested profile groups revision changed.');
+                throw new StaleNestedPublicMembersCursorException('Account Profile nested profile groups revision changed.');
             }
 
             $perPage = $cursorPerPage;

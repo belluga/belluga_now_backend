@@ -6923,6 +6923,128 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
+
+    public function test_public_nested_group_members_rebuild_multiple_affected_parents_without_touching_unrelated_projections(): void
+    {
+        $member = $this->createNestedProfileFixture('Shared Nested Member', 'shared-nested-member');
+        $unrelatedMember = $this->createNestedProfileFixture('Unrelated Nested Member', 'unrelated-nested-member');
+
+        $affectedParents = collect(range(1, 4))->map(function (int $index) use ($member): AccountProfile {
+            $parent = $this->createNestedProfileFixture(
+                'Affected Nested Parent '.$index,
+                'affected-nested-parent-'.$index,
+            );
+
+            $this->createNestedGroupHead(
+                $parent,
+                'Parceiros',
+                max(1, (int) ($parent->aggregate_revision ?? 1)),
+            )->assertCreated();
+
+            $this->patchJson(
+                "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+                [
+                    'add_ids' => [(string) $member->_id],
+                ],
+                $this->getHeaders()
+            )->assertOk()->assertJsonPath('data.member_count', 1);
+
+            return $parent;
+        });
+
+        $unrelatedParent = $this->createNestedProfileFixture(
+            'Unrelated Nested Parent',
+            'unrelated-nested-parent',
+        );
+
+        $this->createNestedGroupHead(
+            $unrelatedParent,
+            'Parceiros',
+            max(1, (int) ($unrelatedParent->aggregate_revision ?? 1)),
+        )->assertCreated();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $unrelatedParent->_id.'/nested_profile_groups/parceiros/members',
+            [
+                'add_ids' => [(string) $unrelatedMember->_id],
+            ],
+            $this->getHeaders()
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+
+        $connection = DB::connection('tenant');
+        $this->assertInstanceOf(Connection::class, $connection);
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $memberAccount = Account::query()->findOrFail((string) $member->account_id);
+        $this->patchAccountPublication(
+            (string) ($memberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::DRAFT,
+        );
+
+        foreach ($affectedParents as $parent) {
+            $this->getJson("{$this->base_api_tenant}account_profiles/{$parent->slug}")
+                ->assertOk()
+                ->assertJsonCount(0, 'data.nested_profile_groups');
+
+            $this->getJson(
+                "{$this->base_api_tenant}account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members",
+                $this->getHeaders()
+            )->assertStatus(404)
+                ->assertJsonPath('message', 'Resource you are looking for was not found.');
+        }
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/{$unrelatedParent->slug}")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/{$unrelatedParent->slug}/nested_profile_groups/parceiros/members",
+            $this->getHeaders()
+        )->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $unrelatedMember->_id);
+
+        $this->assertSame(
+            0,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'member_profile_id' => (string) $member->_id,
+                'doc_type' => 'member_edge',
+            ])
+        );
+        $this->assertSame(
+            1,
+            $this->nestedPublicMembersProjectionCollection()->countDocuments([
+                'parent_profile_id' => (string) $unrelatedParent->_id,
+                'member_profile_id' => (string) $unrelatedMember->_id,
+                'doc_type' => 'member_edge',
+            ])
+        );
+        $this->assertNoUnboundedAccountPublicationScan(
+            $connection->getQueryLog(),
+            'nested public members multi-parent publication rebuild',
+        );
+
+        $this->patchAccountPublication(
+            (string) ($memberAccount->fresh()->slug ?? ''),
+            AccountPublicationStateService::PUBLISHED,
+        );
+
+        foreach ($affectedParents as $parent) {
+            $this->getJson("{$this->base_api_tenant}account_profiles/{$parent->slug}")
+                ->assertOk()
+                ->assertJsonCount(1, 'data.nested_profile_groups')
+                ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+
+            $this->getJson(
+                "{$this->base_api_tenant}account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members",
+                $this->getHeaders()
+            )->assertOk()
+                ->assertJsonCount(1, 'data')
+                ->assertJsonPath('data.0.id', (string) $member->_id);
+        }
+    }
+
     public function test_public_nested_group_members_rebuild_embedded_parent_memberships_after_member_account_publication_round_trip(): void
     {
         $parent = AccountProfile::create([
