@@ -98,7 +98,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'account-users:delete',
         ]);
         TenantProfileType::query()->delete();
-        TenantProfileType::create([
+        TenantProfileType::query()->updateOrCreate([
+            'type' => 'personal',
+        ], [
             'type' => 'personal',
             'label' => 'Personal',
             'allowed_taxonomies' => [],
@@ -111,7 +113,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'has_events' => false,
             ],
         ]);
-        TenantProfileType::create([
+        TenantProfileType::query()->updateOrCreate([
+            'type' => 'venue',
+        ], [
             'type' => 'venue',
             'label' => 'Venue',
             'allowed_taxonomies' => ['cuisine'],
@@ -4276,6 +4280,32 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaStored($profileId, 'cover');
     }
 
+    public function test_avatar_and_cover_media_of_draft_account_return_404(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->withHeaders($this->getMultipartHeaders())->post(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Profile Media Draft Gate',
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'document' => 'DOC-DRAFT-MEDIA-'.uniqid('', true),
+                'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
+                'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
+            ],
+        );
+
+        $response->assertStatus(201);
+        $avatarUrl = $response->json('data.account_profile.avatar_url');
+        $coverUrl = $response->json('data.account_profile.cover_url');
+        $this->assertNotEmpty($avatarUrl);
+        $this->assertNotEmpty($coverUrl);
+
+        $this->assertMediaUrlAccess($avatarUrl, 404);
+        $this->assertMediaUrlAccess($coverUrl, 404);
+    }
+
     public function test_avatar_and_cover_media_are_not_publicly_served_when_profile_is_not_publicly_exposed(): void
     {
         Storage::fake('public');
@@ -4299,8 +4329,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($coverUrl);
 
         $profile = AccountProfile::query()->findOrFail($profileId);
-        $this->assertMediaUrlAccess($avatarUrl, 404);
-        $this->assertMediaUrlAccess($coverUrl, 404);
+        $account = Account::query()->findOrFail((string) $profile->account_id);
+        $account->publication = [
+            'status' => AccountPublicationStateService::PUBLISHED,
+            'publish_at' => null,
+        ];
+        $account->save();
 
         $profile->visibility = 'friends_only';
         $profile->save();
