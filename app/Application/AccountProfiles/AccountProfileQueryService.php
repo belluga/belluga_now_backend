@@ -972,6 +972,22 @@ class AccountProfileQueryService extends AbstractQueryService
         return $this->findFromQueryOrFail(AccountProfile::withTrashed(), $profileId);
     }
 
+    /**
+     * @return Collection<int, AccountProfile>
+     */
+    public function findWithTrashedByAccountId(string $accountId): Collection
+    {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
+            return collect();
+        }
+
+        return AccountProfile::withTrashed()
+            ->where('account_id', $normalizedAccountId)
+            ->orderBy('_id')
+            ->get();
+    }
+
     private function findFromQueryOrFail(Builder $query, string $profileId): AccountProfile
     {
         $profile = $query->find($profileId);

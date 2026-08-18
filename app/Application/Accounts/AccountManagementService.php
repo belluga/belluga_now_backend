@@ -7,6 +7,7 @@ namespace App\Application\Accounts;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
+use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileTransactionContext;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\Account;
@@ -33,6 +34,7 @@ class AccountManagementService
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
         private readonly AccountProfileOutboxDispatcher $accountProfileOutboxDispatcher,
+        private readonly AccountProfileQueryService $accountProfileQueryService,
     ) {}
 
     public function paginateForUser(
@@ -466,10 +468,8 @@ class AccountManagementService
      */
     private function allAccountProfileIds(Account $account): array
     {
-        return AccountProfile::query()
-            ->withTrashed()
-            ->where('account_id', (string) $account->_id)
-            ->get(['_id'])
+        return $this->accountProfileQueryService
+            ->findWithTrashedByAccountId((string) $account->_id)
             ->map(static fn (AccountProfile $profile): string => trim((string) $profile->_id))
             ->filter(static fn (string $id): bool => $id !== '')
             ->values()
@@ -478,10 +478,8 @@ class AccountManagementService
 
     private function syncNestedPublicMembersProjectionForAccount(Connection $connection, Account $account): void
     {
-        $profiles = AccountProfile::withTrashed()
-            ->where('account_id', (string) $account->_id)
-            ->orderBy('_id')
-            ->get();
+        $profiles = $this->accountProfileQueryService
+            ->findWithTrashedByAccountId((string) $account->_id);
 
         if ($profiles->isEmpty()) {
             return;
