@@ -190,6 +190,7 @@ return Application::configure(basePath: dirname(__DIR__))
             );
 
         $middleware->alias([
+            'auth' => \App\Http\Middleware\Authenticate::class,
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,
             'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
         ]);

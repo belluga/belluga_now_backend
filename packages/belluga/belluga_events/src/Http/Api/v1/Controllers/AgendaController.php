@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Http\Api\v1\Controllers;
 
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
@@ -21,11 +22,17 @@ class AgendaController extends Controller
 
     public function index(AgendaIndexRequest $request): JsonResponse
     {
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.controller.enter');
+
         $user = $request->user();
         $userId = $user ? (string) $user->getAuthIdentifier() : null;
         $payload = $this->eventQueryService->fetchAgenda($request->validated(), $userId);
 
-        return response()->json([
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.payload_ready', [
+            'items_count' => is_array($payload['items'] ?? null) ? count($payload['items']) : null,
+        ]);
+
+        $response = [
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
             'items' => $payload['items'],
             'has_more' => $payload['has_more'],
@@ -38,6 +45,10 @@ class AgendaController extends Controller
                         : null,
                     $request->getSchemeAndHttpHost()
                 ),
-        ]);
+        ];
+
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.response_ready');
+
+        return response()->json($response);
     }
 }

@@ -6,6 +6,7 @@ namespace App\Actions;
 
 use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Application\Tenants\TenantDomainResolverService;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
 use Spatie\Multitenancy\TenantFinder\TenantFinder;
@@ -19,6 +20,7 @@ class DomainTenantFinder extends TenantFinder
     public function __construct(
         private readonly TenantDomainResolverService $domainResolver,
         private readonly TenantAppDomainResolverService $appDomainResolver,
+        private readonly TenantRequestLifecycleTrace $lifecycleTrace,
     ) {}
 
     public function findForRequest(Request $request): ?IsTenant
@@ -27,6 +29,8 @@ class DomainTenantFinder extends TenantFinder
 
         try {
             if ($this->isRequestFromSubdomain()) {
+                $this->lifecycleTrace->record('finder.branch.subdomain');
+
                 $tenant = $this->findTenantBySubdomain();
                 if ($tenant !== null) {
                     return $tenant;
@@ -34,8 +38,12 @@ class DomainTenantFinder extends TenantFinder
             }
 
             if ($this->isRequestFromApp() && $this->isRequestToLandlordHost()) {
+                $this->lifecycleTrace->record('finder.branch.app_domain');
+
                 return $this->findTenantByAppDomain();
             }
+
+            $this->lifecycleTrace->record('finder.branch.web_domain');
 
             return $this->findTenantByWebDomain();
         } finally {
@@ -46,11 +54,27 @@ class DomainTenantFinder extends TenantFinder
     protected function findTenantByAppDomain(): ?IsTenant
     {
         $appDomain = $this->resolveAppDomainFromRequest();
+
+        $this->lifecycleTrace->record('resolver.app_domain.started', [
+            'app_domain_hash' => $this->lifecycleTrace->redactIdentifier($appDomain),
+        ]);
+
         if ($appDomain === null) {
+            $this->lifecycleTrace->record('resolver.app_domain.miss');
+
             return null;
         }
 
-        return $this->appDomainResolver->findTenantByIdentifier($appDomain);
+        $tenant = $this->appDomainResolver->findTenantByIdentifier($appDomain);
+
+        $this->lifecycleTrace->record(
+            $tenant !== null ? 'resolver.app_domain.resolved' : 'resolver.app_domain.miss',
+            [
+                'tenant_target' => $this->lifecycleTrace->tenantFingerprint($tenant),
+            ],
+        );
+
+        return $tenant;
     }
 
     protected function findTenantByWebDomain(): ?IsTenant
@@ -65,7 +89,20 @@ class DomainTenantFinder extends TenantFinder
         $parts_request = explode('.', $this->request()->getHost());
         $subdomain = $parts_request[0];
 
-        return app(IsTenant::class)::where('subdomain', $subdomain)->first();
+        $this->lifecycleTrace->record('resolver.subdomain.started', [
+            'subdomain_hash' => $this->lifecycleTrace->redactIdentifier($subdomain),
+        ]);
+
+        $tenant = app(IsTenant::class)::where('subdomain', $subdomain)->first();
+
+        $this->lifecycleTrace->record(
+            $tenant !== null ? 'resolver.subdomain.resolved' : 'resolver.subdomain.miss',
+            [
+                'tenant_target' => $this->lifecycleTrace->tenantFingerprint($tenant),
+            ],
+        );
+
+        return $tenant;
     }
 
     protected function isRequestFromApp(): bool
