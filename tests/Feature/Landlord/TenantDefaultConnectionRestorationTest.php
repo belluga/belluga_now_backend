@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Landlord;
 
+use App\Actions\MigrateTenantAction as TenantMigrationAction;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Push\PushTenantContextAdapter;
 use App\Integration\Settings\TenantScopeContextAdapter;
 use App\Models\Landlord\Tenant;
+use App\Tasks\SwitchMongoTenantDatabaseTask;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Group;
+use Spatie\Multitenancy\Tasks\SwitchTenantTask;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -78,6 +81,19 @@ class TenantDefaultConnectionRestorationTest extends TestCase
         $this->assertSame('landlord', DB::getDefaultConnection());
         $this->assertNull(Tenant::current());
         $this->assertNull(config(sprintf('database.connections.%s.database', $this->tenantConnectionName())));
+    }
+
+    public function test_migrate_tenant_action_resolves_the_switch_task_from_the_container(): void
+    {
+        $action = new class extends TenantMigrationAction
+        {
+            public function exposedSwitchTask(): SwitchTenantTask
+            {
+                return $this->getSwitchTenantTask();
+            }
+        };
+
+        $this->assertInstanceOf(SwitchMongoTenantDatabaseTask::class, $action->exposedSwitchTask());
     }
 
     public function test_exceptional_callback_cleanup_restores_previous_tenant_runtime(): void
@@ -467,9 +483,13 @@ class TenantDefaultConnectionRestorationTest extends TestCase
     private function assertTenantRuntimeReset(): void
     {
         $tenantConnectionName = $this->tenantConnectionName();
+        $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
+        $containerKey = (string) config('multitenancy.current_tenant_container_key', 'currentTenant');
 
         $this->assertSame($this->expectedDefaultConnection(), DB::getDefaultConnection());
         $this->assertNull(Tenant::current());
+        $this->assertFalse(Context::has($contextKey));
+        $this->assertFalse(app()->bound($containerKey));
         $this->assertNull(config("database.connections.{$tenantConnectionName}.database"));
     }
 

@@ -60,7 +60,6 @@ class TenantRequestLifecycleTraceTest extends TestCase
             'request.started',
             'finder.branch.subdomain',
             'resolver.subdomain.started',
-            "mongo.first.{$landlordConnection}",
             'resolver.subdomain.resolved',
             'tenant.matched',
             'tenant.switch.start',
@@ -79,6 +78,18 @@ class TenantRequestLifecycleTraceTest extends TestCase
             'tenant.forget.complete',
             'request.cleanup.complete',
         ]);
+        $this->assertStageOccursBetween(
+            $stages,
+            "mongo.first.{$landlordConnection}",
+            'resolver.subdomain.started',
+            'resolver.subdomain.resolved',
+        );
+        $this->assertStageOccursBetween(
+            $stages,
+            "mongo.first.{$tenantConnection}",
+            'endpoint.environment.controller.enter',
+            'endpoint.environment.response_ready',
+        );
 
         $this->assertSame(
             $this->traceRecorder()->tenantFingerprint($tenant),
@@ -118,11 +129,16 @@ class TenantRequestLifecycleTraceTest extends TestCase
         $this->assertStageSequence($stages, [
             'tenant.switch.complete',
             'endpoint.anonymous_identity.controller.enter',
-            'mongo.first.tenant',
             'endpoint.anonymous_identity.identity_registered',
             'endpoint.anonymous_identity.response_ready',
             'request.response_handoff',
         ]);
+        $this->assertStageOccursBetween(
+            $stages,
+            'mongo.first.tenant',
+            'endpoint.anonymous_identity.controller.enter',
+            'endpoint.anonymous_identity.response_ready',
+        );
         $this->assertSame(
             'anonymous',
             $this->firstEventValue($trace['events'], 'endpoint.anonymous_identity.identity_registered', 'identity_state')
@@ -335,6 +351,23 @@ class TenantRequestLifecycleTraceTest extends TestCase
         $this->assertTenantRuntimeReset();
     }
 
+    public function test_cleanup_restores_the_configured_baseline_default_connection(): void
+    {
+        $tenant = $this->primaryTenant();
+
+        config(['database.default' => 'landlord']);
+        $this->defaultConnectionAtRest = 'landlord';
+        $this->normalizeTenantRuntimeState();
+
+        $tenant->makeCurrent();
+
+        $response = $this->getJson($this->environmentUrlForHost($this->tenantHost($tenant)), $this->traceHeaders());
+
+        $response->assertOk();
+
+        $this->assertTenantRuntimeReset();
+    }
+
     /**
      * @param  list<string>  $actualStages
      * @param  list<string>  $expectedStages
@@ -353,6 +386,26 @@ class TenantRequestLifecycleTraceTest extends TestCase
 
             $offset += $position + 1;
         }
+    }
+
+    /**
+     * @param  list<string>  $actualStages
+     */
+    private function assertStageOccursBetween(
+        array $actualStages,
+        string $expectedStage,
+        string $afterStage,
+        string $beforeStage,
+    ): void {
+        $expectedIndex = array_search($expectedStage, $actualStages, true);
+        $afterIndex = array_search($afterStage, $actualStages, true);
+        $beforeIndex = array_search($beforeStage, $actualStages, true);
+
+        $this->assertNotFalse($expectedIndex, sprintf('Expected lifecycle stage [%s] in trace: %s', $expectedStage, implode(', ', $actualStages)));
+        $this->assertNotFalse($afterIndex, sprintf('Expected anchor lifecycle stage [%s] in trace: %s', $afterStage, implode(', ', $actualStages)));
+        $this->assertNotFalse($beforeIndex, sprintf('Expected anchor lifecycle stage [%s] in trace: %s', $beforeStage, implode(', ', $actualStages)));
+        $this->assertGreaterThan($afterIndex, $expectedIndex, sprintf('Expected lifecycle stage [%s] after [%s].', $expectedStage, $afterStage));
+        $this->assertLessThan($beforeIndex, $expectedIndex, sprintf('Expected lifecycle stage [%s] before [%s].', $expectedStage, $beforeStage));
     }
 
     /**
@@ -442,9 +495,13 @@ class TenantRequestLifecycleTraceTest extends TestCase
     private function assertTenantRuntimeReset(): void
     {
         $tenantConnectionName = $this->tenantConnectionName();
+        $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
+        $containerKey = (string) config('multitenancy.current_tenant_container_key', 'currentTenant');
 
         $this->assertSame($this->defaultConnectionAtRest, DB::getDefaultConnection());
         $this->assertNull(Tenant::current());
+        $this->assertFalse(Context::has($contextKey));
+        $this->assertFalse(app()->bound($containerKey));
         $this->assertNull(config("database.connections.{$tenantConnectionName}.database"));
     }
 

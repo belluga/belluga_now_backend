@@ -117,6 +117,6 @@ class InitializeTenancy
 
     private function baselineDefaultConnection(): string
     {
-        return (string) env('DB_CONNECTION', 'mongodb');
+        return (string) config('database.default', 'mongodb');
     }
 }
