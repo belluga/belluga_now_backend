@@ -205,6 +205,45 @@ final class AccountProfileNestedGroupMemberStore
     }
 
     /**
+     * @param  array<int, string>  $memberProfileIds
+     * @return array<int, string>
+     */
+    public function parentProfileIdsForMemberIdsWithinContext(
+        AccountProfileTransactionContext $context,
+        array $memberProfileIds,
+    ): array {
+        $normalizedProfileIds = $this->normalizedStrings($memberProfileIds);
+        if ($normalizedProfileIds === []) {
+            return [];
+        }
+
+        $projectedParentIds = $this->normalizedStrings(array_map(
+            static fn (mixed $value): string => trim((string) $value),
+            $context->collection(self::COLLECTION)->distinct(
+                'parent_id',
+                [
+                    'tenant_id' => $this->tenantId(),
+                    'parent_type' => self::PARENT_TYPE,
+                    'doc_type' => self::DOC_TYPE_MEMBER,
+                    'nested_profile.id' => ['$in' => $normalizedProfileIds],
+                ],
+                $context->rawOptions(),
+            ),
+        ));
+
+        $embeddedParentIds = AccountProfile::withTrashed()
+            ->whereIn('nested_profile_groups.account_profile_ids', $normalizedProfileIds)
+            ->orderBy('_id')
+            ->get(['_id'])
+            ->map(static fn (AccountProfile $profile): string => trim((string) $profile->getKey()))
+            ->filter(static fn (string $profileId): bool => $profileId !== '')
+            ->values()
+            ->all();
+
+        return $this->normalizedStrings(array_merge($projectedParentIds, $embeddedParentIds));
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $groups
      * @param  array<string, AccountProfile>  $profilesById
      */

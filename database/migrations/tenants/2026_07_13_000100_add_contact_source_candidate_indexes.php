@@ -6,12 +6,24 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use MongoDB\Collection;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Laravel\Schema\Blueprint;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 
 return new class extends Migration
 {
+    private const ACCOUNT_PROFILE_INDEX_NAME = 'idx_account_profiles_contact_source_candidates_v1';
+
+    private const ACCOUNT_PROFILE_INDEX_KEY = [
+        'contact_mode' => 1,
+        'is_active' => 1,
+        'deleted_at' => 1,
+        'profile_type' => 1,
+        'display_name' => 1,
+        '_id' => 1,
+    ];
+
     public function up(): void
     {
         if (! $this->hasAccountProfileTypeIndex([
@@ -29,17 +41,15 @@ return new class extends Migration
             });
         }
 
+        if (! Schema::hasCollection('account_profiles')) {
+            return;
+        }
+
+        $this->dropAccountProfileIndexIfPresent();
         Schema::table('account_profiles', static function (Blueprint $collection): void {
             $collection->index(
-                [
-                    'contact_mode' => 1,
-                    'is_active' => 1,
-                    'deleted_at' => 1,
-                    'profile_type' => 1,
-                    'display_name' => 1,
-                    '_id' => 1,
-                ],
-                options: ['name' => 'idx_account_profiles_contact_source_candidates_v1'],
+                self::ACCOUNT_PROFILE_INDEX_KEY,
+                options: ['name' => self::ACCOUNT_PROFILE_INDEX_NAME],
             );
         });
     }
@@ -47,14 +57,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('account_profiles', static function (Blueprint $collection): void {
-            $collection->dropIndexIfExists([
-                'contact_mode' => 1,
-                'is_active' => 1,
-                'deleted_at' => 1,
-                'profile_type' => 1,
-                'display_name' => 1,
-                '_id' => 1,
-            ]);
+            $collection->dropIndexIfExists(self::ACCOUNT_PROFILE_INDEX_KEY);
         });
 
         Schema::table('account_profile_types', static function (Blueprint $collection): void {
@@ -82,6 +85,35 @@ return new class extends Migration
         }
 
         return false;
+    }
+
+    private function dropAccountProfileIndexIfPresent(): void
+    {
+        /** @var Collection<array<string, mixed>> $collection */
+        $collection = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profiles');
+
+        foreach ($collection->listIndexes() as $index) {
+            $shouldDrop = $index->getName() === self::ACCOUNT_PROFILE_INDEX_NAME
+                || $this->arrayFrom($index->getKey()) === self::ACCOUNT_PROFILE_INDEX_KEY;
+            if (! $shouldDrop) {
+                continue;
+            }
+
+            $this->dropIndexIgnoringMissing($collection, (string) $index->getName());
+        }
+    }
+
+    private function dropIndexIgnoringMissing(Collection $collection, string $name): void
+    {
+        try {
+            $collection->dropIndex($name);
+        } catch (CommandException $exception) {
+            if ($exception->getCode() !== 27) {
+                throw $exception;
+            }
+        }
     }
 
     /**

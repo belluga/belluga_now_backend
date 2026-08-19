@@ -513,7 +513,10 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             collect($response->json('items'))->pluck('receiver_account_profile_id')->all(),
         );
 
-        $queryLog = json_encode(DB::connection('tenant')->getQueryLog(), JSON_UNESCAPED_SLASHES);
+        $connection = DB::connection('tenant');
+        $queryLog = json_encode($connection->getQueryLog(), JSON_UNESCAPED_SLASHES);
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $this->assertStringContainsString('inviteable_people_projection', $queryLog);
         $this->assertStringNotContainsString('contact_hash_directory', $queryLog);
         $this->assertStringNotContainsString('favorite_edges', $queryLog);

@@ -56,6 +56,9 @@ class InitializationControllerTest extends TestCase
 
     public function test_subsequent_initialization_is_rejected(): void
     {
+        $this->assertSame(0, Landlord::query()->count());
+        $this->assertSame(0, Tenant::query()->count());
+
         $this->withServerVariables([
             'HTTP_HOST' => $this->host,
             'SERVER_NAME' => $this->host,
