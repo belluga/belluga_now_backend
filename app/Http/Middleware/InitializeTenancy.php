@@ -64,6 +64,7 @@ class InitializeTenancy
         $snapshot = $this->lifecycleTrace->snapshotRuntime();
         $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
         $snapshot['tenant_context_present'] = Context::has($contextKey);
+        $snapshot['tenant_database_present'] = $this->tenantDatabaseIsConfigured();
 
         if (! $force && ! $this->runtimeIsDirty($snapshot)) {
             return $snapshot;
@@ -97,6 +98,7 @@ class InitializeTenancy
             'bootstrap_default_connection' => $bootstrapState['default_connection'] ?? null,
             'bootstrap_tenant_current' => $bootstrapState['tenant_current'] ?? null,
             'bootstrap_tenant_context_present' => $bootstrapState['tenant_context_present'] ?? null,
+            'bootstrap_tenant_database_present' => $bootstrapState['tenant_database_present'] ?? null,
         ]);
     }
 
@@ -107,7 +109,8 @@ class InitializeTenancy
     {
         return ($snapshot['default_connection'] ?? null) !== $this->baselineDefaultConnection()
             || ($snapshot['tenant_current'] ?? null) !== null
-            || (($snapshot['tenant_context_present'] ?? false) === true);
+            || (($snapshot['tenant_context_present'] ?? false) === true)
+            || (($snapshot['tenant_database_present'] ?? false) === true);
     }
 
     private function tenantConnectionName(): string
@@ -118,5 +121,12 @@ class InitializeTenancy
     private function baselineDefaultConnection(): string
     {
         return (string) config('database.default', 'mongodb');
+    }
+
+    private function tenantDatabaseIsConfigured(): bool
+    {
+        $database = config(sprintf('database.connections.%s.database', $this->tenantConnectionName()));
+
+        return is_string($database) && trim($database) !== '';
     }
 }

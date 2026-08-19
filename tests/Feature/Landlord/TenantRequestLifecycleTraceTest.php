@@ -70,7 +70,15 @@ class TenantRequestLifecycleTraceTest extends TestCase
             'tenant.switch.default_connection_selected',
             'tenant.switch.complete',
             'endpoint.environment.controller.enter',
+            'environment.snapshot.lookup.start',
             "mongo.first.{$tenantConnection}",
+            'environment.snapshot.lookup.loaded',
+            'environment.snapshot.hydrate.start',
+            'environment.payload.derive.start',
+            'environment.payload.branding_assets.start',
+            'environment.payload.branding_assets.complete',
+            'environment.payload.derive.complete',
+            'environment.snapshot.hydrate.complete',
             'endpoint.environment.response_ready',
             'request.response_handoff',
             'request.cleanup.start',
@@ -171,6 +179,76 @@ class TenantRequestLifecycleTraceTest extends TestCase
                 $landlordConnection,
             ),
             'Public shell fallback should issue at most one collection-backed landlord read after controller entry.',
+        );
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_environment_request_trace_on_explicit_web_domain_skips_subdomain_probe(): void
+    {
+        $tenant = $this->primaryTenant();
+        $this->seedEnvironmentSnapshot($tenant);
+        $landlordConnection = (string) config('multitenancy.landlord_database_connection_name', 'landlord');
+        $tenantConnection = $this->tenantConnectionName();
+        $explicitHost = parse_url($tenant->getMainDomain(), PHP_URL_HOST);
+
+        $this->assertIsString($explicitHost);
+
+        $response = $this->getJson($this->environmentUrlForHost($explicitHost), $this->traceHeaders());
+
+        $response->assertOk();
+        $response->assertJson([
+            'type' => 'tenant',
+            'subdomain' => $tenant->subdomain,
+        ]);
+
+        $trace = $this->completedTrace();
+        $this->assertSame($trace, $this->responseTrace($response));
+
+        $stages = array_column($trace['events'], 'stage');
+
+        $this->assertNotContains('finder.branch.subdomain', $stages);
+        $this->assertNotContains('resolver.subdomain.started', $stages);
+        $this->assertNotContains('resolver.web_domain.fallback.started', $stages);
+        $this->assertStageSequence($stages, [
+            'request.started',
+            'finder.branch.web_domain',
+            'resolver.web_domain.primary.started',
+            'resolver.web_domain.primary.resolved',
+            'tenant.matched',
+            'tenant.switch.start',
+            'tenant.switch.connection_configured',
+            'tenant.switch.connection_purged',
+            'tenant.switch.default_connection_selected',
+            'tenant.switch.complete',
+            'endpoint.environment.controller.enter',
+            'environment.snapshot.lookup.start',
+            "mongo.first.{$tenantConnection}",
+            'environment.snapshot.lookup.loaded',
+            'environment.snapshot.hydrate.start',
+            'environment.payload.derive.start',
+            'environment.payload.branding_assets.start',
+            'environment.payload.branding_assets.complete',
+            'environment.payload.derive.complete',
+            'environment.snapshot.hydrate.complete',
+            'endpoint.environment.response_ready',
+            'request.response_handoff',
+            'request.cleanup.start',
+            'tenant.forget.start',
+            'tenant.forget.connection_purged',
+            'tenant.forget.default_restored',
+            'tenant.forget.complete',
+            'request.cleanup.complete',
+        ]);
+        $this->assertCount(
+            2,
+            $this->mongoCollectionCommandsBetween(
+                $trace['events'],
+                'resolver.web_domain.primary.started',
+                'resolver.web_domain.primary.resolved',
+                $landlordConnection,
+            ),
+            'Explicit web-domain resolution should use the canonical domains path plus one tenant hydration, without subdomain or fallback probes.',
         );
 
         $this->assertTenantRuntimeReset();
@@ -414,6 +492,52 @@ class TenantRequestLifecycleTraceTest extends TestCase
         $this->assertSame(
             $this->traceRecorder()->tenantFingerprint($tenant),
             $this->firstEventValue($events, 'request.bootstrap_reset', 'bootstrap_tenant_current')
+        );
+
+        $this->assertStageSequence($stages, [
+            'request.started',
+            'request.bootstrap_reset',
+            'tenant.switch.start',
+            'tenant.switch.complete',
+            'request.cleanup.start',
+            'tenant.forget.complete',
+            'request.cleanup.complete',
+        ]);
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_runtime_with_only_tenant_database_residue_is_reset_before_request_resolution_runs(): void
+    {
+        $tenant = $this->primaryTenant();
+
+        config([
+            sprintf('database.connections.%s.database', $this->tenantConnectionName()) => 'tenant_residual_only',
+        ]);
+
+        $response = $this->getJson($this->environmentUrlForHost($this->tenantHost($tenant)), $this->traceHeaders());
+
+        $response->assertOk();
+        $response->assertJson([
+            'type' => 'tenant',
+            'subdomain' => $tenant->subdomain,
+        ]);
+
+        $trace = $this->completedTrace();
+        $this->assertSame($trace, $this->responseTrace($response));
+
+        $events = $trace['events'];
+        $stages = array_column($events, 'stage');
+
+        $this->assertSame($this->defaultConnectionAtRest, $events[0]['default_connection'] ?? null);
+        $this->assertArrayNotHasKey('tenant_current', $events[0]);
+        $this->assertContains('request.bootstrap_reset', $stages);
+        $this->assertSame(
+            $this->defaultConnectionAtRest,
+            $this->firstEventValue($events, 'request.bootstrap_reset', 'bootstrap_default_connection')
+        );
+        $this->assertTrue(
+            (bool) $this->firstEventValue($events, 'request.bootstrap_reset', 'bootstrap_tenant_database_present')
         );
 
         $this->assertStageSequence($stages, [

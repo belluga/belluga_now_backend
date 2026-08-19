@@ -34,6 +34,7 @@ final class TenantRequestLifecycleTrace
 
     public function beginRequest(Request $request): void
     {
+        $this->disarmAllConnectionTraces();
         $this->resetActiveTrace();
         $this->lastCompletedTrace = null;
 
@@ -82,6 +83,7 @@ final class TenantRequestLifecycleTrace
     public function finishRequest(): void
     {
         if (! $this->enabled) {
+            $this->disarmAllConnectionTraces();
             $this->resetActiveTrace();
 
             return;

@@ -20,8 +20,12 @@ class TenantDomainResolverService
             'host_hash' => $this->lifecycleTrace->redactIdentifier($normalized),
         ]);
 
-        $tenant = Tenant::where('domains', 'all', [$normalized])->first();
-        if ($tenant !== null) {
+        $domain = Domains::query()
+            ->where('path', $normalized)
+            ->where('type', Tenant::DOMAIN_TYPE_WEB)
+            ->first();
+        $tenant = $domain?->tenant;
+        if ($tenant instanceof Tenant) {
             $this->lifecycleTrace->record('resolver.web_domain.primary.resolved', [
                 'tenant_target' => $this->lifecycleTrace->tenantFingerprint($tenant),
             ]);
@@ -34,10 +38,9 @@ class TenantDomainResolverService
             'host_hash' => $this->lifecycleTrace->redactIdentifier($normalized),
         ]);
 
-        $resolvedTenant = Domains::query()
-            ->where('path', $normalized)
-            ->where('type', Tenant::DOMAIN_TYPE_WEB)
-            ->first()?->tenant;
+        $resolvedTenant = Tenant::query()
+            ->where('domains', 'all', [$normalized])
+            ->first();
 
         $this->lifecycleTrace->record(
             $resolvedTenant !== null ? 'resolver.web_domain.fallback.resolved' : 'resolver.web_domain.fallback.miss',

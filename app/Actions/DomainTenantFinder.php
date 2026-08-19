@@ -13,8 +13,6 @@ use Spatie\Multitenancy\TenantFinder\TenantFinder;
 
 class DomainTenantFinder extends TenantFinder
 {
-    private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
-
     private ?Request $activeRequest = null;
 
     public function __construct(
@@ -112,36 +110,29 @@ class DomainTenantFinder extends TenantFinder
 
     protected function isRequestFromSubdomain(): bool
     {
-        $host = $this->request()->getHost();
-        $parts_request = explode('.', $host, 2);
-
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+        $host = strtolower(trim($this->request()->getHost()));
+        if ($host === '' || filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return false;
         }
 
-        if (count($parts_request) >= 2) {
-            $parts_config = explode('://', config('app.url'));
-            if ($parts_request[1] === $parts_config[1]) {
-                return true;
-            }
-
-            if (app()->environment('local')) {
-                return ! in_array($parts_request[0], $this->local_environment_alternatives, true);
-            }
-
+        $configuredHost = $this->configuredHost();
+        if ($configuredHost === null || $host === $configuredHost) {
             return false;
         }
 
-        if ($this->isLocalEnvironment()) {
-            return in_array($parts_request[0], $this->local_environment_alternatives);
-        }
-
-        return false;
+        return str_ends_with($host, '.'.$configuredHost);
     }
 
-    private function isLocalEnvironment(): bool
+    private function configuredHost(): ?string
     {
-        return in_array($this->request()->getHost(), $this->local_environment_alternatives);
+        $configuredHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (! is_string($configuredHost) || trim($configuredHost) === '') {
+            $configuredHost = trim(str_replace(['https://', 'http://'], '', (string) config('app.url')), '/');
+        }
+
+        $configuredHost = strtolower(trim($configuredHost));
+
+        return $configuredHost === '' ? null : $configuredHost;
     }
 
     private function resolveAppDomainFromRequest(): ?string

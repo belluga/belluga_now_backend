@@ -9,6 +9,7 @@ use App\Application\Auth\TenantPublicAuthMethodResolver;
 use App\Application\Branding\BrandingManifestService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
@@ -75,6 +76,7 @@ class TenantEnvironmentPayloadFactory
             'app_domains' => $tenant->resolvedAppDomains(),
             'branding' => $branding,
             'tenant_branding' => $tenantBranding,
+            'branding_assets' => $this->resolveBrandingAssetState($branding),
             'telemetry' => [
                 'location_freshness_minutes' => $telemetry['location_freshness_minutes'],
                 'trackers' => $telemetry['trackers'],
@@ -300,74 +302,122 @@ class TenantEnvironmentPayloadFactory
     }
 
     /**
-     * @param  array<string, mixed>  $snapshot
      * @return array<string, mixed>
      */
     public function hydrateTenantPayload(
         Tenant $tenant,
-        array $snapshot,
+        mixed $snapshot,
         ?string $requestRoot,
         ?string $requestHost,
     ): array {
-        $branding = $this->normalizeBrandingData($snapshot['branding'] ?? []);
-        $tenantBranding = $this->normalizeBrandingData($snapshot['tenant_branding'] ?? []);
-        $canonicalMainDomain = trim((string) ($snapshot['canonical_main_domain'] ?? ''));
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.derive.start');
+        $branding = $this->normalizeBrandingData($this->snapshotValue($snapshot, 'branding', []));
+        $tenantBranding = $this->normalizeBrandingData($this->snapshotValue($snapshot, 'tenant_branding', []));
+        $canonicalMainDomain = trim((string) $this->snapshotValue($snapshot, 'canonical_main_domain', ''));
         if ($canonicalMainDomain === '') {
             $canonicalMainDomain = trim($tenant->getMainDomain());
         }
-        $explicitDomains = $this->normalizeStringList($snapshot['domains'] ?? []);
+        $explicitDomains = $this->normalizeStringList($this->snapshotValue($snapshot, 'domains', []));
         if ($explicitDomains === []) {
             $explicitDomains = $tenant->explicitDomains();
         }
         $resolvedRequestRoot = $this->normalizeRequestRoot($requestRoot);
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.profile_types.start');
+        $profileTypes = $this->normalizeProfileTypes(
+            $this->snapshotValue($snapshot, 'profile_types', []),
+            $resolvedRequestRoot,
+        );
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.profile_types.complete', [
+            'profile_types_count' => count($profileTypes),
+        ]);
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.branding_assets.start');
+        $brandingAssets = $this->normalizeBrandingData(
+            $this->snapshotValue($snapshot, 'branding_assets', [])
+        );
+        if ($brandingAssets === []) {
+            $brandingAssets = $this->resolveBrandingAssetState($branding);
+        }
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.branding_assets.complete');
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.public_web_metadata.start');
+        $publicWebMetadata = $this->resolvePublicWebMetadata(
+            $tenant,
+            $tenantBranding,
+            $resolvedRequestRoot,
+        );
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.public_web_metadata.complete');
 
-        return [
-            'tenant_id' => (string) ($snapshot['tenant_id'] ?? $tenant->getKey()),
-            'name' => (string) ($snapshot['name'] ?? $tenant->name),
+        $payload = [
+            'tenant_id' => (string) $this->snapshotValue($snapshot, 'tenant_id', $tenant->getKey()),
+            'name' => (string) $this->snapshotValue($snapshot, 'name', $tenant->name),
             'type' => 'tenant',
-            'subdomain' => (string) ($snapshot['subdomain'] ?? $tenant->subdomain),
+            'subdomain' => (string) $this->snapshotValue($snapshot, 'subdomain', $tenant->subdomain),
             'main_domain' => $this->resolveTenantMainDomain(
                 tenantMainDomain: $canonicalMainDomain,
                 explicitDomains: $explicitDomains,
-                tenantSubdomain: (string) ($snapshot['subdomain'] ?? $tenant->subdomain),
+                tenantSubdomain: (string) $this->snapshotValue($snapshot, 'subdomain', $tenant->subdomain),
                 requestRoot: $requestRoot,
                 requestHost: $requestHost,
             ),
             'landlord_domain' => $this->resolveLandlordDomain($requestRoot),
             'domains' => $explicitDomains,
-            'app_domains' => $this->normalizeStringList($snapshot['app_domains'] ?? []),
+            'app_domains' => $this->normalizeStringList($this->snapshotValue($snapshot, 'app_domains', [])),
             'theme_data_settings' => $this->normalizeBrandingData($branding['theme_data_settings'] ?? []),
-            'branding_assets' => $this->resolveBrandingAssetState($branding),
-            'public_web_metadata' => $this->resolvePublicWebMetadata(
-                $tenant,
-                $tenantBranding,
-                $resolvedRequestRoot,
-            ),
+            'branding_assets' => $brandingAssets,
+            'public_web_metadata' => $publicWebMetadata,
             'main_logo_light_url' => $this->resolveLogoUrl($branding, 'light_logo_uri'),
             'main_logo_dark_url' => $this->resolveLogoUrl($branding, 'dark_logo_uri'),
             'main_icon_light_url' => $this->resolveIconUrl($branding, 'light_icon_uri'),
             'main_icon_dark_url' => $this->resolveIconUrl($branding, 'dark_icon_uri'),
-            'telemetry' => $this->normalizeTelemetry($snapshot['telemetry'] ?? []),
+            'telemetry' => $this->normalizeTelemetry($this->snapshotValue($snapshot, 'telemetry', [])),
             'firebase' => $this->environmentFirebaseConfig(
-                $this->normalizeBrandingData($snapshot['firebase'] ?? [])
+                $this->normalizeBrandingData($this->snapshotValue($snapshot, 'firebase', []))
             ),
-            'push' => $this->normalizeBrandingData($snapshot['push'] ?? []),
-            'profile_types' => $this->normalizeProfileTypes(
-                $snapshot['profile_types'] ?? [],
-                $resolvedRequestRoot,
-            ),
+            'push' => $this->normalizeBrandingData($this->snapshotValue($snapshot, 'push', [])),
+            'profile_types' => $profileTypes,
             'settings' => [
                 'map_ui' => $this->normalizeBrandingData(
-                    data_get($snapshot, 'settings.map_ui', [])
+                    $this->snapshotNestedValue($snapshot, 'settings', 'map_ui', [])
                 ),
                 'app_links' => $this->normalizeBrandingData(
-                    data_get($snapshot, 'settings.app_links', [])
+                    $this->snapshotNestedValue($snapshot, 'settings', 'app_links', [])
                 ),
                 'tenant_public_auth' => $this->normalizeBrandingData(
-                    data_get($snapshot, 'settings.tenant_public_auth', [])
+                    $this->snapshotNestedValue($snapshot, 'settings', 'tenant_public_auth', [])
                 ),
             ],
         ];
+
+        app(TenantRequestLifecycleTrace::class)->record('environment.payload.derive.complete');
+
+        return $payload;
+    }
+
+    private function snapshotValue(mixed $snapshot, string $key, mixed $default = null): mixed
+    {
+        if (is_array($snapshot)) {
+            return array_key_exists($key, $snapshot) ? $snapshot[$key] : $default;
+        }
+
+        if ($snapshot instanceof \ArrayAccess) {
+            return $snapshot->offsetExists($key) ? $snapshot[$key] : $default;
+        }
+
+        if (is_object($snapshot) && isset($snapshot->{$key})) {
+            return $snapshot->{$key};
+        }
+
+        return $default;
+    }
+
+    private function snapshotNestedValue(
+        mixed $snapshot,
+        string $firstKey,
+        string $secondKey,
+        mixed $default = null,
+    ): mixed {
+        $nested = $this->snapshotValue($snapshot, $firstKey);
+
+        return $this->snapshotValue($nested, $secondKey, $default);
     }
 
     /**
