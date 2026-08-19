@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Application\PublicWeb\FlutterWebShellRenderer;
 use App\Application\PublicWeb\PublicWebMetadataService;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use Belluga\DeepLinks\Application\WebToAppPromotionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -37,6 +38,10 @@ class TenantPublicShellController extends Controller
             return $redirect;
         }
 
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.controller.enter', [
+            'route_kind' => 'account_profile',
+        ]);
+
         return $this->renderShell(
             $this->metadataService->accountProfileMetadata($accountProfileSlug),
             forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
@@ -61,6 +66,10 @@ class TenantPublicShellController extends Controller
             return $redirect;
         }
 
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.controller.enter', [
+            'route_kind' => 'event',
+        ]);
+
         return $this->renderShell(
             $this->metadataService->eventMetadata($eventSlug),
             forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
@@ -84,6 +93,10 @@ class TenantPublicShellController extends Controller
         if ($redirect !== null) {
             return $redirect;
         }
+
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.controller.enter', [
+            'route_kind' => 'static_asset',
+        ]);
 
         return $this->renderShell(
             $this->metadataService->staticAssetMetadata($assetRef),
@@ -110,11 +123,19 @@ class TenantPublicShellController extends Controller
         }
 
         if ($this->isInvitePath($requestedUri)) {
+            app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.controller.enter', [
+                'route_kind' => 'invite',
+            ]);
+
             return $this->renderShell(
                 $this->metadataService->inviteMetadata($request->query('code')),
                 forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
             );
         }
+
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.controller.enter', [
+            'route_kind' => 'fallback',
+        ]);
 
         return $this->renderShell(
             $this->metadataService->defaultMetadata($requestedUri),
@@ -129,6 +150,8 @@ class TenantPublicShellController extends Controller
         array $metadata,
         bool $forgetDirectFallbackBypass = false,
     ): Response {
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.response_ready');
+
         $response = response(
             $this->shellRenderer->render($metadata),
             200,

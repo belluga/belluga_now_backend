@@ -6,6 +6,7 @@ namespace Tests\Feature\Landlord;
 
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Environment\EnvironmentResolverService;
+use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Tenants\TenantRequestLifecycleTrace;
@@ -40,6 +41,7 @@ class TenantRequestLifecycleTraceTest extends TestCase
     public function test_environment_request_trace_records_resolution_switch_queries_and_cleanup(): void
     {
         $tenant = $this->primaryTenant();
+        $this->seedEnvironmentSnapshot($tenant);
         $landlordConnection = (string) config('multitenancy.landlord_database_connection_name', 'landlord');
         $tenantConnection = $this->tenantConnectionName();
 
@@ -90,11 +92,87 @@ class TenantRequestLifecycleTraceTest extends TestCase
             'endpoint.environment.controller.enter',
             'endpoint.environment.response_ready',
         );
+        $this->assertCount(
+            1,
+            $this->mongoCollectionCommandsBetween(
+                $trace['events'],
+                'endpoint.environment.controller.enter',
+                'endpoint.environment.response_ready',
+                $tenantConnection,
+            ),
+            'Tenant environment response should issue exactly one collection-backed tenant command after controller entry.',
+        );
+        $this->assertCount(
+            0,
+            $this->mongoCollectionCommandsBetween(
+                $trace['events'],
+                'endpoint.environment.controller.enter',
+                'endpoint.environment.response_ready',
+                $landlordConnection,
+            ),
+            'Tenant environment response should not re-read landlord-side tenant metadata once the snapshot-backed request context is already resolved.',
+        );
 
         $this->assertSame(
             $this->traceRecorder()->tenantFingerprint($tenant),
             $this->firstEventValue($trace['events'], 'tenant.matched', 'tenant_target')
         );
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_public_shell_root_trace_records_bounded_metadata_queries_after_tenancy_switch(): void
+    {
+        $tenant = $this->primaryTenant();
+        $landlordConnection = (string) config('multitenancy.landlord_database_connection_name', 'landlord');
+        $fixturePath = realpath(__DIR__.'/../../Fixtures/PublicWeb/flutter_shell_index.html');
+
+        $this->assertIsString($fixturePath);
+
+        $previousShellPath = (string) getenv('FLUTTER_WEB_SHELL_PATH');
+        putenv("FLUTTER_WEB_SHELL_PATH={$fixturePath}");
+
+        try {
+            $response = $this->withHeaders($this->traceHeaders())
+                ->get($this->webUrlForHost($this->tenantHost($tenant)));
+        } finally {
+            putenv('FLUTTER_WEB_SHELL_PATH='.$previousShellPath);
+        }
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
+
+        $trace = $this->completedTrace();
+        $this->assertSame($trace, $this->responseTrace($response));
+
+        $stages = array_column($trace['events'], 'stage');
+
+        $this->assertStageSequence($stages, [
+            'tenant.switch.complete',
+            'endpoint.public_shell.controller.enter',
+            'endpoint.public_shell.response_ready',
+            'request.response_handoff',
+        ]);
+        $this->assertCount(
+            0,
+            $this->mongoCollectionCommandsBetween(
+                $trace['events'],
+                'endpoint.public_shell.controller.enter',
+                'endpoint.public_shell.response_ready',
+                $this->tenantConnectionName(),
+            ),
+            'Public shell fallback should not re-read the tenant after tenancy middleware has resolved it.',
+        );
+        $this->assertCount(
+            1,
+            $this->mongoCollectionCommandsBetween(
+                $trace['events'],
+                'endpoint.public_shell.controller.enter',
+                'endpoint.public_shell.response_ready',
+                $landlordConnection,
+            ),
+            'Public shell fallback should issue at most one collection-backed landlord read after controller entry.',
+        );
+
         $this->assertTenantRuntimeReset();
     }
 
@@ -505,6 +583,54 @@ class TenantRequestLifecycleTraceTest extends TestCase
         $this->assertNull(config("database.connections.{$tenantConnectionName}.database"));
     }
 
+    /**
+     * @param  list<array<string, mixed>>  $events
+     * @return list<array<string, mixed>>
+     */
+    private function mongoCollectionCommandsBetween(
+        array $events,
+        string $afterStage,
+        string $beforeStage,
+        string $connectionName,
+    ): array {
+        return array_values(array_filter(
+            $this->eventsBetweenStages($events, $afterStage, $beforeStage),
+            static fn (array $event): bool => ($event['stage'] ?? null) === "mongo.command.{$connectionName}"
+                && is_string($event['collection'] ?? null)
+                && trim((string) $event['collection']) !== '',
+        ));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $events
+     * @return list<array<string, mixed>>
+     */
+    private function eventsBetweenStages(array $events, string $afterStage, string $beforeStage): array
+    {
+        $startIndex = null;
+        $endIndex = null;
+
+        foreach ($events as $index => $event) {
+            if (($event['stage'] ?? null) === $afterStage) {
+                $startIndex = $index;
+
+                continue;
+            }
+
+            if ($startIndex !== null && ($event['stage'] ?? null) === $beforeStage) {
+                $endIndex = $index;
+
+                break;
+            }
+        }
+
+        $this->assertNotNull($startIndex, "Expected stage [{$afterStage}] before collecting bounded events.");
+        $this->assertNotNull($endIndex, "Expected stage [{$beforeStage}] after [{$afterStage}] when collecting bounded events.");
+        $this->assertGreaterThan($startIndex, $endIndex);
+
+        return array_slice($events, $startIndex + 1, $endIndex - $startIndex - 1);
+    }
+
     private function normalizeTenantRuntimeState(): void
     {
         Tenant::current()?->forgetCurrent();
@@ -566,6 +692,19 @@ class TenantRequestLifecycleTraceTest extends TestCase
         return $this->apiUrlForHost($host, 'environment');
     }
 
+    private function webUrlForHost(string $host, string $path = '/'): string
+    {
+        $normalizedPath = trim($path);
+        if ($normalizedPath === '') {
+            $normalizedPath = '/';
+        }
+        if (! str_starts_with($normalizedPath, '/')) {
+            $normalizedPath = '/'.$normalizedPath;
+        }
+
+        return "http://{$host}{$normalizedPath}";
+    }
+
     private function apiUrlForHost(string $host, string $path): string
     {
         $normalizedPath = ltrim($path, '/');
@@ -592,6 +731,13 @@ class TenantRequestLifecycleTraceTest extends TestCase
         DB::setDefaultConnection($this->defaultConnectionAtRest);
 
         return $token;
+    }
+
+    private function seedEnvironmentSnapshot(Tenant $tenant): void
+    {
+        $tenant->makeCurrent();
+        $this->app->make(TenantEnvironmentSnapshotService::class)->repair($tenant, 'trace_seed');
+        $this->normalizeTenantRuntimeState();
     }
 
     private function initializeSystem(): void

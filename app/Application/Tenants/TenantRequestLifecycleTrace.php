@@ -180,6 +180,22 @@ final class TenantRequestLifecycleTrace
         ]);
     }
 
+    public function recordMongoCommand(string $connectionName, CommandStartedEvent $event): void
+    {
+        if (! $this->enabled) {
+            return;
+        }
+
+        $command = get_object_vars($event->getCommand());
+        $commandName = $event->getCommandName();
+
+        $this->record("mongo.command.{$connectionName}", array_filter([
+            'connection' => $connectionName,
+            'command' => $commandName,
+            'collection' => $this->resolveCommandCollection($commandName, $command),
+        ], static fn (mixed $value): bool => $value !== null));
+    }
+
     public function redactIdentifier(?string $value): ?string
     {
         $normalized = is_string($value) ? trim($value) : '';

@@ -311,13 +311,13 @@ class TenantEnvironmentPayloadFactory
     ): array {
         $branding = $this->normalizeBrandingData($snapshot['branding'] ?? []);
         $tenantBranding = $this->normalizeBrandingData($snapshot['tenant_branding'] ?? []);
-        $canonicalMainDomain = trim($tenant->getMainDomain());
+        $canonicalMainDomain = trim((string) ($snapshot['canonical_main_domain'] ?? ''));
         if ($canonicalMainDomain === '') {
-            $canonicalMainDomain = trim((string) ($snapshot['canonical_main_domain'] ?? ''));
+            $canonicalMainDomain = trim($tenant->getMainDomain());
         }
-        $explicitDomains = $tenant->explicitDomains();
+        $explicitDomains = $this->normalizeStringList($snapshot['domains'] ?? []);
         if ($explicitDomains === []) {
-            $explicitDomains = $this->normalizeStringList($snapshot['domains'] ?? []);
+            $explicitDomains = $tenant->explicitDomains();
         }
         $resolvedRequestRoot = $this->normalizeRequestRoot($requestRoot);
 

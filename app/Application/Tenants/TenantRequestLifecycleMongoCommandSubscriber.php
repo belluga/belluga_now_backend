@@ -19,6 +19,7 @@ final class TenantRequestLifecycleMongoCommandSubscriber implements CommandSubsc
     public function commandStarted(CommandStartedEvent $event): void
     {
         $this->trace->recordFirstMongoCommand($this->connectionName, $event);
+        $this->trace->recordMongoCommand($this->connectionName, $event);
     }
 
     public function commandSucceeded(CommandSucceededEvent $event): void {}

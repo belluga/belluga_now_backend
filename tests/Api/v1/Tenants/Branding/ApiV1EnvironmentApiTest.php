@@ -141,6 +141,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertSame($expected, $response->json());
 
+        $tenant->makeCurrent();
         $snapshot = TenantEnvironmentSnapshot::current();
         $this->assertNotNull($snapshot);
         $this->assertSame(TenantEnvironmentSnapshotService::SCHEMA_VERSION, (int) $snapshot->schema_version);
@@ -187,6 +188,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertSame($baselinePayload, $response->json());
 
+        $tenant->makeCurrent();
         $failedSnapshot = TenantEnvironmentSnapshot::current();
         $this->assertNotNull($failedSnapshot?->last_rebuild_failed_at);
         $this->assertStringContainsString(
