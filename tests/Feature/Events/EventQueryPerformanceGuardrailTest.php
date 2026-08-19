@@ -334,6 +334,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $response->assertJsonCount(2, 'data');
 
         $queries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
         $profileTypeQueries = $queries->filter(
             static fn (array $query): bool => str_contains(
@@ -606,6 +608,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
         $detailQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertSame((string) $event->_id, $detailPayload['event_id'] ?? null);
         $this->assertSame(2, $detailPayload['counterpart_count'] ?? null);
@@ -631,6 +634,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $managementPayload = $service->formatManagementEvent($event->fresh());
         $managementQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertSame((string) $event->_id, $managementPayload['event_id'] ?? null);
         $managementAccountProfileQueries = $managementQueries->filter(
@@ -706,6 +710,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         ], null);
         $agendaQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertNotEmpty($agendaPayload['items'] ?? []);
         $agendaAccountProfileQueries = $agendaQueries->filter(
@@ -730,6 +735,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
         $managementQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertNotEmpty($managementPaginator->items());
         $managementAccountProfileQueries = $managementQueries->filter(

@@ -385,6 +385,8 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         ])->assertNoContent();
 
         $queries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
         $initialProfileDiscoveryReads = $queries->filter(static function (array $query): bool {
             $serialized = json_encode($query, JSON_UNESCAPED_SLASHES);

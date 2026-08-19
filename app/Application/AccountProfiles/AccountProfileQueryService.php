@@ -940,6 +940,15 @@ class AccountProfileQueryService extends AbstractQueryService
             && $this->isParentAccountPublished($profile);
     }
 
+    public function isPublicNestedParent(AccountProfile $profile): bool
+    {
+        return $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy()
+            ->isPublicNestedParent($profile)
+            && $this->isParentAccountPublished($profile);
+    }
+
     public function isPubliclyNavigable(AccountProfile $profile): bool
     {
         return $profile->getAttribute('is_active') === true
@@ -961,6 +970,22 @@ class AccountProfileQueryService extends AbstractQueryService
     public function findWithTrashedOrFail(string $profileId): AccountProfile
     {
         return $this->findFromQueryOrFail(AccountProfile::withTrashed(), $profileId);
+    }
+
+    /**
+     * @return Collection<int, AccountProfile>
+     */
+    public function findWithTrashedByAccountId(string $accountId): Collection
+    {
+        $normalizedAccountId = trim($accountId);
+        if ($normalizedAccountId === '') {
+            return collect();
+        }
+
+        return AccountProfile::withTrashed()
+            ->where('account_id', $normalizedAccountId)
+            ->orderBy('_id')
+            ->get();
     }
 
     private function findFromQueryOrFail(Builder $query, string $profileId): AccountProfile

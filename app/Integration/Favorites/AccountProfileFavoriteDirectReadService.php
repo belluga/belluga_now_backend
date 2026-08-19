@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Favorites;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Models\Tenants\AccountProfile;
@@ -22,6 +23,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
 
     public function __construct(
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
+        private readonly AccountPublicationStateService $accountPublicationStateService,
     ) {}
 
     /**
@@ -136,6 +138,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             ->whereIn('_id', array_values($targetIds))
             ->get([
                 '_id',
+                'account_id',
                 'slug',
                 'display_name',
                 'avatar_url',
@@ -155,7 +158,28 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             $activeProfiles[(string) $profile->getAttribute('_id')] = $profile;
         }
 
-        return $activeProfiles;
+        if ($activeProfiles === []) {
+            return [];
+        }
+
+        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds(
+            array_values(array_unique(array_map(
+                static fn (AccountProfile $profile): string => trim((string) $profile->account_id),
+                array_values($activeProfiles),
+            )))
+        );
+        if ($publishedAccountIds === []) {
+            return [];
+        }
+
+        return array_filter(
+            $activeProfiles,
+            static fn (AccountProfile $profile): bool => in_array(
+                trim((string) $profile->account_id),
+                $publishedAccountIds,
+                true,
+            ),
+        );
     }
 
     /**
