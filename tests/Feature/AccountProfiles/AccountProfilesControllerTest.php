@@ -1550,8 +1550,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $aggregateCalls[0]['pipeline'],
             'public account profile index',
         );
+        $queryLog = $connection->getQueryLog();
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $this->assertNoUnboundedAccountPublicationScan(
-            $connection->getQueryLog(),
+            $queryLog,
             'public account profile index',
         );
     }
@@ -1571,8 +1574,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
 
         $this->assertSame([], $payload);
+        $queryLog = $connection->getQueryLog();
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $this->assertNoUnboundedAccountPublicationScan(
-            $connection->getQueryLog(),
+            $queryLog,
             'public catalog profile resolution',
         );
     }
@@ -1651,8 +1657,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertFalse(
             $items->contains(static fn (array $item): bool => ($item['slug'] ?? null) === 'near-guard-draft')
         );
+        $queryLog = $connection->getQueryLog();
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $this->assertNoUnboundedAccountPublicationScan(
-            $connection->getQueryLog(),
+            $queryLog,
             'public account profile near',
         );
     }
@@ -7020,8 +7029,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'doc_type' => 'member_edge',
             ])
         );
+        $queryLog = $connection->getQueryLog();
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $this->assertNoUnboundedAccountPublicationScan(
-            $connection->getQueryLog(),
+            $queryLog,
             'nested public members multi-parent publication rebuild',
         );
 

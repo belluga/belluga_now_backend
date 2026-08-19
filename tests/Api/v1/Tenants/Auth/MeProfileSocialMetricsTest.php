@@ -96,8 +96,9 @@ class MeProfileSocialMetricsTest extends TestCaseTenant
             'credited_acceptance' => false,
         ]);
 
-        DB::connection('tenant')->flushQueryLog();
-        DB::connection('tenant')->enableQueryLog();
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
 
         $response = $this->getMe($user, 'tenant-me-aggregate-query');
 
@@ -105,7 +106,11 @@ class MeProfileSocialMetricsTest extends TestCaseTenant
         $response->assertJsonPath('data.social_score.invites_sent', 2);
         $response->assertJsonPath('data.social_score.invites_accepted', 1);
 
-        $inviteEdgeQueries = collect(DB::connection('tenant')->getQueryLog())->filter(
+        $queryLog = $connection->getQueryLog();
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
+
+        $inviteEdgeQueries = collect($queryLog)->filter(
             static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'invite_edges')
         );
 

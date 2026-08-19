@@ -468,6 +468,8 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->assertNotNull(FavoriteEdge::query()->where('target_id', (string) $draftedProfile->_id)->first());
         $this->assertNotNull(Account::query()->find((string) $account->_id));
         $this->assertNotNull(AccountProfile::query()->find((string) $draftedProfile->_id));
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $this->assertNoUnboundedAccountPublicationScan(
             $connection->getQueryLog(),
             'favorites direct-read',

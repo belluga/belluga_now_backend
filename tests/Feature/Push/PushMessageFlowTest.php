@@ -6381,6 +6381,7 @@ class PushMessageFlowTest extends TestCase
             return count($connection->getQueryLog());
         } finally {
             $connection->disableQueryLog();
+            $connection->flushQueryLog();
         }
     }
 
